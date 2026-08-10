@@ -14,6 +14,11 @@ from agents_remember.errors import (
     HarnessControlError,
     HarnessRequestConflictError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AssetReference,
+    ControlIdentity,
+    ControlOperationRef,
+)
 from agents_remember.serving.codex_app_server_turns import turn_input as codex_turn_input
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
@@ -24,9 +29,6 @@ from agents_remember.serving.harness_control_client import (
 )
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
-    AssetReference,
-    ControlIdentity,
-    ControlOperationRef,
     PromptRequest,
 )
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter

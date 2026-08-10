@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    SubmissionReceipt,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
-    SubmissionReceipt,
     TranscriptEntry,
     UncommittedDraft,
 )

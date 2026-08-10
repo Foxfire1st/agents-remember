@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.application.hosted_readiness import hosted_session_readiness_tool
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

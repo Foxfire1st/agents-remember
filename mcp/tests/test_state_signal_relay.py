@@ -30,12 +30,12 @@ from agents_remember.controlplane.operator_inbox_records import (
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import RedeliveryFloor
 from agents_remember.controlplane.signal_routing import RoutedOwner
+from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.observer.store import EventStore
 from agents_remember.serving._agent_notifier_actions import act_on_finding
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
-from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import (
     DeliveryAdmission,

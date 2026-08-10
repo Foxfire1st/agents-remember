@@ -24,14 +24,17 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
 )
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.models.terminal import (
     SessionRenameStatus,
     SessionRetireStatus,
     SpawnAgentSessionStatus,
 )
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
-from agents_remember.observer.paths import observer_root
 from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
@@ -64,7 +67,6 @@ from agents_remember.serving.sprint_role_binding import (
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_leaf_assignment import (
@@ -83,7 +85,9 @@ from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def _result(_tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agents_remember.observer.projection import SeriesNode, TaskDocNode
 from agents_remember.observer.reducer import AnalyticalInputs, build_analytics
-from agents_remember.observer.snapshots import (
+from agents_remember.serving.projections.snapshots import (
     read_enclosures,
     read_series_documents,
     read_task_documents,

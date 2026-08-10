@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import gc
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import agents_remember.serving.conversation.active.service as service_module
 import pytest
-from agents_remember.serving.conversation.active.service import ActiveConversationService
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+)
+from agents_remember.models.conversations.identity import (
     ActiveConversationRef,
     AuthorizationBinding,
 )
-from agents_remember.serving.harness_control_models import AdapterSnapshot, ControlIdentity
+from agents_remember.serving.conversation.active.service import ActiveConversationService
 
 
 @pytest.fixture
@@ -65,7 +69,8 @@ async def test_concurrent_reconnect_replaces_a_retired_projector_once() -> None:
         async def close(self) -> None:
             return None
 
-    service = ActiveConversationService(object())  # type: ignore[arg-type]
+    fake_runtime = SimpleNamespace(control_plane=MagicMock())
+    service = ActiveConversationService(fake_runtime)  # type: ignore[arg-type]
     service._projectors["ar-1"] = _Retired()  # type: ignore[assignment]
     service._projector_lru.append("ar-1")
     authorization = AuthorizationBinding(

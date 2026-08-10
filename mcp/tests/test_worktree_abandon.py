@@ -14,9 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from agents_remember.worktrees.modules.abandon import _abandon_blockers, _abandon_branch
-from agents_remember.worktrees.modules.guidance import lifecycle_guidance
-from agents_remember.worktrees.modules.provider_teardown import (
+from agents_remember.application.provider_runtime import (
     _reclaim_image,
     _reclaim_ownership,
     _reclaim_result,
@@ -24,6 +22,8 @@ from agents_remember.worktrees.modules.provider_teardown import (
     _worktree_provider_docker_resources,
     teardown_worktree_providers,
 )
+from agents_remember.worktrees.modules.abandon import _abandon_blockers, _abandon_branch
+from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from test_worktree_support import git, init_repo
 

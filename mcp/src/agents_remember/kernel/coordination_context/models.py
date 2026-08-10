@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.worktrees.worktree_contract import MemoryMode
 
 
 class MissingMemoryError(AgentsRememberError):
@@ -106,6 +105,55 @@ class CoordinationHints:
     onboarding_root: Path | None = None
 
 
+class ContractReaderPort(Protocol):
+    """The worktree contract-file surface the resolver may use."""
+
+    def load_contract(self, path: Path) -> Any: ...
+    def worktree_group_for(
+        self, coordination_root: Path, code_repository_name: str, worktree_name: str
+    ) -> Path: ...
+    def resolve_active_task_root(
+        self,
+        coordination_root: Path,
+        code_repository_name: str,
+        task_name: str,
+        *,
+        parent_task: str | None = None,
+    ) -> Path: ...
+    def find_task_contract(
+        self,
+        coordination_root: Path,
+        code_repository_name: str,
+        task_name: str,
+        *,
+        parent_task: str | None = None,
+        leaf_id: str | None = None,
+    ) -> Path | None: ...
+    def find_worktree_contract(
+        self,
+        coordination_root: Path,
+        code_repository_name: str,
+        worktree_name: str,
+    ) -> Path | None: ...
+
+
+@dataclass(frozen=True)
+class EnclosureResolution:
+    """One resolution's selector plus its bound contract reader."""
+
+    selector: EnclosureSelector | None = None
+    contract_reader: ContractReaderPort | None = None
+
+
+@dataclass(frozen=True)
+class CoordinationRequest:
+    """Everything a coordination-context resolution needs beyond repo identity."""
+
+    hints: CoordinationHints | None = None
+    selector: EnclosureSelector | None = None
+    contract_reader: ContractReaderPort | None = None
+
+
 @dataclass(frozen=True)
 class CodeRepository:
     """A resolved code repository: its name, its root on disk, and the workspace holding it."""
@@ -156,3 +204,6 @@ class CoordinationContext:
     code_worktree: Path | None = None
     memory_worktree: Path | None = None
     ledger_path: Path | None = None
+
+
+MemoryMode = Literal["internal", "external", "disabled"]

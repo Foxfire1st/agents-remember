@@ -13,9 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationAgentRef,
     ConversationItem,
+)
+from agents_remember.models.conversations.identity import (
     ConversationRole,
     ProvenanceEvidence,
 )

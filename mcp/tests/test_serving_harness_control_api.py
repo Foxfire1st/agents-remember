@@ -26,6 +26,16 @@ from agents_remember.errors import (
     HarnessRequestConflictError,
 )
 from agents_remember.kernel.harnesses import HARNESSES
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    SubmissionAuthorityDescriptor,
+    SubmissionReceipt,
+    WithdrawalResult,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving import harness_control_api
 from agents_remember.serving.conversation.authorization import (
     LocalOperatorAuthorizationResolver,
@@ -37,18 +47,16 @@ from agents_remember.serving.conversation.runtime import (
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_capability_catalog import CapabilityCatalogResult
 from agents_remember.serving.harness_control_api import register_harness_control_routes
+from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
     ReconciliationResult,
-    SubmissionAuthorityDescriptor,
     SubmissionLookup,
-    SubmissionReceipt,
     SubmissionStatus,
     SubmissionStatusBatch,
-    WithdrawalResult,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalLivenessObservation,
@@ -105,6 +113,7 @@ class HarnessControlApiTests(unittest.TestCase):
                 scope=ConversationScope(workspace_root=self.tmp, coordination_root=self.tmp),
                 harness_registry=lambda: HARNESSES,
                 catalog=self.catalog,
+                control_plane=ControlPlaneClient(),
                 host=mock.Mock(),
                 liveness_clock=lambda: self.moment,
                 liveness_config=TerminalCatalogLivenessConfig(),
@@ -807,6 +816,7 @@ class ControlLivenessMemoRetentionTests(unittest.TestCase):
                     scope=ConversationScope(workspace_root=self.tmp, coordination_root=self.tmp),
                     harness_registry=lambda: HARNESSES,
                     catalog=self.catalog,
+                    control_plane=ControlPlaneClient(),
                     host=mock.Mock(),
                     liveness_clock=lambda: self.moment,
                     liveness_config=TerminalCatalogLivenessConfig(),

@@ -29,7 +29,10 @@ from agents_remember.serving.conversation.authorization import (
     ConversationAuthorizationResolver,
 )
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.ports import (
+    ControlPlanePort,
+    TerminalCatalogPort,
+)
 from agents_remember.serving.terminal_liveness import (
     Clock,
     TerminalCatalogLivenessConfig,
@@ -62,7 +65,8 @@ class ConversationRuntime:
     """
 
     scope: ConversationScope
-    catalog: TerminalCatalog
+    catalog: TerminalCatalogPort
+    control_plane: ControlPlanePort
     host: TerminalLivenessHost
     harness_registry: HarnessRegistry
     liveness_clock: Clock

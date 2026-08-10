@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -22,6 +23,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 
 @dataclass(frozen=True)
@@ -56,8 +58,11 @@ def resolve_request_context(request: BaselineRequest):
         code_repository_name=request.code_repository_name,
         workspace_root=request.workspace_root,
         code_repository_root=request.code_repository_root,
-        hints=CoordinationHints(
-            topology=request.topology, coordination_root=request.coordination_root
+        request=CoordinationRequest(
+            hints=CoordinationHints(
+                topology=request.topology, coordination_root=request.coordination_root
+            ),
+            contract_reader=WorktreeContractReader(),
         ),
     )
 

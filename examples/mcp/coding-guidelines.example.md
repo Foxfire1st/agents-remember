@@ -249,6 +249,5 @@ Avoid adding boolean mode flags to functions that already have branching behavio
 Bad:
 
 ```python
-def update_memory(path: Path, dry_run: bool, force: bool, skip_validation: bool) -> None:
-    ...
+def update_memory(path: Path, dry_run: bool, force: bool, skip_validation: bool) -> None: ...
 ```

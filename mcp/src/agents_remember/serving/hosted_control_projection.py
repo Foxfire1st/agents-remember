@@ -5,23 +5,23 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     AdapterSnapshot,
     pending_interaction_json,
 )
-from agents_remember.serving.terminal_catalog import (
+from agents_remember.models.terminal_catalog import (
     SeatTurnState,
-    TerminalCatalog,
     TerminalCatalogEntry,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 
 if TYPE_CHECKING:
+    from agents_remember.models.conversations.identity import HarnessId
     from agents_remember.serving.conversation.active.status import TurnTerminalEvidence
-    from agents_remember.serving.conversation.models import HarnessId
 
 
 def project_control_snapshot(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     snapshot: AdapterSnapshot,
 ) -> TerminalCatalogEntry:
@@ -59,7 +59,7 @@ def control_snapshot_entry(
 
 
 def mark_legacy_control_unsupported(
-    catalog: TerminalCatalog, entry: TerminalCatalogEntry
+    catalog: TerminalCatalogPort, entry: TerminalCatalogEntry
 ) -> TerminalCatalogEntry:
     """Label an existing raw-TUI row honestly; no protocol identity can be manufactured for it."""
 

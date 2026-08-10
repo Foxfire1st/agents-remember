@@ -88,9 +88,18 @@ from agents_remember.controlplane.durable_store import (
     rewrite_lines,
 )
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
-from agents_remember.controlplane.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.controlplane.interaction_retention import gate_keep_ids
-from agents_remember.controlplane.records import GateKind, GateRecord, apply_gate
+from agents_remember.controlplane.records import (
+    GateRecord,
+    apply_gate,
+)
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+)
+from agents_remember.models.gates import (
+    GateKind,
+)
 
 
 class GateStore:

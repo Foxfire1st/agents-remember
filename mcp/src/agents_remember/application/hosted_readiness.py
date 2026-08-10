@@ -12,10 +12,15 @@ from agents_remember.serving.hosted_readiness import (
     hosted_session_readiness,
 )
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    terminal_catalog_path,
+)
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def hosted_session_readiness_tool(

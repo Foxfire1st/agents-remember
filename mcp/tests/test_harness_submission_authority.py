@@ -20,21 +20,23 @@ from agents_remember.errors import (
     HarnessControlError,
     HarnessRequestConflictError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    LaunchSpec,
+    SubmissionReceipt,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    LaunchSpec,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
 )
 from agents_remember.serving.harness_submission_authority import (
     DISPATCH_ACCEPTANCE_GRACE_SECONDS,

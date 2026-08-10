@@ -44,7 +44,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import Event
 from agents_remember.observer.store import EventStore
@@ -67,7 +69,9 @@ from agents_remember.serving.app import (
 from agents_remember.serving.build_info import resolve_serving_build
 from agents_remember.serving.projector import ProjectionCadence, Projector
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,

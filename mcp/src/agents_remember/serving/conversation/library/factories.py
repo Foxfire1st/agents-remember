@@ -20,6 +20,10 @@ import weakref
 from dataclasses import dataclass
 
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    HarnessId,
+)
 from agents_remember.serving.conversation.library.claude import ClaudeConversationLibrary
 from agents_remember.serving.conversation.library.codex import CodexConversationLibrary
 from agents_remember.serving.conversation.library.cursor import (
@@ -40,10 +44,6 @@ from agents_remember.serving.conversation.library.pi import PiConversationLibrar
 from agents_remember.serving.conversation.library.service import (
     ConversationLibraryService,
     LibraryPort,
-)
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    HarnessId,
 )
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 

@@ -31,7 +31,9 @@ from agents_remember.application.gate_tools import (
 from agents_remember.code_quality import single_owner
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.records import GateAnchor
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.memory_quality.style.citations import (
     claim_change_router,
     claim_reopen,
@@ -49,9 +51,11 @@ from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
 )
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.lifecycle_state import LifecycleError
 from agents_remember.serving import dispatch_brief
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.worktrees.modules import cleanup
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.worktree_contract import WorktreeContract

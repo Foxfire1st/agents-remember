@@ -36,7 +36,6 @@ from pathlib import Path
 from agents_remember.code_quality import (
     crap_calculator,
     diff_coverage,
-    memory_cap,
     post_coverage,
     retry_proof,
     scope_reporting,
@@ -45,6 +44,7 @@ from agents_remember.code_quality import (
 from agents_remember.code_quality import (
     scope as quality_scope,
 )
+from agents_remember.kernel.primitives import memory_cap
 
 crap_failure_line = post_coverage.crap_failure_line
 run_crap_calculator = post_coverage.run_crap_calculator
@@ -245,6 +245,20 @@ def _file_size_step(config: CheckConfig, size_args: list[str]) -> Step:
     )
 
 
+def _layering_step(config: CheckConfig) -> Step:
+    """The package-layering rail: the tree must satisfy ``layers.toml``'s order."""
+    return Step(
+        "layering",
+        [
+            sys.executable,
+            "-m",
+            "agents_remember.code_quality.layering",
+            "--project-root",
+            str(config.project_root),
+        ],
+    )
+
+
 def quality_steps(
     config: CheckConfig,
     coverage_json: Path,
@@ -271,6 +285,7 @@ def quality_steps(
     # run. Pytest must remain the final subprocess because CRAP and diff coverage consume the
     # coverage artifact it produces and therefore cannot safely run before it.
     steps.insert(2, _file_size_step(config, posix_args(scope.size_paths)))
+    steps.insert(3, _layering_step(config))
     # A targeted run scopes radon and coverage/CRAP to the changed production
     # modules. When no production module changed (tests-only or non-Python leaves),
     # the radon report rails are not applicable and are skipped loudly by the

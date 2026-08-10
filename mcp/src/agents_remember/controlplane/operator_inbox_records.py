@@ -4,61 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import ConfigDict, Field, model_validator
 
 from agents_remember.controlplane.durable_store import DurableRecord
+from agents_remember.models.operator_inbox import (
+    AdapterDeliveryState,
+    AgentRole,
+    InboxDeliveryState,
+    InboxMessageKind,
+    OperatorInboxState,
+    OperatorInboxVia,
+)
 
 OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v1"
 
-OperatorInboxState = Literal[
-    "pending",
-    "landed",
-    "superseded",
-    "unresolved",
-    "expired",
-    # Legacy states retained for parse compatibility with pre-N16 rows. ``consumed`` is no
-    # longer written (operator_inbox_consume is an attribution marker, not a state
-    # transition) and ``ladder-resolved`` predates the formal terminal vocabulary (the timed
-    # escalation ladder is retired); both are still treated as terminal by the fold and never
-    # re-enter the retry path.
-    "consumed",
-    "ladder-resolved",
-]
-OperatorInboxVia = Literal["chat", "dashboard", "cli"]
-AgentRole = Literal[
-    "developer",
-    "operator",
-    "designer",
-    "strategist",
-    "orchestrator",
-    "manager",
-    "worker",
-    "reviewer",
-    "system-specialist",
-    "architect",
-    "curator",
-    "agent",
-    "system",
-]
-InboxMessageKind = Literal[
-    "message",
-    "gate-response",
-    "turn-report",
-    "master-handover",
-    "nudge",
-    "escalation",
-    "degradation-alert",
-    "decision-item",
-    "decision-ruling",
-    "dispatch-brief",
-    "state-signal",
-]
-InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconfirmed"]
-AdapterDeliveryState = Literal[
-    "accepted", "queued", "rejected", "unknown", "completed", "unsupported"
-]
 OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS = frozenset(
     {"adapterDeliveryState", "adapterDeliveryDetail"}
 )

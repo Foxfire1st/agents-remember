@@ -8,7 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    ProviderScope,
+)
 
 STATE_VERSION = 1
 

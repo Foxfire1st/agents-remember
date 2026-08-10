@@ -22,23 +22,27 @@ conservative pre-L2E posture below.
 
 from __future__ import annotations
 
-from agents_remember.serving.conversation.control.capabilities import (
-    interrupt_capability_for,
-)
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.capabilities import (
     AttachmentCapabilities,
     AttachmentCapability,
     CapabilityEvidence,
-    CapabilityState,
     ControlCapabilities,
     ConversationCapabilities,
     FeatureCapability,
-    HarnessId,
     HistoryCapabilities,
     LiveCapabilities,
     TelemetryCapabilities,
 )
-from agents_remember.serving.harness_control_models import AdapterSnapshot
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.conversations.identity import (
+    CapabilityState,
+    HarnessId,
+)
+from agents_remember.serving.conversation.control.capabilities import (
+    interrupt_capability_for,
+)
 
 _CODEX_FIXTURE = "codex-0.144.5-installed-20260718"
 _CLAUDE_FIXTURE = "claude-2.1.211-installed-20260718"

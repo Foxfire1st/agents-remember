@@ -11,7 +11,6 @@ from agents_remember.controlplane.attention_dismissals import (
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateAnchor, create_gate
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import ActionAvailability, WorkspaceProjection
 from agents_remember.serving.actions import (
     ActionEvaluationContext,
@@ -20,6 +19,7 @@ from agents_remember.serving.actions import (
     evaluate_action,
 )
 from agents_remember.serving.app import create_app
+from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.serving.projector import ProjectionCadence
 from fastapi.testclient import TestClient
 from test_serving import (

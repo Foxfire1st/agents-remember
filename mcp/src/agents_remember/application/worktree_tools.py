@@ -8,7 +8,7 @@ from typing import Any
 from agents_remember.application.completion_cleanup import auto_complete_seats
 from agents_remember.application.task_ref import TaskRef
 from agents_remember.kernel.authority import require_repo, require_within_coordination
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
     RepositoryScope,

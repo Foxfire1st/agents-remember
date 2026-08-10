@@ -32,7 +32,10 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.errors import AuthorityError
-from agents_remember.mcp.config import McpRuntimeConfig, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    load_config,
+)
 from agents_remember.mcp.tools import (
     drift_check_payload,
     memory_quality_check_payload,

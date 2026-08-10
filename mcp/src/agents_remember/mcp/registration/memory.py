@@ -9,8 +9,8 @@ from agents_remember.application.memory_tools import (
     CarryoverSelection,
     MemoryBranches,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from ..tools import (
     drift_check_payload,
     memory_baseline_adopt_payload,

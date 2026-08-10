@@ -14,13 +14,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agents_remember.code_quality.memory_cap import DEFAULT_FULL_GATE_MEMORY_CAP_BYTES
-from agents_remember.controlplane.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
-from agents_remember.controlplane.inbox_backoff import (
-    DEFAULT_RATE_LIMIT_SECONDS,
-)
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.harnesses import HARNESSES, Harness
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+)
+from agents_remember.kernel.primitives.inbox_backoff import (
+    DEFAULT_RATE_LIMIT_SECONDS,
+)
+from agents_remember.kernel.primitives.memory_cap import (
+    DEFAULT_FULL_GATE_MEMORY_CAP_BYTES,
+)
 
 
 class AgenticSettingsError(AgentsRememberError):
@@ -249,7 +254,7 @@ class QualityGateSettings:
     ``memory_cap_bytes`` bounds every full-wrapper run at the master integration
     gate. The integration step wraps the run in a systemd scope with MemoryMax when
     one is available, and falls back to a POSIX address-space rlimit inside the
-    wrapper otherwise (see ``code_quality.memory_cap``). Targeted leaf runs are not
+    wrapper otherwise (see ``kernel.memory_cap``). Targeted leaf runs are not
     full runs and are not capped by this knob.
     """
 

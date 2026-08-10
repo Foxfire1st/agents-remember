@@ -6,8 +6,8 @@ from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.task_ref import TaskRef
 from agents_remember.application.worktree_tools import StartExecution, TaskBases, TaskIdentity
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from ..tools import (
     worktree_attach_payload,
     worktree_start_payload,

@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import (
     AgentRole,
     InboxMessageKind,
@@ -12,7 +13,6 @@ from agents_remember.models.application_requests import (
     OrchestrationNudgeRequest,
 )
 
-from ..config import McpRuntimeConfig
 from ..tools.operator_inbox import (
     operator_inbox_consume_payload,
     operator_inbox_poll_payload,

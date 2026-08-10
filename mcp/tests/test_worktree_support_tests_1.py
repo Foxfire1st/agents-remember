@@ -11,8 +11,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+import agents_remember.providers.provider_setup as provider_setup_api
 from agents_remember.kernel import atomic_write, filesystem
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     EnclosureSelector,
@@ -29,8 +31,8 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
-from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules import start_contract
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.onboarding import _refresh_regenerated_documents
 from agents_remember.worktrees.task_resolver import (
     leaf_enclosure_path,
@@ -393,8 +395,11 @@ class WorktreeSupport1(WorktreeSupportTests):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                hints=CoordinationHints(
-                    topology="external", coordination_root=root / "ar-coordination"
+                request=CoordinationRequest(
+                    hints=CoordinationHints(
+                        topology="external", coordination_root=root / "ar-coordination"
+                    ),
+                    contract_reader=WorktreeContractReader(),
                 ),
             )
 
@@ -413,8 +418,13 @@ class WorktreeSupport1(WorktreeSupportTests):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                hints=CoordinationHints(topology="external", coordination_root=coordination_root),
-                selector=EnclosureSelector(worktree_name="260610-browser-dashboard"),
+                request=CoordinationRequest(
+                    hints=CoordinationHints(
+                        topology="external", coordination_root=coordination_root
+                    ),
+                    selector=EnclosureSelector(worktree_name="260610-browser-dashboard"),
+                    contract_reader=WorktreeContractReader(),
+                ),
             )
 
             # Regression guard: contract-derived fields are populated, not blanked.
@@ -443,8 +453,13 @@ class WorktreeSupport1(WorktreeSupportTests):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                hints=CoordinationHints(topology="external", coordination_root=coordination_root),
-                selector=EnclosureSelector(worktree_name="no-such-worktree"),
+                request=CoordinationRequest(
+                    hints=CoordinationHints(
+                        topology="external", coordination_root=coordination_root
+                    ),
+                    selector=EnclosureSelector(worktree_name="no-such-worktree"),
+                    contract_reader=WorktreeContractReader(),
+                ),
             )
 
             self.assertIsNone(context.contract_path)
@@ -464,9 +479,14 @@ class WorktreeSupport1(WorktreeSupportTests):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                hints=CoordinationHints(topology="external", coordination_root=coordination_root),
-                selector=EnclosureSelector(
-                    task_name="task-a", leaf_id="worktree-a", worktree_name="worktree-b"
+                request=CoordinationRequest(
+                    hints=CoordinationHints(
+                        topology="external", coordination_root=coordination_root
+                    ),
+                    selector=EnclosureSelector(
+                        task_name="task-a", leaf_id="worktree-a", worktree_name="worktree-b"
+                    ),
+                    contract_reader=WorktreeContractReader(),
                 ),
             )
 
@@ -483,10 +503,14 @@ class WorktreeSupport1(WorktreeSupportTests):
                 coordination_root, code_repo, task_name="task-x", worktree_name="worktree-x"
             )
 
-            found = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-x")
+            found = WorktreeContractReader().find_worktree_contract(
+                coordination_root, "repo-a", "worktree-x"
+            )
             self.assertEqual(found, contract.contract_path)
 
-            missing = resolver.find_worktree_contract(coordination_root, "repo-a", "worktree-y")
+            missing = WorktreeContractReader().find_worktree_contract(
+                coordination_root, "repo-a", "worktree-y"
+            )
             self.assertIsNone(missing)
 
     def test_find_worktree_contract_skips_archived_contract(self) -> None:
@@ -507,7 +531,7 @@ class WorktreeSupport1(WorktreeSupportTests):
             archived_dir.mkdir(parents=True, exist_ok=True)
             contract.contract_path.rename(archived_dir / contract.contract_path.name)
 
-            found = resolver.find_worktree_contract(
+            found = WorktreeContractReader().find_worktree_contract(
                 coordination_root, "repo-a", "worktree-archived"
             )
             self.assertIsNone(found)
@@ -587,7 +611,7 @@ class WorktreeSupport1(WorktreeSupportTests):
                 return {"ok": True, "results": []}
 
             with mock.patch.object(
-                worktree_start.provider_setup,
+                provider_setup_api,
                 "run_provider_setup",
                 side_effect=fake_run_provider_setup,
             ):

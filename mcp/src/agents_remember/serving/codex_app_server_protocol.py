@@ -13,7 +13,12 @@ from agents_remember.errors import (
     CodexAppServerRpcError,
     HarnessAdapterDisconnectedError,
 )
-from agents_remember.serving.harness_control_models import LaunchSpec, ShutdownMode
+from agents_remember.models.conversations.control_wire import (
+    LaunchSpec,
+)
+from agents_remember.serving.harness_control_models import (
+    ShutdownMode,
+)
 
 CODEX_APP_SERVER_PROTOCOL = "codex-app-server"
 # Compatibility precedent: Codex's remote app-server client accepts 128 MiB WebSocket

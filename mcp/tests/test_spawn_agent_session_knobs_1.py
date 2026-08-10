@@ -7,6 +7,7 @@ from test_spawn_agent_session import (
     _FakePaster,
     _ObservedPaster,
     _runner_config,
+    _running_chat,
 )
 
 
@@ -131,12 +132,27 @@ class SpawnKnobApplicationTests1(SpawnKnobApplicationTests):
                 }
             }
         )
+        self.catalog.upsert(
+            _running_chat("orchestrator-tier", leaf_key="repo/master/leaf-1").with_leaf_binding(
+                "repo/master/leaf-1",
+                "orchestrator",
+                spawn_repo="repo",
+                spawn_sprint="master",
+            )
+        )
         for role, (model, effort) in tiers.items():
             paster = _FakePaster()
+            spawn_args: dict[str, object] = {}
+            if role == "manager":
+                spawn_args = {
+                    "leaf_key": "repo/master/leaf-1",
+                    "spawned_by_session": "orchestrator-tier",
+                }
             payload = self._spawn(
                 session_id=f"{role}-tier",
                 env={"AR_SPAWN_ROLE": role},
                 paster=paster,
+                **spawn_args,
             )
             self.assertEqual(payload["status"], "spawned-unbriefed")
             self.assertEqual(payload["resolvedModel"], model)

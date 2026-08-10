@@ -20,6 +20,13 @@ from agents_remember.errors import (
     HarnessRequestConflictError,
 )
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.control_wire import (
+    pending_interaction_json,
+    withdrawal_result_json,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation import register_conversation_routes
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.harness_capabilities import (
@@ -44,12 +51,10 @@ from agents_remember.serving.harness_control_client import (
     withdraw_control_submission,
 )
 from agents_remember.serving.harness_control_models import (
-    pending_interaction_json,
     public_receipt_json,
     public_reconciliation_json,
     submission_authority_json,
     submission_status_batch_json,
-    withdrawal_result_json,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
 from agents_remember.serving.response_contract import (
@@ -68,7 +73,6 @@ from agents_remember.serving.response_contract import (
     UnsupportedSeatRefusal,
     WithdrawalResultWire,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     observe_terminal_liveness,

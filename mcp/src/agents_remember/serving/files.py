@@ -33,6 +33,9 @@ from fastapi.responses import JSONResponse, Response
 
 from agents_remember.kernel.coordination_context_resolver import mirror_onboarding_path
 from agents_remember.kernel.onboarding_doc import table_metadata
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.kernel.sidecar_pairing import (
     confine_rel,
     is_file_sidecar,
@@ -40,7 +43,6 @@ from agents_remember.kernel.sidecar_pairing import (
     sidecar_body,
     source_path_from_sidecar,
 )
-from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     DirectoryListing,
@@ -69,7 +71,7 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024
 # every File Viewer refresh, and each call re-walked + re-parsed the whole ``tasks/`` tree
 # PER REPO (the measured refresh bottleneck: 8x rglob + 8x contract-parse passes). The
 # assembly below walks ONCE; this short-TTL memo (mirroring the ``_RepoSurfaceCacheEntry``
-# idiom in observer/projection_store.py) makes repeat/StrictMode calls free. Expiry-based,
+# idiom in serving/projections/projection_store.py) makes repeat/StrictMode calls free. Expiry-based,
 # not invalidated: a newly started enclosure appears in the catalog within the TTL, which
 # the browse UI tolerates. Served as a shared dict -- callers must not mutate it (the route
 # serializes it straight into the JSONResponse).

@@ -12,6 +12,12 @@ import unittest
 from typing import Any, cast
 from unittest import mock
 
+from agents_remember.models.conversations.control_wire import (
+    OperationTimelineItem,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
 from agents_remember.serving.conversation.control import queue_projection
 from agents_remember.serving.conversation.control import service as control_service
 from agents_remember.serving.conversation.control.service import (
@@ -19,8 +25,6 @@ from agents_remember.serving.conversation.control.service import (
     ControlScope,
     ConversationControlService,
 )
-from agents_remember.serving.conversation.models import AuthorizationBinding
-from agents_remember.serving.harness_control_models import OperationTimelineItem
 
 NOW = "2026-07-21T05:00:00+00:00"
 

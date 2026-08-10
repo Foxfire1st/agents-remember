@@ -11,7 +11,9 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     state_signal_landed,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 
 CONFIRMED_GONE_REASON = "subject-session-confirmed-gone"
 

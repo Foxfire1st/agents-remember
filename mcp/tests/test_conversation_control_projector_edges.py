@@ -20,6 +20,22 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _control_plane import OPERATOR, FakeControlAdapter, make_harness
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_TERMINAL_OUTCOME_KEY,
+    EvidenceFrame,
+    NativeEvidenceFrame,
+)
+from agents_remember.models.conversations.submissions import (
+    ConversationSubmitRequest,
+    TextSubmitBlock,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.active.factories import (
     UnsupportedSessionError,
     build_identity,
@@ -30,10 +46,6 @@ from agents_remember.serving.conversation.control.service import (
     OperationConflictError,
     OperationRejectedError,
 )
-from agents_remember.serving.conversation.models import (
-    ConversationSubmitRequest,
-    TextSubmitBlock,
-)
 from agents_remember.serving.conversation.projectors import claude, codex, pi
 from agents_remember.serving.conversation.projectors.common import (
     MappedBlockDelta,
@@ -41,14 +53,6 @@ from agents_remember.serving.conversation.projectors.common import (
     MappedTurnOutcome,
     MappedUnknownVendor,
 )
-from agents_remember.serving.harness_control_models import (
-    AR_TERMINAL_OUTCOME_KEY,
-    AdapterSnapshot,
-    ControlIdentity,
-    EvidenceFrame,
-    NativeEvidenceFrame,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 

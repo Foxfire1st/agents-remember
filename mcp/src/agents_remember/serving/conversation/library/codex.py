@@ -23,6 +23,34 @@ from types import TracebackType
 
 from agents_remember.errors import CodexAppServerError, CodexAppServerRpcError
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.capabilities import (
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.content import (
+    ConversationItem,
+)
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
+from agents_remember.models.conversations.cursors import (
+    LibraryListCursor,
+    LibraryReadCursor,
+    NativeResumeTarget,
+)
+from agents_remember.models.conversations.history import (
+    ConversationLibraryAgentRow,
+    ConversationLibraryPage,
+    ConversationLibraryPageScope,
+    ConversationLibraryRow,
+    HistoricalConversationPage,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    ConversationLibraryScope,
+    HarnessId,
+    NativeConversationRef,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.codex_app_server_protocol import (
     CodexAppServerTransport,
@@ -47,23 +75,6 @@ from agents_remember.serving.conversation.library.errors import (
     UnknownNativeConversationError,
 )
 from agents_remember.serving.conversation.library.scope import query_digest
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    ConversationItem,
-    ConversationLibraryAgentRow,
-    ConversationLibraryPage,
-    ConversationLibraryPageScope,
-    ConversationLibraryRow,
-    ConversationLibraryScope,
-    HarnessId,
-    HistoricalConversationPage,
-    HistoryCapabilities,
-    LibraryListCursor,
-    LibraryReadCursor,
-    NativeConversationRef,
-    NativeResumeTarget,
-)
-from agents_remember.serving.harness_control_models import ControlIdentity, LaunchSpec
 
 _CLIENT_NAME = "agents_remember"
 _CLIENT_VERSION = "3.0.0"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationItem,
     DiffBlock,
     MarkdownBlock,
@@ -13,6 +13,10 @@ from agents_remember.serving.conversation.models import (
     ToolInputBlock,
     ToolOutputBlock,
 )
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    NativeEvidenceFrame,
+)
 from agents_remember.serving.conversation.projectors import claude, codex, pi
 from agents_remember.serving.conversation.projectors.common import (
     MappedBlockDelta,
@@ -20,10 +24,6 @@ from agents_remember.serving.conversation.projectors.common import (
     MappedTurnOutcome,
     MappedUnknownVendor,
     UnmappableShape,
-)
-from agents_remember.serving.harness_control_models import (
-    EvidenceFrame,
-    NativeEvidenceFrame,
 )
 
 NOW = "2026-07-19T08:00:00+00:00"

@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agents_remember.errors import CodexAppServerError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    LaunchSpec,
+)
 from agents_remember.serving.codex_app_server_protocol import (
     CODEX_APP_SERVER_PROTOCOL,
     CodexAppServerTransport,
@@ -27,7 +31,6 @@ from agents_remember.serving.harness_capabilities import (
     LaunchKnobs,
     ModelCapability,
 )
-from agents_remember.serving.harness_control_models import AdapterSnapshot, LaunchSpec
 
 TransportFactory = Callable[[], CodexAppServerTransport]
 

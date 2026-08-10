@@ -15,15 +15,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
 
 
 @dataclass(frozen=True)
 class HostedSessionRuntime:
     """The durable hosted-session catalog bound to the tmux host that runs its sessions."""
 
-    catalog: TerminalCatalog
+    catalog: TerminalCatalogPort
     host: TerminalHost
 
 

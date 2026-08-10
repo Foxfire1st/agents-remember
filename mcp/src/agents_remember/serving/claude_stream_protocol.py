@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     InteractionQuestion,
     InteractionQuestionOption,
     PendingInteraction,
+)
+from agents_remember.serving.harness_control_models import (
     TerminalOutcome,
 )
 

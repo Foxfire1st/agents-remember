@@ -23,6 +23,10 @@ from typing import cast
 
 import pytest
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -38,10 +42,6 @@ from agents_remember.serving.harness_control_client import (
     withdraw_control_submission,
 )
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
-from agents_remember.serving.harness_control_models import (
-    ControlIdentity,
-    LaunchSpec,
-)
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "conversation_runtime"

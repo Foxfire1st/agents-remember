@@ -7,16 +7,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
-from agents_remember.serving.conversation.active.status import ConversationStatusService
-from agents_remember.serving.conversation.models import (
-    ActiveEventCursor,
+from agents_remember.models.conversations.content import (
     ConversationItem,
-    ConversationStatus,
 )
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     AdapterSnapshot,
     SubmissionProvenanceBatch,
 )
+from agents_remember.models.conversations.cursors import (
+    ActiveEventCursor,
+)
+from agents_remember.models.conversations.status import (
+    ConversationStatus,
+)
+from agents_remember.serving.conversation.active.status import ConversationStatusService
 
 from .child_history import ChildHistoryProjection
 from .echo_ingestion import EchoIngestion

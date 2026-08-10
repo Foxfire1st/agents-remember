@@ -14,6 +14,20 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    AssetReference,
+    ControlOperationRef,
+    InterruptResult,
+    LaunchSpec,
+    SubmissionReceipt,
+    read_asset_bytes,
+)
+from agents_remember.models.conversations.evidence import (
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+    window_native_evidence_page,
+)
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     ModelCapability,
@@ -24,20 +38,10 @@ from agents_remember.serving.harness_control_models import (
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    AssetReference,
-    ControlOperationRef,
     InteractionResponse,
-    InterruptResult,
-    LaunchSpec,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
-    read_asset_bytes,
-    window_native_evidence_page,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
 from agents_remember.serving.pi_rpc_configuration import (

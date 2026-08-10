@@ -21,21 +21,23 @@ feature from documentation or changelog text.
 
 from __future__ import annotations
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.capabilities import (
     AttachmentCapabilities,
     AttachmentCapability,
     CapabilityEvidence,
-    CapabilityState,
     ControlCapabilities,
     FeatureCapability,
-    HarnessId,
     TelemetryCapabilities,
 )
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     MAX_SUBMIT_ASSET_BYTES,
     MAX_SUBMIT_ASSETS,
     SUBMIT_ASSET_MIME_TYPES,
     AdapterSnapshot,
+)
+from agents_remember.models.conversations.identity import (
+    CapabilityState,
+    HarnessId,
 )
 
 _CODEX_FIXTURE = "codex-0.144.5-installed-20260718"

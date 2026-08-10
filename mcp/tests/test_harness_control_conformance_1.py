@@ -6,25 +6,29 @@ from dataclasses import replace
 from typing import Any, cast
 
 from agents_remember.errors import HarnessControlError, HarnessInteractionNotPendingError
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+    ActivityState,
+    AdapterSnapshot,
+    PendingInteraction,
+    pending_interaction_json,
+    snapshot_json,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_adapter import HarnessProtocolRegistry
 from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_client import _snapshot as parse_snapshot_wire
 from agents_remember.serving.harness_control_models import (
-    AcceptanceState,
-    ActivityState,
     AdapterEvent,
-    AdapterSnapshot,
     InteractionResponse,
-    PendingInteraction,
     TerminalResult,
     TranscriptEntry,
-    pending_interaction_json,
-    snapshot_json,
 )
 from agents_remember.serving.harness_terminal_surface import HarnessTerminalSurface
 from agents_remember.serving.hosted_control_projection import control_snapshot_entry
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from test_harness_control import (
     _BlockingSetAdapter,
     _BlockingSubmitAdapter,

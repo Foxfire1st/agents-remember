@@ -19,6 +19,10 @@ import unittest
 from pathlib import Path
 
 from agents_remember.kernel.harnesses import HARNESSES
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    NativeConversationRef,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.conversation.library.codex import CodexConversationLibrary
 from agents_remember.serving.conversation.library.cursor import (
@@ -45,16 +49,15 @@ from agents_remember.serving.conversation.library.open_service import (
 from agents_remember.serving.conversation.library.pi import PiConversationLibrary
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
 from agents_remember.serving.conversation.library.service import ConversationLibraryService
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    NativeConversationRef,
-)
 from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
+from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.hosted_readiness import ReadinessWait, hosted_session_readiness
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import TerminalCatalogLivenessConfig, utc_now
 
 CODEX = next(h for h in HARNESSES if h.id == "codex")
@@ -334,6 +337,7 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=self.workspace, coordination_root=self.tmp),
             catalog=self.catalog,
+            control_plane=ControlPlaneClient(),
             host=self.host,
             harness_registry=lambda: HARNESSES,
             liveness_clock=utc_now,
@@ -467,6 +471,7 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=self.workspace, coordination_root=self.tmp),
             catalog=self.catalog,
+            control_plane=ControlPlaneClient(),
             host=self.host,
             harness_registry=lambda: HARNESSES,
             liveness_clock=utc_now,

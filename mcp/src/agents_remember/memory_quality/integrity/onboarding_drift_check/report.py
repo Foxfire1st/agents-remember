@@ -5,11 +5,11 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import json
-import re
 import sys
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.primitives.drift_snapshot import sanitize_report_token
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     parse_table_metadata,
     rel,
@@ -25,12 +25,6 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.unclaimed_e
     UnclaimedEntityReport,
     rank_unclaimed_entity_sources,
 )
-
-
-def sanitize_report_token(token: str) -> str:
-    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", token.strip())
-    normalized = normalized.strip(".-_")
-    return normalized or "unknown"
 
 
 def default_report_filename(repo_root: Path) -> str:

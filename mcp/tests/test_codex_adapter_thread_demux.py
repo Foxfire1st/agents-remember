@@ -28,6 +28,12 @@ from _agent_wire_fixtures import (
     turn_started_params,
 )
 from agents_remember.errors import CodexAppServerError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+)
 from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapter
 from agents_remember.serving.codex_app_server_events import (
     ADAPTER_EVENT_QUEUE_LIMIT,
@@ -40,9 +46,7 @@ from agents_remember.serving.codex_app_server_threads import (
     CodexThreadRegistry,
 )
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
     AdapterEvent,
-    AdapterSnapshot,
     InteractionResponse,
 )
 from test_codex_app_server_adapter import (

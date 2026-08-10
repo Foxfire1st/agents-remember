@@ -22,6 +22,16 @@ from typing import cast
 
 import pytest
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    ControlOperationRef,
+    LaunchSpec,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    EvidencePage,
+    NativeEvidenceFrame,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -39,12 +49,6 @@ from agents_remember.serving.harness_control_client import (
 from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    ControlIdentity,
-    ControlOperationRef,
-    EvidencePage,
-    LaunchSpec,
-    NativeEvidenceFrame,
     PromptRequest,
 )
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter

@@ -42,14 +42,14 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.observer.events import Event
-from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
     LifecycleProjection,
     WorkspaceProjection,
 )
-from agents_remember.observer.projection_store import write_projection
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.current_state import current_state_path
@@ -60,6 +60,8 @@ from agents_remember.serving.agent_notifier_heartbeat import (
 from agents_remember.serving.app import create_app, stream_events
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.delta import DeltaEvent
+from agents_remember.serving.projections.paths import observer_root
+from agents_remember.serving.projections.projection_store import write_projection
 from agents_remember.serving.projector import ProjectionCadence, Projector
 from agents_remember.serving.served_state import (
     SERVED_TAIL_FIELDS,

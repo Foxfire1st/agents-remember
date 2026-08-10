@@ -69,8 +69,13 @@ from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeStore,
     replace_records,
 )
-from agents_remember.controlplane.records import GateRecord, GateState
+from agents_remember.controlplane.records import (
+    GateRecord,
+)
 from agents_remember.controlplane.store import GateStore
+from agents_remember.models.gates import (
+    GateState,
+)
 from agents_remember.providers.degradation import (
     DEGRADATION_EVENT_SCHEMA,
     ProviderDegradationStore,

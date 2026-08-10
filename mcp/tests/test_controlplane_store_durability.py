@@ -53,8 +53,8 @@ from _store_durability import (
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.paths import observer_logs_root
-from agents_remember.observer.snapshots import read_expectation_rows, read_gates
+from agents_remember.serving.projections.paths import observer_logs_root
+from agents_remember.serving.projections.snapshots import read_expectation_rows, read_gates
 from pydantic import ValidationError
 
 # A line cut off mid-write: exactly what a crash or an interleaved append leaves behind.

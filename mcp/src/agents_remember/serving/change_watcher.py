@@ -81,21 +81,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from agents_remember.controlplane.durable_store import lock_path_for
-from agents_remember.observer.paths import drift_snapshot_dir, observer_logs_root
-from agents_remember.observer.projection_inputs import (
+from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
+from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_heartbeat_path
+from agents_remember.serving.projections.paths import drift_snapshot_dir, observer_logs_root
+from agents_remember.serving.projections.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
     ProjectionDomain,
 )
-from agents_remember.observer.projection_store import LATEST_METRICS, LATEST_STATE
-from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
-from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_heartbeat_path
+from agents_remember.serving.projections.projection_store import LATEST_METRICS, LATEST_STATE
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from watchfiles import Change
 
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 try:  # R7: a missing wheel must degrade the daemon loudly, never crash it at import time.
     import watchfiles

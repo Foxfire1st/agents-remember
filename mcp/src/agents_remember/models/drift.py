@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
-from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftStatus
 from agents_remember.models.base import StrictResponseModel
+
+DriftStatus = Literal["notChecked", "checked", "error"]
 
 
 class DriftSummary(StrictResponseModel):

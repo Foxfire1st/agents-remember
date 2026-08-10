@@ -21,11 +21,13 @@ from typing import cast
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.models.conversations.control_wire import (
+    ControlOperationRef,
+    SubmissionReceipt,
+)
 from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_models import (
-    ControlOperationRef,
     PromptRequest,
-    SubmissionReceipt,
 )
 from agents_remember.serving.harness_submission_authority import HarnessSubmissionAuthority
 from test_harness_submission_authority import NOW, _authority, _AuthorityAdapter, _prompt

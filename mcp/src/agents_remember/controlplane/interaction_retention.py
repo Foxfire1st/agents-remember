@@ -8,8 +8,13 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     fold_operator_inbox_entries,
 )
-from agents_remember.controlplane.records import GateKind, GateRecord
+from agents_remember.controlplane.records import (
+    GateRecord,
+)
 from agents_remember.controlplane.stamps import age_seconds
+from agents_remember.models.gates import (
+    GateKind,
+)
 
 GATE_RESPONSE_WAIT_TIMEOUT_SECONDS = 300.0
 GATE_RESPONSE_WAIT_POLL_SECONDS = 5.0

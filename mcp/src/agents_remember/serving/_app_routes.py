@@ -32,7 +32,6 @@ from agents_remember.models.tool_response import finalize_tool_response
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection import TaskDocNode
-from agents_remember.observer.snapshots import read_task_document_body
 from agents_remember.serving._app_common import (
     OperatorInboxPostRequest,
     _if_none_match_matches,
@@ -55,6 +54,7 @@ from agents_remember.serving.operator_inbox_posts import (
     OperatorInboxPostContext,
     post_operator_inbox_entry,
 )
+from agents_remember.serving.projections.snapshots import read_task_document_body
 from agents_remember.serving.response_contract import (
     ACTION_RESPONSES,
     ActionAccepted,
@@ -66,7 +66,9 @@ from agents_remember.serving.response_contract import (
 from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Response:

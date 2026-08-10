@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.install.runtime import RuntimeInstallRequest, install_runtime_from_config
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 
 __all__ = ["RuntimeInstallRequest", "run_runtime_install"]
 

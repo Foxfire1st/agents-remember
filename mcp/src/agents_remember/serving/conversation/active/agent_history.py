@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationAgentRef,
     ConversationItem,
-    ProvenanceEvidence,
     TextBlock,
+)
+from agents_remember.models.conversations.identity import (
+    ProvenanceEvidence,
 )
 from agents_remember.serving.conversation.projectors.common import MappedItem
 

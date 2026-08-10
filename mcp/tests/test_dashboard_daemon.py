@@ -20,7 +20,10 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
-from agents_remember.mcp.config import DashboardSettings, McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    DashboardSettings,
+    McpRuntimeConfig,
+)
 from agents_remember.serving import daemon
 from agents_remember.serving.cadence import ProjectionCadence
 from agents_remember.serving.daemon import DaemonEndpoint

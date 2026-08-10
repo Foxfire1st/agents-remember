@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Protocol
 
 from agents_remember.errors import AuthorityError
-from agents_remember.serving.conversation.models import AuthorizationBinding
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
 
 LOCAL_OPERATOR_PRINCIPAL_PREFIX = "local-operator:"
 

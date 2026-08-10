@@ -43,6 +43,13 @@ from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSig
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _app_terminal_routes as terminal_routes_module
 from agents_remember.serving import app as app_module
@@ -51,10 +58,11 @@ from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartb
 from agents_remember.serving.conversation.active.service import ActiveConversationService
 from agents_remember.serving.conversation.control.service import ConversationControlService
 from agents_remember.serving.conversation.runtime import ConversationRuntime
-from agents_remember.serving.harness_control_models import AdapterSnapshot, ControlIdentity
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     SnapshotReader,

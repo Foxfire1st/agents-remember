@@ -7,8 +7,9 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
-from typing import Literal, get_args
+from typing import get_args
 
+from agents_remember.models.terminal import LeafRefStatus
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument, read_task_doc
 from agents_remember.worktrees.task_resolver import (
     ARCHIVE_DIR,
@@ -21,13 +22,6 @@ from agents_remember.worktrees.task_resolver import (
 )
 
 LEAF_REF_EXPECTED_FORM = "<repo>/<master-folder>/<doc-id>"
-
-# How a failed leaf-ref resolution is reported on the wire, declared once, here.
-# ``LeafRefResolutionError`` is the only producer, and `leaf_ref_refusal_payload` copies it
-# verbatim into whichever tool refused, so both `models.terminal.LeafAssignmentStatus` and
-# `models.terminal.SpawnAgentSessionStatus` fold this alias in rather than each keeping a pair
-# of hand-written members that nothing would compare against this class again.
-LeafRefStatus = Literal["leaf-ref-not-found", "leaf-ref-ambiguous"]
 
 VALID_LEAF_REF_STATUSES: frozenset[LeafRefStatus] = frozenset(get_args(LeafRefStatus))
 

@@ -13,14 +13,16 @@ from unittest import mock
 from _global_state import preserve_owned_mutable_state
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
-from agents_remember.mcp.config import ConfigError
-from agents_remember.observer.projection_store import project_and_write
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+)
 from agents_remember.serving.build_info import (
     ServingBuild,
     _git_worktree_dirty,
     resolve_serving_build,
 )
 from agents_remember.serving.delta import diff_projection
+from agents_remember.serving.projections.projection_store import project_and_write
 from agents_remember.serving.sim import (
     ReplayClock,
     SimError,

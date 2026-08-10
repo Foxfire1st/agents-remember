@@ -24,9 +24,9 @@ from agents_remember.application.provider_tools import (
     provider_watchers_tool,
     summarize_provider_watchers_result,
 )
-from agents_remember.mcp.tool_reports import write_tool_report
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.tool_reports import write_tool_report
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

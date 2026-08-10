@@ -26,9 +26,11 @@ from _agent_wire_fixtures import (
     turn_started_params,
 )
 from agents_remember.errors import HarnessAdapterBusyError
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_METHOD_KEY,
+)
 from agents_remember.serving.codex_app_server_protocol import JsonObject
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_METHOD_KEY,
     AdapterEvent,
 )
 from test_codex_adapter_thread_demux import agent_registry, eventually, live_snapshot

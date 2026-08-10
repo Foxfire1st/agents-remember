@@ -14,8 +14,8 @@ from agents_remember.application.benchmark_tools import (
     codex_benchmark_prepare_tool,
     codex_benchmark_run_tool,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

@@ -24,10 +24,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
+from agents_remember.models.conversations.cursors import (
     ActiveEventCursor,
     ActivePageCursor,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
     AuthorizationBinding,
 )
 

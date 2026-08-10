@@ -11,6 +11,14 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
     ControlSubmission,
@@ -22,12 +30,6 @@ from agents_remember.serving.harness_control_client import (
     submit_control_prompt,
 )
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
-from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    ControlIdentity,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
-)
 from test_harness_control_evidence import (
     NOW,
     _codex_adapter,

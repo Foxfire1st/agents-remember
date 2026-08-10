@@ -18,17 +18,19 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.atomic_write import atomic_replace
+from agents_remember.models.conversations.capabilities import (
+    AttachmentCapability,
+)
+from agents_remember.models.conversations.control_wire import (
+    AssetReference,
+    read_asset_bytes,
+)
+from agents_remember.models.conversations.identity import (
+    AccessibleLabelProvenance,
+)
 from agents_remember.serving.conversation.control.service import (
     CapabilityRefusedError,
     OperationRejectedError,
-)
-from agents_remember.serving.conversation.models import (
-    AccessibleLabelProvenance,
-    AttachmentCapability,
-)
-from agents_remember.serving.harness_control_models import (
-    AssetReference,
-    read_asset_bytes,
 )
 
 

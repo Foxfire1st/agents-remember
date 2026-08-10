@@ -4,17 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ChoiceOption,
     ChoicesBlock,
     ConversationAgentRef,
     ConversationCorrelation,
     ConversationItem,
-    ProvenanceEvidence,
     TextBlock,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    PendingInteraction,
+)
+from agents_remember.models.conversations.identity import (
+    ProvenanceEvidence,
+)
 from agents_remember.serving.conversation.projectors.common import MappedItem
-from agents_remember.serving.harness_control_models import AdapterSnapshot, PendingInteraction
 
 from .mutation_stream import ProjectionMutationStream
 

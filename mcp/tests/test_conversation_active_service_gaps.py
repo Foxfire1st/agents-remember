@@ -4,12 +4,17 @@ import unittest
 from unittest import mock
 
 import agents_remember.serving.conversation.active.projector as projector_module
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+)
+from agents_remember.models.conversations.stream_events import (
+    ConversationEventEnvelope,
+    GapMutation,
+)
 from agents_remember.serving.conversation.active.projector import (
     ZipperEvidenceEvicted,
     mutation_stream,
 )
-from agents_remember.serving.conversation.models import ConversationEventEnvelope, GapMutation
-from agents_remember.serving.harness_control_models import EvidenceFrame
 from test_conversation_active_service import (
     NOW,
     _codex_turn,

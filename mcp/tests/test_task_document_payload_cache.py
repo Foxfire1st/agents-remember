@@ -9,7 +9,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from agents_remember.observer.snapshots_impl import _common as snapshots_common
+from agents_remember.serving.projections.snapshots_impl import _common as snapshots_common
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA
 
 NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)

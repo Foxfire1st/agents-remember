@@ -24,7 +24,9 @@ from agents_remember.application.gate_tools import (
     record_lifecycle_gate_decision,
 )
 from agents_remember.controlplane.records import GateRecord
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.models.application_requests import GateDecisionRequest
 from agents_remember.observer.lifecycle_state import LifecycleError, LifecycleState
 

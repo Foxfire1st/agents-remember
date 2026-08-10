@@ -30,6 +30,16 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.cursors import (
+    ActiveEventCursor,
+    ActivePageCursor,
+)
+from agents_remember.models.conversations.history import (
+    ConversationPage,
+)
+from agents_remember.models.conversations.stream_events import (
+    ConversationEventEnvelope,
+)
 from agents_remember.serving.conversation.active.cursor import (
     ConversationCursorError,
     CursorConflictError,
@@ -46,12 +56,6 @@ from agents_remember.serving.conversation.active.service import (
 from agents_remember.serving.conversation.dependencies import (
     get_conversation_runtime,
     resolve_conversation_authorization,
-)
-from agents_remember.serving.conversation.models import (
-    ActiveEventCursor,
-    ActivePageCursor,
-    ConversationEventEnvelope,
-    ConversationPage,
 )
 from agents_remember.serving.conversation.response_contract import (
     CONVERSATION_RESPONSES,

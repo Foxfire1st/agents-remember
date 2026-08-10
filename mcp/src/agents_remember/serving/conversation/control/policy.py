@@ -15,20 +15,26 @@ in this leaf — capability gating alone cannot authorize one.
 
 from __future__ import annotations
 
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    FeatureCapability,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.primitives import (
+    WireModel,
+)
 from agents_remember.serving.conversation.control.capabilities import (
     control_capabilities_for,
 )
 from agents_remember.serving.conversation.control.service import (
     ConversationControlService,
 )
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    AuthorizationBinding,
-    CapabilityEvidence,
-    FeatureCapability,
-    WireModel,
-)
-from agents_remember.serving.harness_control_models import AdapterSnapshot
 
 _POLICY_ORIGIN = "agents-remember serving composition"
 

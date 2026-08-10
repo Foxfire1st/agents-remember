@@ -17,14 +17,16 @@ from agents_remember.benchmarks.runner_modules.constants import (
 )
 from agents_remember.benchmarks.runner_modules.manifest import manifest_path_component
 from agents_remember.benchmarks.runner_modules.models import BenchmarkCase, BenchmarkWorkspace
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+)
+from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     ProviderScope,
     RepositoryScope,
     provider_runtime_name,
 )
 from agents_remember.providers import provider_setup
-from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 

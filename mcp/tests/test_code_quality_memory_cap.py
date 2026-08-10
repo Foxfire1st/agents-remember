@@ -13,7 +13,8 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import check, memory_cap
+from agents_remember.code_quality import check
+from agents_remember.kernel.primitives import memory_cap
 
 
 def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:

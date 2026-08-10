@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from agents_remember.models.conversations.identity import (
+    ProvenanceEvidence,
+)
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
-from agents_remember.serving.conversation.models import ProvenanceEvidence
 
 TEXT_BLOCK_CAP = 8192
 

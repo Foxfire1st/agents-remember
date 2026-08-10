@@ -7,8 +7,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.observer.landing_state import LandingStateRefresher
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.observer.projection import LedgerRefNode, ProviderNode, SetupProgressNode
 from agents_remember.observer.reducer import (
     AnalyticalInputs,
@@ -20,7 +21,8 @@ from agents_remember.observer.reducer import (
     enclosure_actions,
     project_workspace,
 )
-from agents_remember.observer.snapshots import (
+from agents_remember.serving.projections.landing_state import LandingStateRefresher
+from agents_remember.serving.projections.snapshots import (
     read_engine_process_facts,
     read_start_progress_entries,
 )

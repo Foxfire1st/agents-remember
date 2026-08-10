@@ -13,6 +13,15 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    FeatureCapability,
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    NativeConversationRef,
+)
 from agents_remember.serving.codex_app_server_protocol import JsonObject
 from agents_remember.serving.conversation.library.claude import ClaudeConversationLibrary
 from agents_remember.serving.conversation.library.codex import (
@@ -29,13 +38,6 @@ from agents_remember.serving.conversation.library.errors import (
 )
 from agents_remember.serving.conversation.library.pi import PiConversationLibrary
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    CapabilityEvidence,
-    FeatureCapability,
-    HistoryCapabilities,
-    NativeConversationRef,
-)
 
 CALLER = AuthorizationBinding(principal_id="local-operator:1000", tenant_id="/ws")
 CODEX = Harness(id="codex", name="Codex", command="codex", argv=("codex",))

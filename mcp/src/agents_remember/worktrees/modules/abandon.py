@@ -20,11 +20,6 @@ from typing import TypeAlias
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
-from agents_remember.memory_quality.style.citations.source_index_cache import (
-    TerminalNamespaceGuard,
-    terminal_namespace_guard,
-)
-from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     delete_branch_force,
@@ -36,15 +31,12 @@ from agents_remember.worktrees.modules.cleanup import (
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.modules.provider_teardown import (
-    remove_tree,
-    teardown_worktree_providers,
-)
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     terminal_preflight,
     terminal_result_blockers,
 )
+from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -67,7 +59,11 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
-    if not args.dry_run and not args.force and provider_async.provider_setup_running(contract):
+    if (
+        not args.dry_run
+        and not args.force
+        and worktree_services().provider_lifecycle.setup_running(contract)
+    ):
         # Teardown must not race the live background setup thread (GitHub #53);
         # a dead thread surfaces as a stale heartbeat and does not block.
         return WorktreeCommandResult(
@@ -105,7 +101,7 @@ def _abandon_reserved(
     assert args.contract_path is not None
 
     try:
-        guard_context = terminal_namespace_guard(
+        guard_context = worktree_services().citation_guard.guard(
             contract,
             requested_contract_path=args.contract_path,
         )
@@ -136,7 +132,7 @@ def _abandon_with_guard(
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
-    guard: TerminalNamespaceGuard,
+    guard: TerminalGuard,
 ) -> WorktreeCommandResult:
     try:
         outputs = _abandon_terminal_outputs(args, contract, preflight)
@@ -197,7 +193,7 @@ def _abandon_with_guard(
 
 def _publish_abandon(
     contract: WorktreeContract,
-    guard: TerminalNamespaceGuard,
+    guard: TerminalGuard,
     outputs: AbandonOutputs,
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, directories = outputs
@@ -242,7 +238,9 @@ def _abandon_terminal_outputs(
     contract: WorktreeContract,
     preflight: TerminalPreflight,
 ) -> AbandonOutputs:
-    providers: dict[str, object] = teardown_worktree_providers(contract, dry_run=args.dry_run)
+    providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
+        contract, dry_run=args.dry_run
+    )
     if not args.dry_run and terminal_result_blockers(
         providers=providers,
         worktrees={},
@@ -420,7 +418,9 @@ def _abandon_directories(
     group = contract.worktree_group
     directories = {
         "worktree_group": (
-            remove_tree(group, dry_run=dry_run) if force else remove_empty_dir(group, dry_run)
+            worktree_services().provider_lifecycle.remove_tree(group, dry_run=dry_run)
+            if force
+            else remove_empty_dir(group, dry_run)
         ),
     }
     if group.parent.exists():

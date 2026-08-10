@@ -8,17 +8,17 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 from agents_remember.errors import HarnessBridgeEpochMismatchError, HarnessControlError
-from agents_remember.serving.conversation.active.agent_history import AgentHistoryHydration
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.identity import (
     ActiveConversationRef,
     AuthorizationBinding,
+)
+from agents_remember.models.conversations.stream_events import (
     ConversationEventEnvelope,
 )
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving.conversation.active.agent_history import AgentHistoryHydration
 from agents_remember.serving.conversation.projectors import HarnessProjector
 from agents_remember.serving.conversation.projectors.common import UnmappableShape
-from agents_remember.serving.harness_control_client import (
-    ControlledSession,
-)
 
 from .agent_authority import AgentAuthority
 from .child_history import ChildHistoryProjection
@@ -32,7 +32,7 @@ from .native_ingestion import (
 )
 from .rebuild_coordinator import IngestionComponents, PageResult, RebuildCoordinator
 from .references import ProjectionEvidenceRefs
-from .wiring import LIVE_BRIDGE_READERS, BridgeReaders, SessionProjectionSpine
+from .wiring import BridgeReaders, SessionProjectionSpine
 
 POLL_INTERVAL_SECONDS = 1.0
 CONSUMER_TTL_SECONDS = 30.0
@@ -51,7 +51,7 @@ class ProjectedSession:
 
     identity: ActiveConversationRef
     authorization: AuthorizationBinding
-    entry: ControlledSession
+    entry: TerminalCatalogEntry
     mapper: HarnessProjector
     secret: bytes
 
@@ -64,7 +64,7 @@ class ActiveSessionProjector:
         session: ProjectedSession,
         *,
         clock,
-        readers: BridgeReaders = LIVE_BRIDGE_READERS,
+        readers: BridgeReaders,
     ) -> None:
         identity = session.identity
         entry = session.entry

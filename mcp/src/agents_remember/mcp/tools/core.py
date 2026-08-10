@@ -9,10 +9,10 @@ from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime_install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.application.skill_tools import skills_install_tool
 from agents_remember.application.task_ref import TaskRef
-from agents_remember.mcp.tool_reports import write_tool_report
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.tool_reports import write_tool_report
 
 from .. import SERVER_NAME, SERVER_VERSION
-from ..config import McpRuntimeConfig
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT, _tool_payload
 
 

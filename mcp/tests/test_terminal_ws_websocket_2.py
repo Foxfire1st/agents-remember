@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import patch
 
 from agents_remember.serving.harness_control_runner import parse_runner_config
@@ -64,7 +65,7 @@ class TerminalWebSocketTests2(TerminalWebSocketTests):
         leaf = "repo/master/leaf-1"
         self.catalog.upsert(_catalog_entry("owner", cwd=self.tmp, tmux_name="ar-owner"))
         self.catalog.upsert(
-            _catalog_entry("seeker", cwd=self.tmp, tmux_name="ar-seeker").with_leaf_key(None)
+            replace(_catalog_entry("seeker", cwd=self.tmp, tmux_name="ar-seeker"), leaf_key=None)
         )
         self.host.probe_names.update({"ar-owner", "ar-seeker"})
         with TestClient(self.app) as client:
@@ -132,7 +133,7 @@ class TerminalWebSocketTests2(TerminalWebSocketTests):
         # The attach-leaf path is role-scoped too: a terminal can claim a leaf already held by a chat.
         leaf = "repo/master/leaf-1"
         self.catalog.upsert(
-            _catalog_entry("term", cwd=self.tmp, tmux_name="ar-term").with_leaf_key(None)
+            replace(_catalog_entry("term", cwd=self.tmp, tmux_name="ar-term"), leaf_key=None)
         )
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
             client.post(

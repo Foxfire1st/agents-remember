@@ -21,6 +21,12 @@ from agents_remember.errors import (
     NativeHistoryLimitExceeded,
     NativeHistoryUnavailable,
 )
+from agents_remember.models.conversations.evidence import (
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+    native_evidence_frame_wire_bytes,
+    window_native_evidence_page,
+)
 from agents_remember.serving.codex_app_server_protocol import (
     CodexAppServerTransport,
     JsonObject,
@@ -30,12 +36,6 @@ from agents_remember.serving.codex_app_server_state import (
     required_list,
     required_object,
     required_text,
-)
-from agents_remember.serving.harness_control_models import (
-    NativeEvidenceFrame,
-    NativeEvidencePage,
-    native_evidence_frame_wire_bytes,
-    window_native_evidence_page,
 )
 
 SourceContract = Literal["bounded-items", "bounded-turns", "legacy-thread-read"]

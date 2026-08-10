@@ -11,6 +11,13 @@ from typing import cast
 from unittest import mock
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+    AdapterSnapshot,
+    ControlIdentity,
+    LaunchSpec,
+    SubmissionReceipt,
+)
 from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapter
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
@@ -25,12 +32,7 @@ from agents_remember.serving.harness_control_factories import (
     harness_launch_knobs,
 )
 from agents_remember.serving.harness_control_models import (
-    AcceptanceState,
-    AdapterSnapshot,
-    ControlIdentity,
-    LaunchSpec,
     PromptRequest,
-    SubmissionReceipt,
     TerminalResult,
     TranscriptEntry,
 )

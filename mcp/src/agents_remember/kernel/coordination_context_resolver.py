@@ -8,10 +8,7 @@ from typing import Literal
 
 from agents_remember.kernel.coordination_context import paths as _paths
 from agents_remember.kernel.coordination_context import resolver as _resolver
-from agents_remember.kernel.coordination_context.cli import main
 from agents_remember.kernel.coordination_context.contracts import (
-    find_task_contract,
-    find_worktree_contract,
     resolve_contract,
 )
 from agents_remember.kernel.coordination_context.cross_repo import (
@@ -32,6 +29,7 @@ from agents_remember.kernel.coordination_context.models import (
     CodeRepository,
     CoordinationContext,
     CoordinationHints,
+    CoordinationRequest,
     CoordinationRoots,
     CoordinationSelection,
     CrossRepoAllowEntry,
@@ -133,16 +131,14 @@ def resolve_coordination_context(
     workspace_root: Path | None = None,
     code_repository_root: Path | None = None,
     *,
-    hints: CoordinationHints | None = None,
-    selector: EnclosureSelector | None = None,
+    request: CoordinationRequest,
 ) -> CoordinationContext:
     return _with_facade_agents_repo(
         _resolver.resolve_coordination_context,
         code_repository_name,
         workspace_root,
         code_repository_root,
-        hints=hints,
-        selector=selector,
+        request=request,
     )
 
 
@@ -194,8 +190,6 @@ __all__ = [
     "external_memory_root",
     "extract_yaml_blocks",
     "find_code_repository_root",
-    "find_task_contract",
-    "find_worktree_contract",
     "git_branch",
     "git_head_or_empty",
     "infer_settings_path",
@@ -205,7 +199,6 @@ __all__ = [
     "invalid_cross_repo_entry",
     "is_sidecar_storage",
     "looks_like_installed_coordination_root",
-    "main",
     "matches_any",
     "matches_file_type",
     "memory_repository_info",
@@ -251,7 +244,3 @@ __all__ = [
     "string_list",
     "with_memory_ledger_state",
 ]
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

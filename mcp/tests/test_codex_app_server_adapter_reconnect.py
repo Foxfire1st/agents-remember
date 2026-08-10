@@ -12,7 +12,9 @@ from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerSettings,
 )
 from agents_remember.serving.codex_app_server_state import interaction_prompt, interaction_result
-from agents_remember.serving.harness_control_models import InteractionResponse
+from agents_remember.serving.harness_control_models import (
+    InteractionResponse,
+)
 from test_codex_app_server_adapter import (
     FakeCodexTransport,
     fixture,

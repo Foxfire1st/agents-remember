@@ -14,10 +14,18 @@ import unittest
 from typing import cast
 from unittest import mock
 
+import agents_remember.serving.harness_control_client as client_module
 from _control_plane import OPERATOR, FakeControlAdapter, make_harness
 from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlClientError,
+)
+from agents_remember.models.conversations.submissions import (
+    ConversationSubmitRequest,
+    TextSubmitBlock,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
 )
 from agents_remember.serving.conversation.control import attachments, operations
 from agents_remember.serving.conversation.control.capabilities import (
@@ -30,11 +38,6 @@ from agents_remember.serving.conversation.control.service import (
     OperationConflictError,
     OperationNotFoundError,
 )
-from agents_remember.serving.conversation.models import (
-    ConversationSubmitRequest,
-    TextSubmitBlock,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 
 class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
@@ -143,7 +146,7 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_lost_response_is_unknown_and_reconcile_recovers_first_ack(self) -> None:
         await self._submit("req-1")
         with mock.patch.object(
-            operations,
+            client_module,
             "interrupt_control",
             side_effect=HarnessControlClientError("socket died mid-write", may_have_sent=True),
         ):
@@ -161,7 +164,7 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
         await self._submit("req-1")
         with (
             mock.patch.object(
-                operations,
+                client_module,
                 "interrupt_control",
                 side_effect=HarnessControlClientError("endpoint down", may_have_sent=False),
             ),

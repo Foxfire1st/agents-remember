@@ -30,7 +30,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.serving.conversation.models import AuthorizationBinding
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
 
 REF_SCHEMA_VERSION = 1
 

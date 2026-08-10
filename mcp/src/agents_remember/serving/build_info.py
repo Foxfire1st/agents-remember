@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict
 
 import agents_remember
 from agents_remember.kernel.git_command import run_git
-from agents_remember.mcp import SERVER_VERSION
+from agents_remember.kernel.primitives.version import SERVER_VERSION
 from agents_remember.observer.events import now_iso
 
 # Boot-time probes: the stamp is best-effort and must never delay app creation, so a

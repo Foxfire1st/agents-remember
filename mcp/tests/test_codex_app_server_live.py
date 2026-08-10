@@ -10,6 +10,10 @@ from typing import NamedTuple
 
 import pytest
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -27,8 +31,6 @@ from agents_remember.serving.harness_capabilities import (
 )
 from agents_remember.serving.harness_control_models import (
     AdapterHandshake,
-    ControlIdentity,
-    LaunchSpec,
     PromptRequest,
 )
 from agents_remember.serving.harness_launch import (

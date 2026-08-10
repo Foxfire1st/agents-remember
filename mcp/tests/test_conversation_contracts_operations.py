@@ -3,28 +3,44 @@ from __future__ import annotations
 import json
 
 import pytest
-from agents_remember.serving.conversation.models import (
-    AttachmentCapability,
+from agents_remember.models.conversations.attachments import (
     AttachmentOperationProjection,
-    AttachmentRecoveryRef,
-    CockpitQueueIdentity,
+)
+from agents_remember.models.conversations.capabilities import (
+    AttachmentCapability,
+    FeatureCapability,
+)
+from agents_remember.models.conversations.interrupts import (
+    InterruptOperation,
+)
+from agents_remember.models.conversations.opening import (
+    OpenConversationOperation,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.status import (
     ConversationStatus,
     ConversationTurnStatus,
     ConversationTurnWaiting,
-    FailedWithdrawalResponse,
-    FeatureCapability,
-    InterruptOperation,
-    OpenConversationOperation,
-    OperationFingerprint,
+)
+from agents_remember.models.conversations.submissions import (
+    CockpitQueueIdentity,
     OperationQueueItem,
     OperationQueueProjection,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
+from agents_remember.models.conversations.withdrawals import (
+    AttachmentRecoveryRef,
+    FailedWithdrawalResponse,
     PendingWithdrawalRecoveryList,
     PendingWithdrawalRecoveryProjection,
     WithdrawalOperationProjection,
     WithdrawalRecovery,
     WithdrawnQueueResponse,
     WithdrawQueueRequest,
-    operation_fingerprint,
 )
 from pydantic import ValidationError
 from test_conversation_contracts import (

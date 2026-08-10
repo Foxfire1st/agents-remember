@@ -10,8 +10,8 @@ from agents_remember.application.provider_tools import (
     GrepaiTraceQuery,
     ProviderQueryScope,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from ..tools import (
     cgc_callees_payload,
     cgc_callers_payload,

@@ -27,12 +27,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.observer.paths import observer_logs_root, observer_root
-from agents_remember.observer.projection_store import read_lifecycle_logs
 from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections.paths import observer_logs_root, observer_root
+from agents_remember.serving.projections.projection_store import read_lifecycle_logs
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
     from agents_remember.observer.events import Event
 
 PAUSED = "paused"

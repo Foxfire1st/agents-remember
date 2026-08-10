@@ -25,6 +25,9 @@ from agents_remember.controlplane.signal_routing import (
     signal_leaf_key,
 )
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.dispatch_brief import (
@@ -39,16 +42,18 @@ from agents_remember.serving.inbox_delivery import (
     InboxDeliveryLog,
     deliver_inbox_entry,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 @dataclass(frozen=True)
@@ -70,8 +75,8 @@ def _redelivery_floor_seconds(config: McpRuntimeConfig | None) -> float | None:
 
 def _delivery_catalog(
     config: McpRuntimeConfig | None,
-    catalog: TerminalCatalog | None,
-) -> TerminalCatalog:
+    catalog: TerminalCatalogPort | None,
+) -> TerminalCatalogPort:
     if catalog is not None:
         return catalog
     assert config is not None
@@ -79,7 +84,7 @@ def _delivery_catalog(
 
 
 def _signal_route(
-    catalog: TerminalCatalog | None,
+    catalog: TerminalCatalogPort | None,
     *,
     sender_agent_id: str | None,
     message_kind: InboxMessageKind,
@@ -99,7 +104,7 @@ def _signal_route(
 
 
 def _post_address(
-    catalog: TerminalCatalog | None,
+    catalog: TerminalCatalogPort | None,
     owner: RoutedOwner,
     *,
     message_kind: InboxMessageKind,
@@ -137,7 +142,7 @@ _OWNER_ADDRESS_ROLES = frozenset({"manager", "orchestrator", "architect"})
 
 
 def _is_owner_addressed(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     owner: RoutedOwner,
     address: InboxAddress,
 ) -> bool:
@@ -165,8 +170,8 @@ def _is_owner_addressed(
 
 def _post_catalog(
     config: McpRuntimeConfig | None,
-    supplied: TerminalCatalog | None,
-) -> TerminalCatalog | None:
+    supplied: TerminalCatalogPort | None,
+) -> TerminalCatalogPort | None:
     if supplied is not None:
         return supplied
     if config is None:

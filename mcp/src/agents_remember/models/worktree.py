@@ -6,7 +6,42 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
+
+# Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
+WorkflowKind = Literal["chat-task", "light-task"]
+HumanReviewStatus = Literal["pending-review", "approved"]
+CloseoutStatus = Literal["not-started", "completed"]
+LifecycleStatus = CloseoutStatus  # the published wire name for the closeout status
+IntegrationStatus = Literal["not-started", "completed", "blocked"]
+CleanupStatus = Literal["pending", "completed", "abandoned", "reopened"]
+WorktreePhase = Literal[
+    "worktree-started",
+    "closeout-pending",
+    "integration-pending",
+    "integration-blocked",
+    "carryover-pending",
+    "cleanup-pending",
+    "cleanup-completed",
+    "abandoned",
+]
+NextOperation = Literal[
+    "continue_work",
+    "closeout",
+    "request_integration_decision",
+    "developer_decision",
+    "request_carryover_decision",
+    "request_cleanup_decision",
+    "done",
+]
+NextTool = Literal[
+    "worktree_status",
+    "worktree_closeout_apply",
+    "worktree_integrate",
+    "memory_carryover_apply",
+    "worktree_cleanup",
+]
 
 # Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
 # is what these were, and the copies had drifted apart in six places at once: `chat-task`
@@ -14,21 +49,6 @@ from agents_remember.models.base import FlexibleToolResponse, StrictResponseMode
 # `carryover-pending`, `abandoned`, `request_carryover_decision` and `memory_carryover_apply`
 # were all writable and none validated, which made this model reject 165 of the 213 series
 # contracts on disk with a ValidationError no handler on the tool path catches.
-from agents_remember.worktrees.modules.guidance import (
-    NextOperation,
-    NextTool,
-    WorktreePhase,
-)
-from agents_remember.worktrees.worktree_contract import (
-    CleanupStatus,
-    HumanReviewStatus,
-    IntegrationStatus,
-    MemoryMode,
-    WorkflowKind,
-)
-from agents_remember.worktrees.worktree_contract import (
-    CloseoutStatus as LifecycleStatus,  # the published wire name for the closeout status
-)
 
 # Produced entirely inside `application.worktree_status`, which constructs this model
 # directly, so the projection there is already the single writer the checker can see.

@@ -13,6 +13,18 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    LaunchSpec,
+    PendingInteraction,
+    SubmissionReceipt,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
@@ -29,22 +41,14 @@ from agents_remember.serving.harness_control_ipc import HarnessControlServer, Lo
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
-    AcceptanceState,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    LaunchSpec,
-    PendingInteraction,
     PromptRequest,
     ReconciliationResult,
-    SubmissionReceipt,
     TerminalResult,
     TranscriptEntry,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 HARNESSES = ("claude", "codex", "pi")
 

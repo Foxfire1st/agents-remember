@@ -27,7 +27,10 @@ from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeStore,
     missing_artifact,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    load_config,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.store import EventStore
 from test_config import settings_payload

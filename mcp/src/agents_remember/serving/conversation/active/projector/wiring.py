@@ -14,18 +14,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from agents_remember.serving.harness_control_client import (
-    read_control_evidence,
-    read_control_native_page,
-    read_control_snapshot,
-    read_control_transcript,
-    read_submission_provenance,
-)
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving.ports import ControlPlanePort
 
 if TYPE_CHECKING:
-    from agents_remember.serving.conversation.models import ActiveConversationRef
+    from agents_remember.models.conversations.identity import ActiveConversationRef
     from agents_remember.serving.conversation.projectors import HarnessProjector
-    from agents_remember.serving.harness_control_client import ControlledSession
 
     from .agent_authority import AgentAuthority
     from .mutation_stream import ProjectionMutationStream
@@ -41,15 +35,23 @@ class BridgeReaders:
     the interleaving, so the readers are chosen as a set.
     """
 
-    evidence: Callable[..., Any] = read_control_evidence
-    native_page: Callable[..., Any] = read_control_native_page
-    transcript: Callable[..., Any] = read_control_transcript
-    provenance: Callable[..., Any] = read_submission_provenance
-    snapshot: Callable[..., Any] = read_control_snapshot
+    evidence: Callable[..., Any]
+    native_page: Callable[..., Any]
+    transcript: Callable[..., Any]
+    provenance: Callable[..., Any]
+    snapshot: Callable[..., Any]
 
 
-LIVE_BRIDGE_READERS = BridgeReaders()
-"""The production reads: every one of them goes to the real control bridge."""
+def live_bridge_readers(control_plane: ControlPlanePort) -> BridgeReaders:
+    """The production reads: every one of them goes through the bound control port."""
+
+    return BridgeReaders(
+        evidence=control_plane.read_evidence,
+        native_page=control_plane.read_native_page,
+        transcript=control_plane.read_transcript,
+        provenance=control_plane.read_submission_provenance,
+        snapshot=control_plane.read_snapshot,
+    )
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,7 @@ class SessionProjectionSpine:
     """
 
     identity: ActiveConversationRef
-    entry: ControlledSession
+    entry: TerminalCatalogEntry
     mapper: HarnessProjector
     stream: ProjectionMutationStream
     agents: AgentAuthority
@@ -85,7 +87,7 @@ class SessionProjectionSpine:
 
 
 __all__ = [
-    "LIVE_BRIDGE_READERS",
     "BridgeReaders",
     "SessionProjectionSpine",
+    "live_bridge_readers",
 ]

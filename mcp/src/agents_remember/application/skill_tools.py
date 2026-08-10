@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.install.skills import install_skills
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 
 
 def skills_install_tool(

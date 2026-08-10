@@ -8,7 +8,10 @@ import unittest
 from pathlib import Path
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_control_models import ControlIdentity, LaunchSpec
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
 from agents_remember.serving.pi_rpc_process import PiRpcSubprocess
 
 

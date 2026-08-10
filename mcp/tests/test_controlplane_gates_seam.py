@@ -11,12 +11,7 @@ from agents_remember.application import worktree_tools
 from agents_remember.application.gate_tools import GateRaise, GateWait
 from agents_remember.controlplane.enforcement import evaluate_gate
 from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    GatePolicyRule,
-    apply_seam_verdict_requirement,
     approval_failure_reason,
-    make_gate_policy,
-    named_gate_policy,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
@@ -27,7 +22,14 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.paths import observer_logs_root
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicyRule,
+    apply_seam_verdict_requirement,
+    make_gate_policy,
+    named_gate_policy,
+)
+from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import IntegrationSources

@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Protocol
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_control_models import ShutdownMode
+from agents_remember.serving.harness_control_models import (
+    ShutdownMode,
+)
 
 MAX_CLAUDE_FRAME_BYTES = 1024 * 1024
 PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0

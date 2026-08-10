@@ -9,6 +9,24 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from agents_remember.errors import HarnessBridgeEpochMismatchError
+from agents_remember.models.conversations.capabilities import (
+    ConversationCapabilities,
+)
+from agents_remember.models.conversations.cursors import (
+    ActiveEventCursor,
+    ActivePageCursor,
+)
+from agents_remember.models.conversations.history import (
+    ConversationPage,
+    ConversationPageWindow,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.stream_events import (
+    ConversationEventEnvelope,
+)
 from agents_remember.serving.conversation.active.agent_history import AgentHistoryHydration
 from agents_remember.serving.conversation.active.capabilities import capabilities_for
 from agents_remember.serving.conversation.active.cursor import (
@@ -29,15 +47,8 @@ from agents_remember.serving.conversation.active.projector import (
     PageResult,
 )
 from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    ActiveEventCursor,
-    ActivePageCursor,
-    AuthorizationBinding,
-    ConversationCapabilities,
-    ConversationEventEnvelope,
-    ConversationPage,
-    ConversationPageWindow,
+from agents_remember.serving.conversation.active.projector.wiring import (
+    live_bridge_readers,
 )
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 
@@ -187,10 +198,12 @@ class ActiveConversationService:
         # The catalog resolution takes the TerminalCatalog RLock + file read; offload it off
         # the event loop like the epoch/snapshot reads below.
         entry = await asyncio.to_thread(resolve_running_entry, self._runtime, ar_session_id)
-        actual_epoch = await asyncio.to_thread(current_bridge_epoch, entry)
+        actual_epoch = await asyncio.to_thread(
+            current_bridge_epoch, entry, self._runtime.control_plane
+        )
         if actual_epoch != expected_bridge_epoch:
             raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual_epoch)
-        snapshot = await asyncio.to_thread(live_snapshot, entry)
+        snapshot = await asyncio.to_thread(live_snapshot, entry, self._runtime.control_plane)
         identity, mapper = build_identity(
             entry, secret=self._secret, bridge_epoch=actual_epoch, snapshot=snapshot
         )
@@ -212,6 +225,7 @@ class ActiveConversationService:
                 secret=self._secret,
             ),
             clock=self._clock,
+            readers=live_bridge_readers(self._runtime.control_plane),
         )
         self._projectors[ar_session_id] = projector
         self._lru_touch(ar_session_id)

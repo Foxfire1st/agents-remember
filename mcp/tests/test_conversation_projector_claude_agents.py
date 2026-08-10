@@ -20,21 +20,23 @@ from __future__ import annotations
 
 import unittest
 
-from agents_remember.serving.claude_stream_protocol import (
-    build_claude_stream_argv,
-    forward_subagent_text_supported,
-)
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationItem,
     TextBlock,
     ToolOutputBlock,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+)
+from agents_remember.serving.claude_stream_protocol import (
+    build_claude_stream_argv,
+    forward_subagent_text_supported,
 )
 from agents_remember.serving.conversation.projectors import claude
 from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     MappedUnknownVendor,
 )
-from agents_remember.serving.harness_control_models import EvidenceFrame
 
 NOW = "2026-07-26T08:00:00+00:00"
 REF = "ar-ev:epoch:1"

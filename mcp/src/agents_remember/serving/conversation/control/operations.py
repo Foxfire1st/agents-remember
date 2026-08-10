@@ -30,6 +30,28 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agents_remember.errors import HarnessControlClientError, HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    InterruptResult,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_TERMINAL_OUTCOME_KEY,
+    EvidenceFrame,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+)
+from agents_remember.models.conversations.interrupts import (
+    InterruptOperation,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.control.capabilities import (
     control_capabilities_for,
 )
@@ -43,22 +65,6 @@ from agents_remember.serving.conversation.control.service import (
     OperationConflictError,
     OperationNotFoundError,
 )
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    InterruptOperation,
-    OperationFingerprint,
-    operation_fingerprint,
-)
-from agents_remember.serving.harness_control_client import (
-    interrupt_control,
-    read_control_evidence,
-)
-from agents_remember.serving.harness_control_models import (
-    AR_TERMINAL_OUTCOME_KEY,
-    EvidenceFrame,
-    InterruptResult,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 Acknowledgement = Literal["requested", "accepted", "unknown", "rejected"]
 Settlement = Literal["pending", "interrupted", "already-settled", "failed"]
@@ -248,7 +254,7 @@ async def _drive_interrupt(
     )
     try:
         result: InterruptResult = await asyncio.to_thread(
-            interrupt_control,
+            service.control_plane.interrupt,
             entry,
             expected_bridge_epoch=identity.bridge_epoch,
             **turn_kwarg,
@@ -309,7 +315,7 @@ async def _redrive_unknown(
     )
     try:
         result = await asyncio.to_thread(
-            interrupt_control,
+            service.control_plane.interrupt,
             entry,
             expected_bridge_epoch=record.bridge_epoch,
             **turn_kwarg,
@@ -352,14 +358,14 @@ async def _observe_settlement(
 
 
 async def _codex_terminal_outcome(
-    service: ConversationControlService,  # noqa: ARG001 - clock/epoch owner kept for symmetry
+    service: ConversationControlService,
     entry: TerminalCatalogEntry,
     record: InterruptRecord,
 ) -> tuple[Settlement, str] | None:
     after = record.evidence_floor
     while True:
         page = await asyncio.to_thread(
-            read_control_evidence,
+            service.control_plane.read_evidence,
             entry,
             after_sequence=after,
             expected_bridge_epoch=record.bridge_epoch,
@@ -384,7 +390,7 @@ async def _codex_terminal_outcome(
 
 
 async def _claude_terminal_outcome(
-    service: ConversationControlService,  # noqa: ARG001 - clock/epoch owner kept for symmetry
+    service: ConversationControlService,
     entry: TerminalCatalogEntry,
     record: InterruptRecord,
 ) -> tuple[Settlement, str] | None:
@@ -400,7 +406,7 @@ async def _claude_terminal_outcome(
     after = record.evidence_floor
     while True:
         page = await asyncio.to_thread(
-            read_control_evidence,
+            service.control_plane.read_evidence,
             entry,
             after_sequence=after,
             expected_bridge_epoch=record.bridge_epoch,
@@ -471,7 +477,7 @@ async def _pi_terminal_outcome(
         or row.state in {"queued", "dispatching", "unknown"}
     ):
         return None
-    stop_reason = await _pi_stop_reason(entry, record)
+    stop_reason = await _pi_stop_reason(service, entry, record)
     if stop_reason is None:
         return None
     if stop_reason == _PI_ABORTED:
@@ -482,6 +488,7 @@ async def _pi_terminal_outcome(
 
 
 async def _pi_stop_reason(
+    service: ConversationControlService,
     entry: TerminalCatalogEntry,
     record: InterruptRecord,
 ) -> str | None:
@@ -491,7 +498,7 @@ async def _pi_stop_reason(
     stop_reason: str | None = None
     while True:
         page = await asyncio.to_thread(
-            read_control_evidence,
+            service.control_plane.read_evidence,
             entry,
             after_sequence=after,
             expected_bridge_epoch=record.bridge_epoch,

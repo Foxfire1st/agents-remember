@@ -15,6 +15,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import CitationCacheError
+from agents_remember.memory_quality.style.citations import source_index_cache as citation_cache
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TerminalNamespaceGuard,
 )
@@ -53,7 +54,7 @@ class TestAbandonReserved:
         ctx = mock.MagicMock()
         ctx.__enter__.side_effect = CitationCacheError("live lease busy")
         with (
-            mock.patch.object(abandon, "terminal_namespace_guard", return_value=ctx),
+            mock.patch.object(citation_cache, "terminal_namespace_guard", return_value=ctx),
             mock.patch.object(abandon, "status_payload", return_value={}),
         ):
             result = abandon._abandon_reserved(_args(), _contract(), TerminalPreflight({}, {}, ()))
@@ -68,7 +69,7 @@ class TestAbandonReserved:
         ctx = mock.MagicMock()
         ctx.__enter__.side_effect = CitationCacheError("other")
         with (
-            mock.patch.object(abandon, "terminal_namespace_guard", return_value=ctx),
+            mock.patch.object(citation_cache, "terminal_namespace_guard", return_value=ctx),
             mock.patch.object(abandon, "status_payload", return_value={}),
         ):
             result = abandon._abandon_reserved(_args(), _contract(), TerminalPreflight({}, {}, ()))

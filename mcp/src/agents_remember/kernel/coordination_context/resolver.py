@@ -7,11 +7,14 @@ from agents_remember.kernel.coordination_context.contracts import resolve_contra
 from agents_remember.kernel.coordination_context.cross_repo import resolve_cross_repo_settings
 from agents_remember.kernel.coordination_context.models import (
     CodeRepository,
+    ContractReaderPort,
     CoordinationContext,
     CoordinationHints,
+    CoordinationRequest,
     CoordinationRoots,
     CoordinationSelection,
     CrossRepoSettings,
+    EnclosureResolution,
     EnclosureSelector,
     MissingMemoryError,
     StorageSettings,
@@ -29,12 +32,6 @@ from agents_remember.kernel.coordination_context.paths import (
     settings_path_for_roots,
 )
 from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
-from agents_remember.worktrees.task_resolver import resolve_active_task_root
-from agents_remember.worktrees.worktree_contract import (
-    ContractError,
-    load_contract,
-    worktree_group_for,
-)
 
 
 def detect_coordination_selection(
@@ -153,15 +150,18 @@ def resolve_coordination_context(
     workspace_root: Path | None = None,
     code_repository_root: Path | None = None,
     *,
-    hints: CoordinationHints | None = None,
-    selector: EnclosureSelector | None = None,
+    request: CoordinationRequest,
 ) -> CoordinationContext:
-    hints = hints or CoordinationHints()
-    selector = selector or EnclosureSelector()
+    hints = request.hints or CoordinationHints()
+    selector = request.selector or EnclosureSelector()
+    if request.contract_reader is None:
+        raise ValueError("coordination resolution requires a contract reader")
     repo = _resolve_code_repository(code_repository_name, workspace_root, code_repository_root)
     if hints.onboarding_root is not None:
-        return _context_from_onboarding_root(repo, hints, hints.onboarding_root, selector)
-    return _context_from_selection(repo, hints, selector)
+        return _context_from_onboarding_root(
+            repo, hints, hints.onboarding_root, selector, request.contract_reader
+        )
+    return _context_from_selection(repo, hints, selector, request.contract_reader)
 
 
 def _resolve_code_repository(
@@ -193,6 +193,7 @@ def _context_from_onboarding_root(
     hints: CoordinationHints,
     onboarding_root: Path,
     selector: EnclosureSelector,
+    contract_reader: ContractReaderPort,
 ) -> CoordinationContext:
     resolved_onboarding_root = onboarding_root.resolve()
     resolved_settings = (
@@ -216,7 +217,7 @@ def _context_from_onboarding_root(
         ),
         storage=storage,
         cross_repo=cross_repo,
-        selector=selector,
+        resolution=EnclosureResolution(selector=selector, contract_reader=contract_reader),
     )
 
 
@@ -224,9 +225,10 @@ def _context_from_selection(
     repo: CodeRepository,
     hints: CoordinationHints,
     selector: EnclosureSelector,
+    contract_reader: ContractReaderPort,
 ) -> CoordinationContext:
     contract_coordination_root = _contract_coordination_root(
-        selector.contract_path, hints.coordination_root
+        selector.contract_path, hints.coordination_root, contract_reader
     )
     selection = detect_coordination_selection(
         code_repository_name=repo.name,
@@ -250,18 +252,20 @@ def _context_from_selection(
         ),
         storage=storage,
         cross_repo=cross_repo,
-        selector=selector,
+        resolution=EnclosureResolution(selector=selector, contract_reader=contract_reader),
     )
 
 
 def _contract_coordination_root(
-    contract_path: Path | None, coordination_root: Path | None
+    contract_path: Path | None,
+    coordination_root: Path | None,
+    contract_reader: ContractReaderPort,
 ) -> Path | None:
     if contract_path is None or not contract_path.exists():
         return coordination_root
     try:
-        return load_contract(contract_path.resolve()).coordination_root
-    except ContractError:
+        return contract_reader.load_contract(contract_path.resolve()).coordination_root
+    except Exception:
         return coordination_root
 
 
@@ -271,16 +275,27 @@ def build_coordination_context(
     roots: CoordinationRoots,
     storage: StorageSettings,
     cross_repo: CrossRepoSettings,
-    selector: EnclosureSelector | None = None,
+    resolution: EnclosureResolution,
 ) -> CoordinationContext:
-    selector = selector or EnclosureSelector()
+    selector = resolution.selector or EnclosureSelector()
+    contract_reader = resolution.contract_reader
+    if contract_reader is None:
+        raise ValueError("coordination resolution requires a contract reader")
     coordination_root = roots.coordination_root
     memory_root = roots.memory_root
-    contract, resolved_contract_path = resolve_contract(selector, coordination_root, repo.name)
-    task_root = _task_root(
-        coordination_root, repo.name, selector.task_name, selector.parent_task, contract
+    contract, resolved_contract_path = resolve_contract(
+        selector, coordination_root, repo.name, contract_reader
     )
-    worktree_group = _worktree_group(coordination_root, repo.name, selector.worktree_name, contract)
+    task_root = _task_root(
+        coordination_root,
+        repo.name,
+        selector,
+        contract,
+        contract_reader,
+    )
+    worktree_group = _worktree_group(
+        coordination_root, repo.name, selector.worktree_name, contract, contract_reader
+    )
     memory_mode = contract.memory_mode if contract is not None else _memory_mode(roots.topology)
     effective_memory_root = _effective_memory_root(memory_root, contract)
     system_root = _system_root(memory_root, coordination_root)
@@ -316,26 +331,35 @@ def build_coordination_context(
 def _task_root(
     coordination_root: Path,
     code_repository_name: str,
-    task_name: str | None,
-    parent_task: str | None,
+    selector: EnclosureSelector,
     contract,
+    contract_reader: ContractReaderPort,
 ) -> Path:
     if contract is not None:
         return contract.task_root
-    if task_name:
-        return resolve_active_task_root(
-            coordination_root, code_repository_name, task_name, parent_task=parent_task
+    if selector.task_name:
+        return contract_reader.resolve_active_task_root(
+            coordination_root,
+            code_repository_name,
+            selector.task_name,
+            parent_task=selector.parent_task,
         )
     return coordination_root / "tasks" / code_repository_name
 
 
 def _worktree_group(
-    coordination_root: Path, code_repository_name: str, worktree_name: str | None, contract
+    coordination_root: Path,
+    code_repository_name: str,
+    worktree_name: str | None,
+    contract,
+    contract_reader: ContractReaderPort,
 ) -> Path | None:
     if contract is not None:
         return contract.worktree_group
     if worktree_name:
-        return worktree_group_for(coordination_root, code_repository_name, worktree_name)
+        return contract_reader.worktree_group_for(
+            coordination_root, code_repository_name, worktree_name
+        )
     return None
 
 

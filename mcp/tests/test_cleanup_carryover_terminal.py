@@ -61,7 +61,7 @@ class TerminalPreflightFailureTests(unittest.TestCase):
         contract = self.contract("cleanup-unmerged")
         cache, payload = self.cache(contract)
         with patch(
-            "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+            "agents_remember.application.provider_runtime.provider_setup_running",
             return_value=False,
         ):
             result = cleanup_result(
@@ -79,7 +79,7 @@ class TerminalPreflightFailureTests(unittest.TestCase):
         contract = self.contract("abandon-missing-source", missing_source=True)
         cache, payload = self.cache(contract)
         with patch(
-            "agents_remember.worktrees.modules.abandon.provider_async.provider_setup_running",
+            "agents_remember.application.provider_runtime.provider_setup_running",
             return_value=False,
         ):
             result = abandon_result(
@@ -103,7 +103,7 @@ class TerminalPreflightFailureTests(unittest.TestCase):
         with (
             patch.object(terminal_validation, "run_git", new=failed),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
         ):

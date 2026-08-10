@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     StorageSettings,
@@ -23,6 +24,7 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.drift import (
     extract_inline_onboarding_block,
 )
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 
 @dataclass(frozen=True)
@@ -241,11 +243,14 @@ def main(argv: list[str] | None = None) -> int:
         code_repository_name=code_repository_name,
         workspace_root=code_repository_root.parent,
         code_repository_root=code_repository_root,
-        hints=CoordinationHints(
-            topology=args.topology,
-            coordination_root=args.coordination_root,
-            settings_path=args.settings_path,
-            onboarding_root=args.onboarding_root,
+        request=CoordinationRequest(
+            hints=CoordinationHints(
+                topology=args.topology,
+                coordination_root=args.coordination_root,
+                settings_path=args.settings_path,
+                onboarding_root=args.onboarding_root,
+            ),
+            contract_reader=WorktreeContractReader(),
         ),
     )
     if not filesystem.exists(context.onboarding_root):

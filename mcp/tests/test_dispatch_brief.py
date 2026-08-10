@@ -13,13 +13,21 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
+from agents_remember.models.conversations.control_wire import (
+    SubmissionReceipt,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import observer_root
+from agents_remember.serving.conversation.ports import TerminalCatalogPort
 from agents_remember.serving.dispatch_brief import DispatchBriefGate, HostedDelivery
 from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
-    SubmissionReceipt,
 )
 from agents_remember.serving.hosted_readiness import HostedReadinessResult
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
@@ -29,7 +37,9 @@ from agents_remember.serving.inbox_delivery import (
     deliver_inbox_entry,
 )
 from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_paste import PasteResult
 
 NOW = "2026-07-14T10:00:00+00:00"
@@ -77,7 +87,7 @@ class _NoRawPaster:
 
 
 def _ready(entry: TerminalCatalogEntry):
-    def check(_catalog: TerminalCatalog, _host: object, session_id: str):
+    def check(_catalog: TerminalCatalogPort, _host: object, session_id: str):
         assert session_id == entry.id
         return HostedReadinessResult("ready", session_id, entry=entry)
 
@@ -226,7 +236,7 @@ def test_not_ready_refuses_before_creating_durable_dispatch_row(tmp_path: Path) 
     target = _target(tmp_path)
     catalog.upsert(target)
 
-    def not_ready(_catalog: TerminalCatalog, _host: object, session_id: str):
+    def not_ready(_catalog: TerminalCatalogPort, _host: object, session_id: str):
         return HostedReadinessResult("not-ready", session_id, entry=target, detail="starting")
 
     with pytest.raises(ValueError, match="observed not-ready"):
@@ -310,7 +320,7 @@ def test_a_closed_dispatch_gate_refuses_the_brief_and_keeps_the_gate_reason(tmp_
     store = OperatorInboxStore(tmp_path / "observer")
     entry = _dispatch_row(store, target, kind="dispatch-brief")
 
-    def not_ready(_catalog: TerminalCatalog, _host: object, session_id: str):
+    def not_ready(_catalog: TerminalCatalogPort, _host: object, session_id: str):
         return HostedReadinessResult("not-ready", session_id, entry=target, detail="still booting")
 
     delivered, submit_prompt = _deliver(

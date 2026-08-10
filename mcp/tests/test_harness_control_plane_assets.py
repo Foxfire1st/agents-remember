@@ -6,6 +6,15 @@ import unittest
 from pathlib import Path
 
 from agents_remember.errors import HarnessBridgeEpochMismatchError, HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    operation_timeline_item_json,
+    operation_timeline_item_wire_bytes,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    EVIDENCE_PAGE_BYTE_BUDGET,
+)
 from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_client import (
@@ -18,13 +27,6 @@ from agents_remember.serving.harness_control_client import (
     submit_control_prompt,
 )
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
-from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    EVIDENCE_PAGE_BYTE_BUDGET,
-    ControlIdentity,
-    operation_timeline_item_json,
-    operation_timeline_item_wire_bytes,
-)
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 from test_harness_control_plane import (
     NOW,

@@ -6,16 +6,16 @@ import contextlib
 from pathlib import Path
 
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.observer_paths import observer_root
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.observer.events import now_iso
-from agents_remember.observer.paths import observer_root
 from agents_remember.serving.landing import land_seats_for_leaf
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.seat_events import log_landed_event, log_retire_event
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
     terminal_catalog_path,
 )
 from agents_remember.worktrees.worktree_contract import load_contract

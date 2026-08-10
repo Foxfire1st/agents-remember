@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.harness_control_models import PromptRequest
+from agents_remember.serving.harness_control_models import (
+    PromptRequest,
+)
 
 SubmissionKnowledge = Literal["pending", "accepted", "rejected", "unknown"]
 

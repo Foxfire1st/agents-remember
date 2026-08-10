@@ -35,6 +35,7 @@ from agents_remember.serving.agent_notifier_heartbeat import (
     AgentNotifierHeartbeatPayload,
     heartbeat_age_seconds,
 )
+from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
 from agents_remember.serving.heap_diag import (
     heap_diag_loop,
     malloc_trim_enabled,
@@ -45,10 +46,13 @@ from agents_remember.serving.heap_diag import (
 from agents_remember.serving.relay_death_watch import relay_death_watch_loop
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
+    degradation_alerts = DegradationAlertDelivery(config.coordination_root)
     while True:
         try:
             snapshot = await asyncio.to_thread(
@@ -63,6 +67,7 @@ async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetrics
                     action="stop",
                     dry_run=False,
                 ),
+                degradation_alerts=degradation_alerts,
             )
             # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
             await asyncio.to_thread(metrics_store.compact)

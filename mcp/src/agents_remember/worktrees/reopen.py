@@ -34,7 +34,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.observer.landing_state import LANDING_FINAL_BASENAME
+from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved

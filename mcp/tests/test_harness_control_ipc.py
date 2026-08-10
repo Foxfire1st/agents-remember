@@ -19,6 +19,15 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    InteractionQuestion,
+    InteractionQuestionOption,
+    PendingInteraction,
+    SubmissionReceipt,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.authorization import LocalOperatorAuthorizationResolver
 from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.harness_capabilities import SetResult
@@ -26,6 +35,7 @@ from agents_remember.serving.harness_capability_catalog import HarnessCapability
 from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlPlaneClient,
     ControlSubmission,
     read_control_capabilities,
     read_control_snapshot,
@@ -46,16 +56,14 @@ from agents_remember.serving.harness_control_ipc import (
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     AdapterEvent,
-    InteractionQuestion,
-    InteractionQuestionOption,
-    PendingInteraction,
     ReconciliationResult,
-    SubmissionReceipt,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalLivenessObservation,
@@ -329,6 +337,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                     scope=ConversationScope(workspace_root=root, coordination_root=root),
                     harness_registry=lambda: (),
                     catalog=catalog,
+                    control_plane=ControlPlaneClient(),
                     host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
                     liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
                     liveness_config=TerminalCatalogLivenessConfig(),
@@ -431,6 +440,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                     scope=ConversationScope(workspace_root=root, coordination_root=root),
                     harness_registry=lambda: (),
                     catalog=catalog,
+                    control_plane=ControlPlaneClient(),
                     host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
                     liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
                     liveness_config=TerminalCatalogLivenessConfig(),

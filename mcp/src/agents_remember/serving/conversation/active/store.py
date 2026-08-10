@@ -13,17 +13,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationContentBlock,
     ConversationItem,
-    ConversationLane,
-    ConversationSource,
     MarkdownBlock,
-    ProvenanceProducer,
     TextBlock,
     ThinkingBlock,
     ToolOutputBlock,
     UnknownVendorBlock,
+)
+from agents_remember.models.conversations.control_wire import (
+    SubmissionSource,
+)
+from agents_remember.models.conversations.identity import (
+    ConversationLane,
+    ConversationSource,
+    ProvenanceProducer,
 )
 from agents_remember.serving.conversation.projectors.common import (
     MappedBlockDelta,
@@ -31,7 +36,6 @@ from agents_remember.serving.conversation.projectors.common import (
     MappedUnknownVendor,
     harness_provenance,
 )
-from agents_remember.serving.harness_control_models import SubmissionSource
 
 MAX_PENDING_DELTA_ITEMS = 64
 """Delta-before-item buffering is bounded per projection."""

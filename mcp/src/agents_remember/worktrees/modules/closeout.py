@@ -16,14 +16,8 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.memory_quality.check import (
-    AFTER_METADATA_REFRESH_CHECKS,
-    BEFORE_METADATA_REFRESH_CHECKS,
-    DriftCheckContext,
-    run_memory_quality_check,
-)
+from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.observer.events import now_iso
-from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
@@ -72,6 +66,7 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_onboarding_refresh_plan,
     validate_route_overview_refresh_plan,
 )
+from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     amend_contract,
@@ -630,10 +625,10 @@ def _run_memory_quality_phase(
     *,
     unstamped_code_commit: str | None = None,
 ) -> dict[str, Any]:
-    result = run_memory_quality_check(
+    result = worktree_services().memory_quality.run_check(
         context.onboarding_root,
         checks=checks,
-        drift_context=DriftCheckContext(
+        drift_context=worktree_services().memory_quality.drift_context(
             code_repository_root=context.code_repository_root,
             context=context,
             detail_limit=50,
@@ -653,6 +648,7 @@ def _combined_memory_quality(
     The before phase may be empty: claim evidence is only comparable once the commit it must
     be compared against exists, so phases with no declared checks contribute no result at all.
     """
+    before_checks, after_checks = worktree_services().memory_quality.check_groups()
     report_only_sample = [
         *before_refresh.get("reportOnlySample", []),
         *after_refresh["reportOnlySample"],
@@ -669,8 +665,8 @@ def _combined_memory_quality(
         "reportOnlySample": report_only_sample,
         "reportOnlySampleCount": len(report_only_sample),
         "closeoutPhases": {
-            "beforeMetadataRefresh": list(BEFORE_METADATA_REFRESH_CHECKS),
-            "afterMetadataRefresh": list(AFTER_METADATA_REFRESH_CHECKS),
+            "beforeMetadataRefresh": list(before_checks),
+            "afterMetadataRefresh": list(after_checks),
         },
     }
 
@@ -713,7 +709,8 @@ def _external_closeout_commits(
     )
     refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
-    memory_quality_after_refresh = _run_memory_quality_phase(context, AFTER_METADATA_REFRESH_CHECKS)
+    _, after_checks = worktree_services().memory_quality.check_groups()
+    memory_quality_after_refresh = _run_memory_quality_phase(context, after_checks)
     memory_quality = _combined_memory_quality(
         memory_quality_before_refresh, memory_quality_after_refresh
     )
@@ -988,9 +985,10 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     # memory_quality_check, and a failure here is the exception, not the rule.
     memory_quality_before_refresh: dict[str, Any] = {}
     if contract.memory_mode == "external":
+        before_checks, _ = worktree_services().memory_quality.check_groups()
         memory_quality_before_refresh = _run_memory_quality_phase(
             _closeout_contract_context(contract),
-            BEFORE_METADATA_REFRESH_CHECKS,
+            before_checks,
             unstamped_code_commit=contract.code_base_commit,
         )
     if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):

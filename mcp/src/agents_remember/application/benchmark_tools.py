@@ -11,7 +11,10 @@ from typing import Any
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.install.assets import packaged_source_root
 from agents_remember.kernel.authority import require_within_coordination
-from agents_remember.mcp.config import McpRuntimeConfig, reload_provider_authority
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    reload_provider_authority,
+)
 
 
 @dataclass(frozen=True)

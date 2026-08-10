@@ -34,7 +34,9 @@ from agents_remember.kernel.coordination_context.models import (
     CrossRepoSettings,
     StorageSettings,
 )
-from agents_remember.mcp.config import load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp.tools import read_ar_files_payload
 from agents_remember.observer import (
     AmbientLifecycle,

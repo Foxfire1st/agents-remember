@@ -24,8 +24,10 @@ from datetime import datetime
 from time import perf_counter
 
 from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
-from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.kernel.primitives.inbox_backoff import (
+    require_redelivery_floor_seconds,
+)
 from agents_remember.serving._agent_notifier_actions import (
     _FINDING_ACTIONS,
     _drain_boundary,

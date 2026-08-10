@@ -7,12 +7,6 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.application import gate_tools as gates
-from agents_remember.controlplane.gate_policy import (
-    GatePolicyRule,
-    apply_seam_verdict_requirement,
-    make_gate_policy,
-    named_gate_policy,
-)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
     DecidedVia,
@@ -25,6 +19,12 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.primitives.gate_policy import (
+    GatePolicyRule,
+    apply_seam_verdict_requirement,
+    make_gate_policy,
+    named_gate_policy,
+)
 
 
 @dataclass(frozen=True)

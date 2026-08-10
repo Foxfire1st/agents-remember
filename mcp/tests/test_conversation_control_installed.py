@@ -24,6 +24,13 @@ import httpx
 import pytest
 import uvicorn
 from _control_plane import OPERATOR, TINY_PNG
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -39,6 +46,7 @@ from agents_remember.serving.conversation.runtime import (
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlPlaneClient,
     read_control_evidence,
     read_submission_authority,
 )
@@ -46,12 +54,10 @@ from agents_remember.serving.harness_control_ipc import (
     HarnessControlServer,
     LocalControlEndpoint,
 )
-from agents_remember.serving.harness_control_models import (
-    ControlIdentity,
-    LaunchSpec,
-)
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     utc_now,
@@ -129,6 +135,7 @@ class _LiveHarness:
         self.runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=root, coordination_root=root),
             catalog=catalog,
+            control_plane=ControlPlaneClient(),
             host=_LiveHost(),
             harness_registry=list,
             liveness_clock=utc_now,

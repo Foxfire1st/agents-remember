@@ -10,7 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.errors import AuthorityError
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope, path_is_relative_to
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+    path_is_relative_to,
+)
 
 
 def require_repo(config: McpRuntimeConfig, repo_id: str) -> RepositoryScope:

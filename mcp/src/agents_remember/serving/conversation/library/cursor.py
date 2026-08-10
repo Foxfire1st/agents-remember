@@ -23,18 +23,20 @@ import secrets
 from collections.abc import Mapping
 from typing import Literal
 
-from agents_remember.serving.conversation.library.errors import (
-    InvalidLibraryCursorError,
-)
-from agents_remember.serving.conversation.models import (
-    ConversationLibraryScope,
-    HarnessId,
+from agents_remember.models.conversations.cursors import (
     LibraryConversationKey,
     LibraryCursorBinding,
     LibraryKeyBinding,
     LibraryListCursor,
     LibraryReadCursor,
     NativeResumeTarget,
+)
+from agents_remember.models.conversations.identity import (
+    ConversationLibraryScope,
+    HarnessId,
+)
+from agents_remember.serving.conversation.library.errors import (
+    InvalidLibraryCursorError,
 )
 
 _SCHEMA_VERSION = 1

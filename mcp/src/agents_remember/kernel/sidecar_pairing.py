@@ -23,13 +23,15 @@ from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context_resolver import mirror_onboarding_path
 from agents_remember.kernel.onboarding_doc import meaningful_body
+from agents_remember.kernel.primitives.runtime_config import (
+    path_is_relative_to,
+)
 from agents_remember.kernel.route_index import (
     ENTITY_CATALOG_NAME,
     INDEX_FILE_NAME,
     ROUTE_OVERVIEW_NAME,
     sidecar_status,
 )
-from agents_remember.mcp.config import path_is_relative_to
 
 
 def confine_rel(code_root: Path, requested: str) -> str:

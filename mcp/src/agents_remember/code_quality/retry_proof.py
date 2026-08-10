@@ -34,6 +34,7 @@ from pathlib import Path
 from coverage import CoverageData
 
 from agents_remember.kernel import git_command
+from agents_remember.kernel.atomic_write import atomic_replace
 
 SCHEMA_VERSION = 1
 CACHE_DIRECTORY = "agents-remember-quality-retry"
@@ -446,9 +447,9 @@ def _publish_proof(plan: RetryPlan, coverage_json: Path) -> None:
         "coverageJsonSha256": _file_digest(json_temp),
     }
     manifest_temp.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
-    data_temp.replace(plan.proof_data_path)
-    json_temp.replace(plan.proof_json_path)
-    manifest_temp.replace(plan.manifest_path)
+    atomic_replace(data_temp, plan.proof_data_path)
+    atomic_replace(json_temp, plan.proof_json_path)
+    atomic_replace(manifest_temp, plan.manifest_path)
 
 
 def _remove_proof(plan: RetryPlan) -> None:

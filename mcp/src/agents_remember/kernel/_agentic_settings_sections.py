@@ -3,7 +3,6 @@ agent-notifier, spawn, and the quality gate."""
 
 from __future__ import annotations
 
-from agents_remember.controlplane.inbox_backoff import MIN_REDELIVERY_INTERVAL_SECONDS
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
     DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
@@ -46,6 +45,9 @@ from agents_remember.kernel._agentic_settings_core import (
     _require_positive_number,
     _require_string,
     _require_string_list,
+)
+from agents_remember.kernel.primitives.inbox_backoff import (
+    MIN_REDELIVERY_INTERVAL_SECONDS,
 )
 
 

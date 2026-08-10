@@ -204,7 +204,7 @@ def write_ledger(path: Path, ledger: MemoryLedger) -> None:
       lines. A truncated ledger costs the uncommitted delta, never the mapping history: the
       durable authority is the git object, and ``git checkout -- memory.md`` restores it.
     * All five are reached only through MCP tool registrations. The dashboard reads the ledger
-      (``observer/snapshots.py`` imports ``load_ledger`` and nothing else) and never writes it,
+      (the projection snapshot readers import ``load_ledger`` and nothing else) and never writes it,
       so there is no second process to serialize against and a lock here would protect nothing.
 
     Recorded as a no-action finding. If a writer ever appears outside the MCP process, or one

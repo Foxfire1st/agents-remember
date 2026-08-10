@@ -39,6 +39,9 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier import (
     PERSISTENT_FAILURE_ATTEMPTS,
@@ -51,7 +54,9 @@ from agents_remember.serving.agent_notifier_heartbeat import (
     agent_notifier_staleness_banner,
 )
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 
 NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)

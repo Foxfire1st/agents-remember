@@ -14,11 +14,12 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+import agents_remember.providers.provider_setup as provider_setup_api
+from agents_remember.application import provider_runtime as provider_async
 from agents_remember.application.worktree_tools import _settings_owned_by_background
 from agents_remember.providers.setup_progress import read_setup_progress
 from agents_remember.worktrees.modules import abandon as worktree_abandon
 from agents_remember.worktrees.modules import cleanup as worktree_cleanup
-from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import projected_status_payload
@@ -273,13 +274,11 @@ class StartOrderingTests(unittest.TestCase):
                     worktree_start, "_provider_setup_request", return_value=mock.Mock()
                 ),
                 mock.patch.object(
-                    worktree_start.provider_setup,
+                    provider_setup_api,
                     "run_provider_setup",
                     return_value={"ok": True, "results": []},
                 ) as run_mock,
-                mock.patch.object(
-                    worktree_start.provider_async, "launch_provider_setup"
-                ) as launch_mock,
+                mock.patch.object(provider_async, "launch_provider_setup") as launch_mock,
             ):
                 state = worktree_start.run_or_launch_provider_setup(
                     Namespace(), contract, args, {"state": "enabled", "paths": paths}
@@ -306,9 +305,7 @@ class StartOrderingTests(unittest.TestCase):
                     mock.patch.object(
                         worktree_start, "_provider_setup_request", return_value=mock.Mock()
                     ),
-                    mock.patch.object(
-                        worktree_start.provider_async, "launch_provider_setup"
-                    ) as launch_mock,
+                    mock.patch.object(provider_async, "launch_provider_setup") as launch_mock,
                 ):
                     worktree_start.run_or_launch_provider_setup(
                         Namespace(), contract, args, {"state": "enabled", "paths": paths}
@@ -327,9 +324,7 @@ class RetryProviderSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._existing_contract(Path(tmp))
             args = WorktreeArgs(task_name="async-task", retry_provider_setup=True)
-            with mock.patch.object(
-                worktree_start.provider_async, "provider_setup_running", return_value=True
-            ):
+            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
                 result = worktree_start._retry_provider_setup_result(Namespace(), contract, args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
@@ -341,7 +336,7 @@ class RetryProviderSetupTests(unittest.TestCase):
             args = WorktreeArgs(task_name="async-task", retry_provider_setup=True)
             with (
                 mock.patch.object(
-                    worktree_start.provider_async,
+                    provider_async,
                     "provider_setup_running",
                     return_value=False,
                 ),
@@ -377,9 +372,7 @@ class TeardownGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._integrated_contract(Path(tmp))
             args = WorktreeArgs(contract_path=contract.contract_path, approved=True)
-            with mock.patch.object(
-                worktree_cleanup.provider_async, "provider_setup_running", return_value=True
-            ):
+            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
                 result = worktree_cleanup.cleanup_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
@@ -389,9 +382,7 @@ class TeardownGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._integrated_contract(Path(tmp))
             args = WorktreeArgs(contract_path=contract.contract_path, approved=True)
-            with mock.patch.object(
-                worktree_abandon.provider_async, "provider_setup_running", return_value=True
-            ):
+            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
                 result = worktree_abandon.abandon_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")

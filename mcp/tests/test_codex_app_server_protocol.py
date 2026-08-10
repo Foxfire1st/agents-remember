@@ -6,6 +6,10 @@ from pathlib import Path
 
 import pytest
 from agents_remember.errors import CodexAppServerError
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
 from agents_remember.serving.codex_app_server_protocol import (
     CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES,
     CodexStdioTransport,
@@ -14,7 +18,6 @@ from agents_remember.serving.codex_app_server_state import (
     activity_from_thread_status,
     parse_thread_open_response,
 )
-from agents_remember.serving.harness_control_models import ControlIdentity, LaunchSpec
 
 
 @pytest.fixture

@@ -23,8 +23,8 @@ from agents_remember.application.worktree_tools import (
     worktree_status_tool,
     worktree_sync_tool,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

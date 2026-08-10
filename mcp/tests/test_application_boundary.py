@@ -37,7 +37,7 @@ class ApplicationBoundaryRuleTests(unittest.TestCase):
             "serving/app.py": (
                 "from typing import TYPE_CHECKING\n"
                 "if TYPE_CHECKING:\n"
-                "    from agents_remember.mcp.config import McpRuntimeConfig\n"
+                "    from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig\n"
             ),
         }
         sources.update(overrides or {})

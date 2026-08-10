@@ -14,7 +14,9 @@ import pytest
 from agents_remember.application.worktree_tools import TaskIdentity, worktree_start_tool
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.kernel.memory_ledger import create_initial_ledger, ledger_to_text
-from agents_remember.mcp.config import load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.providers import lifecycle, provider_setup
 from agents_remember.providers.settings import lifecycle_settings_from_config
 from agents_remember.providers.setup_progress import read_setup_progress

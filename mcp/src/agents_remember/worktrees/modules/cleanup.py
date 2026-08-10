@@ -8,23 +8,18 @@ from typing import Literal, TypeAlias
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
-from agents_remember.memory_quality.style.citations.source_index_cache import (
-    TerminalNamespaceGuard,
-    terminal_namespace_guard,
-)
-from agents_remember.observer.drift_snapshots import remove_drift_snapshot
-from agents_remember.worktrees.modules import provider_async
+from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.modules.provider_teardown import teardown_worktree_providers
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
     terminal_preflight,
     terminal_result_blockers,
 )
+from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -435,7 +430,7 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "cleanup requires carryover completed (run memory_carryover_apply first); cleaning up "
             "now would discard the parked memory branch"
         )
-    if not args.dry_run and provider_async.provider_setup_running(contract):
+    if not args.dry_run and worktree_services().provider_lifecycle.setup_running(contract):
         # Teardown must not race the live background setup thread (GitHub #53);
         # a dead thread surfaces as a stale heartbeat and does not block.
         return WorktreeCommandResult(
@@ -473,7 +468,7 @@ def _cleanup_reserved(
     assert args.contract_path is not None
 
     try:
-        guard_context = terminal_namespace_guard(
+        guard_context = worktree_services().citation_guard.guard(
             contract,
             requested_contract_path=args.contract_path,
         )
@@ -503,7 +498,7 @@ def _cleanup_with_guard(
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
-    guard: TerminalNamespaceGuard,
+    guard: TerminalGuard,
 ) -> WorktreeCommandResult:
     # The exact leaf fence remains held through every terminal output and publication.
     try:
@@ -570,7 +565,7 @@ def _cleanup_with_guard(
 
 def _publish_cleanup(
     contract: WorktreeContract,
-    guard: TerminalNamespaceGuard,
+    guard: TerminalGuard,
     outputs: CleanupOutputs,
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, drift_snapshots, directories = outputs
@@ -618,7 +613,7 @@ def _cleanup_terminal_outputs(
     preflight: TerminalPreflight,
 ) -> CleanupOutputs:
     providers: dict[str, object] = (
-        teardown_worktree_providers(contract, dry_run=args.dry_run)
+        worktree_services().provider_lifecycle.teardown(contract, dry_run=args.dry_run)
         if args.teardown_providers
         else {"state": "skipped", "reason": "teardown_providers disabled"}
     )

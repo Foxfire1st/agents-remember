@@ -5,19 +5,24 @@ from dataclasses import replace
 from itertools import pairwise
 
 import agents_remember.serving.conversation.active.projector as projector_module
-from agents_remember.serving.conversation.active.cursor import mint_event_cursor
-from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
-from agents_remember.serving.conversation.active.store import ProjectionStore
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
+    ToolOutputBlock,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    NativeEvidenceFrame,
+)
+from agents_remember.models.conversations.stream_events import (
     ConversationEventEnvelope,
     GapMutation,
     StatusMutation,
-    ToolOutputBlock,
 )
+from agents_remember.serving.conversation.active.cursor import mint_event_cursor
+from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
+from agents_remember.serving.conversation.active.store import ProjectionStore
 from agents_remember.serving.conversation.projectors import claude, codex, pi
 from agents_remember.serving.conversation.projectors.codex import map_native_frame
 from agents_remember.serving.conversation.projectors.common import MappedBlockDelta, MappedItem
-from agents_remember.serving.harness_control_models import EvidenceFrame, NativeEvidenceFrame
 from test_conversation_active_service import (
     NOW,
     SECRET,

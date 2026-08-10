@@ -18,6 +18,39 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from agents_remember.models.conversations.capabilities import (
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.content import (
+    ConversationContentBlock,
+    ConversationCorrelation,
+    ConversationItem,
+    MarkdownBlock,
+    TextBlock,
+    ThinkingBlock,
+    ToolInputBlock,
+    ToolOutputBlock,
+    UnknownVendorBlock,
+)
+from agents_remember.models.conversations.cursors import (
+    LibraryListCursor,
+    LibraryReadCursor,
+    NativeResumeTarget,
+)
+from agents_remember.models.conversations.history import (
+    ConversationLibraryAgentRow,
+    ConversationLibraryPage,
+    ConversationLibraryPageScope,
+    ConversationLibraryRow,
+    HistoricalConversationPage,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    ConversationLibraryScope,
+    HarnessId,
+    NativeConversationRef,
+    ProvenanceEvidence,
+)
 from agents_remember.serving.conversation.library.cursor import LibraryCursorAuthority
 from agents_remember.serving.conversation.library.errors import (
     CatalogGenerationError,
@@ -39,31 +72,6 @@ from agents_remember.serving.conversation.library.normalize_common import (
     text_content_parts,
 )
 from agents_remember.serving.conversation.library.scope import query_digest
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    ConversationContentBlock,
-    ConversationCorrelation,
-    ConversationItem,
-    ConversationLibraryAgentRow,
-    ConversationLibraryPage,
-    ConversationLibraryPageScope,
-    ConversationLibraryRow,
-    ConversationLibraryScope,
-    HarnessId,
-    HistoricalConversationPage,
-    HistoryCapabilities,
-    LibraryListCursor,
-    LibraryReadCursor,
-    MarkdownBlock,
-    NativeConversationRef,
-    NativeResumeTarget,
-    ProvenanceEvidence,
-    TextBlock,
-    ThinkingBlock,
-    ToolInputBlock,
-    ToolOutputBlock,
-    UnknownVendorBlock,
-)
 
 _Capabilities = Callable[[HarnessId], Awaitable[HistoryCapabilities]]
 

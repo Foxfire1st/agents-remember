@@ -15,15 +15,19 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.conversation.active.status import TurnTerminalEvidence
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
+from agents_remember.models.conversations.control_wire import AdapterSnapshot, ControlIdentity
+from agents_remember.models.conversations.evidence import (
     EvidenceFrame,
     EvidencePage,
     NativeEvidenceFrame,
     NativeEvidencePage,
 )
+from agents_remember.models.terminal_catalog import (
+    CatalogTurnEvidence,
+    TerminalCatalogEntry,
+    seat_at_turn_boundary,
+)
+from agents_remember.serving.conversation.active.status import TurnTerminalEvidence
 from agents_remember.serving.hosted_control_projection import snapshot_turn_state
 from agents_remember.serving.seat_turn_truth import (
     record_interrupt_request,
@@ -32,12 +36,7 @@ from agents_remember.serving.seat_turn_truth import (
     record_terminal_cursors,
     record_turn_projection,
 )
-from agents_remember.serving.terminal_catalog import (
-    CatalogTurnEvidence,
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    seat_at_turn_boundary,
-)
+from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_evidence import (
     MAX_NATIVE_LIFT_PAGES,
     TerminalEvidenceProjection,

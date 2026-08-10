@@ -4,12 +4,12 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
 )
 
-from ..config import McpRuntimeConfig
 from ..tools.gates import (
     gate_list_payload,
     registered_gate_decide_payload,

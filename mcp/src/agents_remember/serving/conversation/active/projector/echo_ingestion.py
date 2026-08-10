@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+)
 from agents_remember.serving.conversation.projectors.common import (
     MappedUnknownVendor,
     MapperOutput,
     UnmappableShape,
 )
-from agents_remember.serving.harness_control_models import EvidenceFrame
 
 from .native_ingestion import EVIDENCE_PAGE_LIMIT
 from .wiring import BridgeReaders, SessionProjectionSpine

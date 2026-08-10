@@ -23,7 +23,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BASE_COMMIT = "a3e43cb0877c18b9d2b0e6ada4eb5719a01f251f"
 
 FACADES: list[tuple[str, str]] = [
-    ("agents_remember.observer.snapshots", "mcp/src/agents_remember/observer/snapshots.py"),
+    (
+        "agents_remember.serving.projections.snapshots",
+        "mcp/src/agents_remember/observer/snapshots.py",
+    ),
     ("agents_remember.observer.reducer", "mcp/src/agents_remember/observer/reducer.py"),
     (
         "agents_remember.kernel.agentic_settings",
@@ -39,7 +42,7 @@ FACADES: list[tuple[str, str]] = [
     ),
     ("agents_remember.serving.app", "mcp/src/agents_remember/serving/app.py"),
     (
-        "agents_remember.serving.conversation.models",
+        "agents_remember.models.conversations",
         "mcp/src/agents_remember/serving/conversation/models.py",
     ),
     ("agents_remember.serving.agent_notifier", "mcp/src/agents_remember/serving/agent_notifier.py"),

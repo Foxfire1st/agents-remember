@@ -5,18 +5,16 @@ from __future__ import annotations
 from typing import Literal, get_args
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.worktrees.leaf_refs import LeafRefStatus
 
 # These three vocabularies are declared here rather than beside the payload builders that write
 # them, and the direction is deliberate: `application.terminal_tools` imports them, not the reverse.
 # `mcp.tools.base` -> `models.tool_registry` -> `models.terminal` is an existing import edge, so
-# a `models.terminal` -> `application.terminal_tools` import would close a cycle. The invariant the fix
-# is actually for is ONE declaration, not a particular module owning it: `application.terminal_tools`
-# annotates its status seams with these aliases, so a refusal status the tool invents is a
-# pyright error at the tool rather than a ValidationError escaping the MCP handler. The pair of
-# leaf-ref members is folded in from `worktrees.leaf_refs`, which produces them -- `Literal`
-# flattens nested aliases, so the published enum is unchanged.
-
+# a `models.terminal` -> `application.terminal_tools` import would close a cycle. The invariant
+# is ONE declaration, not a particular module owning it: `application.terminal_tools` annotates
+# its status seams with these aliases, so a refusal status the tool invents is a pyright error
+# at the tool rather than a ValidationError escaping the MCP handler. `Literal` flattens nested
+# aliases, so the published enum is unchanged.
+LeafRefStatus = Literal["leaf-ref-not-found", "leaf-ref-ambiguous"]
 
 LeafAssignmentStatus = Literal[
     "attached",

@@ -5,6 +5,17 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta
 
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    PendingInteraction,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+)
+from agents_remember.models.conversations.status import (
+    ConversationStatus,
+)
 from agents_remember.serving.conversation.active.status import (
     ConversationStatusService,
     ProcessEvidence,
@@ -12,15 +23,6 @@ from agents_remember.serving.conversation.active.status import (
     classify_snapshot,
     seat_turn_state_for,
     snapshot_seat_turn_state,
-)
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    ConversationStatus,
-)
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-    PendingInteraction,
 )
 from agents_remember.serving.hosted_control_projection import snapshot_turn_state
 

@@ -32,8 +32,10 @@ from agents_remember.application.provider_tools import (
 )
 from agents_remember.application.runtime_install import RuntimeInstallRequest
 from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp import SERVER_VERSION
-from agents_remember.mcp.config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.mcp.tools import (
     PUBLIC_TOOLS,

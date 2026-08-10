@@ -14,11 +14,13 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+)
 from agents_remember.providers import provider_setup
 from agents_remember.providers.cgc import seed as cgc_seed
 from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.grepai import seed as grepai_seed
-from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.setup_progress import SetupProgress
 
 

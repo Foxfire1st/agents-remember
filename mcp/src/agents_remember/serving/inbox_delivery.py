@@ -17,6 +17,13 @@ from agents_remember.controlplane.operator_inbox_transitions import (
     RedeliveryFloor,
 )
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    SubmissionReceipt,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+    seat_at_turn_boundary,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.dispatch_brief import (
     DISPATCH_BRIEF_KIND,
@@ -28,13 +35,11 @@ from agents_remember.serving.harness_control_client import (
     reconcile_control_prompt,
     submit_control_prompt,
 )
-from agents_remember.serving.harness_control_models import ReconciliationResult, SubmissionReceipt
-from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    seat_at_turn_boundary,
+from agents_remember.serving.harness_control_models import (
+    ReconciliationResult,
 )
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 
@@ -350,14 +355,14 @@ def _record(
 
 
 def _target_session(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: OperatorInboxEntry,
 ) -> TerminalCatalogEntry | None:
     return target_session_for_entry(catalog, entry)
 
 
 def target_session_for_entry(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: OperatorInboxEntry,
 ) -> TerminalCatalogEntry | None:
     """The running catalog session a durable row is addressed to, by exact agent id first."""

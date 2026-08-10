@@ -12,6 +12,18 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    InterruptResult,
+    SubmissionReceipt,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    AR_TERMINAL_OUTCOME_KEY,
+)
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
     clip_transcript_text,
@@ -37,19 +49,11 @@ from agents_remember.serving.claude_stream_submission import (
 )
 from agents_remember.serving.claude_stream_transport import ClaudeStreamTransport
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    AR_TERMINAL_OUTCOME_KEY,
-    AcceptanceState,
     AdapterEvent,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    InterruptResult,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
     TerminalResult,
     TranscriptEntry,
     TranscriptRole,

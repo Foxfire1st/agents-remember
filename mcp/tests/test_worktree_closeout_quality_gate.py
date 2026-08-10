@@ -443,8 +443,8 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     closeout_module, "requires_strict_code_quality", return_value=True
                 ),
                 mock.patch.object(
-                    closeout_module,
-                    "run_memory_quality_check",
+                    closeout_module.worktree_services().memory_quality,
+                    "run_check",
                     return_value=failed_quality,
                 ),
                 mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,

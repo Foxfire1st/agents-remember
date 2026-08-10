@@ -7,17 +7,17 @@ from collections.abc import Callable
 from typing import Protocol
 
 from agents_remember.errors import AgentsRememberError, HarnessControlError
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
 from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     MappedUnknownVendor,
     MapperOutput,
     UnmappableShape,
-)
-from agents_remember.serving.harness_control_models import (
-    EvidenceFrame,
-    EvidencePage,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
 )
 
 from .wiring import BridgeReaders, SessionProjectionSpine

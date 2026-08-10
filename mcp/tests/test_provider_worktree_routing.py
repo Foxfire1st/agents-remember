@@ -19,9 +19,14 @@ from agents_remember.application.provider_tools import (
     _resolve_worktree_target,
     _worktree_provider_targets,
 )
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+    scoped_name,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.providers.grepai.isolated import _isolated_grepai_base_fields
-from agents_remember.providers.identity import provider_instance_id, scoped_name
 
 
 def _write_worktree_state(

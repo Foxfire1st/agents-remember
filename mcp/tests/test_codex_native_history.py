@@ -11,6 +11,12 @@ from agents_remember.errors import (
     NativeHistoryLimitExceeded,
     NativeHistoryUnavailable,
 )
+from agents_remember.models.conversations.control_wire import (
+    LaunchSpec,
+)
+from agents_remember.models.conversations.evidence import (
+    native_evidence_frame_wire_bytes,
+)
 from agents_remember.serving.codex_app_server_history import CodexNativeHistoryReader
 from agents_remember.serving.codex_app_server_protocol import JsonObject, RequestId
 from agents_remember.serving.codex_app_server_state import native_evidence_frames_from_thread
@@ -20,9 +26,7 @@ from agents_remember.serving.harness_control_ipc import (
     _raise_control_response_error,
 )
 from agents_remember.serving.harness_control_models import (
-    LaunchSpec,
     ShutdownMode,
-    native_evidence_frame_wire_bytes,
 )
 
 

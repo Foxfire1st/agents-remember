@@ -25,6 +25,7 @@ from types import UnionType
 from typing import Literal, Union, cast, get_args, get_origin
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.models.lifecycle import LiveState, Phase, State, TerminalState
 
 
 class LifecycleVocabularyError(AgentsRememberError):
@@ -97,38 +98,6 @@ def check_state_partition(*, live: object, terminal: object, whole: object) -> t
         raise LifecycleVocabularyError(f"state(s) {orphans} are filed but absent from State")
     return whole_names
 
-
-# One state at a time, and every state is either LIVE (work is in flight) or TERMINAL (the
-# lifecycle is over). That split is declared as a PARTITION rather than as a set carved out
-# of a larger list: ``State`` is built from the two halves, so the halves cannot disagree
-# with it. ``paused`` is system-owned -- there is no pause signal: the projection infers it
-# from stale heartbeats or a recorded switch-away, the model never declares it.
-# ``awaiting-developer`` is the NOTIFY-AND-CONTINUE turn-end state (leaf-28): the model
-# declares the turn complete and stops -- live, auto-resumed by the next AR tool call (no
-# gate, no wait).
-LiveState = Literal["running", "paused", "blocked", "awaiting-developer"]
-
-# The terminal half IS the ``lifecycle_end`` outcome vocabulary. A lifecycle reaches a
-# terminal state exactly one way -- by being ended -- and ``lifecycle.ended``'s ``outcome``
-# is what names which one, so "terminal" is not an opinion filed in a set beside the states:
-# it is "this is what ending writes". Filing a state here therefore commits to the reducer
-# being able to reach it through ``lifecycle.ended`` and to nothing else declaring it, which
-# is what the vocabulary tests hold the filing to.
-EndOutcome = Literal["completed", "abandoned"]
-TerminalState = EndOutcome
-
-State = Literal[LiveState, TerminalState]
-
-# Orthogonal to state (a lifecycle can be ``paused`` while in phase ``build``).
-# The enum is the session-lifecycle skill's heading vocabulary, hyphenated.
-Phase = Literal[
-    "request",
-    "trust-checkpoint",
-    "reframe-research",
-    "decide",
-    "build",
-    "close",
-]
 
 STATES: tuple[State, ...] = cast(
     "tuple[State, ...]", check_state_partition(live=LiveState, terminal=TerminalState, whole=State)

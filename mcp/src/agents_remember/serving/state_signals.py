@@ -17,13 +17,10 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.signal_routing import is_seat_dead, master_key
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry, seat_at_turn_boundary
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
 from agents_remember.serving.inbox_delivery import target_session_for_entry
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    seat_at_turn_boundary,
-)
+from agents_remember.serving.ports import TerminalCatalogPort
 
 NON_REACTION_WINDOW_SECONDS = 300.0
 """Bounded window after which a seat that landed rows at a boundary and never left
@@ -37,7 +34,7 @@ so a set observed idle is signaled no later than this bound after that tick."""
 _OWNER_TIER_ROLES = frozenset({"architect", "orchestrator", "manager"})
 
 
-def _manager_owned_subordinate(catalog: TerminalCatalog, entry: TerminalCatalogEntry) -> bool:
+def _manager_owned_subordinate(catalog: TerminalCatalogPort, entry: TerminalCatalogEntry) -> bool:
     """Whether ``entry`` is a leaf seat directly owned by its recorded manager.
 
     Role labels intentionally do not define subordinate membership: a future leaf role joins
@@ -61,7 +58,7 @@ def _manager_owned_subordinate(catalog: TerminalCatalog, entry: TerminalCatalogE
 
 
 def _compound_subordinate_index(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
 ) -> tuple[
     list[TerminalCatalogEntry],
     dict[str, list[TerminalCatalogEntry]],
@@ -85,7 +82,7 @@ def _compound_subordinate_index(
 
 
 def compound_idle_sets(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
 ) -> dict[str, tuple[TerminalCatalogEntry, ...]]:
     """Every live manager's compound-idle member set, keyed by manager id.
 
@@ -120,7 +117,7 @@ def compound_idle_signature(members: tuple[TerminalCatalogEntry, ...]) -> str:
     )
 
 
-def state_signal_held_on_boundary(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
+def state_signal_held_on_boundary(catalog: TerminalCatalogPort, entry: OperatorInboxEntry) -> bool:
     """Whether a non-landed state-signal row is merely boundary-held by a LIVE target seat.
 
     A live addressee's availability gate owns delivery timing: the row must not be
@@ -134,7 +131,7 @@ def state_signal_held_on_boundary(catalog: TerminalCatalog, entry: OperatorInbox
 
 
 def evaluate_state_signal_findings(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
 ) -> list[AgentNotifierFinding]:
     """A live seat whose turn ended with a terminal outcome not yet relayed."""
     return [
@@ -145,7 +142,7 @@ def evaluate_state_signal_findings(
 
 
 def current_state_signal_finding(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     *,
     session_id: str,
     source_id: str,
@@ -161,7 +158,7 @@ def current_state_signal_finding(
 
 
 def _state_signal_finding(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
 ) -> AgentNotifierFinding | None:
     if not (
@@ -186,7 +183,7 @@ def _state_signal_finding(
 
 
 def evaluate_compound_idle_findings(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
 ) -> list[AgentNotifierFinding]:
     """A manager seat whose whole live set is at a turn boundary, not yet relayed."""
     findings: list[AgentNotifierFinding] = []
@@ -209,7 +206,7 @@ def evaluate_compound_idle_findings(
 
 
 def evaluate_non_reaction_findings(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     inbox_store: OperatorInboxStore,
     *,
     now: datetime,
@@ -226,7 +223,7 @@ def evaluate_non_reaction_findings(
 
 
 def current_non_reaction_finding(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     inbox_store: OperatorInboxStore,
     finding: AgentNotifierFinding,
     *,
@@ -248,7 +245,7 @@ def current_non_reaction_finding(
 
 
 def _non_reaction_finding(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     current: dict[str, OperatorInboxEntry],
     *,
@@ -302,7 +299,7 @@ def _oldest_landed_episode(
 
 
 def evaluate_boundary_drain_findings(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     current: dict[str, OperatorInboxEntry],
     *,
     limit: int | None = None,

@@ -11,8 +11,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.harness_control_client import stop_control_session
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.ports import TerminalCatalogPort
 
 if TYPE_CHECKING:
     from agents_remember.serving.terminal import TerminalHost
@@ -35,7 +38,7 @@ class SeatClosure:
 
 
 def retire_entry(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: TerminalHost,
     entry: TerminalCatalogEntry,
     closure: SeatClosure,

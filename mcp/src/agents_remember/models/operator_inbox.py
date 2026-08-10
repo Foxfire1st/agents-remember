@@ -2,16 +2,53 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from agents_remember.controlplane.operator_inbox_records import (
-    AdapterDeliveryState,
-    AgentRole,
-    InboxDeliveryState,
-    InboxMessageKind,
-    OperatorInboxState,
-)
 from agents_remember.models.base import ToolResponse
+
+# The operator-inbox wire vocabulary (moved from controlplane.operator_inbox_records).
+OperatorInboxState = Literal[
+    "pending",
+    "landed",
+    "superseded",
+    "unresolved",
+    "expired",
+    "consumed",
+    "ladder-resolved",
+]
+OperatorInboxVia = Literal["chat", "dashboard", "cli"]
+AgentRole = Literal[
+    "developer",
+    "operator",
+    "designer",
+    "strategist",
+    "orchestrator",
+    "manager",
+    "worker",
+    "reviewer",
+    "system-specialist",
+    "architect",
+    "curator",
+    "agent",
+    "system",
+]
+InboxMessageKind = Literal[
+    "message",
+    "gate-response",
+    "turn-report",
+    "master-handover",
+    "nudge",
+    "escalation",
+    "degradation-alert",
+    "decision-item",
+    "decision-ruling",
+    "dispatch-brief",
+    "state-signal",
+]
+InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconfirmed"]
+AdapterDeliveryState = Literal[
+    "accepted", "queued", "rejected", "unknown", "completed", "unsupported"
+]
 
 
 class OperatorInboxPostResponse(ToolResponse):

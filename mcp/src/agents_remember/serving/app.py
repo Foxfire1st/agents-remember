@@ -40,8 +40,6 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.observer import observer_root
-from agents_remember.observer.landing_state import LandingStateRefresher
-from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving._app_common import (
     _IMAGE_EXTS,
@@ -126,8 +124,11 @@ from agents_remember.serving.conversation.runtime import ConversationRuntime, Co
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_api import register_harness_control_routes
+from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
 from agents_remember.serving.notes import register_notes_routes
+from agents_remember.serving.projections.landing_state import LandingStateRefresher
+from agents_remember.serving.projections.projection_store import ProviderStateRefresher
 from agents_remember.serving.projector import (
     DEFAULT_PROJECTION_CADENCE,
     LIVE_PROJECTION_CLOCK,
@@ -139,7 +140,10 @@ from agents_remember.serving.projector import (
 from agents_remember.serving.seat_events import log_turn_state_change_event
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    terminal_catalog_path,
+)
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessConfig,
@@ -149,7 +153,9 @@ from agents_remember.serving.terminal_liveness import (
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 OWNED_SERVING_COLLABORATORS = ServingCollaborators()
 """No injected collaborators: the app constructs and owns every one of them."""
@@ -270,6 +276,7 @@ def create_app(
                 coordination_root=config.coordination_root,
             ),
             catalog=runtime.catalog,
+            control_plane=ControlPlaneClient(),
             host=runtime.host,
             harness_registry=lambda: load_agentic_settings(config.coordination_root).harnesses,
             liveness_clock=runtime.liveness_clock,

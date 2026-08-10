@@ -43,11 +43,6 @@ from agents_remember.controlplane.gate_decisions import (
 from agents_remember.controlplane.gate_decisions import (
     record_lifecycle_gate_decision as persist_lifecycle_gate_decision,
 )
-from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    SEAM_GATE_KINDS,
-    GatePolicy,
-)
 from agents_remember.controlplane.interaction_retention import (
     GATE_RESPONSE_WAIT_POLL_SECONDS,
     GATE_RESPONSE_WAIT_TIMEOUT_SECONDS,
@@ -58,11 +53,9 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
     DecidedVia,
     GateAnchor,
-    GateKind,
     GateRecord,
     GateRequest,
     GateVerdict,
-    coerce_gate_kind,
     create_gate,
     expire_gate,
 )
@@ -71,9 +64,18 @@ from agents_remember.kernel.agentic_settings import (
     DEFAULT_EXPECTATION_SLA_SECONDS,
     load_agentic_settings,
 )
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    SEAM_GATE_KINDS,
+    GatePolicy,
+)
 from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
+)
+from agents_remember.models.gates import (
+    GateKind,
+    coerce_gate_kind,
 )
 from agents_remember.observer import observer_root
 from agents_remember.observer.ambient import ambient, build_ask, require_ambient
@@ -82,7 +84,9 @@ from agents_remember.observer.lifecycle_state import LifecycleError, LifecycleSt
 from agents_remember.observer.ulid import new_ulid
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def _result(_tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:

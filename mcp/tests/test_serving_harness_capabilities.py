@@ -16,13 +16,15 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.harnesses import HARNESSES
+from agents_remember.models.conversations.control_wire import (
+    LaunchSpec,
+)
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     EffortOption,
     ModelCapability,
 )
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harness_control_models import LaunchSpec
 
 
 def _snapshot(model: str = "model-a") -> CapabilitySnapshot:

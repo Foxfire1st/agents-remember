@@ -30,11 +30,11 @@ from typing import TYPE_CHECKING
 
 from fastapi.sse import ServerSentEvent
 
+from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.observer.event_retention import (
     initial_event_offsets,
     prune_expired_lifecycle_event_logs,
 )
-from agents_remember.observer.paths import observer_root
 from agents_remember.observer.store import (
     WORKSPACE_SOURCE,
     workspace_base_offset,
@@ -44,7 +44,9 @@ from agents_remember.observer.store import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 # The workspace log has no lifecycle id; this reserved cursor key routes it. A lifecycle
 # id can never collide (lifecycle ids are ULIDs -- Crockford base32, never "workspace").

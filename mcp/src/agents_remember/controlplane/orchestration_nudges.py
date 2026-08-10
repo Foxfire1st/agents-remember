@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field, ValidationError
 
@@ -18,10 +17,9 @@ from agents_remember.controlplane.durable_store import (
     require_lock_held,
     rewrite_lines,
 )
+from agents_remember.models.orchestration import NudgeReason, NudgeState
 
 ORCHESTRATION_NUDGE_SCHEMA = "ar-orchestration-nudge/v1"
-NudgeReason = Literal["inactive", "missing-turn-report", "manual"]
-NudgeState = Literal["sent", "rate-limited"]
 
 
 class OrchestrationNudgeRecord(DurableRecord):

@@ -22,6 +22,9 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.primitives.identity import (
+    stable_provider_id,
+)
 from agents_remember.providers import lifecycle, provider_setup
 from agents_remember.providers.cgc import setup as cgc_setup
 from agents_remember.providers.cgc.lifecycle import refresh as cgc_refresh_lifecycle
@@ -36,7 +39,6 @@ from agents_remember.providers.context import (
     cgc_runtime_layout,
 )
 from agents_remember.providers.grepai.lifecycle import embedder as grepai_embedder
-from agents_remember.providers.identity import stable_provider_id
 from agents_remember.providers.lifecycle import compose_runtime, docker_runtime
 from agents_remember.providers.lifecycle.command_runner import UNLIMITED_TIMEOUT
 

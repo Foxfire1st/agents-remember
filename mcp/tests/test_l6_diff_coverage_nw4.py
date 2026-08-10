@@ -29,10 +29,12 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.application import orchestration_tools
+from agents_remember.application import orchestration_tools, provider_runtime
 from agents_remember.code_quality import application_boundary
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeRecord
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.mcp.tools import gates as gate_tools
 from agents_remember.memory_quality.integrity.onboarding_drift_check import unclaimed_entities
 from agents_remember.memory_quality.integrity.onboarding_drift_check.unclaimed_entities import (
@@ -196,7 +198,9 @@ class TestAbandonTerminalOutputsNw4:
 
     def test_provider_blockers_stop_before_worktrees(self) -> None:
         with (
-            mock.patch.object(abandon, "teardown_worktree_providers", return_value={"p": {}}),
+            mock.patch.object(
+                provider_runtime, "teardown_worktree_providers", return_value={"p": {}}
+            ),
             mock.patch.object(
                 abandon, "terminal_result_blockers", return_value=[{"reason": "provider"}]
             ),
@@ -210,7 +214,9 @@ class TestAbandonTerminalOutputsNw4:
 
     def test_worktree_blockers_stop_after_removal(self) -> None:
         with (
-            mock.patch.object(abandon, "teardown_worktree_providers", return_value={"p": {}}),
+            mock.patch.object(
+                provider_runtime, "teardown_worktree_providers", return_value={"p": {}}
+            ),
             mock.patch.object(
                 abandon,
                 "terminal_result_blockers",

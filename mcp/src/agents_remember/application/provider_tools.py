@@ -9,14 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.authority import require_repo
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.identity import (
+    stable_provider_id,
+)
+from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
     ConfigError,
     McpRuntimeConfig,
     require_provider_launch_authority,
 )
 from agents_remember.providers import lifecycle_service
-from agents_remember.providers.identity import stable_provider_id
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import (
     lifecycle_settings_from_config,

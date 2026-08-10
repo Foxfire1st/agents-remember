@@ -16,17 +16,19 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     AcceptanceState,
     ActivityState,
     AdapterSnapshot,
     ControlIdentity,
     ControlState,
 )
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
+from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionStatus,
+)
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
 )
 from agents_remember.serving.terminal_liveness import (
     DEFAULT_CONTROL_READ_FAILURE_THRESHOLD,

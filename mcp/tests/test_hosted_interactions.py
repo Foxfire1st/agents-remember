@@ -18,18 +18,20 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord, GateVerdict, decide_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.errors import HarnessControlClientError, HarnessControlError
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     AdapterSnapshot,
     ControlIdentity,
     InteractionQuestion,
     InteractionQuestionOption,
     PendingInteraction,
 )
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.hosted_interactions import (
     INTERACTION_DELIVERY_ATTEMPT_LIMIT,
     HostedInteractionSynchronizer,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 NOW = "2026-07-14T10:00:00+00:00"
 

@@ -11,7 +11,12 @@ from typing import Any
 
 from pydantic import Field
 
-from agents_remember.controlplane.records import GateKind, GateState
+from agents_remember.kernel.primitives.gate_vocab import (
+    GATE_KINDS,
+    GateKind,
+    GateState,
+    coerce_gate_kind,
+)
 from agents_remember.models.base import ToolResponse
 
 
@@ -73,3 +78,16 @@ class GateListResponse(ToolResponse):
 
     lifecycleId: str | None = None
     gates: list[dict[str, Any]]
+
+
+__all__ = [
+    "GATE_KINDS",
+    "GateCreateResponse",
+    "GateDecideResponse",
+    "GateKind",
+    "GateResponseWaitResponse",
+    "GateState",
+    "GateWaitResponse",
+    "LifecycleGateResponse",
+    "coerce_gate_kind",
+]

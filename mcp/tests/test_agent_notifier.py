@@ -28,15 +28,17 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+    TerminalSessionKind,
+    TerminalSessionStatus,
+)
 from agents_remember.serving.agent_notifier import (
     evaluate_inbox_findings,
     evaluate_pane_findings,
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalSessionKind,
-    TerminalSessionStatus,
 )
 from agents_remember.serving.terminal_paste import (
     PasteResult,

@@ -39,7 +39,10 @@ from agents_remember.application.memory_tools import (
     citation_source_index_build_tool,
 )
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
-from agents_remember.mcp.config import ConfigError, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+    load_config,
+)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

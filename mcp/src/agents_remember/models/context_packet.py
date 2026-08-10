@@ -11,8 +11,7 @@ from agents_remember.kernel.git_freshness import FreshnessState
 from agents_remember.models.base import StrictResponseModel, ToolResponse
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
-from agents_remember.models.worktree import WorktreeSummary
-from agents_remember.worktrees.worktree_contract import MemoryMode
+from agents_remember.models.worktree import MemoryMode, WorktreeSummary
 
 
 class RepoSummary(StrictResponseModel):

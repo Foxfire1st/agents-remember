@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
     McpRuntimeConfig,
     ProviderScope,

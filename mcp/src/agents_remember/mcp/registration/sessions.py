@@ -5,8 +5,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.terminal_tools import RetiredSpawnInputs, SpawnedBy, SpawnSeat
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from ..tools import (
     attach_terminal_session_to_leaf_payload,
     hosted_session_readiness_payload,

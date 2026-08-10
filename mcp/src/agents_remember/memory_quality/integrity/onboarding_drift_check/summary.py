@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
+from agents_remember.kernel.primitives.observer_paths import DRIFT_SNAPSHOT_SCHEMA
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     ACTIONABLE_CLASSIFICATIONS,
     DriftSummaryPacket,
 )
-from agents_remember.observer.drift_snapshots import drift_snapshot_path
-from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA
 
 
 def not_checked() -> DriftSummaryPacket:

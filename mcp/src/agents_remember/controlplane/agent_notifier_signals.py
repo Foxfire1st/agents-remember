@@ -17,8 +17,10 @@ from agents_remember.controlplane.durable_store import (
     read_log_text,
     rewrite_lines,
 )
-from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxDeliveryState
+from agents_remember.kernel.primitives.inbox_backoff import (
+    require_redelivery_floor_seconds,
+)
 
 # The schema string and log filename are retained during the rename window (durable rows in
 # existing deployments); the Python identifiers are the new names. Removal rides the schema

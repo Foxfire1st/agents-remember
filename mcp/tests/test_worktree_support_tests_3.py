@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
@@ -19,6 +20,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.integrate import IntegratedCommits, _merge_integrated_commits
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -57,7 +59,10 @@ class WorktreeSupport3(WorktreeSupportTests):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    hints=CoordinationHints(coordination_root=coordination_root),
+                    request=CoordinationRequest(
+                        hints=CoordinationHints(coordination_root=coordination_root),
+                        contract_reader=WorktreeContractReader(),
+                    ),
                 )
 
     def test_resolver_errors_when_memory_is_missing(self) -> None:
@@ -71,7 +76,10 @@ class WorktreeSupport3(WorktreeSupportTests):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
+                    request=CoordinationRequest(
+                        hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
+                        contract_reader=WorktreeContractReader(),
+                    ),
                 )
             self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
             self.assertEqual(

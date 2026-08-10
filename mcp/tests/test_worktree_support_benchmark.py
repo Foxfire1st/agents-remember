@@ -11,8 +11,12 @@ from typing import Any
 from unittest import mock
 
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.mcp.config import load_config
-from agents_remember.providers.identity import provider_instance_id
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.worktrees.modules.models import OnboardingRefreshPlan, RouteOverviewRefreshPlan
 from agents_remember.worktrees.modules.onboarding import (
     classify_route_overview_updates,

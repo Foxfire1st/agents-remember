@@ -29,8 +29,9 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import ExpiryOptions
 from agents_remember.controlplane.signal_routing import derive_row_owner
 from agents_remember.kernel.agentic_settings import load_agentic_settings
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_supersede_payload
+from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _agent_notifier_actions as notifier_actions
 from agents_remember.serving import _app_lifespan
@@ -52,7 +53,6 @@ from agents_remember.serving.agent_notifier_models import (
     FindingKind,
     SweepState,
 )
-from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.inbox_reclamation import TmuxSessionNameSnapshot
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog

@@ -26,6 +26,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    FeatureCapability,
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.identity import (
+    HarnessId,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.conversation.library import codex as codex_library
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
@@ -33,12 +41,6 @@ from agents_remember.serving.conversation.library.helper_host import (
     ConversationLibraryHelperHost,
     HelperHarness,
     helper_preflight,
-)
-from agents_remember.serving.conversation.models import (
-    CapabilityEvidence,
-    FeatureCapability,
-    HarnessId,
-    HistoryCapabilities,
 )
 from agents_remember.serving.harnesses import Which
 

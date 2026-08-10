@@ -8,7 +8,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
+from agents_remember.kernel.primitives.identity import (
+    provider_ownership_labels,
+    scoped_name,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    ProviderScope,
+    RepositoryScope,
+)
 from agents_remember.providers.cgc.context.constants import CGC_REPO_CGCIGNORE_EXTRAS
 from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.context import (
@@ -19,7 +27,6 @@ from agents_remember.providers.context import (
     GREPAI_PIN,
     GREPAI_RUNNER_IMAGE_REPOSITORY,
 )
-from agents_remember.providers.identity import provider_ownership_labels, scoped_name
 
 
 def lifecycle_settings_from_config(config: McpRuntimeConfig) -> dict[str, Any]:

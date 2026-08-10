@@ -10,14 +10,16 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+)
+from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
     load_config,
     require_config_path,
 )
 from agents_remember.providers.cgc.context.core import cgc_runner_image
-from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 

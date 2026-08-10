@@ -3,37 +3,49 @@
 from __future__ import annotations
 
 import pytest
-from agents_remember.serving.conversation.models import (
-    CANONICAL_TURN_STATE_BY_EVIDENCE,
-    ActiveConversationRef,
+from agents_remember.models.conversations.capabilities import (
+    AttachmentCapabilities,
+    AttachmentCapability,
+    CapabilityEvidence,
+    ControlCapabilities,
+    ConversationCapabilities,
+    FeatureCapability,
+    HistoryCapabilities,
+    LiveCapabilities,
+    TelemetryCapabilities,
+)
+from agents_remember.models.conversations.content import (
+    ConversationItem,
+    ImageReferenceBlock,
+    TextBlock,
+)
+from agents_remember.models.conversations.cursors import (
     ActiveCursorBinding,
     ActiveEventCursor,
     ActiveEventResume,
     ActivePageCursor,
-    AttachmentCapabilities,
-    AttachmentCapability,
+    LibraryCursorBinding,
+    LibraryListCursor,
+    LibraryReadCursor,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
     AuthorizationBinding,
-    CapabilityEvidence,
-    ControlCapabilities,
-    ConversationCapabilities,
-    ConversationItem,
+    ProvenanceEvidence,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.status import (
+    CANONICAL_TURN_STATE_BY_EVIDENCE,
     ConversationProcessStatus,
     ConversationStatus,
     ConversationStatusEvidence,
     ConversationTurnOutcome,
     ConversationTurnStatus,
-    FeatureCapability,
-    HistoryCapabilities,
-    ImageReferenceBlock,
-    LibraryCursorBinding,
-    LibraryListCursor,
-    LibraryReadCursor,
-    LiveCapabilities,
-    OperationFingerprint,
-    ProvenanceEvidence,
     StatusFreshness,
-    TelemetryCapabilities,
-    TextBlock,
+)
+from agents_remember.models.conversations.telemetry import (
     operation_fingerprint,
 )
 from pydantic import ValidationError

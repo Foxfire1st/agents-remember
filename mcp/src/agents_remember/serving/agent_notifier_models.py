@@ -19,8 +19,8 @@ from agents_remember.serving.inbox_reclamation import (
     TmuxSessionNameSnapshotter,
     snapshot_tmux_session_names,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 FindingKind = Literal[
@@ -86,7 +86,7 @@ class AgentNotifierSweepResult:
 class AgentNotifierContext:
     """Stores, delivery seams, and resolved settings required by one sweep."""
 
-    catalog: TerminalCatalog
+    catalog: TerminalCatalogPort
     host: TerminalHost
     paster: TerminalPaster
     inbox_store: OperatorInboxStore

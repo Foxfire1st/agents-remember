@@ -35,10 +35,6 @@ from agents_remember.controlplane.durable_store import (
     read_log_text,
     rewrite_lines,
 )
-from agents_remember.controlplane.inbox_backoff import (
-    DEFAULT_RATE_LIMIT_SECONDS,
-    redeliverable,
-)
 from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
@@ -47,6 +43,10 @@ from agents_remember.controlplane.operator_inbox_records import (
     consume_operator_inbox_entry,
     fold_operator_inbox_entries,
     require_inbox_address,
+)
+from agents_remember.kernel.primitives.inbox_backoff import (
+    DEFAULT_RATE_LIMIT_SECONDS,
+    redeliverable,
 )
 
 

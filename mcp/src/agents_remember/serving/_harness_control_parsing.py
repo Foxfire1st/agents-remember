@@ -23,10 +23,7 @@ from agents_remember.errors import (
     NativeHistoryLimitExceeded,
     NativeHistoryUnavailable,
 )
-from agents_remember.serving.harness_capabilities import (
-    SetResult,
-)
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     AcceptanceState,
     ActivityState,
     AdapterSnapshot,
@@ -35,27 +32,34 @@ from agents_remember.serving.harness_control_models import (
     ControlOperationKind,
     ControlOperationRef,
     ControlState,
-    EvidenceFrame,
-    EvidencePage,
     InteractionQuestion,
     InteractionQuestionOption,
     InterruptAcknowledgement,
     InterruptResult,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
     OperationTimeline,
     OperationTimelineItem,
     PendingInteraction,
     SubmissionLifecycleState,
-    SubmissionLookup,
     SubmissionProvenance,
     SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionSource,
-    SubmissionStatus,
-    SubmissionStatusBatch,
     WithdrawalRecovery,
     WithdrawalResult,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
+from agents_remember.serving.harness_capabilities import (
+    SetResult,
+)
+from agents_remember.serving.harness_control_models import (
+    SubmissionLookup,
+    SubmissionStatus,
+    SubmissionStatusBatch,
 )
 
 

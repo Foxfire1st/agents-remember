@@ -21,7 +21,9 @@ from pydantic import ValidationError
 
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.authority import require_within_coordination
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.tasks import (
     SubTaskRef,
     TaskDocument,

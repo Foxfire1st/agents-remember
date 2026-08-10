@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.tasks import CompletionBlocker
+from agents_remember.models.task_document import CompletionBlocker
 
 
 class LifecycleFinalizeTaskResponse(ToolResponse):

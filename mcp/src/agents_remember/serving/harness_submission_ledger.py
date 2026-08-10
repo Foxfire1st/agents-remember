@@ -22,27 +22,31 @@ from dataclasses import dataclass
 from typing import cast
 
 from agents_remember.errors import HarnessBridgeEpochMismatchError, HarnessControlError
-from agents_remember.serving.harness_capabilities import SetResult
-from agents_remember.serving.harness_control_models import (
-    EVIDENCE_PAGE_BYTE_BUDGET,
-    MAX_OPERATION_TIMELINE_PAGE,
+from agents_remember.models.conversations.control_wire import (
     AcceptanceState,
     AssetReference,
     ControlOperationKind,
     ControlOperationRef,
     OperationTimeline,
     OperationTimelineItem,
-    ReconciliationResult,
-    ReconciliationState,
     SubmissionLifecycleState,
-    SubmissionLookup,
     SubmissionProvenance,
     SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionSource,
+    operation_timeline_item_wire_bytes,
+)
+from agents_remember.models.conversations.evidence import (
+    EVIDENCE_PAGE_BYTE_BUDGET,
+)
+from agents_remember.serving.harness_capabilities import SetResult
+from agents_remember.serving.harness_control_models import (
+    MAX_OPERATION_TIMELINE_PAGE,
+    ReconciliationResult,
+    ReconciliationState,
+    SubmissionLookup,
     SubmissionStatus,
     SubmissionStatusBatch,
-    operation_timeline_item_wire_bytes,
 )
 
 OperationKey = tuple[ControlOperationKind, str]

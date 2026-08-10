@@ -17,7 +17,12 @@ from agents_remember.controlplane.signal_routing import (
     is_seat_dead,
     leaf_chain_has_progress,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 
 T1 = "2026-06-23T10:00:00+00:00"
 

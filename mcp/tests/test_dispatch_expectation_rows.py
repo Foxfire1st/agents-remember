@@ -22,7 +22,9 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.records import GateAnchor, GateVerdict
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
 from agents_remember.observer import observer_root, reset_ambient
 from agents_remember.serving.dispatch_brief import HostedDelivery

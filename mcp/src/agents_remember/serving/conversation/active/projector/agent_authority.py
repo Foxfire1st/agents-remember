@@ -5,17 +5,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationAgentRef,
     ConversationAgentStatus,
     ConversationItem,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
 )
 from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     MappedUnknownVendor,
     MapperOutput,
 )
-from agents_remember.serving.harness_control_models import AdapterSnapshot, EvidenceFrame
 
 _REGISTRY_AGENT_STATUS: dict[str, ConversationAgentStatus] = {
     "registered": "registered",

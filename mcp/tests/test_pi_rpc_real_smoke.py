@@ -21,10 +21,12 @@ from _pi_rpc_capabilities import (
     observe_version,
 )
 from agents_remember.errors import HarnessAdapterBusyError
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     ControlOperationRef,
     LaunchSpec,
+)
+from agents_remember.serving.harness_control_models import (
     PromptRequest,
 )
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter

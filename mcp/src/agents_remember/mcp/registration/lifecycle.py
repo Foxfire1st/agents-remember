@@ -4,7 +4,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ..config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+
 from ..tools import (
     lifecycle_end_payload,
     lifecycle_phase_payload,

@@ -20,7 +20,9 @@ from agents_remember.application.context_packet import (
 )
 from agents_remember.cli.context_packet import main as cli_main
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
-from agents_remember.mcp.config import load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp.tools.core import context_packet_payload
 from agents_remember.worktrees.git_worktree_manager import status_payload
 from agents_remember.worktrees.worktree_contract import (

@@ -6,11 +6,13 @@ import unittest
 from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    pending_interaction_json,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import _interaction_questions
 from agents_remember.serving.harness_control_models import (
     InteractionResponse,
-    pending_interaction_json,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from test_harness_control_claude import (

@@ -14,25 +14,33 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
+from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    ProviderScope,
+    RepositoryScope,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check import summary
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftRow
-from agents_remember.observer.drift_snapshots import drift_snapshot_path
-from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot_dir, observer_root
 from agents_remember.observer.projection import LEDGER_WINDOW, LedgerRefNode
-from agents_remember.observer.projection_store import (
+from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections.paths import (
+    DRIFT_SNAPSHOT_SCHEMA,
+    drift_snapshot_dir,
+    observer_root,
+)
+from agents_remember.serving.projections.projection_store import (
     _gather_repo_surfaces_cached,
     _repo_surface_cache,
     project_and_write,
 )
-from agents_remember.observer.snapshots import (
+from agents_remember.serving.projections.snapshots import (
     _git_commit_meta,
     _ledger_window,
     read_drift_snapshots,
     read_ledger,
 )
-from agents_remember.observer.snapshots_impl import _analytics as snapshots_analytics
-from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections.snapshots_impl import _analytics as snapshots_analytics
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -380,7 +388,7 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
         first = ([], [], [])
         refreshed = ([], [], [])
         with mock.patch(
-            "agents_remember.observer.projection_store._gather_repo_surfaces",
+            "agents_remember.serving.projections.projection_store._gather_repo_surfaces",
             side_effect=[first, refreshed],
         ) as gather:
             # REPO_SURFACE_REFRESH_TTL_SECONDS is 120s: a second
@@ -402,11 +410,11 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
         self.addCleanup(_repo_surface_cache.clear)
         with (
             mock.patch(
-                "agents_remember.observer.projection_store._gather_repo_surfaces",
+                "agents_remember.serving.projections.projection_store._gather_repo_surfaces",
                 return_value=([], [], []),
             ) as gather,
             mock.patch(
-                "agents_remember.observer.projection_inputs.read_providers",
+                "agents_remember.serving.projections.projection_inputs.read_providers",
                 return_value=[],
             ) as providers,
         ):

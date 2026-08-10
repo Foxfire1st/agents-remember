@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.mcp.config import DEFAULT_DOCKER_CONTROL_SECONDS, McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    DEFAULT_DOCKER_CONTROL_SECONDS,
+    McpRuntimeConfig,
+)
 from agents_remember.providers.current_state import write_current_provider_state
 from agents_remember.providers.lifecycle_service import (
     ProviderLifecycleServiceConfig,

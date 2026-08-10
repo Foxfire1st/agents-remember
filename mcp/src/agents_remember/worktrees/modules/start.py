@@ -15,10 +15,8 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.providers import provider_setup
 from agents_remember.tasks.leaf_doc import restamp_leaf_doc_lifecycle
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
-from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -43,6 +41,7 @@ from agents_remember.worktrees.modules.start_contract import (
     build_start_contract,
     memory_base_for_source,
 )
+from agents_remember.worktrees.services import ProviderSetupRequestSpec, worktree_services
 from agents_remember.worktrees.start_progress import (
     StartBeat,
     StartingEnclosure,
@@ -634,9 +633,10 @@ def run_or_launch_provider_setup(
         return plan
     paths = plan["paths"]
     assert isinstance(paths, ProviderStartPaths)
-    request = _provider_setup_request(context, args, paths)
+    spec = _provider_setup_request(context, args, paths)
+    request = worktree_services().provider_lifecycle.setup_request(spec=spec)
     if args.dry_run:
-        payload = provider_setup.run_provider_setup(request)
+        payload = worktree_services().provider_lifecycle.run_setup(request)
         if not payload.get("ok"):
             return {
                 "state": "blocked",
@@ -655,22 +655,20 @@ def run_or_launch_provider_setup(
         if setup_config is not None and setup_config.unlink_settings_after_setup
         else None
     )
-    return provider_async.launch_provider_setup(
-        provider_async.ProviderSetupJob(
-            request=request,
-            contract=contract,
-            write_state_file=lambda payload: _write_provider_state_file(
-                contract, payload, dry_run=False
-            ),
-            settings_cleanup=cleanup,
-        )
+    return worktree_services().provider_lifecycle.launch_setup(
+        request=request,
+        contract=contract,
+        write_state_file=lambda payload: _write_provider_state_file(
+            contract, payload, dry_run=False
+        ),
+        settings_cleanup=cleanup,
     )
 
 
 def _retry_provider_setup_result(
     context, contract: WorktreeContract, args: WorktreeArgs
 ) -> WorktreeCommandResult:
-    if provider_async.provider_setup_running(contract):
+    if worktree_services().provider_lifecycle.setup_running(contract):
         return WorktreeCommandResult(
             2,
             {
@@ -679,7 +677,7 @@ def _retry_provider_setup_result(
                     "Provider setup is still running for this worktree (fresh "
                     "heartbeat); poll worktree_status instead of retrying."
                 ),
-                "providers": provider_async.provider_setup_status(contract),
+                "providers": worktree_services().provider_lifecycle.setup_status(contract),
                 **next_guidance(
                     "continue_work",
                     tool="worktree_status",
@@ -776,17 +774,19 @@ def _provider_enablement_state(
     target_memory_root: Path | None,
 ) -> dict[str, object]:
     try:
-        settings = provider_setup.load_settings(provider_settings_path)
+        settings = worktree_services().provider_lifecycle.load_settings(provider_settings_path)
     except RuntimeError as error:
         return {
             "state": "blocked",
             "reason": str(error),
             "targetCoordinationRoot": target_coordination_root.as_posix(),
         }
-    cgc_enabled = bool(settings) and provider_setup.provider_enabled(
+    cgc_enabled = bool(settings) and worktree_services().provider_lifecycle.provider_enabled(
         settings, "codegraphcontext-code"
     )
-    grepai_enabled = bool(settings) and provider_setup.provider_enabled(settings, "grepai-memory")
+    grepai_enabled = bool(settings) and worktree_services().provider_lifecycle.provider_enabled(
+        settings, "grepai-memory"
+    )
     grepai_worktree_enabled = grepai_enabled and target_memory_root is not None
     if cgc_enabled or grepai_worktree_enabled:
         return _enabled_provider_state(cgc_enabled, grepai_worktree_enabled)
@@ -797,7 +797,9 @@ def _provider_enablement_state(
             grepai_enabled=grepai_enabled,
             target_memory_root=target_memory_root,
         ),
-        "settingsFile": provider_setup.settings_path(provider_settings_path).as_posix(),
+        "settingsFile": worktree_services()
+        .provider_lifecycle.settings_path(provider_settings_path)
+        .as_posix(),
     }
 
 
@@ -840,28 +842,29 @@ def _provider_setup_request(
     context,
     args: WorktreeArgs,
     paths: ProviderStartPaths,
-) -> provider_setup.ProviderSetupRequest:
-    return provider_setup.ProviderSetupRequest(
+):
+    lifecycle = worktree_services().provider_lifecycle
+    return ProviderSetupRequestSpec(
         action="prepare",
         coordination_root=paths.target_coordination_root,
-        settings_path=provider_setup.settings_path(paths.provider_settings_path),
+        settings_path=lifecycle.settings_path(paths.provider_settings_path),
         timeout=getattr(args, "provider_timeout", 1800),
         dry_run=args.dry_run,
         skip_grepai=paths.target_memory_root is None,
-        cgc_seed=provider_setup.CgcSeedOptions(
+        cgc_seed=lifecycle.cgc_seed_options(
             source_coordination_root=paths.source_coordination_root,
             repo_id=context.code_repository_name,
             source_repo_root=paths.source_repo_root,
             target_repo_root=paths.target_repo_root,
         ),
-        cgc_isolated=provider_setup.IsolatedCgcOptions(runtime_root=paths.provider_runtime_root),
-        grepai_seed=provider_setup.GrepaiSeedOptions(
+        cgc_isolated=lifecycle.isolated_cgc_options(runtime_root=paths.provider_runtime_root),
+        grepai_seed=lifecycle.grepai_seed_options(
             source_coordination_root=paths.source_coordination_root,
             source_settings_path=paths.provider_settings_path,
             project_id=context.code_repository_name,
             target_memory_root=paths.target_memory_root,
         ),
-        grepai_isolated=provider_setup.IsolatedGrepaiOptions(
+        grepai_isolated=lifecycle.isolated_grepai_options(
             runtime_root=paths.provider_runtime_root,
             project_id=context.code_repository_name,
             target_memory_root=paths.target_memory_root,

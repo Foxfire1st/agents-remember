@@ -29,6 +29,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.observer.store import EventStore
 from agents_remember.serving._agent_notifier_actions import act_on_finding
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
@@ -37,7 +38,6 @@ from agents_remember.serving.agent_notifier_models import (
     AgentNotifierActionResult,
     AgentNotifierFinding,
 )
-from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.seat_turn_truth import record_compound_idle_emitted
 from agents_remember.serving.state_signals import (
     compound_idle_sets,

@@ -22,9 +22,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from agents_remember.serving.conversation.models import (
-    CANONICAL_TURN_STATE_BY_EVIDENCE,
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.conversations.identity import (
     ActiveConversationRef,
+    HarnessId,
+    ProvenanceStrength,
+)
+from agents_remember.models.conversations.status import (
+    CANONICAL_TURN_STATE_BY_EVIDENCE,
     CanonicalStatusEvidence,
     ConversationProcessState,
     ConversationProcessStatus,
@@ -34,12 +41,11 @@ from agents_remember.serving.conversation.models import (
     ConversationTurnState,
     ConversationTurnStatus,
     ConversationTurnWaiting,
-    HarnessId,
-    ProvenanceStrength,
     StatusFreshness,
 )
-from agents_remember.serving.harness_control_models import AdapterSnapshot
-from agents_remember.serving.terminal_catalog import SeatTurnState
+from agents_remember.models.terminal_catalog import (
+    SeatTurnState,
+)
 
 Clock = Callable[[], str]
 

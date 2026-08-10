@@ -2,7 +2,7 @@
 
 **Why this module exists at all.** Not one of the 61 HTTP routes declared a
 ``response_model``. Twenty-five of them (the conversation surface) already *dumped* a strict
-:class:`~agents_remember.serving.conversation.models.WireModel`, which proves a model existed --
+:class:`~agents_remember.models.conversations.primitives.WireModel`, which proves a model existed --
 not that the route declared its contract. Nothing anywhere said what
 ``GET /api/files/read`` answers with, and nothing could fail when that answer drifted.
 

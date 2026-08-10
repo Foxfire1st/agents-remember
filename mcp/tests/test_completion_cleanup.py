@@ -21,7 +21,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig, RetirementSettings
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RetirementSettings
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 

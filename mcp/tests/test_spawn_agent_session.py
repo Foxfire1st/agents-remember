@@ -25,8 +25,13 @@ from agents_remember.application.terminal_tools import (
     SpawnSeat,
 )
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.mcp.tools.terminal import spawn_agent_session_payload
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
@@ -43,7 +48,6 @@ from agents_remember.serving.terminal import (
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
 )
 from agents_remember.serving.terminal_paste import PasteResult
 from agents_remember.tasks import (

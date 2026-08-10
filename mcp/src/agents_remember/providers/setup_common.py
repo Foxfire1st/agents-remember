@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.command_capture import run_package_main
-from agents_remember.providers import lifecycle
+from agents_remember.kernel.primitives.command_capture import run_package_main
+from agents_remember.kernel.primitives.identity import stable_provider_id  # noqa: F401
 
 # Re-exported for ``from agents_remember.providers.setup_common import stable_provider_id``;
-# canonical source is ``providers.identity``.
-from agents_remember.providers.identity import stable_provider_id  # noqa: F401
+# canonical source is ``kernel.identity``.
+from agents_remember.providers import lifecycle
 from agents_remember.providers.setup_progress import SetupProgress
 
 _NOOP_PROGRESS = SetupProgress()

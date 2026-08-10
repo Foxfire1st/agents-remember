@@ -27,22 +27,27 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.conversation.active.store import ProjectionStore
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationCorrelation,
     ConversationItem,
     TextBlock,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
+from agents_remember.serving.conversation.active.store import ProjectionStore
 from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     unknown_input_provenance,
 )
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-)
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessConfig,

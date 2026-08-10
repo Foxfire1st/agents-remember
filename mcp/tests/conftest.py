@@ -38,6 +38,31 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application.worktree_services import (
+    bind_worktree_services,
+    build_default_worktree_services,
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _bind_worktree_services_for_session() -> Iterator[None]:
+    """Bind the worktree services for class-level setup that runs outside test scope."""
+    bind_worktree_services(build_default_worktree_services())
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _bind_worktree_services() -> Iterator[None]:
+    """Bind the real worktree service bundle for every test.
+
+    Worktree operations consume providers/memory_quality through the bound
+    services port; tests that need a fake bind their own bundle.
+    """
+    bind_worktree_services(build_default_worktree_services())
+    yield
+    bind_worktree_services(build_default_worktree_services())
+
+
 from _global_state import restore_owned_mutable_state, snapshot_owned_mutable_state
 from _random_order import shuffle_items
 from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV

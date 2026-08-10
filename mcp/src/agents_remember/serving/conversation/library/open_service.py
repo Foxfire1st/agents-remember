@@ -29,6 +29,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from agents_remember.models.conversations.control_wire import (
+    SubmissionAuthorityDescriptor,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+    ConversationLibraryScope,
+    HarnessId,
+    NativeConversationRef,
+)
+from agents_remember.models.conversations.opening import (
+    OpenConversationOperation,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.conversation.library.errors import (
     LibraryScopeError,
@@ -40,23 +62,11 @@ from agents_remember.serving.conversation.library.errors import (
     UnknownOpenRequestError,
 )
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    AuthorizationBinding,
-    ConversationLibraryScope,
-    HarnessId,
-    NativeConversationRef,
-    OpenConversationOperation,
-    OperationFingerprint,
-    operation_fingerprint,
-)
 from agents_remember.serving.conversation.runtime import ConversationRuntime
-from agents_remember.serving.harness_control_client import read_submission_authority
 from agents_remember.serving.hosted_readiness import hosted_session_readiness
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.terminal_opener import (
     ControlRunnerRequest,
     OpenTerminalResult,
@@ -65,6 +75,15 @@ from agents_remember.serving.terminal_opener import (
     TerminalLaunchRequest,
     open_terminal_session,
 )
+
+
+def _read_submission_authority(
+    runtime: ConversationRuntime, entry: TerminalCatalogEntry
+) -> SubmissionAuthorityDescriptor:
+    """Read the live bridge epoch through the bound control plane port."""
+
+    return runtime.control_plane.read_submission_authority(entry)
+
 
 if TYPE_CHECKING:
     from agents_remember.serving.conversation.library.factories import LibraryShared
@@ -527,7 +546,7 @@ class ConversationOpenService:
 
     def _open(self, record: _OpenRecord, entry: TerminalCatalogEntry) -> OpenConversationOperation:
         try:
-            descriptor = read_submission_authority(entry)
+            descriptor = _read_submission_authority(self._runtime, entry)
         except Exception as exc:
             return self._fail_launch_with_retire(
                 record, entry, f"catalog proof could not read the bridge epoch: {exc}"
@@ -565,7 +584,7 @@ class ConversationOpenService:
                 "retry with a fresh requestId",
             )
         try:
-            descriptor = read_submission_authority(entry)
+            descriptor = _read_submission_authority(self._runtime, entry)
         except Exception as exc:
             return self._fail_launch_with_retire(
                 record, entry, f"identity mismatch evidence is unreadable: {exc}"

@@ -14,6 +14,10 @@ from typing import Literal, Protocol
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+)
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     capability_snapshot_json,
@@ -23,7 +27,6 @@ from agents_remember.serving.harness_control_adapter import (
     HarnessCapabilityDiscoverer,
 )
 from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
-from agents_remember.serving.harness_control_models import ControlIdentity, LaunchSpec
 from agents_remember.serving.harness_control_runner import adapter_argv
 from agents_remember.serving.harnesses import Which, find_harness
 

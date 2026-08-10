@@ -3,23 +3,33 @@ from __future__ import annotations
 from typing import get_args
 
 import pytest
-from agents_remember.serving.conversation.models import (
-    ActiveEventCursor,
+from agents_remember.models.conversations.capabilities import (
     CapabilityEvidence,
-    ContextMetricValue,
+    FeatureCapability,
+)
+from agents_remember.models.conversations.content import (
     ConversationAgentRef,
     ConversationAgentStatus,
     ConversationItem,
+)
+from agents_remember.models.conversations.cursors import (
+    ActiveEventCursor,
+    LibraryConversationKey,
+    LibraryReadCursor,
+)
+from agents_remember.models.conversations.history import (
     ConversationLibraryAgentRow,
     ConversationLibraryPage,
     ConversationLibraryPageScope,
     ConversationLibraryRow,
-    ConversationTelemetry,
-    FeatureCapability,
-    GapMutation,
     HistoricalConversationPage,
-    LibraryConversationKey,
-    LibraryReadCursor,
+)
+from agents_remember.models.conversations.stream_events import (
+    GapMutation,
+)
+from agents_remember.models.conversations.telemetry import (
+    ContextMetricValue,
+    ConversationTelemetry,
     MetricEvidence,
     MetricScope,
     RuntimeFixtureEvidence,

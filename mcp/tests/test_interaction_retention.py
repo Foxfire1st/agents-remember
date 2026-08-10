@@ -18,8 +18,8 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateAnchor, create_gate
 from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.paths import observer_logs_root
-from agents_remember.observer.snapshots import read_agent_pickups, read_gates
+from agents_remember.serving.projections.paths import observer_logs_root
+from agents_remember.serving.projections.snapshots import read_agent_pickups, read_gates
 
 
 class InteractionRetentionTests(unittest.TestCase):

@@ -7,7 +7,7 @@ MCP adapter surfaces. Missing or empty owned surfaces fail instead of yielding a
 zero.
 
 Absolute, relative, and ``TYPE_CHECKING`` imports are dependencies and are all scanned.
-``mcp.config`` is outside the adapter surface because its runtime-config move belongs to
+``kernel.runtime_config`` is outside the adapter surface because its runtime-config move belongs to
 L9.
 
 False-positive boundaries: test helpers placed inside production adapter packages are

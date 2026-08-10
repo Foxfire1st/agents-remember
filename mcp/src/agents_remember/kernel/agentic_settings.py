@@ -26,7 +26,7 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
   overrides, no concurrency caps, no spawn harness preference.
 - Read PER-USE: consumers call :func:`load_agentic_settings` at each use so a
   settings edit takes effect on the next use without a server restart. The ONE
-  boot-snapshot consumer is ``mcp/config.py``'s ``gateDelegation`` (enforcement
+  boot-snapshot consumer is the runtime-config loader's ``gateDelegation`` (enforcement
   plumbing keeps its boot-cached shape; a change needs a restart -- documented).
 
 - Compatibility window (260713-TES-L1): ``orchestration.supervisor`` is an

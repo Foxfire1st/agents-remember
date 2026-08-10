@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
-from agents_remember.controlplane.gate_policy import GatePolicy
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.agentic_settings import load_agentic_settings
@@ -15,7 +14,10 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.observer.paths import observer_logs_root
+from agents_remember.kernel.primitives.gate_policy import (
+    GatePolicy,
+)
+from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,

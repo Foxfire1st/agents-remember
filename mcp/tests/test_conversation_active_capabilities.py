@@ -12,6 +12,18 @@ with no second copy to edit.
 from __future__ import annotations
 
 import pytest
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    ControlCapabilities,
+    FeatureCapability,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+)
+from agents_remember.models.conversations.identity import (
+    HarnessId,
+)
 from agents_remember.serving.conversation.active.capabilities import capabilities_for
 from agents_remember.serving.conversation.control import (
     capabilities as control_capabilities_module,
@@ -20,13 +32,6 @@ from agents_remember.serving.conversation.control.capabilities import (
     control_capabilities_for,
     interrupt_capability_for,
 )
-from agents_remember.serving.conversation.models import (
-    CapabilityEvidence,
-    ControlCapabilities,
-    FeatureCapability,
-    HarnessId,
-)
-from agents_remember.serving.harness_control_models import AdapterSnapshot, ControlIdentity
 
 HARNESSES: tuple[HarnessId, ...] = ("codex", "claude", "pi")
 

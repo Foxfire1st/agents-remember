@@ -7,9 +7,10 @@ from typing import Any, Literal, NotRequired, TypedDict
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
-from agents_remember.worktrees.modules import provider_async
+from agents_remember.models.worktree import NextOperation, NextTool, WorktreePhase
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
+from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.worktree_contract import (
     CleanupStatus,
     CloseoutStatus,
@@ -20,37 +21,6 @@ from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
 )
 
-# The guidance vocabularies, declared once, here -- this module is the state machine that
-# produces every one of them, and `models.worktree` imports these aliases for the response
-# boundary instead of keeping a second hand-written copy that drifted (`carryover-pending`,
-# `abandoned`, `request_carryover_decision` and `memory_carryover_apply` were all emitted
-# below and all rejected by the packet).
-WorktreePhase = Literal[
-    "worktree-started",
-    "closeout-pending",
-    "integration-pending",
-    "integration-blocked",
-    "carryover-pending",
-    "cleanup-pending",
-    "cleanup-completed",
-    "abandoned",
-]
-NextOperation = Literal[
-    "continue_work",
-    "closeout",
-    "request_integration_decision",
-    "developer_decision",
-    "request_carryover_decision",
-    "request_cleanup_decision",
-    "done",
-]
-NextTool = Literal[
-    "worktree_status",
-    "worktree_closeout_apply",
-    "worktree_integrate",
-    "memory_carryover_apply",
-    "worktree_cleanup",
-]
 # The *other* users of the same nextOperation/nextTool shape: the closeout preview's commit
 # gate and the four blocked-start / blocked-sync recovery payloads. Every one of them is a
 # `WorktreeCommandResult` rendered as a `FlexibleToolResponse` -- none reaches
@@ -437,7 +407,7 @@ def _status_payload_with_landing(
         # The one place a degraded read becomes visible to whoever called a worktree tool:
         # the phase below was computed from the substituted values, and this says so.
         facts["unknown_contract_cells"] = list(contract.unknown_cells)
-    providers = provider_async.provider_setup_status(contract)
+    providers = worktree_services().provider_lifecycle.setup_status(contract)
     if providers is not None:
         facts["providers"] = providers
     freshness = base_freshness(contract)

@@ -9,12 +9,17 @@ from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.harness_control_client import read_control_snapshot
-from agents_remember.serving.harness_control_models import AdapterSnapshot
 from agents_remember.serving.hosted_control_projection import (
     control_snapshot_entry,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.ports import TerminalCatalogPort
 
 HostedReadinessStatus = Literal["ready", "not-ready", "unknown-session", "terminated"]
 SnapshotReader = Callable[[TerminalCatalogEntry], AdapterSnapshot]
@@ -57,7 +62,7 @@ NO_READINESS_WAIT = ReadinessWait()
 
 
 def hosted_session_readiness(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: HostedReadinessHost,
     *,
     session_id: str,
@@ -91,7 +96,7 @@ def hosted_session_readiness(
 
 
 def _observe_exact_session(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: HostedReadinessHost,
     *,
     session_id: str,
@@ -158,7 +163,7 @@ def _bridge_unreachable(
 
 
 def _readiness_from_snapshot(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     *,
     session_id: str,
     observed: TerminalCatalogEntry,

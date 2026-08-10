@@ -7,17 +7,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+    provider_ownership_labels,
+    scoped_name,
+)
+
 # Leaf import; see grepai/lifecycle/backend.py for the aggregator-cycle rationale.
 from agents_remember.providers.grepai.context import (
     GREPAI_NETWORK_NAME,
     GREPAI_OLLAMA_IMAGE,
     GREPAI_PIN,
     GREPAI_RUNNER_IMAGE_REPOSITORY,
-)
-from agents_remember.providers.identity import (
-    provider_instance_id,
-    provider_ownership_labels,
-    scoped_name,
 )
 from agents_remember.providers.setup_common import provider_settings, stable_provider_id
 

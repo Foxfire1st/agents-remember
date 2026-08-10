@@ -10,9 +10,11 @@ from agents_remember.controlplane.signal_routing import (
     is_seat_dead,
     leaf_chain_has_progress,
 )
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
 from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.pane_signals import classify_pane_signal
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.state_signals import (
     evaluate_boundary_drain_findings,
     evaluate_compound_idle_findings,
@@ -20,7 +22,6 @@ from agents_remember.serving.state_signals import (
     evaluate_state_signal_findings,
     state_signal_held_on_boundary,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import capture_pane as default_capture_pane
 
 PERSISTENT_FAILURE_ATTEMPTS = 5
@@ -42,7 +43,7 @@ SEAT_LIVENESS_ASK_PREFIXES = (
 
 
 def evaluate_pane_findings(
-    catalog: TerminalCatalog, *, pane_capturer=default_capture_pane
+    catalog: TerminalCatalogPort, *, pane_capturer=default_capture_pane
 ) -> list[AgentNotifierFinding]:
     """Diagnostic-only pane classifications; the production sweep does not act on them."""
     findings: list[AgentNotifierFinding] = []
@@ -94,13 +95,13 @@ def evaluate_inbox_findings(  # pragma: no cover
     ]
 
 
-def _row_target_dead(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
+def _row_target_dead(catalog: TerminalCatalogPort, entry: OperatorInboxEntry) -> bool:
     """Whether a pending row is addressed to a seat the rebind machinery owns."""
     return entry.agentId is not None and is_seat_dead(catalog, entry.agentId)
 
 
 def _row_dead_since(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     row: OperatorInboxEntry,
 ) -> datetime | None:
     """When the row's addressed seat stopped being live, or a bounded fallback anchor.
@@ -125,7 +126,7 @@ def _row_dead_since(
 
 
 def evaluate_rebind_findings(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     *,
     current: dict[str, OperatorInboxEntry] | None = None,
     now: datetime,
@@ -207,7 +208,7 @@ def _age_seconds(iso_text: str, now: datetime) -> float | None:  # pragma: no co
 
 
 def _inactivity_signal_chain_progressed(
-    catalog: TerminalCatalog, entry: OperatorInboxEntry
+    catalog: TerminalCatalogPort, entry: OperatorInboxEntry
 ) -> bool:
     """Whether real leaf-chain progress invalidated one agent-notifier inactivity root cause."""
     return bool(
@@ -239,7 +240,7 @@ def _seat_liveness_ask_identity(ask: str) -> str:
 
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:223).
 def _stale_turn_state_due(  # pragma: no cover
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     *,
     now: datetime,
@@ -261,7 +262,7 @@ def _stale_turn_state_due(  # pragma: no cover
 
 
 def evaluate_seat_liveness_findings(
-    catalog: TerminalCatalog, *, now: datetime, stale_seconds: float
+    catalog: TerminalCatalogPort, *, now: datetime, stale_seconds: float
 ) -> list[AgentNotifierFinding]:
     """R2e: the L5 hysteresis + L8 turn-state join, with graceful degradation.
 
@@ -300,7 +301,7 @@ def evaluate_seat_liveness_findings(
     return findings
 
 
-def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[AgentNotifierFinding]:
+def evaluate_dead_upstream_findings(catalog: TerminalCatalogPort) -> list[AgentNotifierFinding]:
     """R4 (P-6 made mechanical): every live spawned worker/manager seat whose OWN direct owner is
     dead, per catalog spawn provenance. Doctrine: the seat never absorbs its dead owner's role --
     it continues its own brief; this predicate is what tells its grandparent to look."""

@@ -18,7 +18,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from agents_remember.serving.terminal_catalog import SeatTurnState
+from agents_remember.models.terminal_catalog import (
+    SeatTurnState,
+)
 
 # Busy markers: the harness is visibly generating (a spinner, an interrupt hint, an explicit
 # "thinking" style word). Checked FIRST -- a transient busy marker inside an otherwise-idle-looking

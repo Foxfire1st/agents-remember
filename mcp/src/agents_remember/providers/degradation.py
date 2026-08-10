@@ -34,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from agents_remember.controlplane.durable_store import (
     SCHEMA_VERSION,
@@ -53,7 +53,9 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import ProviderDegradationSettings
+from agents_remember.kernel.primitives.provider_degradation_settings import (
+    ProviderDegradationSettings,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
@@ -62,14 +64,24 @@ from agents_remember.providers.metrics import (
     PROVIDER_METRICS_SCHEMA,
     ProviderMetricsStore,
 )
-from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
-from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
-from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
+
+
+class DegradationAlertPort(Protocol):
+    """The served alert surface the degradation detector may reach.
+
+    Implemented by the serving layer (dashboard loop); providers declares the
+    port and never imports the implementation.
+    """
+
+    def role_recipients(self, coordination_root: Path, role: AgentRole) -> list[str | None]: ...
+
+    def deliver(self, *, store: OperatorInboxStore, entry: Any) -> None: ...
+
 
 DegradationState = Literal["healthy", "degraded", "critical"]
 _LEVELS: dict[DegradationState, int] = {"healthy": 0, "degraded": 1, "critical": 2}
@@ -269,6 +281,7 @@ def evaluate_provider_degradation(
     config: McpRuntimeConfig,
     *,
     stop_provider_stacks: ProviderStopper,
+    degradation_alerts: DegradationAlertPort,
 ) -> dict[str, Any]:
     """Evaluate metrics, emit one event per state change, and run the critical failsafe.
 
@@ -311,7 +324,7 @@ def evaluate_provider_degradation(
             event["criticalFailsafe"] = {"enabled": False}
         store.append_event(event)
         store.compact_events()  # F5: bound the append-only degradation audit log
-        _post_degradation_alerts(config, event)
+        _post_degradation_alerts(config, event, degradation_alerts)
 
     updated = ProviderDegradationState(
         state=state,
@@ -620,14 +633,15 @@ def _build_event(
     }
 
 
-def _post_degradation_alerts(config: McpRuntimeConfig, event: dict[str, Any]) -> None:
+def _post_degradation_alerts(
+    config: McpRuntimeConfig,
+    event: dict[str, Any],
+    alerts: DegradationAlertPort,
+) -> None:
     store = OperatorInboxStore(observer_root(config))
-    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
-    host = TerminalHost()
-    paster = TerminalPaster()
     now = str(event["at"])
     for role, instruction in _ALERT_TARGETS:
-        recipients = _role_recipients(config.coordination_root, role)
+        recipients = alerts.role_recipients(config.coordination_root, role)
         for agent_id in recipients:
             entry = create_operator_inbox_entry(
                 InboxMessage(
@@ -648,23 +662,13 @@ def _post_degradation_alerts(config: McpRuntimeConfig, event: dict[str, Any]) ->
             )
             store.append(entry)
             store.compact(now=datetime.now(UTC))
-            deliver_inbox_entry(
-                InboxDeliveryLog(store=store, entry=entry),
-                sessions=HostedSessionRuntime(catalog=catalog, host=host),
-                paster=paster,
-            )
+            alerts.deliver(store=store, entry=entry)
 
 
-def _role_recipients(coordination_root: Path, role: AgentRole) -> list[str | None]:
-    catalog = TerminalCatalog(terminal_catalog_path(coordination_root))
-    sessions: list[str | None] = [
-        entry.id
-        for entry in catalog.list()
-        if entry.status == "running" and entry.kind == "harness" and entry.binding_role == role
-    ]
-    if sessions:
-        return sessions
-    return [None]
+def _role_recipients(
+    coordination_root: Path, role: AgentRole, alerts: DegradationAlertPort
+) -> list[str | None]:
+    return alerts.role_recipients(coordination_root, role)
 
 
 def _alert_response(event: dict[str, Any], instruction: str) -> str:

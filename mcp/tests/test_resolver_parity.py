@@ -332,7 +332,7 @@ def run_package_resolver(*args: str) -> dict[str, object]:
         [
             sys.executable,
             "-m",
-            "agents_remember.kernel.coordination_context_resolver",
+            "agents_remember.cli.coordination_resolver",
             *args,
             "--format",
             "json",

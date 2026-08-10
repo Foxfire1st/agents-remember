@@ -18,8 +18,8 @@ from agents_remember.application.terminal_tools import (
     session_retire_tool,
     spawn_agent_session_tool,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

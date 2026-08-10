@@ -6,8 +6,8 @@ from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocTarget
 from agents_remember.application.worktree_tools import FinalizeTaskDocs
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from ..tools import (
     lifecycle_finalize_task_payload,
     task_doc_payload,

@@ -9,8 +9,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.code_quality import memory_cap
 from agents_remember.kernel.git_command import git_environment, run_git
+from agents_remember.kernel.primitives import memory_cap
 
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
 QUALITY_MODULE = "agents_remember.code_quality.check"

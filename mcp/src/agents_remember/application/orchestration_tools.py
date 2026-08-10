@@ -24,7 +24,9 @@ from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def _result(_tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:

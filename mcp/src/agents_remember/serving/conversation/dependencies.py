@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from agents_remember.serving.conversation.models import AuthorizationBinding
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
 from agents_remember.serving.conversation.runtime import (
     ConversationRuntime,
     conversation_runtime_from_app,

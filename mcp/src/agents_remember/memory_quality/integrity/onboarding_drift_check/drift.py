@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     StorageSettings,
@@ -91,6 +92,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.sidecar imp
     classify_overview_onboarding,
     classify_sidecar_onboarding_units,
 )
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 __all__ = [
     "ACTIONABLE_CLASSIFICATIONS",
@@ -273,11 +275,14 @@ def main(argv: list[str] | None = None) -> int:
             code_repository_name=code_repository_root.name,
             workspace_root=code_repository_root.parent,
             code_repository_root=code_repository_root,
-            hints=CoordinationHints(
-                topology=args.topology,
-                coordination_root=args.coordination_root,
-                settings_path=args.settings_path,
-                onboarding_root=args.onboarding_root,
+            request=CoordinationRequest(
+                hints=CoordinationHints(
+                    topology=args.topology,
+                    coordination_root=args.coordination_root,
+                    settings_path=args.settings_path,
+                    onboarding_root=args.onboarding_root,
+                ),
+                contract_reader=WorktreeContractReader(),
             ),
         )
     except ValueError as error:

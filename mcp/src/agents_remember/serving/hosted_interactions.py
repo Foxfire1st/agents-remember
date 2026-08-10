@@ -23,18 +23,20 @@ from agents_remember.controlplane.records import (
 )
 from agents_remember.controlplane.store import GateStore
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    PendingInteraction,
+    interaction_question_json,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.harness_control_client import (
     read_control_transcript,
     respond_control_interaction,
 )
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    PendingInteraction,
-    interaction_question_json,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 logger = logging.getLogger(__name__)
 

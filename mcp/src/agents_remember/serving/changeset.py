@@ -32,8 +32,10 @@ from fastapi import Depends, FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
-from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     FileDiff,

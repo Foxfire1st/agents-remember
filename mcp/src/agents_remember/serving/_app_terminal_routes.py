@@ -13,6 +13,9 @@ from fastapi.responses import JSONResponse
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving._app_common import (
     _IMAGE_EXTS,
@@ -67,7 +70,6 @@ from agents_remember.serving.response_contract import (
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.retire_policy import RetirePolicyError, SeatRef, check_retire_authority
 from agents_remember.serving.seat_events import log_rename_event, log_retire_event
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.serving.terminal_liveness import LivenessProbe, observe_terminal_liveness
 from agents_remember.serving.terminal_opener import (

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+    provider_ownership_labels,
+    scoped_name,
+)
 from agents_remember.providers.cgc.seed import (
     CGC_PROVIDER_ID,
     cgc_extra_args,
@@ -15,11 +20,6 @@ from agents_remember.providers.cgc.seed import (
 from agents_remember.providers.context import (
     CGC_NETWORK_NAME,
     CGC_WATCHER_CONTAINER_PREFIX,
-)
-from agents_remember.providers.identity import (
-    provider_instance_id,
-    provider_ownership_labels,
-    scoped_name,
 )
 from agents_remember.providers.setup_common import (
     LifecycleCommand,

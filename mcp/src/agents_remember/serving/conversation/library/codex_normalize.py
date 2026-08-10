@@ -10,6 +10,21 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, TypeAlias
 
+from agents_remember.models.conversations.content import (
+    ConversationContentBlock,
+    ConversationCorrelation,
+    ConversationItem,
+    DiffBlock,
+    MarkdownBlock,
+    TextBlock,
+    ThinkingBlock,
+    ToolInputBlock,
+    ToolOutputBlock,
+    UnknownVendorBlock,
+)
+from agents_remember.models.conversations.identity import (
+    ProvenanceEvidence,
+)
 from agents_remember.serving.codex_app_server_state import (
     required_list,
     required_object,
@@ -21,19 +36,6 @@ from agents_remember.serving.conversation.library.normalize_common import (
 )
 from agents_remember.serving.conversation.library.normalize_common import (
     text_content_parts,
-)
-from agents_remember.serving.conversation.models import (
-    ConversationContentBlock,
-    ConversationCorrelation,
-    ConversationItem,
-    DiffBlock,
-    MarkdownBlock,
-    ProvenanceEvidence,
-    TextBlock,
-    ThinkingBlock,
-    ToolInputBlock,
-    ToolOutputBlock,
-    UnknownVendorBlock,
 )
 
 

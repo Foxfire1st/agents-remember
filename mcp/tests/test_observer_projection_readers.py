@@ -8,14 +8,15 @@ from pathlib import Path
 
 from agents_remember.controlplane.records import GateAnchor, GateVerdict, create_gate, decide_gate
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.drift_snapshots import drift_snapshot_path
-from agents_remember.observer.paths import (
+from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
+from agents_remember.observer.reducer import AnalyticalInputs, WorkspaceStructure, project_workspace
+from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
+from agents_remember.serving.projections.paths import (
     DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
     observer_logs_root,
 )
-from agents_remember.observer.reducer import AnalyticalInputs, WorkspaceStructure, project_workspace
-from agents_remember.observer.snapshots import (
+from agents_remember.serving.projections.snapshots import (
     read_drift_snapshots,
     read_gates,
     read_route_coverage,
@@ -24,7 +25,6 @@ from agents_remember.observer.snapshots import (
     read_sidecar_staleness,
     read_tool_reports,
 )
-from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
 from test_observer_projection import FRESH, STALE, T0, _event, _started
 
 

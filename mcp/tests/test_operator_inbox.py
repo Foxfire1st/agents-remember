@@ -38,16 +38,23 @@ from agents_remember.controlplane.operator_inbox_transitions import (
 )
 from agents_remember.controlplane.signal_routing import RoutedOwner
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
+from agents_remember.models.conversations.control_wire import (
+    SubmissionReceipt,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving import operator_inbox_posts
 from agents_remember.serving.dispatch_brief import HostedDelivery
-from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import (
     InboxDeliveryLog,
     deliver_inbox_entry,
 )
 from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_paste import PasteResult
 
 T1 = "2026-06-23T10:00:00+00:00"

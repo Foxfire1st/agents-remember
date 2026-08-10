@@ -10,7 +10,9 @@ from unittest.mock import patch
 from agents_remember.serving.app import _MAX_IMAGE_BYTES, ServingCollaborators, create_app
 from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_opener import (
     SpawnKnobs,
     TerminalLaunchRequest,

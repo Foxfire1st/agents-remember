@@ -10,6 +10,15 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    InterruptResult,
+    LaunchSpec,
+    PendingInteraction,
+    SubmissionReceipt,
+)
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
     CLAUDE_STREAM_PROTOCOL,
@@ -40,17 +49,10 @@ from agents_remember.serving.harness_control_models import (
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    InterruptResult,
-    LaunchSpec,
-    PendingInteraction,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
     TerminalResult,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch

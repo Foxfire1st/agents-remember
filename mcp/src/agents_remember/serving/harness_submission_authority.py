@@ -30,6 +30,17 @@ from agents_remember.errors import (
     HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    AssetReference,
+    ControlOperationKind,
+    ControlOperationRef,
+    SubmissionLifecycleState,
+    SubmissionReceipt,
+    SubmissionSource,
+    WithdrawalRecovery,
+    WithdrawalResult,
+)
 from agents_remember.serving.harness_capabilities import SET_ACCEPTANCE_VALUES, SetResult
 from agents_remember.serving.harness_control_adapter import (
     AssetSubmitCapable,
@@ -37,19 +48,10 @@ from agents_remember.serving.harness_control_adapter import (
 )
 from agents_remember.serving.harness_control_models import (
     AdapterEvent,
-    AdapterSnapshot,
-    AssetReference,
-    ControlOperationKind,
-    ControlOperationRef,
     InteractionResponse,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
-    SubmissionLifecycleState,
-    SubmissionReceipt,
-    SubmissionSource,
-    WithdrawalRecovery,
-    WithdrawalResult,
 )
 from agents_remember.serving.harness_submission_ledger import (
     OperationKey,

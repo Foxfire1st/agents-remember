@@ -38,7 +38,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from agents_remember.controlplane.inbox_backoff import next_attempt_at
 from agents_remember.controlplane.operator_inbox_records import (
     AdapterDeliveryState,
     InboxDeliveryState,
@@ -47,6 +46,9 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.kernel.primitives.inbox_backoff import (
+    next_attempt_at,
+)
 
 InboxFold = dict[str, OperatorInboxEntry] | None
 

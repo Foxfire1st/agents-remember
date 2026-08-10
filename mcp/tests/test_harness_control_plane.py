@@ -21,6 +21,14 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    InterruptResult,
+    LaunchSpec,
+    SubmissionReceipt,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -44,16 +52,10 @@ from agents_remember.serving.harness_control_models import (
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    InterruptResult,
-    LaunchSpec,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
 )
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 

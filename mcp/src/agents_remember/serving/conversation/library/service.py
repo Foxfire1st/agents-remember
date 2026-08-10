@@ -16,25 +16,29 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 from agents_remember.errors import AuthorityError
+from agents_remember.models.conversations.cursors import (
+    LibraryConversationKey,
+    LibraryKeyBinding,
+    LibraryListCursor,
+    LibraryReadCursor,
+    NativeResumeTarget,
+)
+from agents_remember.models.conversations.history import (
+    ConversationLibraryPage,
+    HistoricalConversationPage,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    ConversationLibraryScope,
+    HarnessId,
+    NativeConversationRef,
+)
 from agents_remember.serving.conversation.library.errors import (
     InvalidLibraryCursorError,
     LibraryCapabilityError,
     StaleNativeIdentityError,
 )
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    ConversationLibraryPage,
-    ConversationLibraryScope,
-    HarnessId,
-    HistoricalConversationPage,
-    LibraryConversationKey,
-    LibraryKeyBinding,
-    LibraryListCursor,
-    LibraryReadCursor,
-    NativeConversationRef,
-    NativeResumeTarget,
-)
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 
 if TYPE_CHECKING:

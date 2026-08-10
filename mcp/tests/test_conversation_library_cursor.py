@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from agents_remember.models.conversations.cursors import (
+    LibraryConversationKey,
+    NativeResumeTarget,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
 from agents_remember.serving.conversation.library.cursor import (
     LibraryCursorAuthority,
     mint_signing_key,
@@ -15,11 +22,6 @@ from agents_remember.serving.conversation.library.scope import (
     canonical_library_scope,
     clamp_limit,
     query_digest,
-)
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    LibraryConversationKey,
-    NativeResumeTarget,
 )
 
 CALLER = AuthorizationBinding(principal_id="local-operator:1000", tenant_id="/ws")

@@ -13,7 +13,10 @@ from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.controlplane.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+)
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 

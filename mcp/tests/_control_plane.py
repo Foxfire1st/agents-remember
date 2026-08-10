@@ -20,11 +20,29 @@ from pathlib import Path
 from typing import Literal, cast
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    InterruptResult,
+    LaunchSpec,
+    SubmissionReceipt,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    AR_TERMINAL_OUTCOME_KEY,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.authorization import (
     LocalOperatorAuthorizationResolver,
 )
 from agents_remember.serving.conversation.control import service as control_service_module
-from agents_remember.serving.conversation.models import AuthorizationBinding
 from agents_remember.serving.conversation.router import register_conversation_routes
 from agents_remember.serving.conversation.runtime import (
     ConversationRuntime,
@@ -33,32 +51,28 @@ from agents_remember.serving.conversation.runtime import (
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
-from agents_remember.serving.harness_control_client import read_submission_authority
+from agents_remember.serving.harness_control_client import (
+    ControlPlaneClient,
+    read_submission_authority,
+)
 from agents_remember.serving.harness_control_ipc import (
     HarnessControlServer,
     LocalControlEndpoint,
 )
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    AR_TERMINAL_OUTCOME_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
-    AcceptanceState,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    InterruptResult,
-    LaunchSpec,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
     TranscriptEntry,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     utc_now,
@@ -472,6 +486,7 @@ class ControlHarness:
         self.runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=root, coordination_root=root),
             catalog=self.catalog,
+            control_plane=ControlPlaneClient(),
             host=LiveHost(),
             harness_registry=empty_registry,
             liveness_clock=utc_now,

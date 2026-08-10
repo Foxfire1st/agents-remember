@@ -44,8 +44,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
-from agents_remember.mcp import SERVER_VERSION
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.kernel.primitives.version import SERVER_VERSION
 from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
 
 STATE_FILE_NAME = "daemon.json"

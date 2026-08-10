@@ -11,9 +11,9 @@ from agents_remember.application.operator_inbox_tools import (
     operator_inbox_supersede_tool,
     post_operator_inbox,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import OperatorInboxPostRequest
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

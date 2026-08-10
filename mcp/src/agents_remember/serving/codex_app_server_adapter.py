@@ -16,6 +16,18 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlOperationRef,
+    InterruptResult,
+    LaunchSpec,
+    SubmissionReceipt,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    AR_EVIDENCE_METHOD_KEY,
+    NativeEvidencePage,
+)
 from agents_remember.serving.codex_agent_lifecycle import (
     completed_turn_status,
     merge_agent_status,
@@ -66,22 +78,14 @@ from agents_remember.serving.harness_capabilities import (
     SetResult,
 )
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    AR_EVIDENCE_METHOD_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlOperationRef,
     InteractionResponse,
-    InterruptResult,
-    LaunchSpec,
-    NativeEvidencePage,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
     TranscriptEntry,
 )
 

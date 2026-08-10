@@ -58,8 +58,10 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxPoster,
 )
 from agents_remember.controlplane.records import GateAnchor, GateRequest, GateVerdict
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp import tools
-from agents_remember.mcp.config import load_config
 from agents_remember.models.base import FlexibleResponseModel
 from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (

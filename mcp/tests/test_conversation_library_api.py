@@ -18,6 +18,35 @@ from typing import Any
 from unittest import mock
 from urllib.parse import urlencode
 
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    FeatureCapability,
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.content import (
+    ConversationItem,
+    TextBlock,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    SubmissionAuthorityDescriptor,
+)
+from agents_remember.models.conversations.history import (
+    ConversationLibraryPage,
+    ConversationLibraryPageScope,
+    ConversationLibraryRow,
+    HistoricalConversationPage,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    HarnessId,
+    NativeConversationRef,
+    ProvenanceEvidence,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.authorization import (
     LocalOperatorAuthorizationResolver,
 )
@@ -36,31 +65,14 @@ from agents_remember.serving.conversation.library.open_service import (
 )
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
 from agents_remember.serving.conversation.library.service import ConversationLibraryService
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    CapabilityEvidence,
-    ConversationItem,
-    ConversationLibraryPage,
-    ConversationLibraryPageScope,
-    ConversationLibraryRow,
-    FeatureCapability,
-    HarnessId,
-    HistoricalConversationPage,
-    HistoryCapabilities,
-    NativeConversationRef,
-    ProvenanceEvidence,
-    TextBlock,
-)
 from agents_remember.serving.conversation.router import register_conversation_routes
 from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-    SubmissionAuthorityDescriptor,
-)
+from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.hosted_readiness import HostedReadinessResult
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import TerminalCatalogLivenessConfig, utc_now
 from agents_remember.serving.terminal_opener import OpenTerminalResult
 from fastapi import FastAPI
@@ -307,6 +319,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=self.tmp, coordination_root=self.tmp),
             catalog=self.catalog,
+            control_plane=ControlPlaneClient(),
             host=self.host,  # type: ignore[arg-type]
             harness_registry=lambda: (),
             liveness_clock=utc_now,
@@ -531,8 +544,8 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(open_module, "hosted_session_readiness", _readiness),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-1"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-1"),
             ),
             mock.patch.object(
                 library_api,

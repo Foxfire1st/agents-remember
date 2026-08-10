@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 
 
 def _create_missing_dirs(paths: list[Path], *, dry_run: bool) -> list[str]:

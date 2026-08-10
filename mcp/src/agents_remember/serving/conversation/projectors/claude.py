@@ -37,7 +37,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationAgentRef,
     ConversationAgentStatus,
     ConversationContentBlock,
@@ -50,6 +50,10 @@ from agents_remember.serving.conversation.models import (
     ToolInputBlock,
     ToolOutputBlock,
     UnknownVendorBlock,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_TERMINAL_OUTCOME_KEY,
+    EvidenceFrame,
 )
 from agents_remember.serving.conversation.projectors.common import (
     ItemPhase,
@@ -65,10 +69,6 @@ from agents_remember.serving.conversation.projectors.common import (
     required_object,
     required_text,
     unknown_input_provenance,
-)
-from agents_remember.serving.harness_control_models import (
-    AR_TERMINAL_OUTCOME_KEY,
-    EvidenceFrame,
 )
 
 HARNESS = "claude"

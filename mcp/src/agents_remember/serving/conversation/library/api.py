@@ -17,6 +17,20 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.errors import AuthorityError, ConversationCompositionError
+from agents_remember.models.conversations.cursors import (
+    LibraryListCursor,
+    LibraryReadCursor,
+)
+from agents_remember.models.conversations.history import (
+    ConversationLibraryPage,
+    HistoricalConversationPage,
+)
+from agents_remember.models.conversations.opening import (
+    OpenConversationOperation,
+)
+from agents_remember.models.conversations.primitives import (
+    WireModel,
+)
 from agents_remember.serving.conversation.dependencies import (
     get_conversation_runtime,
     resolve_conversation_authorization,
@@ -42,14 +56,6 @@ from agents_remember.serving.conversation.library.factories import (
 )
 from agents_remember.serving.conversation.library.open_service import OpenRequest
 from agents_remember.serving.conversation.library.scope import clamp_limit
-from agents_remember.serving.conversation.models import (
-    ConversationLibraryPage,
-    HistoricalConversationPage,
-    LibraryListCursor,
-    LibraryReadCursor,
-    OpenConversationOperation,
-    WireModel,
-)
 from agents_remember.serving.conversation.response_contract import (
     LIBRARY_RESPONSES,
     OPEN_OUTCOME_RESPONSES,

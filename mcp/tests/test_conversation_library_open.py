@@ -10,6 +10,24 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    FeatureCapability,
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    SubmissionAuthorityDescriptor,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+    HarnessId,
+    NativeConversationRef,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.library import open_service as open_module
 from agents_remember.serving.conversation.library.cursor import (
     LibraryCursorAuthority,
@@ -29,23 +47,13 @@ from agents_remember.serving.conversation.library.open_service import (
 )
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
 from agents_remember.serving.conversation.library.service import ConversationLibraryService
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    CapabilityEvidence,
-    FeatureCapability,
-    HarnessId,
-    HistoryCapabilities,
-    NativeConversationRef,
-)
 from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-    SubmissionAuthorityDescriptor,
-)
+from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.hosted_readiness import HostedReadinessResult, HostedReadinessStatus
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import TerminalCatalogLivenessConfig, utc_now
 from agents_remember.serving.terminal_opener import (
     OpenTerminalResult,
@@ -231,6 +239,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=self.tmp, coordination_root=self.tmp),
             catalog=self.catalog,
+            control_plane=ControlPlaneClient(),
             host=self.host,  # type: ignore[arg-type]
             harness_registry=lambda: (),
             liveness_clock=utc_now,
@@ -335,8 +344,10 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 mock.patch.object(
                     open_module,
-                    "read_submission_authority",
-                    lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-race"),
+                    "_read_submission_authority",
+                    lambda _runtime, _entry: SubmissionAuthorityDescriptor(
+                        bridge_epoch="epoch-race"
+                    ),
                 ),
             ):
                 operation = await open_task
@@ -387,8 +398,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-p"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-p"),
             ),
             mock.patch.object(self.catalog, "get", side_effect=_flaky_get),
         ):
@@ -458,8 +469,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-cx"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-cx"),
             ),
         ):
             operation = await service.open(
@@ -491,8 +502,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-pi"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-pi"),
             ),
         ):
             operation = await self.service.open(
@@ -574,8 +585,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-first"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-first"),
             ),
         ):
             operation = await service.open(
@@ -609,8 +620,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-first"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-first"),
             ),
         ):
             replay = await service.open(
@@ -677,8 +688,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-first"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-first"),
             ),
         ):
             operation = await service.open(
@@ -737,8 +748,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-1"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-1"),
             ),
         ):
             operation = await self.service.open(
@@ -789,8 +800,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-1"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-1"),
             ),
         ):
             await self.service.open(
@@ -895,8 +906,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-9"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-9"),
             ),
             mock.patch.object(open_module, "retire_entry", _retire),
         ):
@@ -935,8 +946,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(open_module, "hosted_session_readiness", _readiness),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-2"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="epoch-2"),
             ),
         ):
             operation = await self.service.open(
@@ -1004,8 +1015,8 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
             mock.patch.object(
                 open_module,
-                "read_submission_authority",
-                lambda _entry: SubmissionAuthorityDescriptor(bridge_epoch="e"),
+                "_read_submission_authority",
+                lambda _runtime, _entry: SubmissionAuthorityDescriptor(bridge_epoch="e"),
             ),
         ):
             for index in range(4):

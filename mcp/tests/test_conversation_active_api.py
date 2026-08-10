@@ -26,6 +26,28 @@ from urllib.parse import urlencode
 
 import httpx
 import uvicorn
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    LaunchSpec,
+    SubmissionReceipt,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.status import (
+    CANONICAL_TURN_STATE_BY_EVIDENCE,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.active.cursor import (
     mint_event_cursor,
     mint_page_cursor,
@@ -40,11 +62,6 @@ from agents_remember.serving.conversation.active.status import (
 from agents_remember.serving.conversation.authorization import (
     LocalOperatorAuthorizationResolver,
 )
-from agents_remember.serving.conversation.models import (
-    CANONICAL_TURN_STATE_BY_EVIDENCE,
-    ActiveConversationRef,
-    AuthorizationBinding,
-)
 from agents_remember.serving.conversation.router import register_conversation_routes
 from agents_remember.serving.conversation.runtime import (
     ConversationRuntime,
@@ -54,6 +71,7 @@ from agents_remember.serving.harness_capabilities import CapabilitySnapshot, Set
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlPlaneClient,
     ControlSubmission,
     read_submission_authority,
     submit_control_prompt,
@@ -63,26 +81,20 @@ from agents_remember.serving.harness_control_ipc import (
     LocalControlEndpoint,
 )
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    LaunchSpec,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
     TranscriptEntry,
 )
 from agents_remember.serving.hosted_control_projection import snapshot_turn_state
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     utc_now,
@@ -295,6 +307,7 @@ class _Harness:
         runtime = ConversationRuntime(
             scope=ConversationScope(workspace_root=root, coordination_root=root),
             catalog=catalog,
+            control_plane=ControlPlaneClient(),
             host=_LiveHost(),
             harness_registry=_empty_registry,
             liveness_clock=utc_now,

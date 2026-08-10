@@ -11,13 +11,17 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from agents_remember.errors import CodexAppServerError
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+    ActivityState,
+    PendingInteraction,
+)
+from agents_remember.models.conversations.evidence import (
+    NativeEvidenceFrame,
+)
 from agents_remember.serving.codex_app_server_protocol import JsonObject, RequestId
 from agents_remember.serving.harness_capabilities import EffortOption
 from agents_remember.serving.harness_control_models import (
-    AcceptanceState,
-    ActivityState,
-    NativeEvidenceFrame,
-    PendingInteraction,
     PromptRequest,
     TerminalOutcome,
     TerminalResult,

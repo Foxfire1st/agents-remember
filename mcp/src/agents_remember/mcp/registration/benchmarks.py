@@ -9,9 +9,9 @@ from agents_remember.application.benchmark_tools import (
     BenchmarkSelection,
     CodexBenchmarkRun,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
 
-from ..config import McpRuntimeConfig
 from ..tools import codex_benchmark_prepare_payload, codex_benchmark_run_payload
 
 

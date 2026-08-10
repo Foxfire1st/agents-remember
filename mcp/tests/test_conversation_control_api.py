@@ -17,8 +17,10 @@ from unittest import mock
 import httpx
 import uvicorn
 from _control_plane import OPERATOR, TINY_PNG, FakeControlAdapter, make_harness
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+)
 from agents_remember.serving.harness_control_client import ControlSubmission, submit_control_prompt
-from agents_remember.serving.harness_control_models import AR_EVIDENCE_KEY
 
 SESSION = "ar-api-ctl"
 

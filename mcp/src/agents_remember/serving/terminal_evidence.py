@@ -12,12 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from agents_remember.models.conversations.evidence import EvidencePage, NativeEvidencePage
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.harness_control_client import read_control_evidence
-from agents_remember.serving.harness_control_models import (
-    EvidencePage,
-    NativeEvidencePage,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 if TYPE_CHECKING:
     from agents_remember.serving.conversation.active.status import TurnTerminalEvidence

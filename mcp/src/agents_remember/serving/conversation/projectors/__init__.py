@@ -12,13 +12,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Protocol
 
-from agents_remember.serving.conversation.models import HarnessId
-from agents_remember.serving.conversation.projectors import claude, codex, pi
-from agents_remember.serving.conversation.projectors.common import MapperOutput
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.evidence import (
     EvidenceFrame,
     NativeEvidenceFrame,
 )
+from agents_remember.models.conversations.identity import (
+    HarnessId,
+)
+from agents_remember.serving.conversation.projectors import claude, codex, pi
+from agents_remember.serving.conversation.projectors.common import MapperOutput
 
 
 class HarnessProjector(Protocol):

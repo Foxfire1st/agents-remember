@@ -19,6 +19,7 @@ See ``docs/design/observable-lifecycle.md`` for the full design.
 
 from __future__ import annotations
 
+from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.observer.ambient import (
     AmbientLifecycle,
     install_ambient,
@@ -39,7 +40,6 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
-from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
     ActionAvailability,
     AgentPickupNode,

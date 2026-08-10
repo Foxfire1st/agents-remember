@@ -22,6 +22,9 @@ from agents_remember.kernel.agentic_settings import (
     DEFAULT_EXPECTATION_SLA_SECONDS,
     load_agentic_settings,
 )
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.hosted_readiness import (
@@ -30,15 +33,17 @@ from agents_remember.serving.hosted_readiness import (
     hosted_session_identity,
     hosted_session_readiness,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 DISPATCH_BRIEF_KIND = "dispatch-brief"
-ReadinessCheck = Callable[[TerminalCatalog, HostedReadinessHost, str], HostedReadinessResult]
+ReadinessCheck = Callable[[TerminalCatalogPort, HostedReadinessHost, str], HostedReadinessResult]
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,7 @@ class HostedDelivery:
     """Hosted inbox delivery collaborators owned by the serving performer layer."""
 
     enabled: bool = True
-    catalog: TerminalCatalog | None = None
+    catalog: TerminalCatalogPort | None = None
     host: TerminalHost | None = None
     paster: TerminalPaster | None = None
     readiness: ReadinessCheck | None = None
@@ -61,7 +66,7 @@ NO_HOSTED_DELIVERY = HostedDelivery(enabled=False)
 
 
 def _readiness_check(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: HostedReadinessHost,
     session_id: str,
 ) -> HostedReadinessResult:
@@ -76,7 +81,7 @@ class DispatchBriefGate:
 
     def check(
         self,
-        catalog: TerminalCatalog,
+        catalog: TerminalCatalogPort,
         host: HostedReadinessHost,
         target: TerminalCatalogEntry,
         *,

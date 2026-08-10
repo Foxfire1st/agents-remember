@@ -27,6 +27,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import agent_notifier as agent_notifier_module
 from agents_remember.serving._agent_notifier_evaluation import PERSISTENT_FAILURE_ATTEMPTS
@@ -38,7 +39,6 @@ from agents_remember.serving.agent_notifier import (
     run_agent_notifier_sweep,
 )
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
-from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost

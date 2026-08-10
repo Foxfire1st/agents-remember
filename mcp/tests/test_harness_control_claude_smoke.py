@@ -14,11 +14,13 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     ControlOperationRef,
     LaunchSpec,
+)
+from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
+from agents_remember.serving.harness_control_models import (
     PromptRequest,
 )
 

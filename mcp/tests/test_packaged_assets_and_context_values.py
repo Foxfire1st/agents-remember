@@ -39,7 +39,11 @@ from agents_remember.kernel.coordination_context.serialize import cross_repo_ent
 from agents_remember.kernel.coordination_context.setting_values import (
     parsed_cross_repo_allow_entry,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    ProviderScope,
+    RepositoryScope,
+)
 from agents_remember.providers import lifecycle_service
 
 # The Windows extended-length prefix, `\\?\`, written as a Python literal.

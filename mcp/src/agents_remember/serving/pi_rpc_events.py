@@ -8,14 +8,18 @@ from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    AdapterEvent,
+from agents_remember.models.conversations.control_wire import (
     AdapterSnapshot,
     ControlIdentity,
     ControlOperationRef,
-    InteractionResponse,
     PendingInteraction,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+)
+from agents_remember.serving.harness_control_models import (
+    AdapterEvent,
+    InteractionResponse,
     TranscriptEntry,
 )
 from agents_remember.serving.pi_rpc_protocol import (

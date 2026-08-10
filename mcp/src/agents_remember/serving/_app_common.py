@@ -16,6 +16,9 @@ from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel, Field
 
 from agents_remember.models.application_requests import AgentRole, InboxMessageKind
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import observer_root
 from agents_remember.serving.agent_notifier_heartbeat import (
     AgentNotifierHeartbeatPayload,
@@ -25,10 +28,10 @@ from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessConfig,
@@ -44,7 +47,9 @@ from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 logger = logging.getLogger("agents_remember.serving.app")
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_app_common.py:50).
@@ -437,7 +442,7 @@ class ServingCollaborators:
     """
 
     terminal_host: TerminalHost | None = None
-    terminal_catalog: TerminalCatalog | None = None
+    terminal_catalog: TerminalCatalogPort | None = None
     terminal_paster: TerminalPaster | None = None
     harness_capability_catalog: HarnessCapabilityCatalog | None = None
 
@@ -457,7 +462,7 @@ class _ServingRuntime:
     config: McpRuntimeConfig
     projector: Projector
     host: TerminalHost
-    catalog: TerminalCatalog
+    catalog: TerminalCatalogPort
     paster: TerminalPaster
     liveness_clock: Callable[[], datetime]
     liveness_config: TerminalCatalogLivenessConfig

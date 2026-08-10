@@ -10,9 +10,11 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.memory_ledger import parse_ledger_text
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from test_worktree_support import (
@@ -432,7 +434,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             }
             with (
                 mock.patch(
-                    "agents_remember.worktrees.modules.closeout.run_memory_quality_check",
+                    "agents_remember.memory_quality.check.run_memory_quality_check",
                     return_value=failed_quality,
                 ),
                 self.assertRaisesRegex(RuntimeError, "clean memory_quality_check"),
@@ -733,7 +735,10 @@ class WorktreeSupport2(WorktreeSupportTests):
             context = resolver.resolve_coordination_context(
                 code_repository_name="my-app",
                 workspace_root=workspace,
-                hints=CoordinationHints(topology="internal"),
+                request=CoordinationRequest(
+                    hints=CoordinationHints(topology="internal"),
+                    contract_reader=WorktreeContractReader(),
+                ),
             )
             self.assertEqual(context.coordination_root, repo / "ar-coordination")
             self.assertEqual(context.memory_root, repo / "ar-memory")
@@ -751,7 +756,10 @@ class WorktreeSupport2(WorktreeSupportTests):
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
+                request=CoordinationRequest(
+                    hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
+                    contract_reader=WorktreeContractReader(),
+                ),
             )
             self.assertEqual(context.topology, "internal")
             self.assertEqual(context.memory_root, repo / "ar-memory")
@@ -767,7 +775,10 @@ class WorktreeSupport2(WorktreeSupportTests):
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
+                request=CoordinationRequest(
+                    hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
+                    contract_reader=WorktreeContractReader(),
+                ),
             )
             self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, workspace / "ar-coordination")
@@ -791,6 +802,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 context = resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
+                    request=CoordinationRequest(contract_reader=WorktreeContractReader()),
                 )
             self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, workspace / "ar-coordination")
@@ -813,6 +825,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 context = resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
+                    request=CoordinationRequest(contract_reader=WorktreeContractReader()),
                 )
             self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, coordination_root)
@@ -838,6 +851,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
+                    request=CoordinationRequest(contract_reader=WorktreeContractReader()),
                 )
             self.assertEqual(raised.exception.coordination_root, workspace / "ar-coordination")
 
@@ -852,5 +866,8 @@ class WorktreeSupport2(WorktreeSupportTests):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    hints=CoordinationHints(coordination_root=coordination_root),
+                    request=CoordinationRequest(
+                        hints=CoordinationHints(coordination_root=coordination_root),
+                        contract_reader=WorktreeContractReader(),
+                    ),
                 )

@@ -12,15 +12,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
 from agents_remember.errors import CodexAppServerError
+from agents_remember.models.conversations.control_wire import (
+    ControlOperationRef,
+    PendingInteraction,
+)
 from agents_remember.serving.codex_agent_lifecycle import merge_agent_status
 from agents_remember.serving.codex_app_server_protocol import JsonObject, RequestId
 from agents_remember.serving.codex_app_server_state import (
     CodexServerInteraction,
     required_text,
-)
-from agents_remember.serving.harness_control_models import (
-    ControlOperationRef,
-    PendingInteraction,
 )
 
 THREAD_REGISTRY_LIMIT = 64

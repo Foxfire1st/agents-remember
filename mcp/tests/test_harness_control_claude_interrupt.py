@@ -11,13 +11,15 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    LaunchSpec,
+)
 from agents_remember.serving.claude_stream_transport import ClaudeSubprocessTransport
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import (
     ClaudeAdapterLimits,
     ClaudeStreamJsonAdapter,
 )
-from agents_remember.serving.harness_control_models import LaunchSpec
 from test_harness_control_claude import (
     _STUB_CLAUDE_SOURCE,
     _STUB_EFFORTS,

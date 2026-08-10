@@ -11,11 +11,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
-from agents_remember.serving.terminal_catalog import (
+from agents_remember.models.terminal_catalog import (
     CatalogTurnEvidence,
-    TerminalCatalog,
     TerminalCatalogEntry,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 
 InterruptRequestBy = Literal["developer"]
 
@@ -79,7 +79,7 @@ def with_interrupt_request(
 
 
 def record_turn_projection(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     session_id: str,
     stamp: CatalogTurnEvidence,
 ) -> TerminalCatalogEntry | None:
@@ -109,7 +109,7 @@ def with_terminal_cursors(
 
 
 def record_terminal_cursors(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     session_id: str,
     *,
     evidence_sequence: int | None = None,
@@ -129,7 +129,7 @@ def record_terminal_cursors(
 
 
 def record_state_signal_emitted(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     session_id: str,
     evidence_id: str,
 ) -> None:
@@ -141,7 +141,7 @@ def record_state_signal_emitted(
 
 
 def record_non_reaction_emitted(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     session_id: str,
     row_id: str,
 ) -> None:
@@ -153,7 +153,7 @@ def record_non_reaction_emitted(
 
 
 def record_compound_idle_emitted(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     session_id: str,
     signature: str,
 ) -> None:
@@ -165,7 +165,7 @@ def record_compound_idle_emitted(
 
 
 def record_interrupt_request(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     session_id: str,
     *,
     by: InterruptRequestBy,

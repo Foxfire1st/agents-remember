@@ -6,11 +6,19 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import reset_ambient
 from agents_remember.serving.app import ServingCollaborators, create_app
 from agents_remember.serving.projector import ProjectionCadence
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from fastapi.testclient import TestClient
 from test_spawn_agent_session import (
     _config,

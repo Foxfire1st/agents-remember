@@ -2,15 +2,6 @@
 
 from __future__ import annotations
 
-from agents_remember.controlplane.gate_policy import (
-    GatePolicy,
-    GatePolicyRule,
-    apply_seam_verdict_requirement,
-    coerce_decision_role,
-    make_gate_policy,
-    named_gate_policy,
-)
-from agents_remember.controlplane.records import GateKind, coerce_gate_kind
 from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_GATE_POLICY,
     KNOWN_GATE_DELEGATION_FIELDS,
@@ -20,16 +11,27 @@ from agents_remember.kernel._agentic_settings_core import (
     _require_object,
     _require_string,
 )
+from agents_remember.kernel.primitives.gate_policy import (
+    GatePolicy,
+    GatePolicyRule,
+    apply_seam_verdict_requirement,
+    coerce_decision_role,
+    make_gate_policy,
+    named_gate_policy,
+)
+from agents_remember.kernel.primitives.gate_vocab import (
+    GateKind,
+    coerce_gate_kind,
+)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_policy.py:25).
 def parse_gate_delegation(
     raw: object, *, source: str
 ) -> tuple[GatePolicy, bool]:  # pragma: no cover
     """Parse ``orchestration.gateDelegation`` into ``(policy, requireReviewerVerdictAtSeams)``.
 
-    Shared by the agentic loader (the key's home) and ``mcp/config.py``'s
-    one-cycle legacy authority-file fallback. ``None`` means the all-human
+    Shared by the agentic loader (the key's home) and the runtime-config
+    authority-file loader's one-cycle legacy authority-file fallback. ``None`` means the all-human
     default. Errors name ``source`` (the offending file).
     """
     if raw is None:

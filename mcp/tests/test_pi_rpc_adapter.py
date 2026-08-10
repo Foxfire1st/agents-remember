@@ -18,16 +18,18 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
-from agents_remember.serving.harness_capabilities import SetResult
-from agents_remember.serving.harness_control_models import (
+from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     ControlOperationKind,
     ControlOperationRef,
     LaunchSpec,
-    PromptRequest,
-    ShutdownMode,
     SubmissionReceipt,
     SubmissionSource,
+)
+from agents_remember.serving.harness_capabilities import SetResult
+from agents_remember.serving.harness_control_models import (
+    PromptRequest,
+    ShutdownMode,
 )
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 from agents_remember.serving.pi_rpc_protocol import (

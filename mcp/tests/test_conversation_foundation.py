@@ -6,11 +6,13 @@ import json
 import re
 from pathlib import Path
 
+from agents_remember.models.conversations.telemetry import (
+    RuntimeFixtureEvidence,
+)
 from agents_remember.serving.conversation import ports
 from agents_remember.serving.conversation.active.api import router as active_router
 from agents_remember.serving.conversation.control.api import router as control_router
 from agents_remember.serving.conversation.library.api import router as library_router
-from agents_remember.serving.conversation.models import RuntimeFixtureEvidence
 from agents_remember.serving.conversation.router import CONVERSATION_CHILD_ROUTERS, router
 from fastapi.routing import APIRoute
 
@@ -25,7 +27,12 @@ def test_exactly_two_conversation_ports_exist() -> None:
         for name, value in vars(ports).items()
         if name.endswith("Port") and isinstance(value, type)
     }
-    assert public_ports == {"ActiveConversationPort", "ConversationLibraryPort"}
+    assert public_ports == {
+        "ActiveConversationPort",
+        "ControlPlanePort",
+        "ConversationLibraryPort",
+        "TerminalCatalogPort",
+    }
     assert not hasattr(ports, "NativeControlPort")
 
 

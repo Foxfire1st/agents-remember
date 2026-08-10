@@ -4,12 +4,17 @@ import asyncio
 import unittest
 
 from agents_remember.errors import HarnessAdapterBusyError
+from agents_remember.models.conversations.control_wire import (
+    ControlOperationRef,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import (
     ClaudeAdapterLimits,
     ClaudeStreamJsonAdapter,
 )
-from agents_remember.serving.harness_control_models import ControlOperationRef, PromptRequest
+from agents_remember.serving.harness_control_models import (
+    PromptRequest,
+)
 from test_harness_control_claude import (
     NOW,
     _adapter,

@@ -14,6 +14,25 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    InterruptResult,
+    LaunchSpec,
+    SubmissionSource,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    AR_EVIDENCE_METHOD_KEY,
+    EVIDENCE_PAGE_BYTE_BUDGET,
+    MAX_NATIVE_EVIDENCE_PAGE,
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidencePage,
+    NativePageReader,
+    clip_evidence_payload,
+    evidence_frame_wire_bytes,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolAdapter,
@@ -21,28 +40,13 @@ from agents_remember.serving.harness_control_adapter import (
     reduce_adapter_event,
 )
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    AR_EVIDENCE_METHOD_KEY,
     CONTROL_PROTOCOL_VERSION,
-    EVIDENCE_PAGE_BYTE_BUDGET,
-    MAX_NATIVE_EVIDENCE_PAGE,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    EvidenceFrame,
-    EvidencePage,
-    InterruptResult,
-    LaunchSpec,
-    NativeEvidencePage,
-    NativePageReader,
     PromptRequest,
     ShutdownMode,
-    SubmissionSource,
     TranscriptEntry,
-    clip_evidence_payload,
-    evidence_frame_wire_bytes,
 )
 from agents_remember.serving.harness_submission_authority import (
     BridgeSnapshotPort,

@@ -22,8 +22,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.observer.projection_inputs import ProjectionDomain
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.serving import change_watcher as change_watcher_module
 from agents_remember.serving.change_watcher import (
     ChangePacer,
@@ -33,6 +34,7 @@ from agents_remember.serving.change_watcher import (
     projection_domains_for_paths,
     projection_input_roots,
 )
+from agents_remember.serving.projections.projection_inputs import ProjectionDomain
 from agents_remember.serving.projector import ProjectionCadence, ProjectionRefreshers, Projector
 
 

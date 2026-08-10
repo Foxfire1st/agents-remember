@@ -19,6 +19,17 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
+from agents_remember.models.conversations.control_wire import (
+    OperationTimelineItem,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.submissions import (
+    CockpitQueueIdentity,
+    OperationQueueItem,
+    OperationQueueProjection,
+)
 from agents_remember.serving.conversation.control.previews import payload_digest, redacted_preview
 from agents_remember.serving.conversation.control.refs import (
     OperationIdentity,
@@ -32,13 +43,6 @@ from agents_remember.serving.conversation.control.service import (
     ControlScope,
     ConversationControlService,
 )
-from agents_remember.serving.conversation.models import (
-    AuthorizationBinding,
-    CockpitQueueIdentity,
-    OperationQueueItem,
-    OperationQueueProjection,
-)
-from agents_remember.serving.harness_control_models import OperationTimelineItem
 
 _LIVE_ROW_STATES = {"queued", "dispatching", "unknown"}
 _EMPTY_DIGEST = payload_digest("")

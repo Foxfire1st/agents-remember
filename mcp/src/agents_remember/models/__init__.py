@@ -1,5 +1,8 @@
 """Pydantic response contracts for Agents Remember MCP tools."""
 
+from agents_remember.models import (
+    conversations as conversations,  # curated package surface
+)
 from agents_remember.models.base import (
     FlexibleResponseModel,
     FlexibleToolResponse,

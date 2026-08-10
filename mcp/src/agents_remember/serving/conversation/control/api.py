@@ -25,6 +25,32 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.attachments import (
+    AttachmentOperationProjection,
+)
+from agents_remember.models.conversations.control_wire import (
+    MAX_SUBMIT_ASSET_BYTES,
+)
+from agents_remember.models.conversations.interrupts import (
+    InterruptOperation,
+)
+from agents_remember.models.conversations.primitives import (
+    NonEmptyText,
+    WireModel,
+)
+from agents_remember.models.conversations.submissions import (
+    ConversationSubmitRequest,
+    OperationQueueProjection,
+)
+from agents_remember.models.conversations.telemetry import (
+    ConversationTelemetry,
+)
+from agents_remember.models.conversations.withdrawals import (
+    PendingWithdrawalRecoveryList,
+    WithdrawalOperationProjection,
+    WithdrawalRecovery,
+    WithdrawQueueRequest,
+)
 from agents_remember.serving.conversation.active.factories import SessionResolutionError
 from agents_remember.serving.conversation.control import (
     attachments,
@@ -49,19 +75,6 @@ from agents_remember.serving.conversation.dependencies import (
     get_conversation_runtime,
     resolve_conversation_authorization,
 )
-from agents_remember.serving.conversation.models import (
-    AttachmentOperationProjection,
-    ConversationSubmitRequest,
-    ConversationTelemetry,
-    InterruptOperation,
-    NonEmptyText,
-    OperationQueueProjection,
-    PendingWithdrawalRecoveryList,
-    WireModel,
-    WithdrawalOperationProjection,
-    WithdrawalRecovery,
-    WithdrawQueueRequest,
-)
 from agents_remember.serving.conversation.response_contract import (
     CONTROL_RESPONSES,
     INTERRUPT_OUTCOME_RESPONSES,
@@ -70,7 +83,6 @@ from agents_remember.serving.conversation.response_contract import (
     StagedAttachments,
     WithdrawQueueAnswer,
 )
-from agents_remember.serving.harness_control_models import MAX_SUBMIT_ASSET_BYTES
 from agents_remember.serving.response_contract import StatusRefusal
 from agents_remember.serving.seat_turn_truth import record_interrupt_request
 

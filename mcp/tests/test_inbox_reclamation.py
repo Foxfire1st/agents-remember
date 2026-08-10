@@ -27,6 +27,9 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier import run_agent_notifier_sweep
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
@@ -38,7 +41,9 @@ from agents_remember.serving.inbox_reclamation import (
     snapshot_tmux_session_names,
 )
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=UTC)

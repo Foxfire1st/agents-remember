@@ -22,12 +22,19 @@ from typing import Any
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
-from agents_remember.kernel.coordination_context.models import CoordinationContext
+from agents_remember.kernel.coordination_context.models import (
+    CoordinationContext,
+    CoordinationRequest,
+)
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     EnclosureSelector,
     resolve_coordination_context,
     resolve_storage_for_source,
+)
+from agents_remember.kernel.primitives.observer_paths import observer_root
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
 )
 from agents_remember.kernel.route_index import ROUTE_OVERVIEW_NAME
 from agents_remember.kernel.sidecar_pairing import (
@@ -39,14 +46,13 @@ from agents_remember.kernel.sidecar_pairing import (
 from agents_remember.kernel.sidecar_pairing import (
     sidecar_body as _sidecar_body,
 )
-from agents_remember.mcp.config import McpRuntimeConfig
 
 # ``_resolve_onboarding`` below decides the ``FileReadStatus`` value; ``models.read_files``
 # owns the type, because it is served wire vocabulary.
 from agents_remember.models.read_files import FileReadStatus
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
-from agents_remember.observer.paths import observer_root
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 MAX_FILES = 5
 
@@ -98,8 +104,11 @@ def read_ar_files_tool(
         code_repository_name=repo.repo_id,
         workspace_root=config.workspace_root,
         code_repository_root=repo.path,
-        hints=CoordinationHints(coordination_root=config.coordination_root),
-        selector=EnclosureSelector(contract_path=repo.contract_path),
+        request=CoordinationRequest(
+            hints=CoordinationHints(coordination_root=config.coordination_root),
+            selector=EnclosureSelector(contract_path=repo.contract_path),
+            contract_reader=WorktreeContractReader(),
+        ),
     )
 
     amb = ambient()

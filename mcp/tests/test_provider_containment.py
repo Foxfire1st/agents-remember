@@ -28,7 +28,7 @@ from agents_remember.benchmarks.runner_modules.workspace import (
     UNFILTERED_PROVIDERS_ENV,
     filter_benchmark_provider_ids,
 )
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
     ProviderScope,

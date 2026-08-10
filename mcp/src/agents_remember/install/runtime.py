@@ -25,7 +25,7 @@ from agents_remember.kernel.agentic_settings import (
     agentic_settings_path,
     default_agentic_settings_seed_text,
 )
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
     reload_provider_authority,

@@ -1,7 +1,7 @@
 """The declared response contract for the 25 structured-conversation routes.
 
 Split from ``serving/response_contract.py`` for one hard reason: everything here needs
-``serving/conversation/models.py``, and importing that from the app-level module would make
+the conversation models package, and importing that from the app-level module would make
 it import ``serving.conversation`` -- whose package ``__init__`` mounts the routers, which
 import the contract back. ``serving/app.py`` registers the files/change-set/notes routes
 before the conversation ones, so the app-level module must stay importable first. The seam is
@@ -18,12 +18,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.attachments import (
     AttachmentOperationProjection,
     AttachmentReceipt,
-    FailedWithdrawalResponse,
+)
+from agents_remember.models.conversations.interrupts import (
     InterruptOperation,
+)
+from agents_remember.models.conversations.opening import (
     OpenConversationOperation,
+)
+from agents_remember.models.conversations.withdrawals import (
+    FailedWithdrawalResponse,
     WithdrawnQueueResponse,
 )
 from agents_remember.serving.response_contract import (

@@ -13,25 +13,29 @@ if TYPE_CHECKING:
     from agents_remember.serving.conversation.models import HarnessId
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.terminal_catalog import (
+    CatalogTurnEvidence,
+    SeatTurnState,
+    TerminalCatalogEntry,
+    TerminalCatalogLivenessConfig,
+    TerminalLivenessEvidence,
+)
 from agents_remember.serving.harness_control_client import read_control_snapshot
-from agents_remember.serving.harness_control_models import AdapterSnapshot
 from agents_remember.serving.hosted_control_projection import (
     mark_legacy_control_unsupported,
     project_control_snapshot,
     snapshot_turn_state,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.seat_turn_truth import (
     record_terminal_cursors,
     record_turn_projection,
 )
 from agents_remember.serving.terminal_catalog import (
     DEFAULT_LIVENESS_HYSTERESIS,
-    CatalogTurnEvidence,
-    SeatTurnState,
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalCatalogLivenessConfig,
-    TerminalLivenessEvidence,
 )
 from agents_remember.serving.terminal_evidence import (
     TerminalEvidenceProjection,
@@ -139,7 +143,7 @@ class TerminalCatalogLivenessSweeper:
 
     def __init__(
         self,
-        catalog: TerminalCatalog,
+        catalog: TerminalCatalogPort,
         host: TerminalLivenessHost,
         *,
         now: Clock | None = None,
@@ -296,7 +300,7 @@ class TerminalCatalogLivenessSweeper:
 
 
 def observe_terminal_liveness(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: TerminalLivenessHost,
     entry: TerminalCatalogEntry,
     *,
@@ -341,7 +345,7 @@ def observe_terminal_liveness(
 
 
 def _observe_alive(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     *,
     checked_at: datetime,
@@ -443,7 +447,7 @@ def _terminal_evidence(
 
 
 def _observe_control_read_failure(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     exc: HarnessControlError,
     *,
@@ -503,7 +507,7 @@ def _observe_control_read_failure(
 
 
 def _observe_control_snapshot(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     snapshot: AdapterSnapshot,
     observer: ControlSnapshotObserver,
@@ -556,7 +560,7 @@ def _observe_control_snapshot(
 
 
 def _record_adapter_turn_state(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: TerminalCatalogEntry,
     state: SeatTurnState | None,
     checked_at: datetime,

@@ -40,11 +40,6 @@ from agents_remember.controlplane.enforcement import (
     evaluate_closeout_gate,
     evaluate_gate,
 )
-from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    GatePolicy,
-    GatePolicyRule,
-)
 from agents_remember.controlplane.operator_inbox_records import (
     OPERATOR_INBOX_RECORD_SCHEMA,
     OperatorInboxEntry,
@@ -59,14 +54,21 @@ from agents_remember.controlplane.records import (
     GATE_RECORD_SCHEMA,
     DecidedVia,
     GateEvidenceRef,
-    GateKind,
     GateRecord,
-    GateState,
     apply_gate,
     create_gate,
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+    GatePolicyRule,
+)
+from agents_remember.models.gates import (
+    GateKind,
+    GateState,
+)
 
 __all__ = [
     "DECISION_STATES",

@@ -9,16 +9,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.observer import projection_inputs
-from agents_remember.observer.projection_inputs import (
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.serving.projections import projection_inputs
+from agents_remember.serving.projections.projection_inputs import (
     ProjectionDomain,
     ProjectionInputState,
     ProjectionReaders,
     ProjectionRefresh,
     RefreshPass,
 )
-from agents_remember.observer.snapshots import (
+from agents_remember.serving.projections.snapshots import (
     TASK_DOCUMENT_SCHEMA,
     TASK_DOCUMENT_SUMMARY_LIMIT,
 )

@@ -23,14 +23,20 @@ from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo
-from agents_remember.kernel.coordination_context.models import MissingMemoryError
+from agents_remember.kernel.coordination_context.models import (
+    CoordinationRequest,
+    MissingMemoryError,
+)
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     EnclosureSelector,
     resolve_coordination_context,
 )
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.kernel.sidecar_pairing import confine_rel
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -167,8 +173,11 @@ def resolve_scope(config: McpRuntimeConfig, repo_id: str, scope_id: str) -> File
             code_repository_name=repo_id,
             workspace_root=config.workspace_root,
             code_repository_root=repo.path,
-            hints=CoordinationHints(coordination_root=config.coordination_root),
-            selector=EnclosureSelector(contract_path=contract_path),
+            request=CoordinationRequest(
+                hints=CoordinationHints(coordination_root=config.coordination_root),
+                selector=EnclosureSelector(contract_path=contract_path),
+                contract_reader=WorktreeContractReader(),
+            ),
         )
     except MissingMemoryError:
         return FileScope(

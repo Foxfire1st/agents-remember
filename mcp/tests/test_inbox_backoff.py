@@ -11,7 +11,14 @@ sys.path.insert(0, str(MCP_SRC))
 
 import unittest
 
-from agents_remember.controlplane.inbox_backoff import (
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
+from agents_remember.kernel.primitives.inbox_backoff import (
     BACKOFF_SCHEDULE_SECONDS,
     DEFAULT_RATE_LIMIT_SECONDS,
     MIN_REDELIVERY_INTERVAL_SECONDS,
@@ -20,13 +27,6 @@ from agents_remember.controlplane.inbox_backoff import (
     is_rate_limited,
     next_attempt_at,
     redeliverable,
-)
-from agents_remember.controlplane.operator_inbox_records import (
-    InboxAddress,
-    InboxMessage,
-    InboxPoster,
-    InboxRouting,
-    create_operator_inbox_entry,
 )
 
 T1 = "2026-06-23T10:00:00+00:00"

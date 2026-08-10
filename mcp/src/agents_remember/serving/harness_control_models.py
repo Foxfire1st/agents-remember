@@ -1,38 +1,41 @@
-"""Protocol-neutral models for one exact hosted harness control session."""
+"""Control-plane-only models for one exact hosted harness control session.
+
+The shared conversation/evidence wire contracts that used to live here now
+live under ``models/conversations/evidence.py`` and
+``models/conversations/control_wire.py``; this module keeps only the
+control-plane-only declarations. Declaration bodies are unchanged.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Literal, Protocol, cast, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Literal
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    AssetReference,
+    ControlIdentity,
+    ControlOperationRef,
+    SubmissionAuthorityDescriptor,
+    SubmissionLifecycleState,
+    SubmissionLookupOutcome,
+    SubmissionReceipt,
+    SubmissionSource,
+)
 
 CONTROL_PROTOCOL_VERSION = "ar-harness-control/v1"
 
-ControlState = Literal["starting", "ready", "disconnected", "failed", "unsupported"]
-ActivityState = Literal["idle", "running", "blocked", "settling", "unknown"]
-AcceptanceState = Literal["immediate", "queued", "rejected", "unknown", "unsupported"]
-SubmissionSource = Literal["cockpit", "terminal", "durable"]
-ControlOperationKind = Literal["prompt", "set-model", "set-effort"]
-SubmissionLifecycleState = Literal[
-    "queued",
-    "dispatching",
-    "delivered",
-    "withdrawn",
-    "unknown",
-    "rejected",
-    "unsupported",
-]
-WithdrawalOutcome = Literal["withdrawn", "not-withdrawable", "not-found"]
-SubmissionLookupOutcome = Literal["found", "not-found"]
+
 TranscriptRole = Literal["user", "assistant", "system", "interaction", "result"]
+
 TerminalOutcome = Literal["completed", "failed", "cancelled"]
+
 ReconciliationState = Literal["accepted", "rejected", "unresolved", "unsupported"]
+
 ShutdownMode = Literal["graceful", "forced"]
+
 AdapterCapability = Literal[
     "state-snapshot",
     "state-subscription",
@@ -42,6 +45,7 @@ AdapterCapability = Literal[
     "transcript",
     "graceful-shutdown",
 ]
+
 
 REQUIRED_ADAPTER_CAPABILITIES: frozenset[AdapterCapability] = frozenset(
     {
@@ -55,142 +59,9 @@ REQUIRED_ADAPTER_CAPABILITIES: frozenset[AdapterCapability] = frozenset(
     }
 )
 
-AR_EVIDENCE_KEY = "arEvidence"
-"""Reserved ``AdapterEvent.raw`` key carrying one full native payload for the evidence buffer.
-
-Mappers place full native frames under this key only; every pre-existing raw key keeps its exact
-shape. The control bridge diverts the payload into the bounded evidence deque and republishes the
-event without this key, so ``snapshot.raw`` and every projection of it stay byte-identical.
-"""
-
-AR_EVIDENCE_METHOD_KEY = "arEvidenceMethod"
-"""Reserved ``AdapterEvent.raw`` key carrying the native notification method / frame ``type``.
-
-Some native protocols (notably the Codex app-server) carry the discriminating method name
-*outside* the notification ``params`` payload. When an adapter diverts only ``params`` under
-``AR_EVIDENCE_KEY`` the method would otherwise be stripped before a projector ever sees it, forcing
-the projector to re-guess meaning from the params shape. An adapter that has this fact sets it here
-so the bridge preserves it on the diverted :class:`EvidenceFrame` as typed ``native_method``
-metadata; like ``AR_EVIDENCE_KEY`` it is stripped from the republished event so ``snapshot.raw``
-stays byte-identical.
-"""
-
-AR_TERMINAL_OUTCOME_KEY = "arTerminalOutcome"
-"""Adapter-attributed correlated terminal classification riding one diverted evidence payload.
-
-Some harnesses emit no native marker that distinguishes an interrupt settlement from a real
-failure (claude's stream-json answers an accepted interrupt with a plain
-``error_during_execution``/``is_error`` result). The adapter is the only component that knows an
-interrupt was accepted for the exact settling operation, so it stamps its correlated
-:class:`TerminalOutcome` on the diverted payload copy under this reserved ``ar*`` key. The native
-frame keys stay byte-intact; consumers (projectors, the interrupt settlement ledger) trust the
-stamp when present and fall back to native-frame classification only when it is absent. The
-truncation envelope re-carries the scalar so a clipped settlement frame never loses the
-correlation.
-"""
-
-EVIDENCE_TRUNCATION_MARKER = "…[truncated]"
-"""Visible marker appended to every clipped evidence payload preview."""
-
-MAX_PRESERVED_EVIDENCE_SCALAR_CHARS = 256
-"""Length ceiling for a terminal-identity scalar re-carried by the truncation envelope.
-
-Every preserved field is a protocol enum (pi ``stopReason``, codex turn ``status``), a frame
-type name, or a vendor turn id — a handful of characters in every real shape, so 256 is orders
-of magnitude above any legitimate value while staying tiny against the evidence budget. A scalar
-longer than this is a malformed-frame signal, not trustworthy terminal identity: it is dropped
-WHOLE (never truncated — a partial id/status could mis-correlate at settlement), degrading the
-envelope to the pre-identity total clip for that one field. This keeps an oversized scalar from
-ever making the truncation envelope exceed its own byte budget (which would raise instead of
-clip, and in the bridge event loop that raise is session-fatal)."""
-
-MAX_NATIVE_EVIDENCE_PAGE = 200
-"""Server-side frame cap for one native-domain evidence page."""
-
-EVIDENCE_PAGE_BYTE_BUDGET = 48 * 1024
-"""Default serialized-byte budget for one evidence page (bounded below the IPC wire cap)."""
 
 MAX_OPERATION_TIMELINE_PAGE = 256
 """Server-side item cap for one operation-timeline page (the retained ledger's own bound)."""
-
-MAX_SUBMIT_ASSETS = 4
-"""Maximum asset references riding one submit payload."""
-
-MAX_SUBMIT_ASSET_BYTES = 5 * 1024 * 1024
-"""Maximum declared byte size for one staged asset."""
-
-SUBMIT_ASSET_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
-"""MIME allow-list for the asset channel; anything else fails closed at admission."""
-
-InterruptAcknowledgement = Literal["accepted", "rejected", "unsupported", "unknown"]
-
-
-@dataclass(frozen=True)
-class ControlIdentity:
-    """Exact catalog identity for one bridge; all IPC requests repeat this tuple."""
-
-    ar_session_id: str
-    tmux_name: str
-    created_at: str
-
-    def to_json(self) -> dict[str, str]:
-        return {
-            "arSessionId": self.ar_session_id,
-            "tmuxName": self.tmux_name,
-            "createdAt": self.created_at,
-        }
-
-    @classmethod
-    def from_json(cls, raw: Mapping[str, object]) -> ControlIdentity:
-        return cls(
-            ar_session_id=_required_text(raw, "arSessionId"),
-            tmux_name=_required_text(raw, "tmuxName"),
-            created_at=_required_text(raw, "createdAt"),
-        )
-
-
-@dataclass(frozen=True)
-class LaunchSpec:
-    """The fixed argv and installed environment an adapter owns as its one subprocess."""
-
-    identity: ControlIdentity
-    harness_id: str
-    cwd: Path
-    argv: tuple[str, ...]
-    env: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class InteractionQuestionOption:
-    """One selectable option of a structured interaction question page."""
-
-    label: str
-    description: str | None = None
-
-
-@dataclass(frozen=True)
-class InteractionQuestion:
-    """One structured question page of a vendor interaction (e.g. Claude AskUserQuestion).
-
-    The flattened ``prompt``/``choices`` on :class:`PendingInteraction` stay the legacy
-    rendering; this per-page structure is what a structured answer map keys on.
-    """
-
-    text: str
-    header: str
-    options: tuple[InteractionQuestionOption, ...] = ()
-    multi_select: bool = False
-
-
-@dataclass(frozen=True)
-class PendingInteraction:
-    interaction_id: str
-    kind: str
-    prompt: str
-    created_at: str
-    choices: tuple[str, ...] = ()
-    raw: Mapping[str, object] = field(default_factory=dict)
-    questions: tuple[InteractionQuestion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -214,34 +85,6 @@ class TranscriptEntry:
 
 
 @dataclass(frozen=True)
-class AdapterSnapshot:
-    """Orthogonal control, activity, and acceptance state without erasing vendor detail."""
-
-    identity: ControlIdentity
-    control: ControlState
-    activity: ActivityState
-    acceptance: AcceptanceState
-    vendor_session_id: str | None = None
-    pending_interaction: PendingInteraction | None = None
-    pending_interactions: tuple[PendingInteraction, ...] = ()
-    """Multiplexed pending interactions across threads.
-
-    Codex sub-agent threads raise their own server->client requests (approvals);
-    each entry carries its thread identity in ``raw['threadId']`` plus the agent
-    label evidence the adapter could bind. The singular ``pending_interaction``
-    stays the parent-thread slot for back-compat; consumers that understand the
-    multiplexed form read this tuple.
-    """
-
-    last_event_sequence: int = 0
-    raw: Mapping[str, object] = field(default_factory=dict)
-
-    @property
-    def ar_session_id(self) -> str:
-        return self.identity.ar_session_id
-
-
-@dataclass(frozen=True)
 class AdapterHandshake:
     protocol_version: str
     adapter_id: str
@@ -249,17 +92,6 @@ class AdapterHandshake:
     capabilities: frozenset[AdapterCapability]
     snapshot: AdapterSnapshot
     raw: Mapping[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AssetReference:
-    """One staged asset's verified identity; ``spool_path`` is runner-local and never serialized."""
-
-    asset_id: str
-    mime_type: str
-    byte_size: int
-    sha256: str
-    spool_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -288,18 +120,6 @@ class UncommittedDraft:
 
 
 @dataclass(frozen=True)
-class SubmissionReceipt:
-    request_id: str
-    acceptance: AcceptanceState
-    submitted_at: str
-    vendor_correlation_id: str | None = None
-    accepted_at: str | None = None
-    detail: str | None = None
-    raw: Mapping[str, object] = field(default_factory=dict)
-    bridge_epoch: str | None = None
-
-
-@dataclass(frozen=True)
 class InteractionResponse:
     interaction_id: str
     response: str
@@ -317,44 +137,6 @@ class ReconciliationResult:
     raw: Mapping[str, object] = field(default_factory=dict)
     bridge_epoch: str | None = None
     submission_state: SubmissionLifecycleState | None = None
-
-
-@dataclass(frozen=True)
-class ControlOperationRef:
-    """Exact ordinary-operation identity shared by the authority and adapter events."""
-
-    bridge_epoch: str
-    sequence: int
-    operation_id: str
-    kind: ControlOperationKind
-
-    def to_json(self) -> dict[str, object]:
-        return {
-            "bridgeEpoch": self.bridge_epoch,
-            "operationSequence": self.sequence,
-            "operationId": self.operation_id,
-            "operationKind": self.kind,
-        }
-
-    @classmethod
-    def from_json(cls, raw: Mapping[str, object]) -> ControlOperationRef:
-        sequence = raw.get("operationSequence")
-        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
-            raise HarnessControlError("operation ref requires positive operationSequence")
-        kind = raw.get("operationKind")
-        if kind not in {"prompt", "set-model", "set-effort"}:
-            raise HarnessControlError("operation ref has invalid operationKind")
-        return cls(
-            bridge_epoch=_required_text(raw, "bridgeEpoch"),
-            sequence=sequence,
-            operation_id=_required_text(raw, "operationId"),
-            kind=cast(ControlOperationKind, kind),
-        )
-
-
-@dataclass(frozen=True)
-class SubmissionAuthorityDescriptor:
-    bridge_epoch: str
 
 
 @dataclass(frozen=True)
@@ -382,63 +164,6 @@ class SubmissionStatusBatch:
 
 
 @dataclass(frozen=True)
-class WithdrawalRecovery:
-    """The exact body the tombstone consumed at one true withdrawal; crosses only then."""
-
-    text: str | None
-    assets: tuple[AssetReference, ...] = ()
-
-
-@dataclass(frozen=True)
-class WithdrawalResult:
-    request_id: str
-    outcome: WithdrawalOutcome
-    state: SubmissionLifecycleState | None
-    withdrawn_at: str | None = None
-    detail: str | None = None
-    recovery: WithdrawalRecovery | None = None
-
-
-@dataclass(frozen=True)
-class InterruptResult:
-    """One native interrupt acknowledgement; settlement stays with the completion path."""
-
-    acknowledgement: InterruptAcknowledgement
-    bridge_epoch: str
-    operation: ControlOperationRef | None = None
-    vendor_correlation_id: str | None = None
-    detail: str | None = None
-    raw: Mapping[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class OperationTimelineItem:
-    """One retained ledger row's identity/source/kind/sequence/state — never its body."""
-
-    operation_id: str
-    kind: ControlOperationKind
-    source: SubmissionSource | None
-    state: SubmissionLifecycleState
-    sequence: int
-    submitted_at: str
-    updated_at: str
-    accepted_at: str | None
-    payload_digest_present: bool
-    vendor_correlation_id: str | None = None
-
-
-@dataclass(frozen=True)
-class OperationTimeline:
-    """One paged never-bodies enumeration of the retained ledger; union is completeness."""
-
-    bridge_epoch: str
-    latest_sequence: int
-    evicted_before_sequence: int
-    truncated: bool
-    items: tuple[OperationTimelineItem, ...]
-
-
-@dataclass(frozen=True)
 class AdapterEvent:
     """One normalized adapter event; unknown kinds are additive vendor-detail events."""
 
@@ -450,122 +175,6 @@ class AdapterEvent:
     transcript: tuple[TranscriptEntry, ...] = ()
     raw: Mapping[str, object] = field(default_factory=dict)
     operation: ControlOperationRef | None = None
-
-
-@dataclass(frozen=True)
-class EvidenceFrame:
-    """One diverted native payload in the deque coordinate domain (adapter event sequence)."""
-
-    sequence: int
-    kind: str
-    created_at: str
-    raw: Mapping[str, object] = field(default_factory=dict)
-    native_method: str | None = None
-    """The native notification method / frame ``type`` when the adapter carries it out of band.
-
-    Preserved verbatim from ``AR_EVIDENCE_METHOD_KEY`` so a projector switches on the real method
-    instead of re-guessing meaning from the ``params`` shape; ``None`` when the adapter embeds the
-    discriminator inside ``raw`` (as Claude and Pi do with the frame ``type``).
-    """
-
-    thread_id: str | None = None
-    """The native thread this frame belongs to when the harness multiplexes.
-
-    Codex auto-attaches sub-agent thread listeners to the seat's connection, so one evidence
-    stream carries many threads; ``thread_id`` is the demux key (``None`` = the parent/session
-    thread, matching pre-multiplex behavior). Claude encodes its sidechain join key
-    (``parent_tool_use_id``) inside ``raw`` instead.
-    """
-
-
-@dataclass(frozen=True)
-class EvidencePage:
-    """One bounded deque-domain page; every coordinate is an adapter event sequence."""
-
-    frames: tuple[EvidenceFrame, ...]
-    latest_sequence: int
-    evicted_before_sequence: int
-    truncated: bool
-    bridge_epoch: str
-
-
-@dataclass(frozen=True)
-class NativeEvidenceFrame:
-    """One native-history frame with typed harness identity, never buried in ``raw``."""
-
-    native_id: str
-    native_parent_id: str | None
-    native_type: str
-    created_at: str | None
-    raw: Mapping[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class NativeEvidencePage:
-    """One bounded native-domain page continued only by the opaque ``next_cursor``."""
-
-    frames: tuple[NativeEvidenceFrame, ...]
-    next_cursor: str | None
-    truncated: bool
-    bridge_epoch: str
-
-
-@dataclass(frozen=True)
-class SubmissionProvenance:
-    """Source/lifecycle evidence for one exact request id across every submission source."""
-
-    request_id: str
-    outcome: SubmissionLookupOutcome
-    source: SubmissionSource | None = None
-    state: SubmissionLifecycleState | None = None
-    submitted_at: str | None = None
-    updated_at: str | None = None
-    accepted_at: str | None = None
-    vendor_correlation_id: str | None = None
-
-
-@dataclass(frozen=True)
-class SubmissionProvenanceBatch:
-    bridge_epoch: str
-    provenance: tuple[SubmissionProvenance, ...]
-
-
-@runtime_checkable
-class NativePageReader(Protocol):
-    """Structural native-history read; concrete adapters opt in without a protocol edit."""
-
-    async def read_native_page(
-        self,
-        *,
-        cursor: str | None,
-        limit: int,
-        byte_budget: int,
-    ) -> NativeEvidencePage: ...
-
-
-def interaction_question_json(value: InteractionQuestion) -> dict[str, object]:
-    return {
-        "text": value.text,
-        "header": value.header,
-        "options": [
-            {"label": option.label, "description": option.description} for option in value.options
-        ],
-        "multiSelect": value.multi_select,
-    }
-
-
-def pending_interaction_json(value: PendingInteraction | None) -> dict[str, object] | None:
-    if value is None:
-        return None
-    return {
-        "interactionId": value.interaction_id,
-        "kind": value.kind,
-        "prompt": value.prompt,
-        "createdAt": value.created_at,
-        "choices": list(value.choices),
-        "raw": dict(value.raw),
-        "questions": [interaction_question_json(question) for question in value.questions],
-    }
 
 
 def terminal_result_json(value: TerminalResult | None) -> dict[str, object] | None:
@@ -589,328 +198,6 @@ def transcript_entry_json(value: TranscriptEntry) -> dict[str, object]:
         "vendorCorrelationId": value.vendor_correlation_id,
         "terminalResult": terminal_result_json(value.terminal_result),
         "raw": dict(value.raw),
-    }
-
-
-def snapshot_json(value: AdapterSnapshot) -> dict[str, object]:
-    return {
-        "identity": value.identity.to_json(),
-        "control": value.control,
-        "activity": value.activity,
-        "acceptance": value.acceptance,
-        "vendorSessionId": value.vendor_session_id,
-        "pendingInteraction": pending_interaction_json(value.pending_interaction),
-        # Multiplexed sub-agent pendings: additive; the singular
-        # slot above stays the parent-thread entry exactly as before.
-        "pendingInteractions": [
-            pending_interaction_json(pending) for pending in value.pending_interactions
-        ],
-        "lastEventSequence": value.last_event_sequence,
-        "raw": dict(value.raw),
-    }
-
-
-def evidence_frame_json(value: EvidenceFrame) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "sequence": value.sequence,
-        "kind": value.kind,
-        "createdAt": value.created_at,
-        "raw": dict(value.raw),
-    }
-    if value.native_method is not None:
-        payload["nativeMethod"] = value.native_method
-    if value.thread_id is not None:
-        payload["threadId"] = value.thread_id
-    return payload
-
-
-def evidence_page_json(value: EvidencePage) -> dict[str, object]:
-    return {
-        "frames": [evidence_frame_json(frame) for frame in value.frames],
-        "latestSequence": value.latest_sequence,
-        "evictedBeforeSequence": value.evicted_before_sequence,
-        "truncated": value.truncated,
-        "bridgeEpoch": value.bridge_epoch,
-    }
-
-
-def native_evidence_frame_json(value: NativeEvidenceFrame) -> dict[str, object]:
-    return {
-        "nativeId": value.native_id,
-        "nativeParentId": value.native_parent_id,
-        "nativeType": value.native_type,
-        "createdAt": value.created_at,
-        "raw": dict(value.raw),
-    }
-
-
-def native_evidence_page_json(value: NativeEvidencePage) -> dict[str, object]:
-    return {
-        "frames": [native_evidence_frame_json(frame) for frame in value.frames],
-        "nextCursor": value.next_cursor,
-        "truncated": value.truncated,
-        "bridgeEpoch": value.bridge_epoch,
-    }
-
-
-def submission_provenance_json(value: SubmissionProvenance) -> dict[str, object]:
-    if value.outcome == "not-found":
-        return {"requestId": value.request_id, "outcome": "not-found"}
-    return {
-        "requestId": value.request_id,
-        "outcome": "found",
-        "source": value.source,
-        "state": value.state,
-        "submittedAt": value.submitted_at,
-        "updatedAt": value.updated_at,
-        "acceptedAt": value.accepted_at,
-        "vendorCorrelationId": value.vendor_correlation_id,
-    }
-
-
-def submission_provenance_batch_json(value: SubmissionProvenanceBatch) -> dict[str, object]:
-    return {
-        "bridgeEpoch": value.bridge_epoch,
-        "provenance": [submission_provenance_json(item) for item in value.provenance],
-    }
-
-
-def _bounded_identity_scalar(value: object) -> str | None:
-    """One preserved scalar if it is a string within the identity length ceiling, else ``None``.
-
-    A non-string or an over-length string is dropped whole (never truncated), so a malformed
-    giant scalar can neither cross nor collapse the truncation envelope's own byte budget.
-    """
-
-    if isinstance(value, str) and len(value) <= MAX_PRESERVED_EVIDENCE_SCALAR_CHARS:
-        return value
-    return None
-
-
-_TOP_LEVEL_IDENTITY_KEYS = ("type", "subtype", "terminal_reason", AR_TERMINAL_OUTCOME_KEY)
-"""Identity/status enums the settlement reads take straight off the frame root."""
-
-
-def _bounded_identity_scalars(
-    source: Mapping[str, object], keys: tuple[str, ...]
-) -> dict[str, object]:
-    """The subset of ``keys`` present in ``source`` as bounded scalars, kept at their own names.
-
-    A key is dropped whole when it is absent, non-string, or over-length -- never invented and
-    never truncated, so a surviving value is always the exact scalar a consumer would have read.
-    """
-
-    preserved: dict[str, object] = {}
-    for key in keys:
-        scalar = _bounded_identity_scalar(source.get(key))
-        if scalar is not None:
-            preserved[key] = scalar
-    return preserved
-
-
-def _nested_identity_scalars(
-    payload: Mapping[str, object], *, path: str, keys: tuple[str, ...]
-) -> dict[str, object]:
-    """One nested object's surviving identity scalars, rebuilt at ``path``.
-
-    Empty when the path is absent, is not an object, or contributed nothing -- so a clipped frame
-    never grows an empty ``message``/``turn`` shell that a consumer could mistake for evidence.
-    """
-
-    nested = payload.get(path)
-    if not isinstance(nested, Mapping):
-        return {}
-    kept = _bounded_identity_scalars(nested, keys)
-    return {path: kept} if kept else {}
-
-
-def _preserved_evidence_identity(payload: Mapping[str, object]) -> dict[str, object]:
-    """The terminal-identity fields that survive a clip, each at its original payload path.
-
-    Only tiny scalar identity/status enums cross — never text, content blocks, items, or any
-    other body. Each scalar is bounded by ``MAX_PRESERVED_EVIDENCE_SCALAR_CHARS`` and dropped
-    whole when absent, non-string, or over-length (never invented, never truncated); a value is
-    copied only when it is present as the exact bounded scalar the settlement consumers read:
-
-    * top-level ``type`` — the frame kind every clipped frame keeps (pi ``message_end``); the
-      pi settlement read is ``frame.raw.get("type") == "message_end"``.
-    * ``message.stopReason`` — the pi terminal enum; the read is ``frame.raw["message"]
-      ["stopReason"]``. Only ``stopReason`` crosses; the message role and content never do.
-    * ``turn.id`` + ``turn.status`` — the codex terminal-turn identity and status enum; the
-      read correlates ``frame.raw["turn"]["id"] == turn_id`` before taking ``turn["status"]``,
-      so both must survive or the frame is skipped. The turn's items/error never cross.
-    * top-level ``subtype`` + ``terminal_reason`` — the claude result-frame terminal enums; the
-      claude settlement read classifies the completed-kind frame from exactly these two.
-    * ``arTerminalOutcome`` — the adapter-attributed correlated terminal classification
-      (:data:`AR_TERMINAL_OUTCOME_KEY`); the claude settlement read takes it over the native
-      ``error_during_execution`` shape, so it must survive or a clipped interrupt settlement
-      degrades to a mis-read failure.
-    """
-
-    return {
-        **_bounded_identity_scalars(payload, _TOP_LEVEL_IDENTITY_KEYS),
-        **_nested_identity_scalars(payload, path="message", keys=("stopReason",)),
-        **_nested_identity_scalars(payload, path="turn", keys=("id", "status")),
-    }
-
-
-_CONTENT_TRUNCATION_LIMITS = (65536, 16384, 4096, 1024, 320)
-"""Descending per-string character ceilings the content-preserving clip attempts.
-
-The floor stays above ``MAX_PRESERVED_EVIDENCE_SCALAR_CHARS`` so identity/status scalars are
-never shortened by a content clip; anything that still exceeds the byte budget at the floor is
-structurally oversized and degrades to the legacy preview envelope.
-"""
-
-
-def _truncate_string_leaves(value: object, limit: int) -> object:
-    """A structural copy of ``value`` with every string VALUE longer than ``limit`` shortened.
-
-    Only leaf string values shrink — each carries the truncation marker plus its omitted length,
-    so a shortened tool input/output stays visibly partial. Mapping keys, nesting, numbers, and
-    booleans are untouched, which is what keeps exact schema discrimination valid on the copy.
-    """
-
-    if isinstance(value, str):
-        if len(value) <= limit:
-            return value
-        omitted = len(value) - limit
-        return f"{value[:limit]}{EVIDENCE_TRUNCATION_MARKER} [{omitted} chars omitted]"
-    if isinstance(value, Mapping):
-        return {key: _truncate_string_leaves(item, limit) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_truncate_string_leaves(item, limit) for item in value]
-    return value
-
-
-def clip_evidence_payload(payload: Mapping[str, object], *, max_bytes: int) -> Mapping[str, object]:
-    """Bound one JSON evidence payload to ``max_bytes`` serialized, with any clip visible.
-
-    Unclipped payloads are returned as a plain copy. An oversized payload degrades by CONTENT
-    before structure: long string leaves are truncated in place (marker + omitted count) at
-    descending ceilings until the serialized copy fits, and the copy is stamped
-    ``arEvidenceContentTruncated``/``originalBytes``. Every mapper still parses the exact native
-    shape — frame type, ids, tool inputs, diffs all survive — so an oversized Write/Edit/output
-    frame renders as its real item with visibly shortened text instead of an unknown-vendor row.
-
-    Only when even the structure cannot fit inside the budget does the legacy preview envelope
-    apply: serialized size never exceeds ``max_bytes``, the preview ends with the truncation
-    marker so consumers never mistake a partial payload for a complete native frame, and the
-    frame's terminal-identity enums re-cross at their original payload paths
-    (``_preserved_evidence_identity``) so exact-turn interrupt settlement stays honest.
-    """
-
-    if max_bytes < 1:
-        raise HarnessControlError("evidence payload clip requires a positive byte budget")
-    try:
-        encoded = json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
-    except (TypeError, ValueError) as exc:
-        raise HarnessControlError("adapter evidence payload must be JSON-serializable") from exc
-    if len(encoded.encode("utf-8")) <= max_bytes:
-        return dict(payload)
-    original_bytes = len(encoded.encode("utf-8"))
-    for limit in _CONTENT_TRUNCATION_LIMITS:
-        softened = _truncate_string_leaves(dict(payload), limit)
-        if not isinstance(softened, dict):  # pragma: no cover - Mapping input always copies to dict
-            break
-        clipped_content: dict[str, object] = {
-            **softened,
-            "arEvidenceContentTruncated": True,
-            "originalBytes": original_bytes,
-        }
-        serialized = json.dumps(clipped_content, ensure_ascii=False, separators=(",", ":"))
-        if len(serialized.encode("utf-8")) <= max_bytes:
-            return clipped_content
-    preserved = _preserved_evidence_identity(payload)
-    preview = encoded
-    for _ in range(64):
-        clipped: dict[str, object] = {
-            "arEvidenceTruncated": True,
-            "originalBytes": original_bytes,
-            "preview": preview + EVIDENCE_TRUNCATION_MARKER,
-            **preserved,
-        }
-        if len(json.dumps(clipped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= (
-            max_bytes
-        ):
-            return clipped
-        preview = preview[: len(preview) // 2]
-    raise HarnessControlError("evidence payload clip budget is below the truncation envelope")
-
-
-def evidence_frame_wire_bytes(frame: EvidenceFrame) -> int:
-    return _serialized_size(evidence_frame_json(frame))
-
-
-def native_evidence_frame_wire_bytes(frame: NativeEvidenceFrame) -> int:
-    return _serialized_size(native_evidence_frame_json(frame))
-
-
-def window_native_evidence_page(
-    frames: tuple[NativeEvidenceFrame, ...],
-    *,
-    cursor: str | None,
-    limit: int,
-    byte_budget: int,
-) -> NativeEvidencePage:
-    """Window one full native read into a bounded page with an opaque native continuation.
-
-    The cursor names the last native id of the previous page; the next page starts strictly
-    after it and is minted only from the fresh native read. A single oversized frame is clipped
-    so every page makes progress; the bridge stamps ``bridge_epoch`` on the result.
-    """
-
-    if limit < 1:
-        raise HarnessControlError("native evidence page limit must be positive")
-    if byte_budget < 1:
-        raise HarnessControlError("native evidence page byte budget must be positive")
-    start = _native_window_start(frames, cursor)
-    selected: list[NativeEvidenceFrame] = []
-    used = 0
-    end = start
-    while end < len(frames) and len(selected) < limit:
-        frame = frames[end]
-        if native_evidence_frame_wire_bytes(frame) > byte_budget:
-            frame = replace(frame, raw=clip_evidence_payload(frame.raw, max_bytes=byte_budget // 2))
-        size = native_evidence_frame_wire_bytes(frame)
-        if selected and used + size > byte_budget:
-            break
-        selected.append(frame)
-        used += size
-        end += 1
-    truncated = end < len(frames)
-    next_cursor = selected[-1].native_id if truncated and selected else None
-    return NativeEvidencePage(
-        frames=tuple(selected),
-        next_cursor=next_cursor,
-        truncated=truncated,
-        bridge_epoch="",
-    )
-
-
-def _native_window_start(frames: tuple[NativeEvidenceFrame, ...], cursor: str | None) -> int:
-    if cursor is None:
-        return 0
-    for index, frame in enumerate(frames):
-        if frame.native_id == cursor:
-            return index + 1
-    raise HarnessControlError("native evidence page cursor is absent from the current native read")
-
-
-def _serialized_size(value: Mapping[str, object]) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-
-
-def receipt_json(value: SubmissionReceipt) -> dict[str, object]:
-    return {
-        "requestId": value.request_id,
-        "acceptance": value.acceptance,
-        "submittedAt": value.submitted_at,
-        "vendorCorrelationId": value.vendor_correlation_id,
-        "acceptedAt": value.accepted_at,
-        "detail": value.detail,
-        "raw": dict(value.raw),
-        "bridgeEpoch": value.bridge_epoch,
     }
 
 
@@ -989,92 +276,3 @@ def submission_status_batch_json(value: SubmissionStatusBatch) -> dict[str, obje
         "bridgeEpoch": value.bridge_epoch,
         "submissions": [submission_lookup_json(item) for item in value.submissions],
     }
-
-
-def withdrawal_result_json(value: WithdrawalResult) -> dict[str, object]:
-    result: dict[str, object] = {
-        "requestId": value.request_id,
-        "outcome": value.outcome,
-        "state": value.state,
-        "withdrawnAt": value.withdrawn_at,
-        "detail": value.detail,
-    }
-    if value.recovery is not None:
-        # Additive optional key: present only at the one true withdrawal transition.
-        result["recovery"] = withdrawal_recovery_json(value.recovery)
-    return result
-
-
-def asset_reference_json(value: AssetReference) -> dict[str, object]:
-    """Serialize the wire identity; the runner-local spool path never crosses."""
-
-    return {
-        "assetId": value.asset_id,
-        "mimeType": value.mime_type,
-        "byteSize": value.byte_size,
-        "sha256": value.sha256,
-    }
-
-
-def withdrawal_recovery_json(value: WithdrawalRecovery) -> dict[str, object]:
-    return {
-        "text": value.text,
-        "assets": [asset_reference_json(asset) for asset in value.assets],
-    }
-
-
-def interrupt_result_json(value: InterruptResult) -> dict[str, object]:
-    return {
-        "acknowledgement": value.acknowledgement,
-        "bridgeEpoch": value.bridge_epoch,
-        "operation": value.operation.to_json() if value.operation is not None else None,
-        "vendorCorrelationId": value.vendor_correlation_id,
-        "detail": value.detail,
-        "raw": dict(value.raw),
-    }
-
-
-def operation_timeline_item_json(value: OperationTimelineItem) -> dict[str, object]:
-    return {
-        "operationId": value.operation_id,
-        "kind": value.kind,
-        "source": value.source,
-        "state": value.state,
-        "sequence": value.sequence,
-        "submittedAt": value.submitted_at,
-        "updatedAt": value.updated_at,
-        "acceptedAt": value.accepted_at,
-        "payloadDigestPresent": value.payload_digest_present,
-        "vendorCorrelationId": value.vendor_correlation_id,
-    }
-
-
-def operation_timeline_json(value: OperationTimeline) -> dict[str, object]:
-    return {
-        "bridgeEpoch": value.bridge_epoch,
-        "latestSequence": value.latest_sequence,
-        "evictedBeforeSequence": value.evicted_before_sequence,
-        "truncated": value.truncated,
-        "items": [operation_timeline_item_json(item) for item in value.items],
-    }
-
-
-def operation_timeline_item_wire_bytes(value: OperationTimelineItem) -> int:
-    return _serialized_size(operation_timeline_item_json(value))
-
-
-def read_asset_bytes(path: Path) -> tuple[str, int, bytes]:
-    """Read one confined spool file; return (sha256 hex, size, bytes), typed on any failure."""
-
-    try:
-        data = path.read_bytes()
-    except (OSError, ValueError) as exc:
-        raise HarnessControlError("asset is not readable inside the session asset spool") from exc
-    return hashlib.sha256(data).hexdigest(), len(data), data
-
-
-def _required_text(raw: Mapping[str, object], key: str) -> str:
-    value = raw.get(key)
-    if not isinstance(value, str) or not value:
-        raise HarnessControlError(f"control payload requires non-empty {key}")
-    return value

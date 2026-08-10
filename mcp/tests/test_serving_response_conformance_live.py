@@ -13,13 +13,15 @@ import httpx
 import uvicorn
 from _control_plane import OPERATOR, FakeControlAdapter, drive_activity, make_harness
 from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.models.conversations.opening import (
+    OpenConversationOperation,
+)
 from agents_remember.observer.projection import LifecycleProjection
 from agents_remember.serving.app import create_app, stream_events
 from agents_remember.serving.conversation.control.api import router as control_router
 from agents_remember.serving.conversation.library.api import _OPEN_STATUS_BY_OUTCOME
 from agents_remember.serving.conversation.library.factories import library_shared
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
-from agents_remember.serving.conversation.models import OpenConversationOperation
 from agents_remember.serving.delta import DeltaEvent
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.projector import ProjectionCadence, Projector

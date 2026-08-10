@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    ControlOperationRef,
+    LaunchSpec,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -26,9 +31,6 @@ from agents_remember.serving.codex_app_server_protocol import (
 )
 from agents_remember.serving.harness_control_models import (
     AdapterEvent,
-    ControlIdentity,
-    ControlOperationRef,
-    LaunchSpec,
     PromptRequest,
     ShutdownMode,
 )

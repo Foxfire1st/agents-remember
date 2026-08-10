@@ -8,25 +8,31 @@ from collections.abc import Callable
 from typing import Literal
 from uuid import uuid4
 
+from agents_remember.models.conversations.cursors import (
+    ActiveEventCursor,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.status import (
+    ConversationStatus,
+)
+from agents_remember.models.conversations.stream_events import (
+    AppendBlockDeltaMutation,
+    AppendItemMutation,
+    ConversationEventEnvelope,
+    ConversationMutation,
+    GapMutation,
+    StatusMutation,
+    UpsertItemMutation,
+)
 from agents_remember.serving.conversation.active.cursor import mint_event_cursor
 from agents_remember.serving.conversation.active.status import TurnTerminalEvidence
 from agents_remember.serving.conversation.active.store import (
     ProjectionStore,
     StoreMutation,
     unknown_vendor_item,
-)
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    ActiveEventCursor,
-    AppendBlockDeltaMutation,
-    AppendItemMutation,
-    AuthorizationBinding,
-    ConversationEventEnvelope,
-    ConversationMutation,
-    ConversationStatus,
-    GapMutation,
-    StatusMutation,
-    UpsertItemMutation,
 )
 from agents_remember.serving.conversation.projectors.common import (
     MappedBlockDelta,

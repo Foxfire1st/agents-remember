@@ -22,11 +22,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    GatePolicy,
     approval_failure_reason,
 )
-from agents_remember.controlplane.records import GateKind, GateRecord
+from agents_remember.controlplane.records import (
+    GateRecord,
+)
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+)
+from agents_remember.models.gates import (
+    GateKind,
+)
 
 CLOSEOUT_GATE_KIND: GateKind = "closeout-approval"
 

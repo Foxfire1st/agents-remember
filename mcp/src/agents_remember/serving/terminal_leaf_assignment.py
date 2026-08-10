@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.seat_binding import attach_seat_role
 from agents_remember.serving.sprint_role_binding import sprint_binding_for_attachment
-from agents_remember.serving.terminal_catalog import TerminalCatalog
 
 LeafAssignmentStatus = Literal[
     "attached",
@@ -38,7 +38,7 @@ class LeafAssignmentResult:
 
 
 def leaf_conflict_owner(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     *,
     leaf_key: str | None,
     session_id: str,
@@ -59,7 +59,7 @@ def leaf_conflict_owner(
 
 
 def assign_terminal_session_to_leaf(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: LeafAssignmentHost,
     *,
     session_id: str,

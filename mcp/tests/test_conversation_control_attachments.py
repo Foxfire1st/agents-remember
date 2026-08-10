@@ -12,6 +12,17 @@ import unittest
 from hashlib import sha256
 
 from _control_plane import OPERATOR, TINY_PNG, FakeControlAdapter, drive_activity, make_harness
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+)
+from agents_remember.models.conversations.submissions import (
+    AssetSubmitBlock,
+    ConversationSubmitRequest,
+    TextSubmitBlock,
+)
+from agents_remember.models.conversations.withdrawals import (
+    WithdrawnQueueResponse,
+)
 from agents_remember.serving.conversation.control import (
     attachments,
     policy,
@@ -28,13 +39,6 @@ from agents_remember.serving.conversation.control.service import (
     OperationConflictError,
     OperationRejectedError,
 )
-from agents_remember.serving.conversation.models import (
-    AssetSubmitBlock,
-    ConversationSubmitRequest,
-    TextSubmitBlock,
-    WithdrawnQueueResponse,
-)
-from agents_remember.serving.harness_control_models import AR_EVIDENCE_KEY
 
 SESSION = "ar-attach-1"
 

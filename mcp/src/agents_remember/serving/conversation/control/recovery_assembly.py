@@ -10,6 +10,16 @@ pure assembly over the bounded retention record; the lifecycle policy lives in
 
 from __future__ import annotations
 
+from agents_remember.models.conversations.control_wire import (
+    AssetReference,
+)
+from agents_remember.models.conversations.control_wire import (
+    WithdrawalRecovery as SubstrateWithdrawalRecovery,
+)
+from agents_remember.models.conversations.withdrawals import (
+    AttachmentRecoveryRef,
+    WithdrawalRecovery,
+)
 from agents_remember.serving.conversation.control import attachments
 from agents_remember.serving.conversation.control.previews import payload_digest
 from agents_remember.serving.conversation.control.refs import (
@@ -22,16 +32,6 @@ from agents_remember.serving.conversation.control.service import (
     ControlChannel,
     ControlScope,
     JournalEntry,
-)
-from agents_remember.serving.conversation.models import (
-    AttachmentRecoveryRef,
-    WithdrawalRecovery,
-)
-from agents_remember.serving.harness_control_models import (
-    AssetReference,
-)
-from agents_remember.serving.harness_control_models import (
-    WithdrawalRecovery as SubstrateWithdrawalRecovery,
 )
 
 EMPTY_DIGEST = payload_digest("")

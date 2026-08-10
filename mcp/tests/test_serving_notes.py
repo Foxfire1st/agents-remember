@@ -21,7 +21,10 @@ from fastapi.testclient import TestClient
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.serving.app import create_app
 from agents_remember.serving.notes import _MAX_FILE_BYTES
 from agents_remember.serving.projector import ProjectionCadence

@@ -18,7 +18,10 @@ from unittest.mock import patch
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.serving import files, scope
 from agents_remember.serving.changeset import (
     ChangesetFileRef,

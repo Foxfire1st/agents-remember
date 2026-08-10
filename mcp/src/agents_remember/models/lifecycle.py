@@ -8,10 +8,23 @@ so the response contract is as drift-proof as the event envelope.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.observer.lifecycle_state import Phase, State
+
+# The lifecycle state/phase vocabulary (moved from observer.lifecycle_state).
+LiveState = Literal["running", "paused", "blocked", "awaiting-developer"]
+EndOutcome = Literal["completed", "abandoned"]
+TerminalState = EndOutcome
+State = Literal[LiveState, TerminalState]
+Phase = Literal[
+    "request",
+    "trust-checkpoint",
+    "reframe-research",
+    "decide",
+    "build",
+    "close",
+]
 
 
 class LifecycleResponse(ToolResponse):

@@ -28,8 +28,14 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig, RetirementSettings
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RetirementSettings,
+)
 from agents_remember.mcp.tools.terminal import session_rename_payload, session_retire_payload
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.landing import land_seats_for_leaf
 from agents_remember.serving.retire import SeatClosure
 from agents_remember.serving.retire_policy import (
@@ -38,7 +44,9 @@ from agents_remember.serving.retire_policy import (
     check_retire_authority,
     master_of,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessConfig,

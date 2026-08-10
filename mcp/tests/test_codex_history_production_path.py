@@ -18,6 +18,22 @@ from _agent_wire_fixtures import (
     turn_completed_params,
     turn_started_params,
 )
+from agents_remember.models.conversations.content import (
+    MarkdownBlock,
+)
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    LaunchSpec,
+    SubmissionAuthorityDescriptor,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    EvidencePage,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
@@ -25,11 +41,6 @@ from agents_remember.serving.codex_app_server_adapter import (
 from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
 from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
 from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    AuthorizationBinding,
-    MarkdownBlock,
-)
 from agents_remember.serving.conversation.projectors import projector_for
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
@@ -42,13 +53,6 @@ from agents_remember.serving.harness_control_client import (
 from agents_remember.serving.harness_control_ipc import (
     HarnessControlServer,
     LocalControlEndpoint,
-)
-from agents_remember.serving.harness_control_models import (
-    ControlIdentity,
-    EvidenceFrame,
-    EvidencePage,
-    LaunchSpec,
-    SubmissionAuthorityDescriptor,
 )
 
 NOW = "2026-07-27T11:00:00+00:00"
@@ -402,7 +406,7 @@ def _projector_over_control_entry(
                 principal_id="local-operator:1000",
                 tenant_id=str(tmp_path),
             ),
-            entry=entry,
+            entry=entry,  # type: ignore[arg-type]
             mapper=mapper,
             secret=SECRET,
         ),

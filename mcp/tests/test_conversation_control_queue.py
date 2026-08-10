@@ -11,8 +11,19 @@ import json
 import unittest
 from unittest import mock
 
+import agents_remember.serving.harness_control_client as client_module
 from _control_plane import OPERATOR, FakeControlAdapter, drive_activity, make_harness
 from agents_remember.errors import HarnessControlClientError
+from agents_remember.models.conversations.control_wire import (
+    SubmissionSource,
+)
+from agents_remember.models.conversations.submissions import (
+    ConversationSubmitRequest,
+    TextSubmitBlock,
+)
+from agents_remember.models.conversations.withdrawals import (
+    WithdrawnQueueResponse,
+)
 from agents_remember.serving.conversation.control import attachments, queue_projection, withdrawals
 from agents_remember.serving.conversation.control.previews import (
     MAX_PREVIEW_CLUSTERS,
@@ -33,17 +44,11 @@ from agents_remember.serving.conversation.control.service import (
     OperationConflictError,
     OperationNotFoundError,
 )
-from agents_remember.serving.conversation.models import (
-    ConversationSubmitRequest,
-    TextSubmitBlock,
-    WithdrawnQueueResponse,
-)
 from agents_remember.serving.harness_control_client import (
     ControlSubmission,
     set_control_model,
     submit_control_prompt,
 )
-from agents_remember.serving.harness_control_models import SubmissionSource
 
 SESSION = "ar-queue-1"
 
@@ -452,7 +457,7 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         row = await self._queue_row(1)
         assert row.cockpit is not None
         with mock.patch.object(
-            withdrawals,
+            client_module,
             "withdraw_control_submission",
             side_effect=HarnessControlClientError("socket died mid-read", may_have_sent=True),
         ):

@@ -8,12 +8,14 @@ from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    LaunchSpec,
+)
 from agents_remember.serving.harness_capabilities import (
     EffortOption,
     LaunchKnobs,
     ModelCapability,
 )
-from agents_remember.serving.harness_control_models import LaunchSpec
 
 PI_RPC_PACKAGE = "@earendil-works/pi-coding-agent"
 PI_RPC_PROTOCOL = "pi-rpc/jsonl"

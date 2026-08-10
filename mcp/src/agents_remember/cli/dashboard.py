@@ -18,7 +18,10 @@ import uvicorn
 import agents_remember
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.controlplane.durable_store import declare_process_role
-from agents_remember.mcp.config import ConfigError, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+    load_config,
+)
 from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving.app import create_app
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS

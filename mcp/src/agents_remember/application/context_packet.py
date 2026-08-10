@@ -8,6 +8,7 @@ from typing import Any
 
 from agents_remember.application.worktree_status import worktree_status_packet
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     EnclosureSelector,
@@ -17,7 +18,10 @@ from agents_remember.kernel.coordination_context_resolver import (
 from agents_remember.kernel.git_facts import GitFacts, git_facts_to_packet, read_git_facts
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     DriftSummaryPacket,
 )
@@ -37,6 +41,7 @@ from agents_remember.models.context_packet import (
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
 from agents_remember.providers.status import provider_summary_packet
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 CONTEXT_PACKET_VERSION = 2
 
@@ -65,13 +70,16 @@ def build_context_packet(
         code_repository_name=repo_scope.repo_id,
         workspace_root=config.workspace_root,
         code_repository_root=repo_scope.path,
-        hints=CoordinationHints(
-            coordination_root=config.coordination_root,
-            onboarding_root=(repo_scope.memory_root / "onboarding")
-            if repo_scope.memory_root
-            else None,
+        request=CoordinationRequest(
+            hints=CoordinationHints(
+                coordination_root=config.coordination_root,
+                onboarding_root=(repo_scope.memory_root / "onboarding")
+                if repo_scope.memory_root
+                else None,
+            ),
+            selector=EnclosureSelector(contract_path=repo_scope.contract_path),
+            contract_reader=WorktreeContractReader(),
         ),
-        selector=EnclosureSelector(contract_path=repo_scope.contract_path),
     )
     context_dict = context_to_dict(context)
     git_facts = read_git_facts(repo_scope.repo_id, repo_scope.path)

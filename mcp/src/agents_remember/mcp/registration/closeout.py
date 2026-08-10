@@ -8,8 +8,8 @@ from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from ..tools import (
     worktree_abandon_payload,
     worktree_cleanup_payload,

@@ -7,10 +7,15 @@ from pathlib import Path
 from typing import ClassVar
 
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.observer import reset_ambient
 from agents_remember.serving.harness_launch import ResolvedLaunch
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from test_spawn_agent_session import (
     _detected,
     _FakeHost,

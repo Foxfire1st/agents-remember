@@ -14,10 +14,12 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
+from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionKind,
+)
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
     terminal_catalog_path,
 )
 
@@ -386,12 +388,16 @@ class TerminalCatalogTests(unittest.TestCase):
         # A terminated chat frees its leaf too.
         self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
 
-    def test_with_leaf_key_copies_binding(self) -> None:
+    def test_replace_copies_leaf_binding(self) -> None:
         entry = _entry("a")
-        bound = entry.with_leaf_key("repo/master/leaf-1")
+        bound = replace(entry, leaf_key="repo/master/leaf-1")
         self.assertEqual(bound.leaf_key, "repo/master/leaf-1")
-        self.assertIsNone(bound.with_leaf_key(None).leaf_key)
+        self.assertIsNone(replace(bound, leaf_key=None).leaf_key)
         self.assertIsNone(entry.leaf_key)  # the original is untouched (frozen copy)
+
+    def test_with_turn_state_keeps_an_unchanged_state(self) -> None:
+        entry = replace(_entry("a"), turn_state="working")
+        self.assertIs(entry.with_turn_state("working", changed_at="2026-08-10T12:00:00Z"), entry)
 
     def test_read_recovers_from_torn_extra_data_write(self) -> None:
         # The exact corruption two writers (or one process's two request threads) produced on the old

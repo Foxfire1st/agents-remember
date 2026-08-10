@@ -13,13 +13,15 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.observer.landing_state import (
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.observer.projection import LandingRefNode
+from agents_remember.serving.projections.landing_state import (
     _LANDING_ROW_KEYS,
     LandingStateRefresher,
     _load_final,
 )
-from agents_remember.observer.projection import LandingRefNode
 from agents_remember.worktrees.reopen import _clear_frozen_landing, reopen_task
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -195,7 +197,9 @@ class LandingStateLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
 
             refresher.refresh_once = refresh_once  # type: ignore[method-assign]
-            with self.assertLogs("agents_remember.observer.landing_state", level="ERROR"):
+            with self.assertLogs(
+                "agents_remember.serving.projections.landing_state", level="ERROR"
+            ):
                 task = asyncio.create_task(refresher.run())
                 await asyncio.wait_for(recovered.wait(), timeout=1)
                 task.cancel()

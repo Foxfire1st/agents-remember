@@ -46,6 +46,9 @@ from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeRecord,
     OrchestrationNudgeStore,
 )
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_TTL_SECONDS,
@@ -61,7 +64,6 @@ from agents_remember.providers.metrics import PROVIDER_METRICS_SCHEMA, ProviderM
 from agents_remember.serving.events import decode_cursor, read_new_events
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
 )
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,

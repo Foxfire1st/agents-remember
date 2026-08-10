@@ -39,7 +39,7 @@ from agents_remember.controlplane.signal_routing import (
     derive_architect_owner,
 )
 from agents_remember.kernel.agentic_settings import load_agentic_settings
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_supersede_payload
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _app_lifespan

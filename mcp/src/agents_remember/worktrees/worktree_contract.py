@@ -11,11 +11,19 @@ import json
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal, TypeVar, cast, get_args
+from typing import TypeVar, cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.models.worktree import (
+    CleanupStatus,
+    CloseoutStatus,
+    HumanReviewStatus,
+    IntegrationStatus,
+    MemoryMode,
+    WorkflowKind,
+)
 from agents_remember.worktrees.leaf_refs import (
     LeafRefResolutionError,
     canonical_leaf_doc_ids,
@@ -56,16 +64,6 @@ migration is needed.
 # `worktrees/reopen.py` and by `worktree_start`'s own documented argument, and neither was in
 # the Literal the packet validated against).
 #
-# `WorkflowKind` holds exactly the two task formats a producer can write: `worktree_start`'s
-# `workflow_kind` argument, whose own docstring advertises these two and nothing else. The
-# bare `chat`/`light` this alias also carried were the un-reconciled union of two
-# hand-written copies -- no writer, and zero occurrences across the 213 contracts on disk.
-WorkflowKind = Literal["chat-task", "light-task"]
-MemoryMode = Literal["internal", "external", "disabled"]
-HumanReviewStatus = Literal["pending-review", "approved"]
-CloseoutStatus = Literal["not-started", "completed"]
-IntegrationStatus = Literal["not-started", "completed", "blocked"]
-CleanupStatus = Literal["pending", "completed", "abandoned", "reopened"]
 
 # The runtime half of each alias, derived from it rather than retyped beside it, so a
 # member can only ever be added in one place.

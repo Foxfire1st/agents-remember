@@ -9,6 +9,15 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    ControlOperationRef,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    EvidenceFrame,
+    clip_evidence_payload,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
     ControlSubmission,
@@ -19,12 +28,7 @@ from agents_remember.serving.harness_control_client import (
 from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
-    ControlIdentity,
-    ControlOperationRef,
-    EvidenceFrame,
     PromptRequest,
-    clip_evidence_payload,
 )
 from agents_remember.serving.harness_control_runner import (
     RunnerConfig,
@@ -33,7 +37,9 @@ from agents_remember.serving.harness_control_runner import (
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_opener import (
     ControlRunnerRequest,
     TerminalLaunchRequest,

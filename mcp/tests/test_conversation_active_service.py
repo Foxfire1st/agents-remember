@@ -7,6 +7,25 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.content import (
+    UnknownVendorBlock,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    SubmissionProvenance,
+    SubmissionProvenanceBatch,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
 from agents_remember.serving.conversation.active.projector import (
     ActiveSessionProjector,
     EvidenceTimelineRegressed,
@@ -14,24 +33,9 @@ from agents_remember.serving.conversation.active.projector import (
 from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
 from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
 from agents_remember.serving.conversation.active.store import ProjectionStore
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    AuthorizationBinding,
-    UnknownVendorBlock,
-)
 from agents_remember.serving.conversation.projectors import projector_for
 from agents_remember.serving.conversation.projectors.codex import map_native_frame
 from agents_remember.serving.conversation.projectors.common import MappedItem
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-    EvidenceFrame,
-    EvidencePage,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
-    SubmissionProvenance,
-    SubmissionProvenanceBatch,
-)
 
 NOW = "2026-07-19T08:00:00+00:00"
 SECRET = b"x" * 32
@@ -172,7 +176,8 @@ def _projector(bridge: _ScriptedBridge, harness: str = "codex") -> ActiveSession
         ProjectedSession(
             identity=_identity(harness),
             authorization=_authorization(),
-            entry=_ControlledEntry(),
+            entry=_ControlledEntry(),  # type: ignore[arg-type]
+            # type: ignore[arg-type]
             mapper=mapper,
             secret=SECRET,
         ),
@@ -233,7 +238,7 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
             ["turn-1-user", "turn-1-agent", "turn-result:turn-1"],
         )
         agent = result.items[1]
-        from agents_remember.serving.conversation.models import MarkdownBlock  # noqa: PLC0415
+        from agents_remember.models.conversations.content import MarkdownBlock  # noqa: PLC0415
 
         self.assertIsInstance(agent.blocks[0], MarkdownBlock)
         self.assertEqual(
@@ -280,7 +285,7 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         silently stored (``model_copy`` skips validation) and 500-ing the active-page route only at
         response re-validation. Every emitted item must survive a full model re-validation.
         """
-        from agents_remember.serving.conversation.models import ConversationItem  # noqa: PLC0415
+        from agents_remember.models.conversations.content import ConversationItem  # noqa: PLC0415
 
         bridge = _ScriptedBridge()
         bridge.provenance["req-turn-1"] = "cockpit"

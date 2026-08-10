@@ -42,11 +42,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from agents_remember.observer.projection_inputs import (
-    ProjectionInputState,
-    ProjectionRefresh,
-)
-from agents_remember.observer.projection_store import ProjectionTickState, project_and_write
 from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS, ChangePacer
 from agents_remember.serving.delta import (
@@ -55,13 +50,23 @@ from agents_remember.serving.delta import (
     diff_projection,
     stable_projection_state,
 )
+from agents_remember.serving.projections.projection_inputs import (
+    ProjectionInputState,
+    ProjectionRefresh,
+)
+from agents_remember.serving.projections.projection_store import (
+    ProjectionTickState,
+    project_and_write,
+)
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
-    from agents_remember.observer.landing_state import LandingStateRefresh
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
     from agents_remember.observer.projection import WorkspaceProjection
-    from agents_remember.observer.projection_store import ProviderStateRefresh
     from agents_remember.serving.change_watcher import ChangeWatch
+    from agents_remember.serving.projections.landing_state import LandingStateRefresh
+    from agents_remember.serving.projections.projection_store import ProviderStateRefresh
 
 logger = logging.getLogger(__name__)
 

@@ -45,7 +45,6 @@ from agents_remember.benchmarks.runner_modules import execution as benchmark_exe
 from agents_remember.benchmarks.runner_modules import mcp_registration as benchmark_mcp
 from agents_remember.cli import dashboard as dashboard_cli
 from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
-from agents_remember.controlplane.gate_policy import coerce_decision_role
 from agents_remember.controlplane.operator_inbox_records import (
     InboxSubject,
     OperatorInboxEntry,
@@ -61,10 +60,13 @@ from agents_remember.install.runtime import (
 )
 from agents_remember.kernel.agentic_settings import AgenticSettingsError, load_agentic_settings
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.kernel.primitives.gate_policy import (
+    coerce_decision_role,
+)
 from agents_remember.memory import baseline as memory_baseline
 from agents_remember.memory.carryover import _validate_entity_fingerprints
-from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.observer.reducer import _paused_updates
+from agents_remember.serving.projections.projection_store import ProviderStateRefresher
 
 
 class DecisionRoleTests(unittest.TestCase):
@@ -165,7 +167,9 @@ class ProviderStateCacheTests(unittest.TestCase):
             ttl_seconds=0.0,
         )
 
-        with self.assertLogs("agents_remember.observer.projection_store", level="WARNING") as logs:
+        with self.assertLogs(
+            "agents_remember.serving.projections.projection_store", level="WARNING"
+        ) as logs:
             cache.maybe_refresh(config, now=datetime(2026, 7, 31, 12, 0, tzinfo=UTC))
 
         self.assertTrue(any("using last snapshot" in line for line in logs.output))

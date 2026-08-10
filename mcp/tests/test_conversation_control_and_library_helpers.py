@@ -28,6 +28,40 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.capabilities import (
+    CapabilityEvidence,
+    FeatureCapability,
+    HistoryCapabilities,
+)
+from agents_remember.models.conversations.content import (
+    ConversationContentBlock,
+    ToolInputBlock,
+    ToolOutputBlock,
+    UnknownVendorBlock,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    SubmissionProvenanceBatch,
+    WithdrawalResult,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+    ConversationLibraryScope,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
 from agents_remember.serving.conversation.active.projector import facade as projector_facade
 from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
 from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
@@ -52,32 +86,8 @@ from agents_remember.serving.conversation.library.errors import (
 from agents_remember.serving.conversation.library.normalize_common import TEXT_BLOCK_CAP
 from agents_remember.serving.conversation.library.pi import PiConversationLibrary
 from agents_remember.serving.conversation.library.scope import query_digest
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    AuthorizationBinding,
-    CapabilityEvidence,
-    ConversationContentBlock,
-    ConversationLibraryScope,
-    FeatureCapability,
-    HistoryCapabilities,
-    OperationFingerprint,
-    ToolInputBlock,
-    ToolOutputBlock,
-    UnknownVendorBlock,
-    operation_fingerprint,
-)
 from agents_remember.serving.conversation.projectors import projector_for
 from agents_remember.serving.harness_control_client import ControlledSession
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-    EvidenceFrame,
-    EvidencePage,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
-    SubmissionProvenanceBatch,
-    WithdrawalResult,
-)
 
 CALLER = AuthorizationBinding(principal_id="local-operator:1000", tenant_id="/ws")
 EPOCH = "epoch-1"
@@ -840,7 +850,7 @@ class ActiveProjectorPollLoopTests(unittest.IsolatedAsyncioTestCase):
                 authorization=AuthorizationBinding(
                     principal_id="local-operator:1000", tenant_id="/workspace"
                 ),
-                entry=cast("ControlledSession", _ControlledEntry()),
+                entry=cast("ControlledSession", _ControlledEntry()),  # type: ignore[arg-type]
                 mapper=mapper,
                 secret=SECRET,
             ),

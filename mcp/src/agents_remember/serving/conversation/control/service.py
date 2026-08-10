@@ -31,24 +31,26 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    OperationTimeline,
+    OperationTimelineItem,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.active.factories import (
     build_identity,
     current_bridge_epoch,
     live_snapshot,
     resolve_running_entry,
 )
-from agents_remember.serving.conversation.models import ActiveConversationRef, AuthorizationBinding
 from agents_remember.serving.conversation.runtime import ConversationRuntime
-from agents_remember.serving.harness_control_client import (
-    ControlledSession,
-    read_operation_timeline,
-)
-from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    OperationTimeline,
-    OperationTimelineItem,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving.ports import ControlPlanePort, ControlSessionLike
 
 Clock = Callable[[], str]
 
@@ -237,6 +239,10 @@ class ConversationControlService:
     def clock(self) -> Clock:
         return self._clock
 
+    @property
+    def control_plane(self) -> ControlPlanePort:
+        return self._runtime.control_plane
+
     def channel(self, ar_session_id: str, bridge_epoch: str) -> ControlChannel:
         key = (ar_session_id, bridge_epoch)
         channel = self._channels.get(key)
@@ -299,14 +305,14 @@ class ConversationControlService:
         return await asyncio.to_thread(resolve_running_entry, self._runtime, ar_session_id)
 
     async def verify_epoch(self, entry: TerminalCatalogEntry, expected_bridge_epoch: str) -> str:
-        actual = await asyncio.to_thread(current_bridge_epoch, entry)
+        actual = await asyncio.to_thread(current_bridge_epoch, entry, self._runtime.control_plane)
         if actual != expected_bridge_epoch:
             raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual)
         return actual
 
     async def live_snapshot(self, entry: TerminalCatalogEntry) -> AdapterSnapshot:
         try:
-            return await asyncio.to_thread(live_snapshot, entry)
+            return await asyncio.to_thread(live_snapshot, entry, self._runtime.control_plane)
         except HarnessControlError:
             raise
         except Exception as exc:  # defensive: factories already type these
@@ -326,7 +332,7 @@ class ConversationControlService:
 
     async def read_full_timeline(
         self,
-        entry: ControlledSession,
+        entry: ControlSessionLike,
         *,
         expected_bridge_epoch: str,
     ) -> list[OperationTimelineItem]:
@@ -336,7 +342,7 @@ class ConversationControlService:
         after = 0
         while True:
             page: OperationTimeline = await asyncio.to_thread(
-                read_operation_timeline,
+                self._runtime.control_plane.read_operation_timeline,
                 entry,
                 expected_bridge_epoch=expected_bridge_epoch,
                 after_sequence=after,
@@ -347,7 +353,7 @@ class ConversationControlService:
             after = page.items[-1].sequence
         return items
 
-    def spool_assets_root(self, entry: ControlledSession) -> Path:
+    def spool_assets_root(self, entry: ControlSessionLike) -> Path:
         """The session's user-private asset spool root (L2E endpoint convention)."""
 
         endpoint = entry.control_endpoint

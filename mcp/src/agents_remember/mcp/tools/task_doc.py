@@ -11,8 +11,8 @@ from agents_remember.application.task_doc_tools import (
     task_doc_tool,
     task_reopen_tool,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

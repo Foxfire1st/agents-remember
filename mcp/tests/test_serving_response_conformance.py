@@ -83,9 +83,12 @@ sys.path.insert(0, str(MCP_SRC))
 import httpx
 import uvicorn
 from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
 )
 from agents_remember.serving.app import (
     ServingCollaborators,
@@ -95,7 +98,6 @@ from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.response_contract import TerminalCatalogEntryWire
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_pty import TerminalSession
@@ -659,7 +661,7 @@ class ValidatedRouteHazardTests(unittest.TestCase):
         that method uses -- string keys of a dict literal, and ``data["x"] = ...``.
         """
 
-        source = (MCP_SRC / "agents_remember" / "serving" / "terminal_catalog.py").read_text()
+        source = (MCP_SRC / "agents_remember" / "models" / "terminal_catalog.py").read_text()
         entry = next(
             node
             for node in ast.parse(source).body

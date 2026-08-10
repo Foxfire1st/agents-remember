@@ -13,14 +13,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from agents_remember.serving.conversation.library.errors import (
-    InvalidLibraryCursorError,
-    LibraryScopeError,
-)
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.identity import (
     AuthorizationBinding,
     ConversationLibraryScope,
     HarnessId,
+)
+from agents_remember.serving.conversation.library.errors import (
+    InvalidLibraryCursorError,
+    LibraryScopeError,
 )
 
 LIBRARY_SORT = "last-activity-desc"

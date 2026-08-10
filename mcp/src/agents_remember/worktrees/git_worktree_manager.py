@@ -92,9 +92,6 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_onboarding_refresh_plan,
     validate_onboarding_refresh_plan_for_context,
 )
-from agents_remember.worktrees.modules.provider_teardown import (
-    teardown_worktree_providers,
-)
 from agents_remember.worktrees.modules.start import (
     attach_result,
     load_contract_from_args,
@@ -183,7 +180,6 @@ __all__ = [
     "status_payload",
     "status_result",
     "sync_result",
-    "teardown_worktree_providers",
     "validate_integrate_contract",
     "validate_onboarding_refresh_plan",
     "validate_onboarding_refresh_plan_for_context",

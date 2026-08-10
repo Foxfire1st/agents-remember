@@ -31,7 +31,9 @@ def _result(_tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def _store(config: McpRuntimeConfig) -> OperatorInboxStore:

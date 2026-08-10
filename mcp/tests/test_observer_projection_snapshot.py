@@ -11,18 +11,25 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope
-from agents_remember.observer.paths import observer_root
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    ProviderScope,
+)
 from agents_remember.observer.projection import WorkspaceProjection
-from agents_remember.observer.projection_store import (
+from agents_remember.observer.reducer import WorkspaceStructure, project_workspace
+from agents_remember.observer.store import EventStore
+from agents_remember.providers.current_state import current_state_path
+from agents_remember.serving.projections.paths import observer_root
+from agents_remember.serving.projections.projection_store import (
     project_and_write,
     read_lifecycle_logs,
     write_projection,
 )
-from agents_remember.observer.reducer import WorkspaceStructure, project_workspace
-from agents_remember.observer.snapshots import _inspect_result_map, read_enclosures, read_providers
-from agents_remember.observer.store import EventStore
-from agents_remember.providers.current_state import current_state_path
+from agents_remember.serving.projections.snapshots import (
+    _inspect_result_map,
+    read_enclosures,
+    read_providers,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -379,7 +386,7 @@ class SnapshotReaderTests(unittest.TestCase):
 
         names = {"cgc-device-management", "cgc-db", "grepai-watch", "grepai-db", "grepai-ollama"}
         with mock.patch(
-            "agents_remember.observer.snapshots._inspect_containers",
+            "agents_remember.serving.projections.snapshots._inspect_containers",
             return_value={name: inspected(name) for name in names},
         ) as inspect:
             nodes = {

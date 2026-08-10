@@ -12,7 +12,10 @@ from pathlib import Path
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:

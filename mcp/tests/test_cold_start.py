@@ -130,7 +130,7 @@ except BlockedNetwork:
 else:
     raise SystemExit("the network block did not take effect; the run proves nothing")
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.server import create_server
 from agents_remember.models.tokens import DEFAULT_TOKEN_COUNTER
 

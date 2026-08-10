@@ -229,6 +229,14 @@ def fixed_step_scope_line(
             "architectural failure); [tool.agents_remember] file_size_armed",
             f"{len(scope.size_paths)} size-scoped files",
         )
+    if name == "layering":
+        return scope_line(
+            name,
+            "every Python module under mcp/src/agents_remember",
+            "layers.toml strict package order (rank(imported) < rank(importer), no "
+            "package-pair cycles, no stale present=false flags); armed with no baseline",
+            "full tree",
+        )
     raise ScopeReportingError(f"no scope contract is registered for wrapper step {name!r}")
 
 

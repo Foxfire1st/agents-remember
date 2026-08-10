@@ -13,7 +13,7 @@ import errno
 import json
 import socket
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -21,6 +21,21 @@ from typing import Protocol, cast
 from agents_remember.errors import (
     HarnessControlClientError,
     HarnessControlError,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlSubmission,
+    InterruptResult,
+    OperationTimeline,
+    SubmissionAuthorityDescriptor,
+    SubmissionProvenanceBatch,
+    SubmissionReceipt,
+    WithdrawalResult,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidencePage,
+    NativeEvidencePage,
 )
 from agents_remember.serving._harness_control_parsing import (
     _asset_reference,
@@ -63,21 +78,11 @@ from agents_remember.serving.harness_control_ipc import MAX_CONTROL_MESSAGE_BYTE
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     MAX_OPERATION_TIMELINE_PAGE,
-    AdapterSnapshot,
-    ControlIdentity,
-    EvidencePage,
-    InterruptResult,
-    NativeEvidencePage,
-    OperationTimeline,
     ReconciliationResult,
     ReconciliationState,
-    SubmissionAuthorityDescriptor,
-    SubmissionProvenanceBatch,
-    SubmissionReceipt,
-    SubmissionSource,
     SubmissionStatusBatch,
-    WithdrawalResult,
 )
+from agents_remember.serving.ports import ControlSessionLike
 
 SET_CONTROL_TIMEOUT_SECONDS = 35.0
 """Bound a native setter above Claude's 30-second correlated acceptance window."""
@@ -153,7 +158,7 @@ def read_control_capabilities(entry: ControlledSession) -> CapabilitySnapshot:  
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:151).
 def read_submission_authority(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
 ) -> SubmissionAuthorityDescriptor:  # pragma: no cover
     result = request_control(entry, "submission-authority")
     if not isinstance(result, Mapping):
@@ -162,7 +167,7 @@ def read_submission_authority(
 
 
 def read_submission_status(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     expected_bridge_epoch: str,
     request_ids: tuple[str, ...],
@@ -183,7 +188,7 @@ def read_submission_status(
 
 
 def withdraw_control_submission(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     expected_bridge_epoch: str,
     request_id: str,
@@ -199,34 +204,17 @@ def withdraw_control_submission(
     return _withdrawal_result(result, request_id=request_id)
 
 
-def set_control_model(entry: ControlledSession, model_key: str) -> SetResult:
+def set_control_model(entry: ControlSessionLike, model_key: str) -> SetResult:
     return _set_control_value(entry, "set-model", "modelKey", model_key)
 
 
-def set_control_effort(entry: ControlledSession, effort: str) -> SetResult:
+def set_control_effort(entry: ControlSessionLike, effort: str) -> SetResult:
     return _set_control_value(entry, "set-effort", "effort", effort)
-
-
-@dataclass(frozen=True)
-class ControlSubmission:
-    """Everything about one submission EXCEPT its text: who sent it, as what, against which epoch.
-
-    The request id makes the submission idempotent, the source decides which authority owns it, the
-    epoch is the bridge generation it is valid against, and the assets are the bytes it references.
-    They are one envelope: a request id replayed with a different source or epoch is a different
-    submission, and the wire payload is built from all of them at once.
-    """
-
-    source: SubmissionSource
-    request_id: str
-    submitted_at: str | None = None
-    expected_bridge_epoch: str | None = None
-    assets: Sequence[Mapping[str, object]] | None = None
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:221).
 def submit_control_prompt(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     text: str,
     submission: ControlSubmission,
 ) -> SubmissionReceipt:
@@ -286,7 +274,7 @@ def _submit_payload(text: str, submission: ControlSubmission) -> dict[str, objec
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:280).
 def reconcile_control_prompt(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     request_id: str,
     *,
     expected_bridge_epoch: str | None = None,
@@ -320,7 +308,7 @@ def reconcile_control_prompt(  # pragma: no cover
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:313).
 def respond_control_interaction(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     interaction_id: str,
     response: str,
@@ -345,7 +333,7 @@ def respond_control_interaction(  # pragma: no cover
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:337).
 def read_control_transcript(  # pragma: no cover
-    entry: ControlledSession, *, after_sequence: int = 0, limit: int = 500
+    entry: ControlSessionLike, *, after_sequence: int = 0, limit: int = 500
 ) -> tuple[Mapping[str, object], ...]:
     result = request_control(
         entry,
@@ -361,7 +349,7 @@ def read_control_transcript(  # pragma: no cover
 
 
 def read_control_evidence(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     after_sequence: int = 0,
     limit: int = 500,
@@ -385,7 +373,7 @@ def read_control_evidence(
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:376).
 def read_control_native_page(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     cursor: str | None = None,
     limit: int = 200,
@@ -420,7 +408,7 @@ def read_control_native_page(  # pragma: no cover
 
 
 def read_submission_provenance(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     expected_bridge_epoch: str,
     request_ids: tuple[str, ...],
@@ -441,7 +429,7 @@ def read_submission_provenance(
 
 
 def interrupt_control(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     expected_bridge_epoch: str,
     turn_id: str | None = None,
@@ -464,7 +452,7 @@ def interrupt_control(
 
 
 def read_operation_timeline(
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     *,
     expected_bridge_epoch: str,
     after_sequence: int = 0,
@@ -490,13 +478,13 @@ def read_operation_timeline(
     return _operation_timeline(result, expected_bridge_epoch=expected_bridge_epoch)
 
 
-def stop_control_session(entry: ControlledSession, *, forced: bool = False) -> None:
+def stop_control_session(entry: ControlSessionLike, *, forced: bool = False) -> None:
     request_control(entry, "stop", {"mode": "forced" if forced else "graceful"})
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:486).
 def request_control(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     action: str,
     payload: Mapping[str, object] | None = None,
     *,
@@ -512,7 +500,7 @@ def request_control(  # pragma: no cover
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:501).
 def _encode_control_request(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     action: str,
     payload: Mapping[str, object] | None,
 ) -> bytes:
@@ -594,7 +582,7 @@ def _exchange_control(
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:578).
 def _set_control_value(  # pragma: no cover
-    entry: ControlledSession,
+    entry: ControlSessionLike,
     action: str,
     payload_key: str,
     requested_value: str,
@@ -640,10 +628,131 @@ def _read_line(client: socket.socket) -> bytes:  # pragma: no cover
     return bytes(data[: data.index(b"\n")])
 
 
+class ControlPlaneClient:
+    """Structural adapter exposing the control-socket reads as one injected port.
+
+    The conversation tree depends on ``ControlPlanePort`` from
+    ``serving.conversation.ports`` and never imports this module; the
+    composition root binds this adapter into the conversation runtime.
+    """
+
+    def read_snapshot(self, entry: ControlSessionLike) -> AdapterSnapshot:
+        return read_control_snapshot(entry)
+
+    def read_submission_authority(self, entry: ControlSessionLike) -> SubmissionAuthorityDescriptor:
+        return read_submission_authority(entry)
+
+    def read_evidence(
+        self,
+        entry: ControlSessionLike,
+        *,
+        after_sequence: int = 0,
+        limit: int = 500,
+        expected_bridge_epoch: str | None = None,
+    ) -> EvidencePage:
+        return read_control_evidence(
+            entry,
+            after_sequence=after_sequence,
+            limit=limit,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+
+    def read_native_page(
+        self,
+        entry: ControlSessionLike,
+        *,
+        cursor: str | None = None,
+        limit: int = 200,
+        expected_bridge_epoch: str | None = None,
+        thread_id: str | None = None,
+    ) -> NativeEvidencePage:
+        return read_control_native_page(
+            entry,
+            cursor=cursor,
+            limit=limit,
+            expected_bridge_epoch=expected_bridge_epoch,
+            thread_id=thread_id,
+        )
+
+    def read_transcript(
+        self,
+        entry: ControlSessionLike,
+        *,
+        after_sequence: int = 0,
+        limit: int = 500,
+    ) -> tuple[Mapping[str, object], ...]:
+        return read_control_transcript(entry, after_sequence=after_sequence, limit=limit)
+
+    def read_submission_provenance(
+        self,
+        entry: ControlSessionLike,
+        *,
+        expected_bridge_epoch: str,
+        request_ids: tuple[str, ...],
+    ) -> SubmissionProvenanceBatch:
+        return read_submission_provenance(
+            entry,
+            expected_bridge_epoch=expected_bridge_epoch,
+            request_ids=request_ids,
+        )
+
+    def interrupt(
+        self,
+        entry: ControlSessionLike,
+        *,
+        expected_bridge_epoch: str,
+        turn_id: str | None = None,
+        expected_operation_id: str | None = None,
+    ) -> InterruptResult:
+        return interrupt_control(
+            entry,
+            expected_bridge_epoch=expected_bridge_epoch,
+            turn_id=turn_id,
+            expected_operation_id=expected_operation_id,
+        )
+
+    def withdraw_submission(
+        self,
+        entry: ControlSessionLike,
+        *,
+        expected_bridge_epoch: str,
+        request_id: str,
+    ) -> WithdrawalResult:
+        return withdraw_control_submission(
+            entry,
+            expected_bridge_epoch=expected_bridge_epoch,
+            request_id=request_id,
+        )
+
+    def submit(
+        self,
+        entry: ControlSessionLike,
+        text: str,
+        submission: ControlSubmission,
+    ) -> SubmissionReceipt:
+        return submit_control_prompt(entry, text, submission)
+
+    def read_operation_timeline(
+        self,
+        entry: ControlSessionLike,
+        *,
+        expected_bridge_epoch: str,
+        after_sequence: int = 0,
+        limit: int = MAX_OPERATION_TIMELINE_PAGE,
+    ) -> OperationTimeline:
+        return read_operation_timeline(
+            entry,
+            expected_bridge_epoch=expected_bridge_epoch,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
+
 __all__ = [
     "EVIDENCE_PAGE_TIMEOUT_SECONDS",
     "SET_CONTROL_TIMEOUT_SECONDS",
     "SUBMIT_TIMEOUT_SECONDS",
+    "ControlPlaneClient",
     "ControlSubmission",
     "ControlledSession",
     "_asset_reference",

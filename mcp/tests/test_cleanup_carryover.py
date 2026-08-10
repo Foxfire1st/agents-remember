@@ -23,13 +23,13 @@ from agents_remember.kernel.memory_ledger import (
     ledger_to_text,
     prepend_mapping,
 )
+from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.memory_quality.style.citations import (
     source_index,
     source_index_cache,
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
-from agents_remember.observer.drift_snapshots import drift_snapshot_path
-from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA
+from agents_remember.serving.projections.paths import DRIFT_SNAPSHOT_SCHEMA
 from agents_remember.tasks import (
     TaskDocument,
     read_task_doc,
@@ -425,7 +425,7 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._td.cleanup()
 
-    @patch("agents_remember.worktrees.modules.cleanup.teardown_worktree_providers")
+    @patch("agents_remember.application.provider_runtime.teardown_worktree_providers")
     @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
     def test_worktree_group_would_remove_when_only_scheduled_paths_remain(
         self, carryover: MagicMock, teardown: MagicMock

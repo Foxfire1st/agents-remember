@@ -12,7 +12,9 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.mcp.config import load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp.tools import memory_quality_check_payload
 from agents_remember.memory_quality.check import run_memory_quality_check
 from agents_remember.memory_quality.style.update_history import history_order_fix

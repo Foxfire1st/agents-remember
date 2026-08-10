@@ -20,7 +20,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.harness_control_models import ControlIdentity
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+)
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harness_launch import ResolvedLaunch
 

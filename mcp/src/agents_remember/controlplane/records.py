@@ -17,58 +17,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, cast, get_args
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.controlplane.durable_store import DurableRecord
+from agents_remember.models.gates import GateKind, GateState
 
 GATE_RECORD_SCHEMA = "ar-gate-record/v1"
-
-# What needs the human/operator. Extensible: a new gate kind is one literal.
-GateKind = Literal[
-    "plan-approval",
-    "worktree-intent",
-    # `closeout-approval` IS the commit gate: closeout is the single commit-of-record for code + memory +
-    # ledger (there is no separate `commit-approval`; singular commits route through closeout).
-    "closeout-approval",
-    "push-approval",
-    "integration-approval",
-    # `master-handover-approval` is the master-exit seam gate: the manager raises it with the
-    # reviewer verdict attached as evidence; the orchestrator decides it on the happy path
-    # (delegable, never human-pinned) — human review concentrates at the super gate.
-    "master-handover-approval",
-    "cleanup-approval",
-    "agent-question",
-    "provider-retry",
-    "alarm-ack",
-]
-# The gate's lifecycle. ``open`` awaits a decision; ``applied`` is set once a
-# mutating tool consumes an approval (a later slice writes it -- modeled here so
-# the contract is stable). The rest are terminal decisions.
-GateState = Literal[
-    "open",
-    "approved",
-    "rejected",
-    "revision-requested",
-    "applied",
-    "cancelled",
-    "expired",
-]
 # Through what surface the decision arrived -- kept separate from the actor
 # (``decidedBy``); "who" and "through what" never share a field, the same rule
 # the observer event envelope follows.
 DecidedVia = Literal["chat", "dashboard", "cli", "orchestration"]
 GateEvidenceKind = Literal["reviewer-verdict"]
-
-GATE_KINDS: tuple[GateKind, ...] = get_args(GateKind)
-
-
-def coerce_gate_kind(raw: str) -> GateKind:
-    """Validate a raw kind string against the :data:`GateKind` literals."""
-    if raw not in GATE_KINDS:
-        raise ValueError(f"unknown gate kind {raw!r}; expected one of {list(GATE_KINDS)}")
-    return cast(GateKind, raw)
 
 
 class GateEvidenceRef(BaseModel):

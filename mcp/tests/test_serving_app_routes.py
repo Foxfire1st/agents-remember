@@ -41,7 +41,13 @@ sys.path.insert(0, str(MCP_SRC))
 from _control_plane import FakeControlAdapter, drive_activity, make_harness
 from agents_remember.controlplane.records import GateAnchor, create_gate
 from agents_remember.controlplane.store import GateStore
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+    TerminalSessionStatus,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.actions import ActionOutcome, GateDecisionIntent
@@ -56,8 +62,6 @@ from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalSessionStatus,
 )
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 

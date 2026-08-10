@@ -26,16 +26,10 @@ sys.path.insert(0, str(MCP_SRC))
 from _scaling import assert_bounded_count
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.observer import (
-    contract_snapshot,
-    drift_snapshots,
-    projection_store,
-    snapshots,
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
 )
-from agents_remember.observer.contract_snapshot import ContractSnapshotCache
 from agents_remember.observer.events import Event
-from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     Analytics,
@@ -44,7 +38,16 @@ from agents_remember.observer.projection import (
     WorkspaceProjection,
     task_documents_body_bytes,
 )
-from agents_remember.observer.snapshots import (
+from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections import (
+    contract_snapshot,
+    drift_snapshots,
+    projection_store,
+    snapshots,
+)
+from agents_remember.serving.projections.contract_snapshot import ContractSnapshotCache
+from agents_remember.serving.projections.paths import observer_logs_root
+from agents_remember.serving.projections.snapshots import (
     TASK_DOCUMENT_SCHEMA,
     TASK_DOCUMENT_SUMMARY_LIMIT,
     read_enclosures,
@@ -55,9 +58,8 @@ from agents_remember.observer.snapshots import (
     read_task_documents,
     refresh_engine_process_landing,
 )
-from agents_remember.observer.snapshots_impl import _common as snapshots_common
-from agents_remember.observer.snapshots_impl import _runtime as snapshots_runtime
-from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections.snapshots_impl import _common as snapshots_common
+from agents_remember.serving.projections.snapshots_impl import _runtime as snapshots_runtime
 from agents_remember.worktrees.task_resolver import ENCLOSURES_DIR, SERIES_CONTRACT_FILENAME
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,

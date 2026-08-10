@@ -19,9 +19,9 @@ from agents_remember.application.memory_tools import (
     memory_quality_check_tool,
     route_index_refresh_tool,
 )
-from agents_remember.mcp.tool_reports import write_tool_report
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.tool_reports import write_tool_report
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

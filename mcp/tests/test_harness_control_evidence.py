@@ -17,6 +17,20 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    LaunchSpec,
+    SubmissionReceipt,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    NativeEvidencePage,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
@@ -32,21 +46,14 @@ from agents_remember.serving.harness_control_bridge import (
 )
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_models import (
-    AR_EVIDENCE_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
     InteractionResponse,
-    LaunchSpec,
-    NativeEvidencePage,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    SubmissionReceipt,
     TranscriptEntry,
 )
 from agents_remember.serving.hosted_control_projection import control_snapshot_entry
@@ -54,7 +61,6 @@ from agents_remember.serving.terminal import (
     TerminalSessionBinding,
     TerminalSessionSpec,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 NOW = "2026-07-19T08:00:00+00:00"
 CODEX_FIXTURE = Path(__file__).parent / "fixtures" / "codex_app_server_0_144_3.json"
@@ -431,11 +437,11 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
         # AR_EVIDENCE_METHOD_KEY so the projector switches on the real method instead of re-guessing
         # from the params shape. The bridge must preserve it as typed EvidenceFrame.native_method and
         # strip it from the republished snapshot exactly like AR_EVIDENCE_KEY (byte-identical).
-        from agents_remember.serving.harness_control_client import _evidence_page  # noqa: PLC0415
-        from agents_remember.serving.harness_control_models import (  # noqa: PLC0415
+        from agents_remember.models.conversations.evidence import (  # noqa: PLC0415
             AR_EVIDENCE_METHOD_KEY,
             evidence_page_json,
         )
+        from agents_remember.serving.harness_control_client import _evidence_page  # noqa: PLC0415
 
         identity = _identity()
         adapter = _EvidenceAdapter()
@@ -577,7 +583,7 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
         # The projector switches on ``native_method`` to decide what a frame IS. An empty string or
         # a non-string would be carried as a method that matches nothing, so every frame behind it
         # would be silently misclassified. Absent is fine; present-and-unusable is not.
-        from agents_remember.serving.harness_control_models import (  # noqa: PLC0415
+        from agents_remember.models.conversations.evidence import (  # noqa: PLC0415
             AR_EVIDENCE_METHOD_KEY,
         )
 

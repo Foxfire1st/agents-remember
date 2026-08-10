@@ -9,7 +9,9 @@ from agents_remember.observer import AmbientLifecycle, EventStore, install_ambie
 from agents_remember.serving.daemon import maybe_autostart_dashboard
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 
 def initialize_mcp_application(config: McpRuntimeConfig) -> None:

@@ -28,13 +28,20 @@ from typing import Any, Literal, NamedTuple
 
 import agents_remember
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.control_wire import (
+    ControlIdentity,
+    ControlState,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+    TerminalSessionKind,
+    migrated_seat_role,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
-    ControlIdentity,
-    ControlState,
 )
 from agents_remember.serving.harness_control_runner import RunnerConfig, control_runner_command
 from agents_remember.serving.harness_launch import ResolvedLaunch
@@ -48,7 +55,6 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.seat_binding import migrated_seat_role
 from agents_remember.serving.sprint_role_binding import (
     SprintOpenBindingRequest,
     sprint_binding_for_reopen,
@@ -57,10 +63,6 @@ from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSessionBinding,
     TerminalSessionSpec,
-)
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalogEntry,
-    TerminalSessionKind,
 )
 from agents_remember.serving.terminal_leaf_assignment import leaf_conflict_owner
 from agents_remember.serving.terminal_tmux import tmux_session_name
@@ -607,17 +609,7 @@ def _open_terminal_transaction(
         spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),
         kind=resolved_kind,
     )
-    binding, binding_refusal = sprint_binding_for_reopen(
-        SprintOpenBindingRequest(
-            role=seat_role,
-            leaf_key=provenance.leaf_key,
-            replacement_for_leaf=provenance.replacement_for_leaf,
-            existing=existing,
-            spawned_by_session=provenance.spawned_by_session,
-            spawn_repo=provenance.spawn_repo,
-            spawn_sprint=provenance.spawn_sprint,
-        )
-    )
+    binding, binding_refusal = _sprint_binding(existing, provenance, seat_role)
     if binding_refusal is not None:
         return OpenTerminalResult(status=binding_refusal)
     owner = leaf_conflict_owner(
@@ -672,6 +664,25 @@ def _open_terminal_transaction(
     catalog.upsert(entry)
     return OpenTerminalResult(
         status="opened", entry=entry, kind=resolved_kind, seat_role=entry.binding_role
+    )
+
+
+def _sprint_binding(
+    existing: TerminalCatalogEntry | None,
+    provenance: SpawnProvenance,
+    seat_role: str,
+):
+    """Resolve the named-seat sprint scope before opening its host session."""
+    return sprint_binding_for_reopen(
+        SprintOpenBindingRequest(
+            role=seat_role,
+            leaf_key=provenance.leaf_key,
+            replacement_for_leaf=provenance.replacement_for_leaf,
+            existing=existing,
+            spawned_by_session=provenance.spawned_by_session,
+            spawn_repo=provenance.spawn_repo,
+            spawn_sprint=provenance.spawn_sprint,
+        )
     )
 
 

@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from agents_remember.controlplane.durable_store import GATE_OWNERSHIP
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.gate_policy import (
-    GatePolicy,
     delegated_decision_failure_reason,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
@@ -24,6 +23,9 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.primitives.gate_policy import (
+    GatePolicy,
+)
 
 
 @dataclass(frozen=True)

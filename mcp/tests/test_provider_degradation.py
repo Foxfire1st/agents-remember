@@ -12,8 +12,16 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig, load_config
-from agents_remember.mcp.provider_degradation_settings import ProviderDegradationSettings
+from agents_remember.kernel.primitives.provider_degradation_settings import (
+    ProviderDegradationSettings,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    load_config,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import observer_root
 from agents_remember.providers.degradation import (
     ProviderDegradationStore,
@@ -26,9 +34,9 @@ from agents_remember.providers.metrics import (
     MetricsSnapshot,
     ProviderMetricsStore,
 )
+from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
     terminal_catalog_path,
 )
 
@@ -285,14 +293,17 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
             return log.entry
 
         with patch(
-            "agents_remember.providers.degradation.deliver_inbox_entry", side_effect=deliver_entry
+            "agents_remember.serving.degradation_delivery.deliver_inbox_entry",
+            side_effect=deliver_entry,
         ):
             result = evaluate_provider_degradation(
                 self.config,
+                degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
                 stop_provider_stacks=stop_provider_stacks,
             )
             second = evaluate_provider_degradation(
                 self.config,
+                degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
                 stop_provider_stacks=stop_provider_stacks,
             )
 
@@ -338,6 +349,7 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         result = evaluate_provider_degradation(
             self.config,
+            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
             stop_provider_stacks=stop_provider_stacks,
         )
 
@@ -366,7 +378,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         record_memory_sample(self.config, name="grepai-1", ratio=0.80)
         record_memory_sample(self.config, name="grepai-2", ratio=0.82)
         degraded = evaluate_provider_degradation(
-            self.config, stop_provider_stacks=unreachable_stopper
+            self.config,
+            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
+            stop_provider_stacks=unreachable_stopper,
         )
         self.assertEqual(degraded["state"], "degraded")
 
@@ -374,7 +388,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         record_memory_sample(self.config, name="grepai-4", ratio=0.20)
 
         recovered = evaluate_provider_degradation(
-            self.config, stop_provider_stacks=unreachable_stopper
+            self.config,
+            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
+            stop_provider_stacks=unreachable_stopper,
         )
 
         self.assertEqual(recovered["state"], "healthy")

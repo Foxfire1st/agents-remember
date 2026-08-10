@@ -4,23 +4,11 @@ from __future__ import annotations
 
 from collections import Counter
 
-from pydantic import BaseModel, ConfigDict
+from agents_remember.models.task_document import CompletionBlocker
 
-from .document import DocStatus, StepStatus, SubTaskRef, TaskDocument
+from .document import SubTaskRef, TaskDocument
 
-CompletionUnitStatus = StepStatus | DocStatus
 MasterRowIdentity = tuple[str, str]
-
-
-class CompletionBlocker(BaseModel):
-    """One exact declared work unit that prevents terminal completion."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    parentId: str | None = None
-    title: str
-    status: CompletionUnitStatus
 
 
 def completion_blockers(doc: TaskDocument) -> list[CompletionBlocker]:

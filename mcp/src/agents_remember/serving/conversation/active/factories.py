@@ -14,18 +14,21 @@ import hmac
 import json
 
 from agents_remember.errors import AgentsRememberError, HarnessControlError
-from agents_remember.serving.conversation.models import ActiveConversationRef
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.projectors import (
     HarnessProjector,
     projector_for,
 )
 from agents_remember.serving.conversation.runtime import ConversationRuntime
-from agents_remember.serving.harness_control_client import (
-    read_control_snapshot,
-    read_submission_authority,
-)
-from agents_remember.serving.harness_control_models import AdapterSnapshot
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving.ports import ControlPlanePort
 
 
 class SessionResolutionError(AgentsRememberError):
@@ -105,20 +108,20 @@ def build_identity(
     return identity.model_copy(update={"identity_digest": digest}), mapper
 
 
-def current_bridge_epoch(entry: TerminalCatalogEntry) -> str:
+def current_bridge_epoch(entry: TerminalCatalogEntry, control_plane: ControlPlanePort) -> str:
     """Read the live bridge epoch from the submission authority."""
 
     try:
-        return read_submission_authority(entry).bridge_epoch
+        return control_plane.read_submission_authority(entry).bridge_epoch
     except HarnessControlError as exc:
         raise ControlUnavailableError(str(exc)) from exc
 
 
-def live_snapshot(entry: TerminalCatalogEntry) -> AdapterSnapshot:
+def live_snapshot(entry: TerminalCatalogEntry, control_plane: ControlPlanePort) -> AdapterSnapshot:
     """Read the live adapter snapshot; IPC failures map to control-unavailable."""
 
     try:
-        return read_control_snapshot(entry)
+        return control_plane.read_snapshot(entry)
     except HarnessControlError as exc:
         raise ControlUnavailableError(str(exc)) from exc
 

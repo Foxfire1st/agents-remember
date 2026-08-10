@@ -6,8 +6,8 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftStatus
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
+from agents_remember.models.drift import DriftStatus
 
 
 class DriftCheckResponse(ToolResponse):

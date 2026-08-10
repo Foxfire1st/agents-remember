@@ -36,7 +36,9 @@ sys.path.insert(0, str(MCP_SRC))
 
 import inspect
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.observer import projection as projection_module
 from agents_remember.observer.lifecycle_state import State
 from agents_remember.observer.projection import (

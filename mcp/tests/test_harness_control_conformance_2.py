@@ -5,13 +5,15 @@ import unittest
 from dataclasses import replace
 
 from agents_remember.errors import HarnessControlError, HarnessRequestConflictError
+from agents_remember.models.conversations.control_wire import (
+    AcceptanceState,
+)
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolRegistry,
     protocol_adapter_status,
 )
 from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
-    AcceptanceState,
     AdapterEvent,
     ReconciliationResult,
     ReconciliationState,

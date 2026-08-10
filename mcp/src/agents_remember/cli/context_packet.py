@@ -11,7 +11,10 @@ from agents_remember.application.context_packet import (
     ContextPacketRequest,
     build_context_packet,
 )
-from agents_remember.mcp.config import ConfigError, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+    load_config,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

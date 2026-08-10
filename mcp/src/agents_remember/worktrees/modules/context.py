@@ -4,11 +4,13 @@ from dataclasses import replace
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     EnclosureSelector,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -17,13 +19,18 @@ def resolve_context(args: WorktreeArgs):
         code_repository_name=args.code_repository_name,
         workspace_root=args.workspace_root,
         code_repository_root=args.code_repository_root,
-        hints=CoordinationHints(topology=args.topology, coordination_root=args.coordination_root),
-        selector=EnclosureSelector(
-            contract_path=getattr(args, "contract_path", None),
-            task_name=getattr(args, "task_name", None),
-            parent_task=getattr(args, "parent_task", None),
-            leaf_id=getattr(args, "leaf_id", None),
-            worktree_name=getattr(args, "worktree_name", None),
+        request=CoordinationRequest(
+            hints=CoordinationHints(
+                topology=args.topology, coordination_root=args.coordination_root
+            ),
+            selector=EnclosureSelector(
+                contract_path=getattr(args, "contract_path", None),
+                task_name=getattr(args, "task_name", None),
+                parent_task=getattr(args, "parent_task", None),
+                leaf_id=getattr(args, "leaf_id", None),
+                worktree_name=getattr(args, "worktree_name", None),
+            ),
+            contract_reader=WorktreeContractReader(),
         ),
     )
 
@@ -33,7 +40,10 @@ def contract_context(contract: WorktreeContract):
         code_repository_name=contract.repo_name,
         workspace_root=contract.coordination_root.parent,
         code_repository_root=contract.code_repo_path,
-        selector=EnclosureSelector(contract_path=contract.contract_path),
+        request=CoordinationRequest(
+            selector=EnclosureSelector(contract_path=contract.contract_path),
+            contract_reader=WorktreeContractReader(),
+        ),
     )
     if contract.memory_mode != "external" or contract.memory_worktree is None:
         return context

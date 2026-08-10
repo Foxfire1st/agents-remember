@@ -82,7 +82,10 @@ from agents_remember.controlplane.durable_store import (
     CompactionOwnerError,
     declare_process_role,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    load_config,
+)
 from agents_remember.providers.degradation import (
     DEGRADATION_EVENT_SCHEMA,
     PROVIDER_DEGRADATION_OWNERSHIP,
@@ -98,6 +101,7 @@ from agents_remember.providers.metrics import (
     MetricsSnapshot,
     ProviderMetricsStore,
 )
+from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
 
@@ -535,7 +539,11 @@ class ProviderReadPolicyTests(_TempRootTest):
         def unreachable_stopper(_: McpRuntimeConfig) -> dict[str, Any]:
             raise AssertionError("this evaluation must not reach the critical failsafe")
 
-        verdict = evaluate_provider_degradation(config, stop_provider_stacks=unreachable_stopper)
+        verdict = evaluate_provider_degradation(
+            config,
+            degradation_alerts=DegradationAlertDelivery(config.coordination_root),
+            stop_provider_stacks=unreachable_stopper,
+        )
 
         self.assertEqual(verdict["state"], "degraded", "these rows must have decided something")
         self.assertIsNone(verdict["event"], "a transition here would test the alert path instead")

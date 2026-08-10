@@ -22,12 +22,12 @@ from agents_remember.application.gate_tools import (
     raise_lifecycle_gate,
     record_gate_decision,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
 )
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

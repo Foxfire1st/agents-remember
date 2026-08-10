@@ -21,6 +21,35 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
+from agents_remember.models.conversations.attachments import (
+    AttachmentOperationProjection,
+    AttachmentReceipt,
+)
+from agents_remember.models.conversations.capabilities import (
+    AttachmentCapability,
+)
+from agents_remember.models.conversations.control_wire import (
+    ControlSubmission,
+    OperationTimelineItem,
+    SubmissionReceipt,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.submissions import (
+    AssetSubmitBlock,
+    ComposerSubmitBlock,
+    ConversationSubmitRequest,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.control.asset_spool import (
     AssetRecord,
     StagedUpload,
@@ -58,26 +87,6 @@ from agents_remember.serving.conversation.control.service import (
     iso_expired,
     iso_seconds_after,
 )
-from agents_remember.serving.conversation.models import (
-    AssetSubmitBlock,
-    AttachmentCapability,
-    AttachmentOperationProjection,
-    AttachmentReceipt,
-    AuthorizationBinding,
-    ComposerSubmitBlock,
-    ConversationSubmitRequest,
-    OperationFingerprint,
-    operation_fingerprint,
-)
-from agents_remember.serving.harness_control_client import (
-    ControlSubmission,
-    submit_control_prompt,
-)
-from agents_remember.serving.harness_control_models import (
-    OperationTimelineItem,
-    SubmissionReceipt,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 AttachmentPhase = Literal[
     "staging",
@@ -235,7 +244,7 @@ async def submit(
             f"submit request id {body.request_id!r} already belongs to its first content"
         )
     receipt = await asyncio.to_thread(
-        submit_control_prompt,
+        service.control_plane.submit,
         entry,
         text,
         ControlSubmission(

@@ -16,8 +16,10 @@ import json
 import unicodedata
 from hashlib import sha256
 
-from agents_remember.mcp.tool_reports import redact_secrets
-from agents_remember.serving.harness_control_models import AssetReference
+from agents_remember.kernel.primitives.tool_reports import redact_secrets
+from agents_remember.models.conversations.control_wire import (
+    AssetReference,
+)
 
 MAX_PREVIEW_CLUSTERS = 96
 

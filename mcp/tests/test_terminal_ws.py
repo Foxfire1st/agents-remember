@@ -27,7 +27,13 @@ from typing import cast
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+    TerminalSessionStatus,
+)
 from agents_remember.serving.app import (
     ServingCollaborators,
     _apply_terminal_input,
@@ -41,8 +47,6 @@ from agents_remember.serving.terminal import (
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalSessionStatus,
 )
 from agents_remember.serving.terminal_pty import TerminalSession
 from agents_remember.tasks import (

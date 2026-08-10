@@ -3,15 +3,17 @@ from __future__ import annotations
 from typing import Any
 from unittest import mock
 
+from agents_remember.models.conversations.control_wire import (
+    SubmissionAuthorityDescriptor,
+    SubmissionReceipt,
+    WithdrawalResult,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
-    SubmissionAuthorityDescriptor,
     SubmissionLookup,
-    SubmissionReceipt,
     SubmissionStatus,
     SubmissionStatusBatch,
-    WithdrawalResult,
 )
 from test_serving_response_conformance import _PNG, ServingResponseConformanceTests
 

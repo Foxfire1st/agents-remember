@@ -15,8 +15,16 @@ from _agent_wire_fixtures import (
     turn_started_params,
 )
 from agents_remember.errors import NativeHistoryUnavailable
-from agents_remember.serving.conversation.models import MarkdownBlock, TextBlock
-from agents_remember.serving.harness_control_models import NativeEvidenceFrame, PendingInteraction
+from agents_remember.models.conversations.content import (
+    MarkdownBlock,
+    TextBlock,
+)
+from agents_remember.models.conversations.control_wire import (
+    PendingInteraction,
+)
+from agents_remember.models.conversations.evidence import (
+    NativeEvidenceFrame,
+)
 from test_conversation_active_service import _codex_turn
 from test_conversation_projector_codex_agents import (
     AGENT,

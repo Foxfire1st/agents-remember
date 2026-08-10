@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 
-from agents_remember.serving.harness_control_models import AdapterEvent
+from agents_remember.serving.harness_control_models import (
+    AdapterEvent,
+)
 
 ADAPTER_EVENT_QUEUE_LIMIT = 1024
 LOAD_SHED_DELTA_METHODS = frozenset(

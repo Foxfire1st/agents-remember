@@ -6,15 +6,25 @@ from pathlib import Path
 
 import pytest
 from agents_remember.errors import HarnessControlError
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.mcp.tools.hosted_readiness import hosted_session_readiness_payload
-from agents_remember.serving.harness_control_models import AdapterSnapshot, ControlIdentity
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.hosted_readiness import (
     HostedReadinessResult,
     ReadinessWait,
     hosted_session_readiness,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 
 
 def _entry(

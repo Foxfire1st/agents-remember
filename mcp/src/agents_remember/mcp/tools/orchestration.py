@@ -10,9 +10,9 @@ from agents_remember.application.orchestration_tools import (
     nudge_manager,
     orchestration_nudge_manager_tool,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import OrchestrationNudgeRequest
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 

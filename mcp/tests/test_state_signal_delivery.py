@@ -20,7 +20,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import RedeliveryFloor
-from agents_remember.serving.harness_control_models import SubmissionReceipt
+from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import (
     DeliveryAdmission,

@@ -27,6 +27,31 @@ from agents_remember.errors import (
     HarnessControlClientError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    OperationTimelineItem,
+    WithdrawalResult,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.primitives import (
+    OperationFingerprint,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
+from agents_remember.models.conversations.withdrawals import (
+    AttachmentRecoveryRef,
+    FailedWithdrawalResponse,
+    PendingWithdrawalRecoveryList,
+    PendingWithdrawalRecoveryProjection,
+    WithdrawalOperationProjection,
+    WithdrawalRecovery,
+    WithdrawnQueueResponse,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving.conversation.control import attachments, recovery_assembly
 from agents_remember.serving.conversation.control.refs import (
     OperationIdentity,
@@ -50,24 +75,6 @@ from agents_remember.serving.conversation.control.service import (
     iso_expired,
     iso_seconds_after,
 )
-from agents_remember.serving.conversation.models import (
-    AttachmentRecoveryRef,
-    AuthorizationBinding,
-    FailedWithdrawalResponse,
-    OperationFingerprint,
-    PendingWithdrawalRecoveryList,
-    PendingWithdrawalRecoveryProjection,
-    WithdrawalOperationProjection,
-    WithdrawalRecovery,
-    WithdrawnQueueResponse,
-    operation_fingerprint,
-)
-from agents_remember.serving.harness_control_client import withdraw_control_submission
-from agents_remember.serving.harness_control_models import (
-    OperationTimelineItem,
-    WithdrawalResult,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 WithdrawalPhase = Literal["requested", "linearizing", "settled", "unknown"]
 WithdrawalOutcome = Literal[
@@ -378,7 +385,7 @@ async def _drive_withdrawal(
         )
     try:
         result = await asyncio.to_thread(
-            withdraw_control_submission,
+            service.control_plane.withdraw_submission,
             entry,
             expected_bridge_epoch=epoch,
             request_id=identity.operation_id,
@@ -585,7 +592,7 @@ async def _redrive_withdrawal(
 
     try:
         result = await asyncio.to_thread(
-            withdraw_control_submission,
+            service.control_plane.withdraw_submission,
             entry,
             expected_bridge_epoch=record.bridge_epoch,
             request_id=record.operation.operation_id,

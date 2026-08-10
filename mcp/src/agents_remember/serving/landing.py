@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.retire import SeatClosure
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 
 
 def land_seats_for_leaf(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     closure: SeatClosure,
     *,
     leaf_key: str,

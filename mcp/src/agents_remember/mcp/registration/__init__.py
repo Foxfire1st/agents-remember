@@ -16,7 +16,8 @@ from collections.abc import Callable
 
 from mcp.server.fastmcp import FastMCP
 
-from ..config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+
 from .benchmarks import register_benchmark_tools
 from .closeout import register_closeout_tools
 from .code_search import register_code_search_tools

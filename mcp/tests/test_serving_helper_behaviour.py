@@ -48,7 +48,18 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessBridgeEpochMismatchError, HarnessControlError
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlOperationRef,
+    PendingInteraction,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving import daemon, heap_diag
 from agents_remember.serving.app import (
     LiveProjectionInputs,
@@ -64,16 +75,14 @@ from agents_remember.serving.claude_stream_transport import ClaudeStreamTranspor
 from agents_remember.serving.harness_capabilities import ModelCapability
 from agents_remember.serving.harness_control_client import _evidence_page
 from agents_remember.serving.harness_control_models import (
-    AdapterSnapshot,
-    ControlIdentity,
-    ControlOperationRef,
-    PendingInteraction,
     PromptRequest,
     ShutdownMode,
 )
 from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
 NOW = "2026-07-31T10:00:00+00:00"

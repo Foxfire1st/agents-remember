@@ -10,10 +10,12 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
     AdapterEvent,
-    AdapterSnapshot,
     InteractionResponse,
 )
 from agents_remember.serving.pi_rpc_adapter import PiAdapterLimits, PiRpcAdapter

@@ -29,7 +29,9 @@ from agents_remember.application.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
     TaskDocument,

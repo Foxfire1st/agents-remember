@@ -7,7 +7,12 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Protocol
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_control_models import LaunchSpec, ShutdownMode
+from agents_remember.models.conversations.control_wire import (
+    LaunchSpec,
+)
+from agents_remember.serving.harness_control_models import (
+    ShutdownMode,
+)
 from agents_remember.serving.pi_rpc_protocol import PiRpcJsonlDecoder, encode_pi_rpc_frame
 
 WriteGuard = Callable[[], None]

@@ -10,18 +10,22 @@ from typing import Any
 import pytest
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.conversations.cursors import (
+    ActiveCursorBinding,
+)
+from agents_remember.models.conversations.identity import (
+    ActiveConversationRef,
+    AuthorizationBinding,
+    ConversationLibraryScope,
+)
+from agents_remember.models.conversations.telemetry import (
+    operation_fingerprint,
+)
 from agents_remember.serving.conversation import resolve_conversation_authorization
 from agents_remember.serving.conversation.authorization import (
     LOCAL_OPERATOR_PRINCIPAL_PREFIX,
     ConversationAuthorizationResolver,
     LocalOperatorAuthorizationResolver,
-)
-from agents_remember.serving.conversation.models import (
-    ActiveConversationRef,
-    ActiveCursorBinding,
-    AuthorizationBinding,
-    ConversationLibraryScope,
-    operation_fingerprint,
 )
 from agents_remember.serving.conversation.runtime import (
     ConversationRuntime,
@@ -29,7 +33,10 @@ from agents_remember.serving.conversation.runtime import (
     install_conversation_runtime,
 )
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.serving.harness_control_client import ControlPlaneClient
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     utc_now,
@@ -70,6 +77,7 @@ def _runtime(
     return ConversationRuntime(
         scope=ConversationScope(workspace_root=workspace, coordination_root=workspace),
         catalog=TerminalCatalog(workspace / "terminal-sessions.json"),
+        control_plane=ControlPlaneClient(),
         host=_NoSessionHost(),
         harness_registry=_empty_registry,
         liveness_clock=utc_now,

@@ -20,16 +20,10 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agents_remember.models.task_document import DocStatus, StepStatus
+
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
-# Step/substep status carries the dashboard's granularity; the markdown render
-# only has a binary checkbox, so the richer state lives in the JSON.
-StepStatus = Literal["pending", "inProgress", "blocked", "done"]
-# Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
-# the rendered ``**Status:**`` line is always a valid template value.
-DocStatus = Literal["planning", "inProgress", "Completed"]
-# "light" is retained only so any legacy light document still loads; the task_doc
-# create/replace path refuses to author new ones — every task is master/leaf.
 DocKind = Literal["light", "subTask", "master"]
 
 

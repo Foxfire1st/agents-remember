@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.serving.seat_binding import role_suffixed_leaf_base
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError, resolve_leaf_ref
 

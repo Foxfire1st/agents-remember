@@ -23,7 +23,9 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application import operator_inbox_tools, terminal_tools
 from agents_remember.errors import HarnessControlError
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.memory_quality.style.citations import (
     extents,
     model,

@@ -8,6 +8,7 @@ from typing import Any
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationContext,
     CoordinationHints,
@@ -15,8 +16,11 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_coordination_context,
 )
 from agents_remember.kernel.memory_init import initialize_memory
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.kernel.route_index import build_route_indexes
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory import baseline, carryover
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
@@ -31,6 +35,7 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.worktrees.git_worktree_manager import contract_context
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import load_contract
 
 
@@ -100,10 +105,13 @@ def _memory_scope(
             code_repository_name=repo.repo_id,
             workspace_root=config.workspace_root,
             code_repository_root=repo.path,
-            hints=CoordinationHints(
-                coordination_root=config.coordination_root, onboarding_root=onboarding_root
+            request=CoordinationRequest(
+                hints=CoordinationHints(
+                    coordination_root=config.coordination_root, onboarding_root=onboarding_root
+                ),
+                selector=EnclosureSelector(contract_path=repo.contract_path),
+                contract_reader=WorktreeContractReader(),
             ),
-            selector=EnclosureSelector(contract_path=repo.contract_path),
         ),
     )
 

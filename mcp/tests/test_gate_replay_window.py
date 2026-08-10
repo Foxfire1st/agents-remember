@@ -57,7 +57,7 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer.paths import observer_logs_root
+from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs

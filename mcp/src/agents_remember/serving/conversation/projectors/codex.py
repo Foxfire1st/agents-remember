@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationCorrelation,
     ConversationItem,
     DiffBlock,
@@ -38,6 +38,10 @@ from agents_remember.serving.conversation.models import (
     ToolInputBlock,
     ToolOutputBlock,
     UnknownVendorBlock,
+)
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    NativeEvidenceFrame,
 )
 from agents_remember.serving.conversation.projectors._codex_collab import (
     _AGENT_THREAD_NOTIFICATIONS,
@@ -80,10 +84,6 @@ from agents_remember.serving.conversation.projectors.common import (
     required_object,
     required_text,
     unknown_input_provenance,
-)
-from agents_remember.serving.harness_control_models import (
-    EvidenceFrame,
-    NativeEvidenceFrame,
 )
 
 HARNESS = "codex"

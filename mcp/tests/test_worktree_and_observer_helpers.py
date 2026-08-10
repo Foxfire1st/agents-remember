@@ -22,19 +22,19 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.observer import snapshots
-from agents_remember.observer.snapshots import (
+from agents_remember.application import provider_runtime as provider_teardown
+from agents_remember.application.provider_runtime import _docker_network_rm, _docker_rm_f
+from agents_remember.providers.context import ContextProviderError
+from agents_remember.serving.projections import snapshots
+from agents_remember.serving.projections.snapshots import (
     _inspect_containers,
     _inspect_containers_individually,
 )
-from agents_remember.providers.context import ContextProviderError
-from agents_remember.worktrees.modules import provider_teardown
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import delete_branch_if_merged
 from agents_remember.worktrees.modules.onboarding import (
     route_overview_metadata_refresh_plan_for_context,
 )
-from agents_remember.worktrees.modules.provider_teardown import _docker_network_rm, _docker_rm_f
 from agents_remember.worktrees.modules.start_contract import _parent_series_contract
 from agents_remember.worktrees.task_resolver import (
     archive_completed_root_task,

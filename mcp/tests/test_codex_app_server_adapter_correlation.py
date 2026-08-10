@@ -5,7 +5,9 @@ from dataclasses import replace
 
 import pytest
 from agents_remember.errors import CodexAppServerError, HarnessAdapterBusyError
-from agents_remember.serving.harness_control_models import ControlOperationRef
+from agents_remember.models.conversations.control_wire import (
+    ControlOperationRef,
+)
 from test_codex_app_server_adapter import (
     TEST_SETTINGS,
     BlockingTurnStartTransport,

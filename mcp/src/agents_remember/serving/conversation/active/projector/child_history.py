@@ -6,12 +6,14 @@ import asyncio
 from collections.abc import Callable
 
 from agents_remember.errors import NativeHistoryLimitExceeded, NativeHistoryUnavailable
+from agents_remember.models.conversations.evidence import (
+    NativeEvidencePage,
+)
 from agents_remember.serving.conversation.active.agent_history import (
     AgentHistoryHydration,
     agent_history_state_item,
 )
 from agents_remember.serving.conversation.projectors.common import MappedItem
-from agents_remember.serving.harness_control_models import NativeEvidencePage
 
 from .agent_authority import is_agent_roster_item
 from .native_ingestion import NATIVE_PAGE_LIMIT, NativeEvidenceIngestion

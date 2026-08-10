@@ -10,9 +10,17 @@ from agents_remember.application.server_startup import (
     initialize_mcp_application,
     prepare_mcp_process,
 )
+from agents_remember.application.worktree_services import (
+    bind_worktree_services,
+    build_default_worktree_services,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+    McpRuntimeConfig,
+    load_config,
+)
 
 from .compact_content import install_compact_content
-from .config import ConfigError, McpRuntimeConfig, load_config
 from .registration import TOOL_REGISTRARS
 
 
@@ -23,6 +31,7 @@ def _complete_fastmcp_settings() -> None:
 
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
+    bind_worktree_services(build_default_worktree_services())
     # One ambient lifecycle per server process; the _tool_payload choke point
     # tags tool calls onto it once a lifecycle is started.
     initialize_mcp_application(config)

@@ -22,12 +22,16 @@ from agents_remember.application import (
 from agents_remember.application.task_doc_tools import TaskDocError, _Edit
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.mcp.tools.leaf_ref import leaf_ref_refusal_payload
 from agents_remember.models.application_requests import OrchestrationNudgeRequest
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.serving import dispatch_brief, operator_inbox_posts
 from agents_remember.serving.dispatch_brief import HostedDelivery
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 
 def _edit(step: dict | None, *, kind: str = "light", lifecycle_id: str | None = None) -> _Edit:

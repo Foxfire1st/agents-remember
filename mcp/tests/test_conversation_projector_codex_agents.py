@@ -32,14 +32,19 @@ from _agent_wire_fixtures import (
     turn_started_params,
 )
 from agents_remember.errors import NativeHistoryUnavailable
-from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
-from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
-from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
-from agents_remember.serving.conversation.models import (
+from agents_remember.models.conversations.content import (
     ConversationItem,
     TextBlock,
     ToolInputBlock,
 )
+from agents_remember.models.conversations.evidence import (
+    EvidenceFrame,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
+)
+from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
+from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
+from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
 from agents_remember.serving.conversation.projectors import (
     codex,
     projector_for,
@@ -48,11 +53,6 @@ from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     MappedTurnOutcome,
     MappedUnknownVendor,
-)
-from agents_remember.serving.harness_control_models import (
-    EvidenceFrame,
-    NativeEvidenceFrame,
-    NativeEvidencePage,
 )
 from test_conversation_active_service import (
     SECRET,
@@ -454,7 +454,7 @@ def _projector(bridge: _MultiplexedBridge) -> ActiveSessionProjector:
         ProjectedSession(
             identity=_identity("codex"),
             authorization=_authorization(),
-            entry=_ControlledEntry(),
+            entry=_ControlledEntry(),  # type: ignore[arg-type]
             mapper=mapper,
             secret=SECRET,
         ),

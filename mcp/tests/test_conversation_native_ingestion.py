@@ -6,8 +6,8 @@ import asyncio
 import unittest
 from unittest import mock
 
-from agents_remember.serving.conversation.models import ConversationItem, UnknownVendorBlock
-from agents_remember.serving.harness_control_models import NativeEvidenceFrame
+from agents_remember.models.conversations.content import ConversationItem, UnknownVendorBlock
+from agents_remember.models.conversations.evidence import NativeEvidenceFrame
 from test_conversation_active_service import NOW, _projector, _ScriptedBridge
 
 

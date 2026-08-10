@@ -28,7 +28,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -71,7 +71,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -126,7 +126,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                     return_value=(True, "now"),
                 ),
                 patch(
-                    "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                    "agents_remember.application.provider_runtime.provider_setup_running",
                     return_value=False,
                 ),
                 patch(
@@ -156,7 +156,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
         with (
             patch("agents_remember.worktrees.modules.abandon.load_contract", return_value=contract),
             patch(
-                "agents_remember.worktrees.modules.abandon.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -206,7 +206,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value={},
             ),
             patch(
-                "agents_remember.worktrees.modules.abandon.teardown_worktree_providers",
+                "agents_remember.application.provider_runtime.teardown_worktree_providers",
                 return_value={"state": "removed"},
             ),
             patch("agents_remember.worktrees.modules.abandon.write_contract"),
@@ -231,7 +231,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -286,7 +286,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -294,7 +294,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=self.preflight(),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.teardown_worktree_providers",
+                "agents_remember.application.provider_runtime.teardown_worktree_providers",
                 return_value=providers,
             ),
             patch(
@@ -331,7 +331,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
         with (
             patch("agents_remember.worktrees.modules.abandon.load_contract", return_value=contract),
             patch(
-                "agents_remember.worktrees.modules.abandon.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -339,7 +339,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=self.preflight(),
             ),
             patch(
-                "agents_remember.worktrees.modules.abandon.teardown_worktree_providers",
+                "agents_remember.application.provider_runtime.teardown_worktree_providers",
                 return_value=providers,
             ),
             patch(
@@ -373,7 +373,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -427,7 +427,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
@@ -479,7 +479,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value=(True, "now"),
             ),
             patch(
-                "agents_remember.worktrees.modules.cleanup.provider_async.provider_setup_running",
+                "agents_remember.application.provider_runtime.provider_setup_running",
                 return_value=False,
             ),
             patch(
