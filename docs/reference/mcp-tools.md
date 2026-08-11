@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 58 tools. Tools **apply by default** — pass
+The Agents Remember MCP server exposes 55 public tools. Tools **apply by default** — pass
 `dry_run=true` to preview first (for the read-only `cgc_*`/`grepai_*` query tools,
 `dry_run=true` returns the planned provider command without running it). The two
 `codex_benchmark_*` tools are the exception: they default to `dry_run=true`
@@ -27,19 +27,24 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `resolve_context` | Resolve a repository's coordination/memory context (topology, roots, settings, storage, pathRules). | `repo_id`, optional `task_name` / `contract_path` / `worktree_name` / `topology` |
 | `context_packet` | Bundle repo state, paths, memory, worktree, and provider status into one packet. | `repo_id`, `include_providers=true`, `include_drift=false` |
 
-## Hosted role dispatch
+## Structural role control
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `attach_terminal_session_to_leaf` | Bind an existing hosted session to one exact qualified leaf and seat role. | `session_id`, `leaf_key`, `role` |
-| `spawn_agent_session` | Resolve settings-owned role/level launch knobs, create and bind one seat, and return `spawned-unbriefed`; it does not deliver caller task context. | `env.AR_SPAWN_ROLE`, `level`, `leaf_key`, `submit=false`, no `context` |
-| `hosted_session_readiness` | Read-only bounded readiness check for the exact returned catalog id, addressable pane, harness prompt marker, and non-copy-mode state. | `session_id`, finite `wait_seconds` (maximum 60) |
-| `operator_inbox_post` | Queue a durable external-chat inbox row; the row lands (terminal `landed`) only on correlated adapter acceptance at a turn boundary (N16). | `ask`, `response`, `lifecycle_id`/`agent_id`/`recipient_role`, `message_kind`, `deliver_to_hosted=true` |
-| `operator_inbox_poll` | List pending rows for a mailbox; `include_terminal=true` additionally lists terminal markers inside their 48h retention window (N11). | `lifecycle_id`/`agent_id`/`recipient_role`, `include_terminal=false` |
-| `operator_inbox_consume` | Optional attribution marker only (N16): nothing mechanical (retry, expectation, escalation, terminality) hangs off it. | `entry_id` |
-| `operator_inbox_supersede` | Explicitly supersede one pending command (R11): terminal `superseded`, no false ack, skipped by every retry/evaluation path. | `entry_id`, `reason`, `superseded_by` |
-| `session_retire` | Terminate and mark one catalog session under role-scoped authority. | `actor_session_id`, `session_id`, `reason` |
-| `session_rename` | Rename one hosted catalog session. | `session_id`, `label` |
+| `dispatch_agent` | Atomically create or replace one authorized child seat, wait for plane-owned readiness, and persist the exact initial brief internally. | `task_document_ref`, `role`, `brief` |
+| `message_parent` | Send one durable whole-message submission to the caller's structurally current parent. | `ask`, `response`, optional agent-visible `message_kind` |
+| `message_child` | Send one durable whole-message submission to an authorized structurally current child. | `task_document_ref`, `role`, `ask`, `response`, optional agent-visible `message_kind` |
+| `retire_child` | Retire an authorized child seat without exposing its occupant address. | `task_document_ref`, `role`, `reason` |
+| `rename_child` | Rename an authorized child chat by document and role. | `task_document_ref`, `role`, `label` |
+| `rename_self` | Rename the caller's ambient structural chat. | `label` |
+| `lifecycle_gate` | Raise a gate on the caller's ambient task document. | `kind`, optional `ask`/`packet`/`evidence_refs`, `wait` |
+| `gate_decide` | Decide exactly one open gate matching an authorized child document and kind; zero or multiple matches fail closed. | `task_document_ref`, `kind`, `decision`, optional `note`/`evidence_refs` |
+| `gate_list` | List document-projected gate state in the caller's authorized structural scope. | — |
+
+Runtime session, lifecycle, inbox-row, adapter, vendor, and gate identifiers are private
+control-plane correlations. The plane may use exact addressing internally for the initial brief,
+delivery, recovery, diagnostics, and trusted dashboard administration, but those operations are
+not registered as agent MCP tools and must not appear in role briefs or handoffs.
 
 ## Install & scaffolding
 
@@ -54,7 +59,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 | --- | --- | --- |
 | `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
 | `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50`, `contract_path=None` |
-| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). | `repo_id`, `checks=None`, `detail_limit=50`, `contract_path=None` |
+| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `repo_id`, `checks=None`, `detail_limit=50`, `contract_path=None` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
 
 The three rows above take the same optional `contract_path` as the `worktree_*` verbs: a leaf
@@ -65,6 +70,22 @@ to run `route_index_refresh` from inside a leaf, since without it that tool writ
 official repo and leaves it dirty. A contract naming another repo, or one whose memory worktree is
 gone, is refused; nothing falls back to the official repo. The response carries `onboardingRoot`, so
 which tree was acted on is always visible.
+
+Only a full leaf-scoped `memory_quality_check` writes the curator checklist. It reports
+`curatorActionableCount` and `checklistStatus`; the curator reruns it until the actionable count is
+zero. Subset checks and official-repository checks do not create that artifact. The checklist is
+outside both Git worktrees, replaces its predecessor instead of accumulating timestamped files,
+and `worktree_cleanup`/`worktree_abandon` remove its reserved `reports/` directory with the
+enclosure. Dirty-source and real-commit residuals remain listed separately so the pre-commit loop
+does not fabricate closeout metadata.
+
+The strict quality wrapper has the same enclosure-owned lifetime for its test evidence. Every
+completed leaf-closeout or leaf/master-integration gate atomically replaces
+`<worktree enclosure>/reports/test-results.md` with the run status, command, timestamps, scope,
+exit code, memory-cap facts when applicable, and the complete wrapper output (including pytest).
+A failed gate writes the report before refusing and names its path in the error. An interrupted
+run cannot replace the previous completed result, and cleanup/abandon removes the file with the
+same `reports/` directory. The gate payload returns that stable path as `reportPath`.
 
 Citation ranges are not repaired by hand. `agents-remember memory-citations --repo <id> --contract
 <enclosure contract> [--fix]` regenerates every range that can be regenerated from its anchor — the

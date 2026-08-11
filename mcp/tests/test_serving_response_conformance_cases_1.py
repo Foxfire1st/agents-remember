@@ -159,35 +159,40 @@ class ServingResponseConformance1(ServingResponseConformanceTests):
                 route="/api/terminal/{session}/image",
                 files={"file": ("big.png", b"\x89PNG" + b"0" * (5 * 1024 * 1024), "image/png")},
             )
-            # ``/attach-leaf`` 400: a hand-opened harness seat carries no spawn role, so
-            # there is no seat role to bind the leaf to and the request supplied none.
+            # ``/attach-task`` 400: a hand-opened harness carries no structural role.
             refused = self._check(
                 client,
                 "POST",
-                "/api/terminal/legacy/attach-leaf",
+                "/api/terminal/legacy/attach-task",
                 status=400,
-                route="/api/terminal/{session}/attach-leaf",
-                json={"leafKey": "R/t/leaf-1"},
+                route="/api/terminal/{session}/attach-task",
+                json={"taskDocumentRef": {"repository": "R", "path": "t/leaf-1.json"}},
             )
             self.assertEqual(refused["status"], "role-required")
-            # ``/attach-leaf`` 409: the same leaf and role, already held by another live seat.
+            # ``/attach-task`` 409: the same document+role seat already has a live occupant.
             self._check(
                 client,
                 "POST",
-                "/api/terminal/live/attach-leaf",
+                "/api/terminal/live/attach-task",
                 status=200,
-                route="/api/terminal/{session}/attach-leaf",
-                json={"leafKey": "R/t/leaf-1", "role": "worker"},
+                route="/api/terminal/{session}/attach-task",
+                json={
+                    "taskDocumentRef": {"repository": "R", "path": "t/leaf-1.json"},
+                    "role": "worker",
+                },
             )
             taken = self._check(
                 client,
                 "POST",
-                "/api/terminal/legacy/attach-leaf",
+                "/api/terminal/legacy/attach-task",
                 status=409,
-                route="/api/terminal/{session}/attach-leaf",
-                json={"leafKey": "R/t/leaf-1", "role": "worker"},
+                route="/api/terminal/{session}/attach-task",
+                json={
+                    "taskDocumentRef": {"repository": "R", "path": "t/leaf-1.json"},
+                    "role": "worker",
+                },
             )
-        self.assertEqual(taken["status"], "leaf-taken")
+        self.assertEqual(taken["status"], "seat-taken")
 
     def test_the_scoped_read_refusal_legs_conform(self) -> None:
         # The files / notes / change-set family shares one two-status refusal idiom, and half

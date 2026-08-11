@@ -65,7 +65,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     GatePolicy,
     GatePolicyRule,
 )
-from agents_remember.models.gates import (
+from agents_remember.models.structural.gates import (
     GateKind,
     GateState,
 )

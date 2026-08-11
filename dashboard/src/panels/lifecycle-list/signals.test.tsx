@@ -21,8 +21,6 @@ import {
 installLifecycleListCleanup();
 
 describe("LifecycleList independent Operations signals", () => {
-  const leafKey = "agents-remember/260610_browser-dashboard/01";
-
   function seedActivityProjection(
     agentPickups: Analytics["agentPickups"] = [],
     state: LifecycleProjection["state"] = "running",
@@ -52,7 +50,8 @@ describe("LifecycleList independent Operations signals", () => {
               id: "01",
               lifecycleId: "LC-ACTIVITY",
               title: "Activity Leaf",
-              docPath: "/tasks/260610_browser-dashboard/01_activity.json",
+              docPath:
+                "/tasks/agents-remember/260610_browser-dashboard/01_activity.json",
             }),
           ],
         },
@@ -67,7 +66,10 @@ describe("LifecycleList independent Operations signals", () => {
         label: "Worker",
         kind: "harness",
         status: "running",
-        leafKey,
+        taskDocumentRef: {
+          repository: "agents-remember",
+          path: "260610_browser-dashboard/01_activity.json",
+        },
         lifecycleId: "LC-ACTIVITY",
         seatRole: "worker",
         turnState,

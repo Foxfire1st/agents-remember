@@ -18,6 +18,7 @@ from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
     GATE_TARGETED,
     QualityGatePlan,
+    QualityGateTarget,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -69,7 +70,14 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         self.assertIsNone(blocked)
         self.assertEqual(result, {"passed": True})
         requires.assert_called_once_with(contract.code_worktree, code_would_commit=True)
-        (_worktree,), kwargs = gate.call_args
+        (target,), kwargs = gate.call_args
+        self.assertEqual(
+            target,
+            QualityGateTarget(
+                code_worktree=contract.code_worktree,
+                worktree_group=contract.worktree_group,
+            ),
+        )
         plan = kwargs["plan"]
         assert isinstance(plan, QualityGatePlan)
         self.assertEqual(plan.mode, GATE_TARGETED)
@@ -90,7 +98,14 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
         self.assertIsNone(blocked)
         self.assertEqual(result, {"passed": True})
-        (_worktree,), kwargs = gate.call_args
+        (target,), kwargs = gate.call_args
+        self.assertEqual(
+            target,
+            QualityGateTarget(
+                code_worktree=contract.code_worktree,
+                worktree_group=contract.worktree_group,
+            ),
+        )
         plan = kwargs["plan"]
         assert isinstance(plan, QualityGatePlan)
         self.assertEqual(plan.mode, GATE_FULL)

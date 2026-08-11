@@ -137,7 +137,9 @@ def _readdress_fields(owner: InboxOwner) -> dict[str, object]:
         "recipientRole": owner.role,
         "agentId": owner.agent_id,
         "lifecycleId": owner.lifecycle_id,
+        "taskDocumentRef": owner.task_document_ref,
         "ownerRole": owner.role,
+        "ownerTaskDocumentRef": owner.task_document_ref,
         "ownerAgentId": owner.agent_id,
         "ownerLifecycleId": owner.lifecycle_id,
     }
@@ -438,8 +440,8 @@ def renew(
     update: dict[str, object] = {"ts": now}
     if renewal.response is not None:
         update["response"] = renewal.response
-    if renewal.subject.leaf_key is not None:
-        update["leafKey"] = renewal.subject.leaf_key
+    if renewal.subject.task_document_ref is not None:
+        update["subjectTaskDocumentRef"] = renewal.subject.task_document_ref
     if renewal.subject.seat_role is not None:
         update["seatRole"] = renewal.subject.seat_role
     if renewal.subject.agent_id is not None:

@@ -22,6 +22,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -33,16 +34,71 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
 )
 from agents_remember.serving.terminal_opener import (
+    HOSTED_SESSION_ENV,
     ControlRunnerRequest,
     SpawnKnobs,
     SpawnProvenance,
     TerminalLaunchRequest,
     open_terminal_session,
 )
+from agents_remember.tasks import TaskDocument, write_task_doc
 
 # The source root of the agents_remember package this test process imported (``.../mcp/src``) --
 # what the opener must seed onto the runner spawn's PYTHONPATH.
 _DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
+LEAF_REF = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
+MASTER_REF = TaskDocumentRef(repository="repo", path="master/task.json")
+
+
+def _write_task_tree(root: Path) -> None:
+    for directory, body in (
+        (
+            "sprint",
+            {
+                "id": "SPRINT",
+                "slug": "task",
+                "title": "Sprint",
+                "kind": "master",
+                "repo": "repo",
+                "createdAt": "2026-07-04T00:00",
+                "orchestrates": ["master"],
+            },
+        ),
+        (
+            "master",
+            {
+                "id": "MASTER",
+                "slug": "task",
+                "title": "Master",
+                "kind": "master",
+                "repo": "repo",
+                "createdAt": "2026-07-04T00:01",
+                "subTasks": [
+                    {
+                        "number": "leaf-1",
+                        "name": "Leaf",
+                        "file": "leaf-1.md",
+                        "status": "inProgress",
+                    }
+                ],
+            },
+        ),
+    ):
+        write_task_doc(root / "tasks/repo" / directory, TaskDocument.model_validate(body))
+    write_task_doc(
+        root / "tasks/repo/master",
+        TaskDocument.model_validate(
+            {
+                "id": "leaf-1",
+                "slug": "leaf-1",
+                "title": "Leaf",
+                "kind": "subTask",
+                "repo": "repo",
+                "createdAt": "2026-07-04T00:02",
+                "master": "task.md",
+            }
+        ),
+    )
 
 
 class _FakeHost:
@@ -95,8 +151,8 @@ _PROVENANCE_FIELDS = frozenset(
     {
         "label",
         "lifecycle_id",
-        "leaf_key",
-        "replacement_for_leaf",
+        "task_document_ref",
+        "replacement_for_task_document_ref",
         "spawned_by_session",
         "spawned_by_lifecycle",
         "spawn_level",
@@ -138,7 +194,7 @@ def _runner_config(host: _FakeHost):
 def _running_chat(
     session_id: str,
     *,
-    leaf_key: str,
+    task_document_ref: TaskDocumentRef,
     spawn_role: str | None = None,
 ) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
@@ -153,7 +209,7 @@ def _running_chat(
         created_at="2026-07-04T00:00:00Z",
         last_attached_at="2026-07-04T00:00:00Z",
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
         spawn_role=spawn_role,
     )
 
@@ -161,7 +217,8 @@ def _running_chat(
 class OpenTerminalSessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
-        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
+        _write_task_tree(self.tmp)
+        self.catalog = TerminalCatalog(self.tmp / "logs/dashboard/terminal-sessions.json")
         self.host = _FakeHost()
 
     def _open(self, **kwargs: object):
@@ -176,9 +233,9 @@ class OpenTerminalSessionTests(unittest.TestCase):
         session_id = str(base.pop("session_id", "worker-1"))
         return _open_session(self.catalog, self.host, session_id, **base)
 
-    def test_opened_records_provenance_env_and_leaf(self) -> None:
+    def test_opened_records_provenance_env_and_task_document(self) -> None:
         result = self._open(
-            leaf_key="repo/master/leaf-1",
+            task_document_ref=LEAF_REF,
             env={"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high", "AR_SPAWN_ROLE": "worker"},
             spawned_by_session="manager-9",
             spawned_by_lifecycle="LC-manager",
@@ -186,7 +243,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(result.status, "opened")
         entry = self.catalog.get("worker-1")
         assert entry is not None
-        self.assertEqual(entry.leaf_key, "repo/master/leaf-1")
+        self.assertEqual(entry.task_document_ref, LEAF_REF)
         self.assertEqual(entry.spawned_by_session, "manager-9")
         self.assertEqual(entry.spawned_by_lifecycle, "LC-manager")
         self.assertEqual(entry.harness, "claude")
@@ -201,6 +258,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
                 "AR_SPAWN_MODEL": "opus",
                 "AR_SPAWN_EFFORT": "high",
                 "AR_SPAWN_ROLE": "worker",
+                HOSTED_SESSION_ENV: "worker-1",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
@@ -215,7 +273,10 @@ class OpenTerminalSessionTests(unittest.TestCase):
 
     def test_runner_spawn_env_without_caller_env_is_exactly_the_package_root(self) -> None:
         self._open()
-        self.assertEqual(self.host.ensured[0]["env"], {"PYTHONPATH": _DAEMON_PACKAGE_ROOT})
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {HOSTED_SESSION_ENV: "worker-1", "PYTHONPATH": _DAEMON_PACKAGE_ROOT},
+        )
 
     def test_runner_spawn_env_prepends_to_a_caller_seeded_pythonpath(self) -> None:
         self._open(env={"PYTHONPATH": "/custom/seed"})
@@ -228,7 +289,10 @@ class OpenTerminalSessionTests(unittest.TestCase):
         # caller env byte-identical.
         result = self._open(kind="terminal", harness=None, env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(result.status, "opened")
-        self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_ROLE": "worker"})
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {"AR_SPAWN_ROLE": "worker", HOSTED_SESSION_ENV: "worker-1"},
+        )
 
     def test_spawn_env_scrubs_daemon_inherited_identity_residue(self) -> None:
         result = self._open(
@@ -247,11 +311,16 @@ class OpenTerminalSessionTests(unittest.TestCase):
         # daemon session's residue, not this child's. Only unrelated env survives (+PYTHONPATH).
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"KEEP_ME": "value", "PYTHONPATH": _DAEMON_PACKAGE_ROOT},
+            {
+                "KEEP_ME": "value",
+                HOSTED_SESSION_ENV: "worker-1",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
+            },
         )
 
     def test_role_spawn_keeps_its_explicit_ar_spawn_values_but_not_vendor_identity(self) -> None:
         result = self._open(
+            task_document_ref=LEAF_REF,
             env={
                 "AR_SPAWN_ROLE": "worker",
                 "AR_SPAWN_MODEL": "opus",
@@ -259,7 +328,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
                 "CODEX_THREAD_ID": "thread-9",
                 "CLAUDE_DOC_FOCUS_PATHS": "/docs/a.md",
                 "GAME_DATA_LEVEL": "7",
-            }
+            },
         )
         self.assertEqual(result.status, "opened")
         # AR_SPAWN_ROLE marks an explicit role spawn: its AR_SPAWN_* values survive; the vendor
@@ -270,6 +339,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
                 "AR_SPAWN_ROLE": "worker",
                 "AR_SPAWN_MODEL": "opus",
                 "AR_SPAWN_EFFORT": "high",
+                HOSTED_SESSION_ENV: "worker-1",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
@@ -287,7 +357,10 @@ class OpenTerminalSessionTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "opened")
         # The scrub is not runner-specific: a plain shell spawn also drops daemon identity.
-        self.assertEqual(self.host.ensured[0]["env"], {"KEEP_ME": "value"})
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {"KEEP_ME": "value", HOSTED_SESSION_ENV: "worker-1"},
+        )
 
     def test_future_bridge_endpoint_is_additive_control_metadata(self) -> None:
         endpoint = self.tmp / "control" / "worker.sock"
@@ -299,7 +372,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
 
     def test_reopen_preserves_spawn_role_and_hand_open_records_none(self) -> None:
         # Non-named role provenance is set once at first spawn and survives a role-less re-open.
-        self._open(env={"AR_SPAWN_ROLE": "worker"})
+        self._open(task_document_ref=LEAF_REF, env={"AR_SPAWN_ROLE": "worker"})
         self._open()  # re-open with no env — must not drop the recorded role
         entry = self.catalog.get("worker-1")
         assert entry is not None
@@ -311,24 +384,31 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertIsNone(hand_opened.spawn_role)
         self.assertNotIn("spawnRole", hand_opened.to_json())
 
-    def test_leaf_taken_surfaces_owner_without_spawning(self) -> None:
-        self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))
+    def test_seat_taken_surfaces_owner_without_spawning(self) -> None:
+        self.catalog.upsert(
+            _running_chat("owner-1", task_document_ref=LEAF_REF, spawn_role="worker")
+        )
         self.host.known.add("ar-owner-1")
-        result = self._open(session_id="intruder", leaf_key="repo/master/leaf-1")
-        self.assertEqual(result.status, "leaf-taken")
+        result = self._open(
+            session_id="intruder",
+            task_document_ref=LEAF_REF,
+            env={"AR_SPAWN_ROLE": "worker"},
+        )
+        self.assertEqual(result.status, "seat-taken")
         self.assertEqual(result.owner_session_id, "owner-1")
         # Never spawned, never upserted the intruder.
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("intruder"))
 
     def test_different_roles_share_leaf_and_dead_same_role_is_replaced(self) -> None:
-        leaf = "repo/master/leaf-1"
-        self.catalog.upsert(_running_chat("worker", leaf_key=leaf, spawn_role="worker"))
+        self.catalog.upsert(
+            _running_chat("worker", task_document_ref=LEAF_REF, spawn_role="worker")
+        )
         self.host.known.add("ar-worker")
 
         reviewer = self._open(
             session_id="reviewer",
-            leaf_key=leaf,
+            task_document_ref=LEAF_REF,
             env={"AR_SPAWN_ROLE": "reviewer"},
         )
         self.assertEqual(reviewer.status, "opened")
@@ -336,7 +416,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.host.known.discard("ar-worker")
         replacement = self._open(
             session_id="worker-2",
-            leaf_key=leaf,
+            task_document_ref=LEAF_REF,
             env={"AR_SPAWN_ROLE": "worker"},
         )
         self.assertEqual(replacement.status, "opened")
@@ -348,11 +428,10 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(next_worker.binding_role, "worker")
         self.assertEqual(reviewer_entry.binding_role, "reviewer")
 
-    def test_pipeline_roles_and_manager_anchor_share_one_canonical_leaf(self) -> None:
-        leaf = "repo/master/leaf-1"
+    def test_pipeline_roles_bind_to_their_canonical_document_altitudes(self) -> None:
         first_worker = self._open(
             session_id="worker-1",
-            leaf_key=leaf,
+            task_document_ref=LEAF_REF,
             env={"AR_SPAWN_ROLE": "worker"},
         )
         self.assertEqual(first_worker.status, "opened")
@@ -366,16 +445,15 @@ class OpenTerminalSessionTests(unittest.TestCase):
         ):
             result = self._open(
                 session_id=session_id,
-                leaf_key=leaf,
+                task_document_ref=MASTER_REF if role == "manager" else LEAF_REF,
                 env={"AR_SPAWN_ROLE": role},
             )
-            expected = "sprint-binding-required" if role == "manager" else "opened"
-            self.assertEqual(result.status, expected)
+            self.assertEqual(result.status, "opened")
 
         live = {
             entry.id: entry.binding_role
             for entry in self.catalog.list()
-            if entry.leaf_key == leaf and entry.status == "running"
+            if entry.task_document_ref == LEAF_REF and entry.status == "running"
         }
         self.assertEqual(
             live,
@@ -385,6 +463,9 @@ class OpenTerminalSessionTests(unittest.TestCase):
                 "reviewer": "reviewer",
             },
         )
+        manager = self.catalog.get("manager")
+        assert manager is not None
+        self.assertEqual(manager.task_document_ref, MASTER_REF)
 
     def test_bad_kind_reports_detail(self) -> None:
         result = self._open(kind="bogus")
@@ -431,6 +512,7 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(
             self.host.ensured[0]["env"],
             {
+                HOSTED_SESSION_ENV: "worker-1",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
@@ -616,6 +698,7 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(
             self.host.ensured[0]["env"],
             {
+                HOSTED_SESSION_ENV: "worker-1",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )

@@ -367,13 +367,12 @@ export type {
   HarnessControlState,
   SeatTurnState,
   TerminalCatalogRow as TerminalSessionInfo,
+  TaskDocumentRef,
   TerminalLivenessEvidence,
   TerminalOpenKind,
   TerminalSessionStatus,
 } from "../types/terminalCatalog";
-import type {
-  TerminalCatalogRow,
-} from "../types/terminalCatalog";
+import type { TaskDocumentRef, TerminalCatalogRow } from "../types/terminalCatalog";
 
 export {
   openTerminalSession,
@@ -481,31 +480,30 @@ export async function cleanupLandedTerminalSessions(
   }
 }
 
-/** The outcome of a leaf-attach POST: bound, refused (the pair already has a live owner), or failed. */
-export type AttachLeafResult = "ok" | "leaf-taken" | "error";
+/** The outcome of a trusted task-seat attachment. */
+export type AttachTaskResult = "ok" | "seat-taken" | "error";
 
 /**
- * Claim one leaf-role pair for an existing session. The server is the uniqueness arbiter: `200`
- * atomically binds the pair, `409` means another live session owns that same pair, and any other
- * status or network failure is `"error"`. Enclosure-independent.
+ * Claim one document-role seat for an existing session. The server is the uniqueness arbiter:
+ * `200` atomically binds the pair, `409` means another live session owns it.
  */
-export async function attachSessionToLeaf(
+export async function attachSessionToTask(
   sessionId: string,
-  leafKey: string,
+  taskDocumentRef: TaskDocumentRef,
   role: string,
   base = "",
-): Promise<AttachLeafResult> {
+): Promise<AttachTaskResult> {
   try {
     const response = await fetch(
-      `${base}/api/terminal/${encodeURIComponent(sessionId)}/attach-leaf`,
+      `${base}/api/terminal/${encodeURIComponent(sessionId)}/attach-task`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leafKey, role }),
+        body: JSON.stringify({ taskDocumentRef, role }),
       },
     );
     if (response.ok) return "ok";
-    if (response.status === 409) return "leaf-taken";
+    if (response.status === 409) return "seat-taken";
     return "error";
   } catch {
     return "error";

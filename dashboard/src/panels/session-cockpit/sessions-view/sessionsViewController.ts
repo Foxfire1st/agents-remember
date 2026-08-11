@@ -23,7 +23,6 @@ import {
   attentionRollup,
   buildRailModel,
   criticalBusSessionIds,
-  masterLabels,
   railCycleOrder,
   smartDefaultFocus,
 } from "../../../data/railModel";
@@ -322,13 +321,9 @@ export function useSessionsViewDerived(
     if (focusedSessionId === null || focusedSessionId === undefined) return false;
     return state.bySession[focusedSessionId]?.stream === "live";
   });
-  const labels = useMemo(() => masterLabels(taskDocuments), [taskDocuments]);
   const model = useMemo(
-    () =>
-      buildRailModel(sessions, {
-        masterLabel: (key) => labels.get(key),
-      }),
-    [sessions, labels],
+    () => buildRailModel(sessions, taskDocuments),
+    [sessions, taskDocuments],
   );
   const unackedIds = useMemo(
     () =>

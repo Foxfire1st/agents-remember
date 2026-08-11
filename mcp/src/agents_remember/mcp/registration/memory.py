@@ -62,10 +62,12 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         contract_path: str | None = None,
     ) -> dict[str, Any]:
         """Closeout memory-quality gate: runs drift-integrity and style checks over onboarding.
-        Read-only. ok=false means findings exist (e.g. drifted onboarding), not that the tool
-        failed. Pass `checks` to run a subset; default runs all. Pass `contract_path` (a leaf
-        enclosure contract) to check that leaf's memory worktree -- the same check closeout runs
-        -- instead of the official memory repo."""
+        It never changes code or memory. A full contract-scoped call atomically replaces the one
+        operational checklist at `<worktree enclosure>/reports/curator-memory-quality.md`; subset
+        and unscoped calls write no checklist. ok=false means findings exist (e.g. dirty-source
+        drift), not that the tool failed. `curatorActionableCount` is the repair loop gate; final
+        commit stamps remain closeout-owned. Pass `checks` to run a subset; default runs all. Pass
+        `contract_path` to check that leaf's memory worktree instead of the official memory repo."""
         return memory_quality_check_payload(
             config,
             repo_id,

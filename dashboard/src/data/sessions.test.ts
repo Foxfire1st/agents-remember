@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSession,
   deliverToSession,
-  findSessionForLeaf,
+  findSessionForTask,
   findSessionForLifecycle,
   fromTerminalSessionInfo,
   notifySessionCatalogChanged,
@@ -83,7 +83,7 @@ function openedResponse(
       kind: "harness",
       harness: "claude",
       lifecycleId: null,
-      leafKey: null,
+      taskDocumentRef: null,
       seatRole: "chat",
       status: "running",
       controlState: "starting",
@@ -267,90 +267,90 @@ describe("sessionStore (6e hardening)", () => {
     expect(sessionStore.getState().sessions).toEqual([{ id: "d", label: "Claude Code 1" }]);
   });
 
-  it("binds a session to a leaf and resolves it via findSessionForLeaf", () => {
-    const leaf = "agents-remember/260628_operations-integration/260628-L5";
+  it("binds a session to a task document and resolves it structurally", () => {
+    const task = { repository: "agents-remember", path: "260628_operations-integration/260628-L5.json" };
     sessionStore.getState().add("Chat", "agent-1");
-    sessionStore.getState().setLeaf("agent-1", leaf);
-    expect(findSessionForLeaf(leaf)?.id).toBe("agent-1");
-    expect(sessionStore.getState().sessions[0].leafKey).toBe(leaf);
+    sessionStore.getState().setTask("agent-1", task);
+    expect(findSessionForTask(task)?.id).toBe("agent-1");
+    expect(sessionStore.getState().sessions[0].taskDocumentRef).toEqual(task);
   });
 
-  it("rejects a leaf bind that another LIVE session already owns (advisory guard)", () => {
-    const leaf = "repo/master/leaf-1";
+  it("rejects a same-role task bind that another LIVE session already owns (advisory guard)", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
     sessionStore.getState().add("Chat", "owner");
-    sessionStore.getState().setLeaf("owner", leaf);
+    sessionStore.getState().setTask("owner", task);
     sessionStore.getState().add("Chat", "seeker");
-    sessionStore.getState().setLeaf("seeker", leaf); // owner already holds it → no-op
+    sessionStore.getState().setTask("seeker", task); // owner already holds it → no-op
 
-    expect(findSessionForLeaf(leaf)?.id).toBe("owner");
-    expect(sessionStore.getState().sessions.find((s) => s.id === "seeker")?.leafKey).toBeUndefined();
+    expect(findSessionForTask(task)?.id).toBe("owner");
+    expect(sessionStore.getState().sessions.find((s) => s.id === "seeker")?.taskDocumentRef).toBeUndefined();
   });
 
-  it("applies a server-authoritative leaf assignment over a stale local same-role owner", () => {
-    const leaf = "repo/master/leaf-1";
+  it("applies a server-authoritative task assignment over a stale local same-role owner", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
     sessionStore.getState().add("Chat", "owner");
     sessionStore.getState().add("Chat", "seeker");
-    sessionStore.getState().setLeaf("owner", leaf);
+    sessionStore.getState().setTask("owner", task);
 
-    sessionStore.getState().applyLeafAssignment("seeker", leaf, "chat");
+    sessionStore.getState().applyTaskAssignment("seeker", task, "chat");
 
-    expect(findSessionForLeaf(leaf)?.id).toBe("seeker");
-    expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.leafKey).toBeUndefined();
+    expect(findSessionForTask(task)?.id).toBe("seeker");
+    expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.taskDocumentRef).toBeUndefined();
   });
 
-  it("keeps different role seats on the same leaf while replacing only the matching role", () => {
-    const leaf = "repo/master/leaf-1";
+  it("keeps different role seats on the same task while replacing only the matching role", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
     sessionStore.getState().hydrate([
-      { id: "worker-old", label: "Worker", leafKey: leaf, seatRole: "worker", status: "running" },
-      { id: "reviewer", label: "Reviewer", leafKey: leaf, seatRole: "reviewer", status: "running" },
+      { id: "worker-old", label: "Worker", taskDocumentRef: task, seatRole: "worker", status: "running" },
+      { id: "reviewer", label: "Reviewer", taskDocumentRef: task, seatRole: "reviewer", status: "running" },
       { id: "worker-new", label: "Replacement worker", status: "running" },
     ]);
 
-    sessionStore.getState().applyLeafAssignment("worker-new", leaf, "worker");
+    sessionStore.getState().applyTaskAssignment("worker-new", task, "worker");
 
-    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-old")?.leafKey).toBeUndefined();
-    expect(sessionStore.getState().sessions.find((s) => s.id === "reviewer")?.leafKey).toBe(leaf);
+    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-old")?.taskDocumentRef).toBeUndefined();
+    expect(sessionStore.getState().sessions.find((s) => s.id === "reviewer")?.taskDocumentRef).toEqual(task);
     expect(sessionStore.getState().sessions.find((s) => s.id === "worker-new")).toMatchObject({
-      leafKey: leaf,
+      taskDocumentRef: task,
       seatRole: "worker",
     });
   });
 
-  it("frees a leaf so an exited owner no longer blocks a new bind", () => {
-    const leaf = "repo/master/leaf-1";
-    sessionStore.getState().hydrate([{ id: "dead", label: "Chat 1", leafKey: leaf, status: "exited" }]);
-    expect(findSessionForLeaf(leaf)).toBeUndefined(); // an exited chat does not own the leaf
+  it("frees a task seat so an exited owner no longer blocks a new bind", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
+    sessionStore.getState().hydrate([{ id: "dead", label: "Chat 1", taskDocumentRef: task, status: "exited" }]);
+    expect(findSessionForTask(task)).toBeUndefined();
     sessionStore.getState().add("Chat", "fresh");
-    sessionStore.getState().setLeaf("fresh", leaf); // not blocked by the dead owner
-    expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
+    sessionStore.getState().setTask("fresh", task);
+    expect(findSessionForTask(task)?.id).toBe("fresh");
   });
 
-  it("frees a leaf so a landed owner no longer blocks a new bind", () => {
-    const leaf = "repo/master/leaf-1";
-    sessionStore.getState().hydrate([{ id: "landed", label: "Chat 1", leafKey: leaf, status: "landed" }]);
-    expect(findSessionForLeaf(leaf)).toBeUndefined();
+  it("frees a task seat so a landed owner no longer blocks a new bind", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
+    sessionStore.getState().hydrate([{ id: "landed", label: "Chat 1", taskDocumentRef: task, status: "landed" }]);
+    expect(findSessionForTask(task)).toBeUndefined();
     sessionStore.getState().add("Chat", "fresh");
-    sessionStore.getState().setLeaf("fresh", leaf);
-    expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
+    sessionStore.getState().setTask("fresh", task);
+    expect(findSessionForTask(task)?.id).toBe("fresh");
   });
 
-  it("clears a leaf binding when set to null", () => {
-    const leaf = "repo/master/leaf-1";
+  it("clears a task binding when set to null", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
     sessionStore.getState().add("Chat", "agent-1");
-    sessionStore.getState().setLeaf("agent-1", leaf);
-    sessionStore.getState().setLeaf("agent-1", null);
-    expect(findSessionForLeaf(leaf)).toBeUndefined();
-    expect(sessionStore.getState().sessions[0].leafKey).toBeUndefined();
+    sessionStore.getState().setTask("agent-1", task);
+    sessionStore.getState().setTask("agent-1", null);
+    expect(findSessionForTask(task)).toBeUndefined();
+    expect(sessionStore.getState().sessions[0].taskDocumentRef).toBeUndefined();
   });
 
-  it("maps leafKey from a terminal catalog row the same conditional way as lifecycleId", () => {
-    const leaf = "repo/master/leaf-1";
+  it("maps taskDocumentRef from a terminal catalog row conditionally", () => {
+    const task = { repository: "repo", path: "master/leaf-1.json" };
     expect(
       fromTerminalSessionInfo({
         id: "s1",
         label: "Chat 1",
         kind: "terminal",
-        leafKey: leaf,
+        taskDocumentRef: task,
         seatRole: "terminal",
         cwd: "/ws",
         tmuxName: "ar-s1",
@@ -362,13 +362,13 @@ describe("sessionStore (6e hardening)", () => {
       id: "s1",
       label: "Chat 1",
       kind: "terminal",
-      leafKey: leaf,
+      taskDocumentRef: task,
       seatRole: "terminal",
       createdAt: "2026-06-26T00:00:00Z",
       status: "running",
     });
 
-    // No leafKey on the row → no leafKey on the session (omitted, not undefined-valued).
+    // No taskDocumentRef on the row → no binding on the session.
     expect(
       fromTerminalSessionInfo({
         id: "s2",
@@ -380,7 +380,7 @@ describe("sessionStore (6e hardening)", () => {
         lastAttachedAt: "2026-06-26T00:00:00Z",
         status: "running",
       }),
-    ).not.toHaveProperty("leafKey");
+    ).not.toHaveProperty("taskDocumentRef");
   });
 
   it("converts terminal catalog rows into store sessions", () => {
@@ -416,7 +416,7 @@ describe("sessionStore (6e hardening)", () => {
         kind: "harness",
         harness: "claude",
         lifecycleId: "LC1",
-        leafKey: "repo/master/leaf-1",
+        taskDocumentRef: { repository: "repo", path: "master/leaf-1.json" },
         spawnRole: "worker",
         seatRole: "reviewer",
         cwd: "/ws",
@@ -439,7 +439,7 @@ describe("sessionStore (6e hardening)", () => {
       kind: "harness",
       harness: "claude",
       lifecycleId: "LC1",
-      leafKey: "repo/master/leaf-1",
+      taskDocumentRef: { repository: "repo", path: "master/leaf-1.json" },
       spawnRole: "worker",
       seatRole: "reviewer",
       createdAt: "2026-06-26T00:00:00Z",
@@ -577,13 +577,13 @@ describe("session catalog cross-tab sync", () => {
     FakeBroadcastChannel.dispatch({
       type: "terminal-catalog-changed",
       source: "other-tab",
-      reason: "leaf",
+      reason: "task",
       sessionId: "moved",
     });
     notifySessionCatalogChanged("create", "created");
     unsubscribe();
 
-    expect(seen).toEqual(["leaf:moved"]);
+    expect(seen).toEqual(["task:moved"]);
     expect(FakeBroadcastChannel.messages).toEqual([
       expect.objectContaining({
         type: "terminal-catalog-changed",

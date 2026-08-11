@@ -89,6 +89,14 @@ RENAMED_FACADE_NAMES: dict[str, dict[str, str]] = {
 # machinery (L5). The pin would otherwise fail the removal; these are intended deletions,
 # not lost split names.
 REMOVED_FACADE_NAMES: dict[str, frozenset[str]] = {
+    "agents_remember.serving.app": frozenset(
+        {
+            "TerminalAttachLeafRequest",
+            "_resolve_request_leaf_key",
+            "_leaf_ref_response",
+            "_attach_leaf_response",
+        }
+    ),
     "agents_remember.kernel.agentic_settings": frozenset(
         {
             "DEFAULT_ESCALATION_RUNG_SECONDS",

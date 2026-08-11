@@ -32,50 +32,63 @@ from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartb
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from test_agent_notifier import NOW, _entry, _fake_paster, _FakeHost
+from test_agent_notifier_ladder import MASTER_REF, SPRINT_REF, _leaf_ref, _write_topology
 
 
 class SeatLivenessPredicateTests(unittest.TestCase):
     def test_stale_turn_state_past_cutoff_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(
                 _entry("s1").with_turn_state(
                     "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 )
             )
-            findings = evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0)
+            findings = evaluate_seat_liveness_findings(
+                catalog, topology, now=NOW, stale_seconds=60.0
+            )
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].detail, "turn-state-stale")
 
     def test_recently_stale_does_not_fire_yet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(_entry("s1").with_turn_state("stale", changed_at=NOW.isoformat()))
             self.assertEqual(
-                evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0), []
+                evaluate_seat_liveness_findings(catalog, topology, now=NOW, stale_seconds=60.0),
+                [],
             )
 
     def test_degraded_row_with_no_turn_state_uses_liveness_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(replace(_entry("s1"), liveness_failures=1))
-            findings = evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0)
+            findings = evaluate_seat_liveness_findings(
+                catalog, topology, now=NOW, stale_seconds=60.0
+            )
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].detail, "liveness-degraded")
 
     def test_unbound_reviewer_completion_suppresses_false_inactive_refire(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            leaf_key = "repo-a/260707_master/leaf-9"
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(
                 replace(
-                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    _entry("manager-current", task_document_ref=MASTER_REF),
                     spawn_role="manager",
                 )
             )
             catalog.upsert(
                 replace(
-                    _entry("worker-1", leaf_key=leaf_key).with_turn_state(
+                    _entry("worker-1", task_document_ref=_leaf_ref(9)).with_turn_state(
                         "stale", changed_at=(NOW - timedelta(minutes=10)).isoformat()
                     ),
                     spawn_role="worker",
@@ -87,29 +100,30 @@ class SeatLivenessPredicateTests(unittest.TestCase):
                     _entry("reviewer-1", status="landed"),
                     spawn_role="reviewer",
                     spawned_by_session="manager-current",
-                    replacement_for_leaf=leaf_key,
+                    replacement_for_task_document_ref=_leaf_ref(9),
                     landed_at=(NOW - timedelta(minutes=1)).isoformat(),
                 )
             )
 
             self.assertEqual(
-                evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0),
+                evaluate_seat_liveness_findings(catalog, topology, now=NOW, stale_seconds=60.0),
                 [],
             )
 
     def test_declared_unbound_replacement_suppresses_false_inactive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            leaf_key = "repo-a/260707_master/leaf-9"
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(
                 replace(
-                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    _entry("manager-current", task_document_ref=MASTER_REF),
                     spawn_role="manager",
                 )
             )
             catalog.upsert(
                 replace(
-                    _entry("worker-dead", leaf_key=leaf_key).with_turn_state(
+                    _entry("worker-dead", task_document_ref=_leaf_ref(9)).with_turn_state(
                         "stale", changed_at=(NOW - timedelta(minutes=10)).isoformat()
                     ),
                     spawn_role="worker",
@@ -121,12 +135,12 @@ class SeatLivenessPredicateTests(unittest.TestCase):
                     replace(_entry("worker-replacement"), turn_state="working"),
                     spawn_role="worker",
                     spawned_by_session="manager-current",
-                    replacement_for_leaf=leaf_key,
+                    replacement_for_task_document_ref=_leaf_ref(9),
                 )
             )
 
             self.assertEqual(
-                evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0),
+                evaluate_seat_liveness_findings(catalog, topology, now=NOW, stale_seconds=60.0),
                 [],
             )
 
@@ -139,8 +153,15 @@ class SweepIntegrationTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.coordination_root = root / "ar-coordination"
+        _write_topology(self.coordination_root)
         observer_root = self.coordination_root / "logs" / "observer"
         self.catalog = TerminalCatalog(root / "catalog.json")
+        self.catalog.upsert(
+            replace(
+                _entry("orchestrator-1", task_document_ref=SPRINT_REF),
+                spawn_role="orchestrator",
+            )
+        )
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
@@ -165,9 +186,11 @@ class SweepIntegrationTests(unittest.TestCase):
 
     def test_seeded_drift_produces_expected_actions_and_ticks_heartbeat(self) -> None:
         # A worker seat spawned by a manager seat -- the routing edge signal-emit walk.
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         worker = replace(
-            _entry("worker-1", leaf_key="repo-a/260707_master/leaf-9"),
+            _entry("worker-1", task_document_ref=_leaf_ref(9)),
             spawn_role="worker",
             spawned_by_session="manager-1",
         )
@@ -181,7 +204,7 @@ class SweepIntegrationTests(unittest.TestCase):
             spawn_role="worker",
             spawned_by_session="manager-1",
             cwd=Path("/workspace"),
-            replacement_for_leaf="repo-a/260707_master/leaf-10",
+            replacement_for_task_document_ref=_leaf_ref(10),
         )
         self.catalog.upsert(stale_seat)
 
@@ -266,7 +289,15 @@ class SweepIntegrationTests(unittest.TestCase):
 
     def test_dead_seat_row_expires_to_the_architect_mailbox_not_redelivered(self) -> None:
         entry = create_operator_inbox_entry(
-            InboxMessage(ask="ask", response="resp"),
+            InboxMessage(
+                ask="ask",
+                response="resp",
+                subject=InboxSubject(
+                    task_document_ref=_leaf_ref(1),
+                    seat_role="worker",
+                    agent_id="missing-seat",
+                ),
+            ),
             entry_id="dead-row",
             now=(NOW - timedelta(minutes=10)).isoformat(),
             routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="missing-seat")),
@@ -334,10 +365,12 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(self._ctx().redeliver_budget, 1)
 
     def test_repeated_seat_liveness_sweeps_coalesce_into_one_signal_row(self) -> None:
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3").with_turn_state(
+                _entry("worker-1", task_document_ref=_leaf_ref(3)).with_turn_state(
                     "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 ),
                 spawn_role="worker",
@@ -371,12 +404,17 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertGreater(signal_rows[0].ts, first.ts)
 
     def test_same_leaf_different_seat_roles_do_not_coalesce(self) -> None:
-        leaf_key = "repo-a/260707_master/leaf-3"
-        self.catalog.upsert(replace(_entry("manager-1", leaf_key=leaf_key), seat_role="manager"))
+        leaf = _leaf_ref(3)
+        self.catalog.upsert(
+            replace(
+                _entry("manager-1", task_document_ref=MASTER_REF),
+                seat_role="manager",
+            )
+        )
         for session_id, role in (("worker-1", "worker"), ("reviewer-1", "reviewer")):
             self.catalog.upsert(
                 replace(
-                    _entry(session_id, leaf_key=leaf_key),
+                    _entry(session_id, task_document_ref=leaf),
                     seat_role=role,
                     spawn_role=role,
                     spawned_by_session="manager-1",
@@ -390,7 +428,7 @@ class SweepIntegrationTests(unittest.TestCase):
                     kind="seat-liveness",
                     detail="turn-state-stale",
                     session_id=session_id,
-                    leaf_key=leaf_key,
+                    task_document_ref=leaf,
                     seat_role=role,
                 ),
                 now=NOW,
@@ -409,11 +447,13 @@ class SweepIntegrationTests(unittest.TestCase):
         # legacy ask prefix and createdBy. A new-format re-fire must RENEW that one row (same
         # id, bumped ts), never append a second pending row -- the ruled one-row-per-root-cause
         # invariant survives the rename window.
-        leaf_key = "repo-a/260707_master/leaf-3"
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        leaf = _leaf_ref(3)
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key=leaf_key).with_turn_state(
+                _entry("worker-1", task_document_ref=leaf).with_turn_state(
                     "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 ),
                 spawn_role="worker",
@@ -424,10 +464,12 @@ class SweepIntegrationTests(unittest.TestCase):
             create_operator_inbox_entry(
                 InboxMessage(
                     ask="Supervisor observed seat-liveness: turn-state-stale",
-                    response="session worker-1 (leaf repo-a/260707_master/leaf-3)",
+                    response="worker seat on task document leaf-3",
                     message_kind="escalation",
                     subject=InboxSubject(
-                        leaf_key=leaf_key, seat_role="worker", agent_id="worker-1"
+                        task_document_ref=leaf,
+                        seat_role="worker",
+                        agent_id="worker-1",
                     ),
                 ),
                 entry_id="legacy-row",
@@ -450,11 +492,13 @@ class SweepIntegrationTests(unittest.TestCase):
 
     def test_new_format_ask_row_is_renewed_by_new_format_refire(self) -> None:
         # Same seam, current-format path: prefix normalization must not break new/new coalescing.
-        leaf_key = "repo-a/260707_master/leaf-3"
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        leaf = _leaf_ref(3)
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key=leaf_key).with_turn_state(
+                _entry("worker-1", task_document_ref=leaf).with_turn_state(
                     "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 ),
                 spawn_role="worker",
@@ -465,10 +509,12 @@ class SweepIntegrationTests(unittest.TestCase):
             create_operator_inbox_entry(
                 InboxMessage(
                     ask="Agent notifier observed seat-liveness: turn-state-stale",
-                    response="session worker-1 (leaf repo-a/260707_master/leaf-3)",
+                    response="worker seat on task document leaf-3",
                     message_kind="escalation",
                     subject=InboxSubject(
-                        leaf_key=leaf_key, seat_role="worker", agent_id="worker-1"
+                        task_document_ref=leaf,
+                        seat_role="worker",
+                        agent_id="worker-1",
                     ),
                 ),
                 entry_id="current-row",
@@ -490,10 +536,12 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertGreater(rows[0].ts, (NOW - timedelta(minutes=1)).isoformat())
 
     def test_diagnostic_pane_signal_is_not_actionable(self) -> None:
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3"),
+                _entry("worker-1", task_document_ref=_leaf_ref(3)),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
@@ -502,7 +550,7 @@ class SweepIntegrationTests(unittest.TestCase):
             kind="pane-signal",
             detail="mid-turn",
             session_id="worker-1",
-            leaf_key="repo-a/260707_master/leaf-3",
+            task_document_ref=_leaf_ref(3),
         )
 
         result = act_on_finding(self._ctx(), finding, now=NOW)
@@ -538,10 +586,12 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(result.redeliverable_inbox_count, 0)
 
     def test_one_second_sweeps_do_not_emit_per_second_signal_rows(self) -> None:
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3").with_turn_state(
+                _entry("worker-1", task_document_ref=_leaf_ref(3)).with_turn_state(
                     "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 ),
                 spawn_role="worker",

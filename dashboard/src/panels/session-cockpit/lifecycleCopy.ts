@@ -1,6 +1,5 @@
 import type { OpenSession } from "../../data/sessions";
 import { seatVisualState } from "../../data/stateGrammar";
-import { leafIdFromKey } from "../../data/taskIdentity";
 
 // THE lifecycle/interaction copy module — copy is centralized here. Every confirm,
 // residual, and round-trip string the terminate/retire/interaction surfaces render comes from
@@ -10,16 +9,16 @@ import { leafIdFromKey } from "../../data/taskIdentity";
 //     the words "termination failed" must never appear for them, and they are never discarded.
 //   - the InteractionBar's copy states the real answer channel and the real PTY truth.
 
-/** Honest terminate confirm: names the session, its leaf, and its current state. */
+/** Honest terminate confirm: names the session, its task document, and its current state. */
 export function terminateConfirmCopy(session: OpenSession): string {
   const state = seatVisualState(session).word;
-  const leaf = session.leafKey
-    ? ` · leaf ${leafIdFromKey(session.leafKey)}`
+  const task = session.taskDocumentRef
+    ? ` · task ${session.taskDocumentRef.path}`
     : "";
   // An unclassified seat's state word is itself an em-dash; joining it before the "— kills"
   // consequence dash printed "state — —". Drop the empty state clause so the dashes never collide.
   const stateClause = state === "—" ? "" : ` · state ${state}`;
-  return `end ${session.label}${leaf}${stateClause} — kills the tmux session; transcripts are kept`;
+  return `end ${session.label}${task}${stateClause} — kills the tmux session; transcripts are kept`;
 }
 
 /**

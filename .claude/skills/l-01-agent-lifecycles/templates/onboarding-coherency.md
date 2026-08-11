@@ -22,7 +22,7 @@ memory repo stayed in lockstep with the code, since **orchestrator quality ∝ m
 | Field     | Value                                   |
 | --------- | --------------------------------------- |
 | for       | reviewer (<seam>) | orchestrator         |
-| author    | <sub-agent id>                          |
+| author    | <analysis role / bounded fan-out label> |
 | scope     | <change set reviewed>                    |
 | written   | <YYYY-MM-DDTHH:MM>                        |
 

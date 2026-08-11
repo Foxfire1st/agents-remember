@@ -4,6 +4,7 @@ import json
 import os
 from typing import cast
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.app import _TERMINAL_EXIT_FRAME
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -258,35 +259,48 @@ class TerminalWebSocketTests1(TerminalWebSocketTests):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.host.ensured, [])
 
-    def test_post_open_claims_leaf_and_persists_it(self) -> None:
-        leaf = "agents-remember/260628_operations-integration/260628-L5"
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf}
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["leafKey"], leaf)
-        entry = self.catalog.get("term-1")
-        assert entry is not None
-        self.assertEqual(entry.leaf_key, leaf)
-
-    def test_post_open_rejects_unmatchable_leaf_ref(self) -> None:
+    def test_post_open_claims_task_document_and_persists_it(self) -> None:
+        task_document_ref = TaskDocumentRef(
+            repository="agents-remember",
+            path="260628_operations-integration/260628-L5.json",
+        )
         with TestClient(self.app) as client:
             response = client.post(
                 "/api/terminal/term-1",
-                json={"kind": "terminal", "leafKey": "repo/master/missing-leaf"},
+                json={
+                    "kind": "terminal",
+                    "taskDocumentRef": task_document_ref.model_dump(),
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["taskDocumentRef"], task_document_ref.model_dump())
+        entry = self.catalog.get("term-1")
+        assert entry is not None
+        self.assertEqual(entry.task_document_ref, task_document_ref)
+
+    def test_post_open_rejects_missing_task_document_ref(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/term-1",
+                json={
+                    "kind": "terminal",
+                    "taskDocumentRef": {
+                        "repository": "repo",
+                        "path": "master/missing-leaf.json",
+                    },
+                },
             )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["status"], "leaf-ref-not-found")
-        self.assertIn("<repo>/<master-folder>/<doc-id>", response.json()["detail"])
+        self.assertEqual(response.json()["status"], "task-binding-invalid")
+        self.assertIn("role scope", response.json()["detail"])
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("term-1"))
 
-    def test_post_open_null_leaf_still_works(self) -> None:
+    def test_post_open_without_task_document_still_works(self) -> None:
         with TestClient(self.app) as client:
             response = client.post("/api/terminal/term-1", json={"kind": "terminal"})
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.json()["leafKey"])
+        self.assertIsNone(response.json()["taskDocumentRef"])
         entry = self.catalog.get("term-1")
         assert entry is not None
-        self.assertIsNone(entry.leaf_key)
+        self.assertIsNone(entry.task_document_ref)

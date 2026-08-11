@@ -36,11 +36,13 @@ from agents_remember.controlplane.operator_inbox_records import (
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.signal_routing import (
     RoutedOwner,
+    StructuralRoutingError,
     derive_architect_owner,
 )
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_supersede_payload
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _app_lifespan
 from agents_remember.serving import relay_death_watch as relay_module
@@ -60,8 +62,12 @@ from agents_remember.serving.relay_death_watch import (
 )
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.tasks.document_refs import TaskDocumentTopology
+from test_agent_notifier_ladder import LEAF_1_REF, MASTER_REF, SPRINT_REF, _write_topology
+from test_compound_idle_relay import OTHER_MASTER_LEAF, _write_other_master
 
 NOW = datetime(2026, 7, 13, 12, 0, 0, tzinfo=UTC)
+REPO_B_SPRINT = TaskDocumentRef(repository="repo-b", path="sprint/task.json")
 
 
 def _seat(session_id: str, **overrides: object) -> TerminalCatalogEntry:
@@ -97,13 +103,17 @@ class ScopedArchitectCustodyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.catalog = TerminalCatalog(Path(self.tmp.name) / "catalog.json")
+        root = Path(self.tmp.name)
+        _write_topology(root)
+        _write_other_master(root)
+        self.topology = TaskDocumentTopology(root)
+        self.catalog = TerminalCatalog(root / "catalog.json")
 
     def test_two_simultaneous_repository_architects_resolve_by_scope(self) -> None:
         self.catalog.upsert(
             _seat(
                 "arch-a",
-                leaf_key="repo-a/260707_master/architect-anchor",
+                task_document_ref=SPRINT_REF,
                 seat_role="architect",
                 spawn_role="architect",
             )
@@ -111,41 +121,35 @@ class ScopedArchitectCustodyTests(unittest.TestCase):
         self.catalog.upsert(
             _seat(
                 "arch-b",
-                leaf_key="repo-b/260707_master/architect-anchor",
+                task_document_ref=REPO_B_SPRINT,
                 seat_role="architect",
                 spawn_role="architect",
             )
         )
-        owner_a = derive_architect_owner(self.catalog, leaf_key="repo-a/260707_master/leaf-1")
-        owner_b = derive_architect_owner(self.catalog, leaf_key="repo-b/260707_master/leaf-1")
+        owner_a = derive_architect_owner(self.catalog, self.topology, task_document_ref=LEAF_1_REF)
+        owner_b = derive_architect_owner(
+            self.catalog, self.topology, task_document_ref=OTHER_MASTER_LEAF
+        )
         self.assertEqual(owner_a.agent_id, "arch-a")
         self.assertEqual(owner_b.agent_id, "arch-b")
 
-    def test_architect_bound_to_the_exact_leaf_wins_within_its_master(self) -> None:
+    def test_one_sprint_architect_owns_every_leaf_in_that_sprint(self) -> None:
         self.catalog.upsert(
             _seat(
-                "arch-exact",
-                leaf_key="repo-a/260707_master/leaf-1",
+                "arch-sprint",
+                task_document_ref=SPRINT_REF,
                 seat_role="architect",
                 spawn_role="architect",
             )
         )
-        self.catalog.upsert(
-            _seat(
-                "arch-other",
-                leaf_key="repo-a/260707_master/other-leaf",
-                seat_role="architect",
-                spawn_role="architect",
-            )
-        )
-        owner = derive_architect_owner(self.catalog, leaf_key="repo-a/260707_master/leaf-1")
-        self.assertEqual(owner.agent_id, "arch-exact")
+        owner = derive_architect_owner(self.catalog, self.topology, task_document_ref=LEAF_1_REF)
+        self.assertEqual(owner.agent_id, "arch-sprint")
 
     def test_global_first_match_is_never_a_fallback(self) -> None:
         self.catalog.upsert(
             _seat(
                 "arch-a",
-                leaf_key="repo-a/260707_master/architect-anchor",
+                task_document_ref=SPRINT_REF,
                 seat_role="architect",
                 spawn_role="architect",
             )
@@ -153,26 +157,21 @@ class ScopedArchitectCustodyTests(unittest.TestCase):
         self.catalog.upsert(
             _seat(
                 "arch-b",
-                leaf_key="repo-b/260707_master/architect-anchor",
+                task_document_ref=REPO_B_SPRINT,
                 seat_role="architect",
                 spawn_role="architect",
             )
         )
-        # Unscoped or ambiguous requests resolve to the role-only mailbox, never a first match.
-        owner = derive_architect_owner(self.catalog)
-        self.assertEqual(owner.role, "architect")
-        self.assertIsNone(owner.agent_id)
         self.catalog.upsert(
             _seat(
                 "arch-a2",
-                leaf_key="repo-a/260707_master/architect-anchor-2",
+                task_document_ref=SPRINT_REF,
                 seat_role="architect",
                 spawn_role="architect",
             )
         )
-        ambiguous = derive_architect_owner(self.catalog, leaf_key="repo-a/260707_master/leaf-1")
-        self.assertEqual(ambiguous.role, "architect")
-        self.assertIsNone(ambiguous.agent_id)
+        with self.assertRaisesRegex(StructuralRoutingError, "multiple running occupants"):
+            derive_architect_owner(self.catalog, self.topology, task_document_ref=LEAF_1_REF)
 
 
 class PostTimeOwnerRebindingTests(unittest.TestCase):
@@ -181,27 +180,28 @@ class PostTimeOwnerRebindingTests(unittest.TestCase):
     def test_message_to_retired_manager_reaches_the_replacement_at_post_time(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            _write_topology(root)
             catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(
                 _seat(
                     "manager-old",
                     status="terminated",
                     terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                    leaf_key="repo-a/260707_master/old-manager-anchor",
+                    task_document_ref=MASTER_REF,
                     spawn_role="manager",
                 )
             )
             catalog.upsert(
                 _seat(
                     "manager-new",
-                    leaf_key="repo-a/260707_master/current-manager-anchor",
+                    task_document_ref=MASTER_REF,
                     spawn_role="manager",
                 )
             )
             catalog.upsert(
                 _seat(
                     "worker-1",
-                    leaf_key="repo-a/260707_master/leaf-1",
+                    task_document_ref=LEAF_1_REF,
                     spawn_role="worker",
                     spawned_by_session="manager-old",
                 )
@@ -237,11 +237,12 @@ class PostTimeAddressBranchTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.root = root
+        _write_topology(root)
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.catalog.upsert(
             _seat(
                 "manager-new",
-                leaf_key="repo-a/260707_master/current-manager-anchor",
+                task_document_ref=MASTER_REF,
                 spawn_role="manager",
                 lifecycle_id="L-manager",
             )
@@ -251,14 +252,14 @@ class PostTimeAddressBranchTests(unittest.TestCase):
                 "manager-old",
                 status="terminated",
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                task_document_ref=MASTER_REF,
                 spawn_role="manager",
             )
         )
         self.catalog.upsert(
             _seat(
                 "worker-1",
-                leaf_key="repo-a/260707_master/leaf-1",
+                task_document_ref=LEAF_1_REF,
                 spawn_role="worker",
                 spawned_by_session="manager-new",
             )
@@ -266,7 +267,9 @@ class PostTimeAddressBranchTests(unittest.TestCase):
         self.catalog.upsert(
             _seat(
                 "worker-2",
-                leaf_key="repo-a/260707_master/leaf-2",
+                task_document_ref=TaskDocumentRef(
+                    repository="repo-a", path="260707_master/leaf-2.json"
+                ),
                 spawn_role="worker",
                 spawned_by_session="manager-new",
                 lifecycle_id="L-worker",
@@ -590,7 +593,7 @@ class RelayDeathWatchTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         row = next(iter(rows))
         self.assertEqual(row.messageKind, "degradation-alert")
-        self.assertEqual(row.recipientRole, "architect")
+        self.assertEqual(row.recipientRole, "developer")
         # A fresh tick re-arms the watcher for the next death.
         self.heartbeat_store.tick(now=NOW + timedelta(minutes=1))
         self.assertFalse(
@@ -664,7 +667,7 @@ class RetireSurfacingTests(unittest.TestCase):
             catalog.upsert(
                 _seat(
                     "worker-1",
-                    leaf_key="repo-a/260707_master/leaf-1",
+                    task_document_ref=LEAF_1_REF,
                     spawn_role="worker",
                     spawned_by_session="orchestrator-1",
                 )
@@ -713,7 +716,7 @@ class RetireSurfacingTests(unittest.TestCase):
             catalog.upsert(
                 _seat(
                     "worker-1",
-                    leaf_key="repo-a/260707_master/leaf-1",
+                    task_document_ref=LEAF_1_REF,
                     spawn_role="worker",
                     spawned_by_session="orchestrator-1",
                 )

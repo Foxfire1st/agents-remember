@@ -22,7 +22,20 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.memory import baseline, carryover
-from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
+from agents_remember.memory_quality.check import (
+    DRIFT_CHECK_NAME,
+    DriftCheckContext,
+    run_memory_quality_check,
+)
+from agents_remember.memory_quality.curator_checklist import (
+    CuratorChecklist,
+    report_path_for,
+    split_commit_owned_findings,
+    write_curator_checklist,
+)
+from agents_remember.memory_quality.integrity.check_missing_onboarding import (
+    check_missing_onboarding,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     run_drift_summary,
 )
@@ -54,6 +67,8 @@ class MemoryScope:
     onboarding_root: Path
     context: CoordinationContext
     cache_authority: source_index_cache.ManagedCacheAuthority | None = None
+    unstamped_code_commit: str | None = None
+    curator_report_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +185,11 @@ def _leaf_memory_scope(
             memory_root=contract.memory_worktree,
             lifecycle_id=contract.lifecycle_id,
         ),
+        # This is comparison provenance, not a verification stamp. It lets the leaf-scoped
+        # pre-commit check re-open claims against the dirty worktree exactly as closeout does,
+        # while the real commit-derived metadata remains closeout-owned.
+        unstamped_code_commit=contract.code_base_commit,
+        curator_report_path=report_path_for(contract.worktree_group),
     )
 
 
@@ -203,6 +223,7 @@ def memory_quality_check_tool(
     contract_path: str | None = None,
 ) -> dict[str, Any]:
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    write_curator_report = scope.curator_report_path is not None and not checks
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=checks,
@@ -210,14 +231,65 @@ def memory_quality_check_tool(
             code_repository_root=scope.code_root,
             context=scope.context,
             detail_limit=detail_limit,
+            unstamped_code_commit=scope.unstamped_code_commit,
+            report_path=scope.curator_report_path if write_curator_report else None,
+            include_rows=write_curator_report,
+            write_report=not write_curator_report,
         ),
+        include_report_only_findings=write_curator_report,
     )
-    return {
+    response = {
         "operation": "memory_quality_check",
         "repoId": scope.repo_id,
         "onboardingRoot": scope.onboarding_root.as_posix(),
         **payload,
     }
+    if not write_curator_report:
+        return response
+
+    drift_result = payload.get("checks", {}).get(DRIFT_CHECK_NAME, {})
+    drift_rows = drift_result.pop("rows", [])
+    report_only = payload.pop("reportOnlyFindings", [])
+    style_findings = [
+        finding
+        for finding in payload.get("findings", [])
+        if finding.get("check") != DRIFT_CHECK_NAME
+    ]
+    repair_findings, commit_owned_findings = split_commit_owned_findings(
+        style_findings, scope.onboarding_root
+    )
+    missing_onboarding = check_missing_onboarding(
+        code_repository_root=scope.code_root,
+        onboarding_root=scope.onboarding_root,
+        settings=scope.context.storage,
+        code_repository_name=scope.context.code_repository_name,
+    )
+    route_indexes = build_route_indexes(
+        code_root=scope.code_root,
+        onboarding_root=scope.onboarding_root,
+        repository=scope.context.code_repository_name,
+        storage=scope.context.storage,
+        dry_run=True,
+    )
+    assert scope.curator_report_path is not None
+    checklist = write_curator_checklist(
+        CuratorChecklist(
+            report_path=scope.curator_report_path,
+            repo_id=scope.repo_id,
+            code_root=scope.code_root,
+            onboarding_root=scope.onboarding_root,
+            quality=payload,
+            repair_findings=repair_findings,
+            commit_owned_findings=commit_owned_findings,
+            missing_onboarding=missing_onboarding,
+            stale_route_indexes=route_indexes.stale_indexes,
+            drift_rows=drift_rows,
+            report_only_findings=report_only,
+        )
+    )
+    response.pop("reportOnlyFindings", None)
+    response.update(checklist)
+    return response
 
 
 def _refuse_official_memory(repo: RepositoryScope, scope: MemoryScope) -> None:

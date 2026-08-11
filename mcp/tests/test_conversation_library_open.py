@@ -823,7 +823,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
                     request_id="req-1",
                     expected_identity_digest=self._digest(),
                     cwd=None,
-                    launch_context={"leafKey": "different"},
+                    launch_context={
+                        "taskDocumentRef": {
+                            "repository": "repo",
+                            "path": "master/different.json",
+                        }
+                    },
                 ),
             )
         assert len(self.opener.calls) == 1

@@ -29,6 +29,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.mcp.tools.terminal import spawn_agent_session_payload
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -58,9 +59,19 @@ from agents_remember.tasks import (
 # The source root of the agents_remember package this test process imported -- what the opener
 # seeds onto every harness-runner spawn's PYTHONPATH.
 _DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
+SPRINT_REF = TaskDocumentRef(repository="repo", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo", path="master/task.json")
+LEAF_REF = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
 
 
-_SEAT_FIELDS = ("kind", "leaf_key", "replacement_for_leaf", "level", "label", "env")
+_SEAT_FIELDS = (
+    "kind",
+    "task_document_ref",
+    "replacement_for_task_document_ref",
+    "level",
+    "label",
+    "env",
+)
 _RETIRED_FIELDS = (
     "context",
     "submit",
@@ -119,6 +130,20 @@ def _write_leaf_task(
     doc_id: str = "leaf-1",
     slug: str = "leaf-1",
 ) -> None:
+    write_task_doc(
+        coordination_root / "tasks" / repo / "sprint",
+        TaskDocument.model_validate(
+            {
+                "id": "SPRINT",
+                "slug": "task",
+                "title": "Sprint",
+                "kind": "master",
+                "repo": repo,
+                "createdAt": "2026-07-07T09:59",
+                "orchestrates": [master],
+            }
+        ),
+    )
     task_root = coordination_root / "tasks" / repo / master
     write_task_doc(
         task_root,
@@ -248,7 +273,7 @@ class _FakePaster:
 _ObservedPaster = _FakePaster
 
 
-def _running_chat(session_id: str, *, leaf_key: str) -> TerminalCatalogEntry:
+def _running_chat(session_id: str, *, task_document_ref: TaskDocumentRef) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
         label="Claude Code",
@@ -261,7 +286,8 @@ def _running_chat(session_id: str, *, leaf_key: str) -> TerminalCatalogEntry:
         created_at="2026-07-04T00:00:00Z",
         last_attached_at="2026-07-04T00:00:00Z",
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
+        spawn_role="worker",
     )
 
 
@@ -284,6 +310,17 @@ class SpawnAgentSessionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        env = base.get("env")
+        role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
+        if role is not None and "task_document_ref" not in base:
+            base["task_document_ref"] = (
+                SPRINT_REF
+                if role
+                in {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
+                else MASTER_REF
+                if role == "manager"
+                else LEAF_REF
+            )
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
@@ -292,7 +329,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
     def test_spawns_bound_seat_without_brief_or_readiness_claim(self) -> None:
         paster = _FakePaster(delivered=True, submitted=True)
         payload = self._spawn(
-            leaf_key="repo/master/leaf-1",
+            task_document_ref=LEAF_REF,
             spawned_by_session="manager-9",
             spawned_by_lifecycle="LC-manager",
             paster=paster,
@@ -300,7 +337,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["session"], "worker-1")
-        self.assertEqual(payload["leafKey"], "repo/master/leaf-1")
+        self.assertEqual(payload["taskDocumentRef"], LEAF_REF.model_dump())
         self.assertEqual(payload["spawnedBySession"], "manager-9")
         self.assertEqual(payload["spawnedByLifecycle"], "LC-manager")
         self.assertNotIn("contextDelivered", payload)
@@ -333,34 +370,38 @@ class SpawnAgentSessionTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"}, leaf_key="repo/master/leaf-1")
-        self.assertEqual(payload["status"], "sprint-binding-required")
-        self.assertIsNone(self.catalog.get("worker-1"))
-
-    def test_spawn_normalizes_legacy_leaf_slug_before_persisting(self) -> None:
-        payload = self._spawn(leaf_key="leaf-1")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"}, task_document_ref=MASTER_REF)
         self.assertEqual(payload["status"], "spawned-unbriefed")
-        self.assertEqual(payload["leafKey"], "repo/master/leaf-1")
         row = self.catalog.get("worker-1")
         assert row is not None
-        self.assertEqual(row.leaf_key, "repo/master/leaf-1")
+        self.assertEqual(row.task_document_ref, MASTER_REF)
+        self.assertEqual(row.binding_role, "manager")
 
-    def test_unbound_replacement_records_real_leaf_discriminator(self) -> None:
-        payload = self._spawn(replacement_for_leaf="leaf-1")
-
+    def test_spawn_persists_canonical_task_document_reference(self) -> None:
+        payload = self._spawn(task_document_ref=LEAF_REF)
         self.assertEqual(payload["status"], "spawned-unbriefed")
-        self.assertNotIn("leafKey", payload)
-        self.assertEqual(payload["replacementForLeaf"], "repo/master/leaf-1")
+        self.assertEqual(payload["taskDocumentRef"], LEAF_REF.model_dump())
         row = self.catalog.get("worker-1")
         assert row is not None
-        self.assertIsNone(row.leaf_key)
-        self.assertEqual(row.replacement_for_leaf, "repo/master/leaf-1")
+        self.assertEqual(row.task_document_ref, LEAF_REF)
 
-    def test_spawn_rejects_unmatchable_leaf_ref_before_spawning(self) -> None:
-        payload = self._spawn(leaf_key="missing-leaf", paster=_FakePaster())
+    def test_unbound_replacement_records_canonical_task_document(self) -> None:
+        payload = self._spawn(replacement_for_task_document_ref=LEAF_REF)
+
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertNotIn("taskDocumentRef", payload)
+        self.assertEqual(payload["replacementForTaskDocumentRef"], LEAF_REF.model_dump())
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertIsNone(row.task_document_ref)
+        self.assertEqual(row.replacement_for_task_document_ref, LEAF_REF)
+
+    def test_spawn_rejects_missing_task_document_before_spawning(self) -> None:
+        missing = TaskDocumentRef(repository="repo", path="master/missing-leaf.json")
+        payload = self._spawn(task_document_ref=missing, paster=_FakePaster())
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["status"], "leaf-ref-not-found")
-        self.assertIn("<repo>/<master-folder>/<doc-id>", payload["detail"])
+        self.assertEqual(payload["status"], "task-document-not-found")
+        self.assertIn("does not exist", payload["detail"])
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("worker-1"))
 
@@ -370,7 +411,9 @@ class SpawnAgentSessionTests(unittest.TestCase):
                 paster = _FakePaster()
                 payload = self._spawn(
                     context=context,
-                    leaf_key="missing-leaf",
+                    task_document_ref=TaskDocumentRef(
+                        repository="repo", path="master/missing-leaf.json"
+                    ),
                     harness="legacy-override",
                     paster=paster,
                 )
@@ -407,13 +450,36 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(row.kind, "terminal")
         self.assertEqual(row.binding_role, "terminal")
 
-    def test_leaf_taken_is_surfaced_never_overridden(self) -> None:
-        self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))
+    def test_seat_taken_is_surfaced_never_overridden(self) -> None:
+        path = agentic_settings_path(self.tmp)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "orchestration": {
+                        "roles": {
+                            "worker": {
+                                "harness": "claude",
+                                "model": "claude-fable-5",
+                                "effort": "max",
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.catalog.upsert(_running_chat("owner-1", task_document_ref=LEAF_REF))
         self.host.known.add("ar-owner-1")
         paster = _FakePaster()
-        payload = self._spawn(session_id="intruder", leaf_key="repo/master/leaf-1", paster=paster)
+        payload = self._spawn(
+            session_id="intruder",
+            task_document_ref=LEAF_REF,
+            env={"AR_SPAWN_ROLE": "worker"},
+            paster=paster,
+        )
         self.assertFalse(payload["ok"])
-        self.assertEqual(payload["status"], "leaf-taken")
+        self.assertEqual(payload["status"], "seat-taken")
         self.assertEqual(payload["ownerSession"], "owner-1")
         # Never spawned or pasted.
         self.assertEqual(self.host.ensured, [])
@@ -472,6 +538,10 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        env = base.get("env")
+        role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
+        if role is not None and "task_document_ref" not in base:
+            base["task_document_ref"] = SPRINT_REF if role == "strategist" else LEAF_REF
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log

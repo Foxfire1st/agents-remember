@@ -49,6 +49,7 @@ from agents_remember.models.conversations.status import (
 from agents_remember.models.conversations.stream_events import (
     ConversationEventEnvelope,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     DEFAULT_LIVENESS_HYSTERESIS,
     SeatTurnState,
@@ -153,7 +154,9 @@ class TerminalCatalogPort(Protocol):
         edge: str,
     ) -> TerminalCatalogEntry | None: ...
     def set_label(self, session_id: str, label: str) -> TerminalCatalogEntry | None: ...
-    def active_for_leaf(self, leaf_key: str, *, seat_role: str) -> TerminalCatalogEntry | None: ...
+    def active_for_task(
+        self, task_document_ref: TaskDocumentRef, *, seat_role: str
+    ) -> TerminalCatalogEntry | None: ...
     def mark_retired(
         self,
         session_id: str,

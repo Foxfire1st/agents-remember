@@ -27,11 +27,12 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import ExpiryOptions
-from agents_remember.controlplane.signal_routing import derive_row_owner
+from agents_remember.controlplane.signal_routing import StructuralRoutingError, derive_row_owner
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_supersede_payload
 from agents_remember.models.conversations.control_wire import SubmissionReceipt
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _agent_notifier_actions as notifier_actions
 from agents_remember.serving import _app_lifespan
@@ -57,6 +58,15 @@ from agents_remember.serving.inbox_reclamation import TmuxSessionNameSnapshot
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from test_inbox_arrival_guarantee import NOW, _seat
+
+SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo-a", path="master/task.json")
+LEAF_REF = TaskDocumentRef(repository="repo-a", path="master/leaf-1.json")
+
+
+class _Topology:
+    def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
+        return {LEAF_REF: MASTER_REF, MASTER_REF: SPRINT_REF, SPRINT_REF: None}[ref]
 
 
 class TransitionIdempotenceTests(unittest.TestCase):
@@ -91,8 +101,8 @@ class TransitionIdempotenceTests(unittest.TestCase):
                 self.store, "e1", now=NOW.isoformat(), options=ExpiryOptions(reason="x")
             ),
         )
-        for transition in transitions:
-            with self.subTest(transition=transition):
+        for index, transition in enumerate(transitions):
+            with self.subTest(transition=index):
                 self.setUp()
                 first, first_now = transition()
                 self.assertTrue(first_now)
@@ -131,25 +141,28 @@ class TransitionIdempotenceTests(unittest.TestCase):
 
 
 class RowOwnerDerivationTests(unittest.TestCase):
-    """N14 row-based owner derivation branches."""
+    """N14 rows re-resolve through task containment, never spawn provenance."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.catalog = TerminalCatalog(Path(self.tmp.name) / "catalog.json")
+        self.topology = _Topology()
 
     def _row(self, **updates: object) -> OperatorInboxEntry:
         return create_operator_inbox_entry(
             InboxMessage(ask="ask", response="resp", message_kind="escalation"),
             entry_id="e1",
             now=NOW.isoformat(),
-            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="manager-1")),
+            routing=InboxRouting(address=InboxAddress(agent_id="manager-old")),
             poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update=updates)
 
     def test_dispatch_brief_never_derives_an_owner(self) -> None:
         owner = derive_row_owner(
-            self.catalog, self._row(messageKind="dispatch-brief", state="pending")
+            self.catalog,
+            self.topology,
+            self._row(messageKind="dispatch-brief", state="pending"),
         )
         self.assertIsNone(owner.role)
         self.assertIsNone(owner.agent_id)
@@ -159,133 +172,55 @@ class RowOwnerDerivationTests(unittest.TestCase):
             _seat(
                 "orchestrator-old",
                 status="terminated",
-                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                spawn_role="orchestrator",
-            )
-        )
-        self.catalog.upsert(
-            _seat(
-                "manager-1",
-                status="terminated",
-                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                spawn_role="manager",
-                spawned_by_session="orchestrator-old",
-                leaf_key="repo-a/260707_master/manager-anchor",
+                task_document_ref=SPRINT_REF,
+                seat_role="orchestrator",
             )
         )
         self.catalog.upsert(
             _seat(
                 "orchestrator-new",
-                leaf_key="repo-a/260707_master/orchestrator-anchor",
-                spawn_role="orchestrator",
+                task_document_ref=SPRINT_REF,
+                seat_role="orchestrator",
             )
         )
         row = self._row(
             seatRole="manager",
-            senderRole="manager",
-            subjectAgentId="manager-1",
-            leafKey="repo-a/260707_master/leaf-1",
+            subjectTaskDocumentRef=MASTER_REF,
+            subjectAgentId="manager-old",
         )
-        owner = derive_row_owner(self.catalog, row)
+        owner = derive_row_owner(self.catalog, self.topology, row)
         self.assertEqual(owner.role, "orchestrator")
         self.assertEqual(owner.agent_id, "orchestrator-new")
 
-    def test_stamped_owner_fallbacks_cover_manager_orchestrator_and_architect(self) -> None:
-        self.catalog.upsert(
-            _seat(
-                "architect-1",
-                leaf_key="repo-a/260707_master/architect-anchor",
-                seat_role="architect",
-                spawn_role="architect",
-            )
+    def test_stamped_owner_fallback_rebinds_by_document_and_role(self) -> None:
+        self.catalog.upsert(_seat("manager-new", task_document_ref=MASTER_REF, seat_role="manager"))
+        row = self._row(
+            ownerRole="manager",
+            ownerTaskDocumentRef=MASTER_REF,
+            ownerAgentId="manager-old",
         )
-        self.catalog.upsert(
-            _seat(
-                "manager-2",
-                leaf_key="repo-a/260707_master/current-manager-anchor",
-                spawn_role="manager",
-            )
+        self.assertEqual(
+            derive_row_owner(self.catalog, self.topology, row).agent_id,
+            "manager-new",
         )
-        manager_row = self._row(ownerRole="manager", leafKey="repo-a/260707_master/leaf-1")
-        self.assertEqual(derive_row_owner(self.catalog, manager_row).agent_id, "manager-2")
-        architect_row = self._row(ownerRole="architect", leafKey="repo-a/260707_master/leaf-1")
-        self.assertEqual(derive_row_owner(self.catalog, architect_row).agent_id, "architect-1")
-        orchestrator_row = self._row(ownerRole="orchestrator")
-        owner = derive_row_owner(self.catalog, orchestrator_row)
-        self.assertEqual(owner.role, "orchestrator")
-        self.assertIsNone(owner.agent_id)
 
     def test_unroutable_row_returns_empty_owner(self) -> None:
-        owner = derive_row_owner(self.catalog, self._row())
+        owner = derive_row_owner(self.catalog, self.topology, self._row())
         self.assertIsNone(owner.role)
         self.assertIsNone(owner.agent_id)
 
-    def test_manager_row_with_live_orchestrator_uses_provenance(self) -> None:
-        self.catalog.upsert(_seat("orchestrator-live", spawn_role="orchestrator"))
-        self.catalog.upsert(
-            _seat(
-                "manager-1",
-                spawn_role="manager",
-                spawned_by_session="orchestrator-live",
+    def test_ambiguous_structural_owner_refuses_instead_of_role_mailbox_guess(self) -> None:
+        for session_id in ("orch-a", "orch-b"):
+            self.catalog.upsert(
+                _seat(
+                    session_id,
+                    task_document_ref=SPRINT_REF,
+                    seat_role="orchestrator",
+                )
             )
-        )
-        row = self._row(
-            seatRole="manager",
-            senderRole="manager",
-            subjectAgentId="manager-1",
-        )
-        owner = derive_row_owner(self.catalog, row)
-        self.assertEqual(owner.agent_id, "orchestrator-live")
-
-    def test_manager_row_with_unknown_subject_falls_back_to_role_mailbox(self) -> None:
-        row = self._row(seatRole="manager", senderRole="manager", subjectAgentId="ghost")
-        owner = derive_row_owner(self.catalog, row)
-        self.assertIsNone(owner.role)
-        self.assertIsNone(owner.agent_id)
-
-    def test_ambiguous_orchestrator_scope_resolves_to_role_mailbox(self) -> None:
-        self.catalog.upsert(
-            _seat(
-                "orchestrator-old",
-                status="terminated",
-                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                spawn_role="orchestrator",
-                spawned_by_lifecycle="L-old",
-            )
-        )
-        self.catalog.upsert(
-            _seat(
-                "manager-1",
-                status="terminated",
-                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                spawn_role="manager",
-                spawned_by_session="orchestrator-old",
-                leaf_key="repo-a/260707_master/manager-anchor",
-            )
-        )
-        self.catalog.upsert(
-            _seat(
-                "orch-a",
-                leaf_key="repo-a/260707_master/orch-a",
-                spawn_role="orchestrator",
-            )
-        )
-        self.catalog.upsert(
-            _seat(
-                "orch-b",
-                leaf_key="repo-a/260707_master/orch-b",
-                spawn_role="orchestrator",
-            )
-        )
-        row = self._row(
-            seatRole="manager",
-            senderRole="manager",
-            subjectAgentId="manager-1",
-            leafKey="repo-a/260707_master/leaf-1",
-        )
-        owner = derive_row_owner(self.catalog, row)
-        self.assertEqual(owner.role, "orchestrator")
-        self.assertIsNone(owner.agent_id)
+        row = self._row(seatRole="manager", subjectTaskDocumentRef=MASTER_REF)
+        with self.assertRaises(StructuralRoutingError):
+            derive_row_owner(self.catalog, self.topology, row)
 
 
 class ActionSkipBranchTests(unittest.TestCase):
@@ -299,6 +234,13 @@ class ActionSkipBranchTests(unittest.TestCase):
         self.observer_root = root / "logs" / "observer"
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(self.observer_root)
+        topology_patch = mock.patch.object(
+            notifier_actions,
+            "TaskDocumentTopology",
+            return_value=_Topology(),
+        )
+        topology_patch.start()
+        self.addCleanup(topology_patch.stop)
 
     def _ctx(self) -> AgentNotifierContext:
         return AgentNotifierContext(
@@ -340,16 +282,15 @@ class ActionSkipBranchTests(unittest.TestCase):
                 "manager-1",
                 status="terminated",
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                spawn_role="manager",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                task_document_ref=MASTER_REF,
+                seat_role="manager",
             )
         )
         self.catalog.upsert(
             _seat(
                 "worker-1",
-                leaf_key="repo-a/260707_master/leaf-1",
-                spawn_role="worker",
-                spawned_by_session="manager-1",
+                task_document_ref=LEAF_REF,
+                seat_role="worker",
             )
         )
         row = create_operator_inbox_entry(
@@ -358,7 +299,10 @@ class ActionSkipBranchTests(unittest.TestCase):
             now=(NOW - timedelta(minutes=5)).isoformat(),
             routing=InboxRouting(
                 address=InboxAddress(
-                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                    task_document_ref=MASTER_REF,
+                    lifecycle_id=None,
+                    agent_id="manager-1",
+                    recipient_role="manager",
                 )
             ),
             poster=InboxPoster(
@@ -367,7 +311,13 @@ class ActionSkipBranchTests(unittest.TestCase):
                 sender_agent_id="worker-1",
                 sender_role="worker",
             ),
-        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        ).model_copy(
+            update={
+                "subjectTaskDocumentRef": LEAF_REF,
+                "seatRole": "worker",
+                "subjectAgentId": "worker-1",
+            }
+        )
         self.inbox_store.append(row)
         sweep = SweepState(inbox_current={row.id: row}, redeliver_budget=1)
         result = notifier_actions.act_on_finding(
@@ -385,23 +335,22 @@ class ActionSkipBranchTests(unittest.TestCase):
                 "manager-1",
                 status="terminated",
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                spawn_role="manager",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                task_document_ref=MASTER_REF,
+                seat_role="manager",
             )
         )
         self.catalog.upsert(
             _seat(
                 "worker-1",
-                leaf_key="repo-a/260707_master/leaf-1",
-                spawn_role="worker",
-                spawned_by_session="manager-1",
+                task_document_ref=LEAF_REF,
+                seat_role="worker",
             )
         )
         self.catalog.upsert(
             _seat(
                 "manager-2",
-                leaf_key="repo-a/260707_master/current-manager-anchor",
-                spawn_role="manager",
+                task_document_ref=MASTER_REF,
+                seat_role="manager",
             )
         )
         row = create_operator_inbox_entry(
@@ -410,7 +359,10 @@ class ActionSkipBranchTests(unittest.TestCase):
             now=(NOW - timedelta(minutes=10)).isoformat(),
             routing=InboxRouting(
                 address=InboxAddress(
-                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                    task_document_ref=MASTER_REF,
+                    lifecycle_id=None,
+                    agent_id="manager-1",
+                    recipient_role="manager",
                 )
             ),
             poster=InboxPoster(
@@ -419,7 +371,13 @@ class ActionSkipBranchTests(unittest.TestCase):
                 sender_agent_id="worker-1",
                 sender_role="worker",
             ),
-        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        ).model_copy(
+            update={
+                "subjectTaskDocumentRef": LEAF_REF,
+                "seatRole": "worker",
+                "subjectAgentId": "worker-1",
+            }
+        )
         self.inbox_store.append(row)
         sweep = SweepState(inbox_current={row.id: row}, redeliver_budget=1)
         result = notifier_actions.act_on_finding(
@@ -491,8 +449,8 @@ class ActionSkipBranchTests(unittest.TestCase):
         self.catalog.upsert(
             _seat(
                 "manager-2",
-                leaf_key="repo-a/260707_master/current-manager-anchor",
-                spawn_role="manager",
+                task_document_ref=MASTER_REF,
+                seat_role="manager",
             )
         )
         rebind_row = create_operator_inbox_entry(
@@ -501,7 +459,10 @@ class ActionSkipBranchTests(unittest.TestCase):
             now=NOW.isoformat(),
             routing=InboxRouting(
                 address=InboxAddress(
-                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                    task_document_ref=MASTER_REF,
+                    lifecycle_id=None,
+                    agent_id="manager-1",
+                    recipient_role="manager",
                 )
             ),
             poster=InboxPoster(
@@ -510,7 +471,13 @@ class ActionSkipBranchTests(unittest.TestCase):
                 sender_agent_id="worker-1",
                 sender_role="worker",
             ),
-        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        ).model_copy(
+            update={
+                "subjectTaskDocumentRef": LEAF_REF,
+                "seatRole": "worker",
+                "subjectAgentId": "worker-1",
+            }
+        )
         self.inbox_store.append(rebind_row)
         inbox_transitions.mark_landed(
             self.inbox_store, "e2", now=NOW.isoformat(), reason="concurrent"
@@ -556,6 +523,7 @@ class EvaluationBranchTests(unittest.TestCase):
         self.assertIsNone(_row_dead_since(self.catalog, row))
         findings = evaluate_rebind_findings(
             self.catalog,
+            _Topology(),
             current={row.id: row},
             now=NOW,
             grace_seconds=REBIND_GRACE_SECONDS,
@@ -1099,30 +1067,36 @@ class ReboundDeliveryToReplacementTests(unittest.TestCase):
             root = Path(tmp)
             observer = root / "logs" / "observer"
             catalog = TerminalCatalog(root / "catalog.json")
-            catalog.upsert(_seat("orchestrator-1", spawn_role="orchestrator"))
+            catalog.upsert(
+                _seat(
+                    "orchestrator-1",
+                    task_document_ref=SPRINT_REF,
+                    seat_role="orchestrator",
+                )
+            )
             catalog.upsert(
                 _seat(
                     "manager-old",
                     status="terminated",
                     terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
-                    spawn_role="manager",
+                    task_document_ref=MASTER_REF,
+                    seat_role="manager",
                     spawned_by_session="orchestrator-1",
-                    leaf_key="repo-a/260707_master/old-manager-anchor",
                 )
             )
             catalog.upsert(
                 _seat(
                     "worker-1",
-                    leaf_key="repo-a/260707_master/leaf-1",
-                    spawn_role="worker",
+                    task_document_ref=LEAF_REF,
+                    seat_role="worker",
                     spawned_by_session="manager-old",
                 )
             )
             catalog.upsert(
                 _seat(
                     "manager-new",
-                    leaf_key="repo-a/260707_master/current-manager-anchor",
-                    spawn_role="manager",
+                    task_document_ref=MASTER_REF,
+                    seat_role="manager",
                     turn_state="turn-ended",
                     turn_state_changed_at=(NOW - timedelta(minutes=1)).isoformat(),
                     control_state="ready",
@@ -1147,7 +1121,13 @@ class ReboundDeliveryToReplacementTests(unittest.TestCase):
                         sender_agent_id="worker-1",
                         sender_role="worker",
                     ),
-                ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+                ).model_copy(
+                    update={
+                        "subjectTaskDocumentRef": LEAF_REF,
+                        "subjectAgentId": "worker-1",
+                        "seatRole": "worker",
+                    }
+                )
             )
             ctx = AgentNotifierContext(
                 catalog=catalog,
@@ -1169,21 +1149,33 @@ class ReboundDeliveryToReplacementTests(unittest.TestCase):
                     frozenset(), "tmux-no-server"
                 ),
             )
-            with mock.patch(
-                "agents_remember.serving.inbox_delivery.submit_control_prompt",
-                side_effect=lambda _target, _text, submission: SubmissionReceipt(
-                    request_id=submission.request_id,
-                    acceptance="immediate",
-                    submitted_at=NOW.isoformat(),
-                    accepted_at=NOW.isoformat(),
+            with (
+                mock.patch(
+                    "agents_remember.serving._agent_notifier_actions.TaskDocumentTopology",
+                    return_value=_Topology(),
                 ),
-            ) as submit:
+                mock.patch(
+                    "agents_remember.serving._agent_notifier_evaluation.TaskDocumentTopology",
+                    return_value=_Topology(),
+                ),
+                mock.patch(
+                    "agents_remember.serving.inbox_delivery.submit_control_prompt",
+                    side_effect=lambda _target, _text, submission: SubmissionReceipt(
+                        request_id=submission.request_id,
+                        acceptance="immediate",
+                        submitted_at=NOW.isoformat(),
+                        accepted_at=NOW.isoformat(),
+                    ),
+                ) as submit,
+            ):
                 run_agent_notifier_sweep(ctx, now=NOW)
                 self.assertEqual(store.current()["e1"].agentId, "manager-new")
-                e1_calls = [call for call in submit.call_args_list if "entry: e1" in call.args[1]]
+                e1_calls = [
+                    call for call in submit.call_args_list if call.args[2].request_id == "e1"
+                ]
                 self.assertEqual(e1_calls, [])
                 run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=1))
-            e1_calls = [call for call in submit.call_args_list if "entry: e1" in call.args[1]]
+            e1_calls = [call for call in submit.call_args_list if call.args[2].request_id == "e1"]
             self.assertEqual(len(e1_calls), 1)
             self.assertEqual(e1_calls[0].args[0].id, "manager-new")
             final = store.current()["e1"]

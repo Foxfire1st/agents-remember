@@ -21,6 +21,7 @@ from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
+    QualityGateTarget,
     code_quality_gate_preview,
     requires_strict_code_quality,
     run_strict_code_quality_gate,
@@ -817,7 +818,9 @@ def _refuse_conflicted_worktree(code_worktree: Path) -> None:
         )
 
 
-def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, object]:
+def _gate_staged_code(
+    code_worktree: Path, *, worktree_group: Path, diff_base: str
+) -> dict[str, object]:
     """Stage, run the configured fast hook, then gate exactly what closeout commits.
 
     Every rail of the gate reads the index. ``derive_scope`` lists what ruff and pyright
@@ -879,7 +882,9 @@ def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, objec
         # the authoritative wrapper so the wrapper and the eventual commit see one tree.
         require_git(code_worktree, ["add", "-A"])
     result = run_strict_code_quality_gate(
-        code_worktree, diff_base=diff_base, plan=QualityGatePlan(mode="targeted")
+        QualityGateTarget(code_worktree=code_worktree, worktree_group=worktree_group),
+        diff_base=diff_base,
+        plan=QualityGatePlan(mode="targeted"),
     )
     return {
         **result,
@@ -1013,7 +1018,9 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     )
     if strict_code_quality_required:
         code_quality_gate = _gate_staged_code(
-            contract.code_worktree, diff_base=contract.code_base_commit
+            contract.code_worktree,
+            worktree_group=contract.worktree_group,
+            diff_base=contract.code_base_commit,
         )
     # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
     # Everything above only reads or touches the index of the task's own disposable worktree, so a

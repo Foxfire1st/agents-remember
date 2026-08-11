@@ -169,8 +169,9 @@ integrated on super.
 
 ## Comms Protocol
 
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — receive the seam's change-set context; post
-  the verdict reference to the seam's decider.
+- **Structural parent message** (`message_parent`) — ask for missing review context or report a
+  blocking routing problem. The verdict artifact plus terminal/finalizer truth is the completion
+  signal; do not author a second completion row or carry the decider's runtime identity.
 - **Stdin push** — not a driver here; the reviewer is short-lived and reports through its verdict.
 - **Escalation** — the reviewer does not escalate; it **reports a verdict**. If the change set is
   un-reviewable (missing diff, missing task docs), that itself is a **blocking finding** in the verdict,

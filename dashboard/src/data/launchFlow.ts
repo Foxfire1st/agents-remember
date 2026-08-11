@@ -3,7 +3,11 @@ import type {
   EffortOptionWire,
   ModelCapabilityWire,
 } from "../types/harnessCapabilities";
-import type { HarnessControlState, TerminalOpenKind } from "../types/terminalCatalog";
+import type {
+  HarnessControlState,
+  TaskDocumentRef,
+  TerminalOpenKind,
+} from "../types/terminalCatalog";
 import { openTerminalSession, type OpenedTerminalSession } from "./terminal";
 
 // The launch-flow state machines (260715-FEUI-L3 R4/R5), pure so vitest tables can be
@@ -99,7 +103,7 @@ export type OpenOutcome =
       label: string | null;
       kind: TerminalOpenKind | null;
       harness: string | null;
-      leafKey: string | null;
+      taskDocumentRef: TaskDocumentRef | null;
       controlState: HarnessControlState | null;
       /** The REQUESTED pair persisted verbatim before validation — tier 'pending', never proof. */
       resolvedModel: string | null;
@@ -107,7 +111,11 @@ export type OpenOutcome =
     }
   | { path: "launch-selection-invalid"; detail: string }
   | { path: "open-refused"; status: string; detail: string }
-  | { path: "leaf-taken"; leafKey: string | null; ownerSession: string | null }
+  | {
+      path: "seat-taken";
+      taskDocumentRef: TaskDocumentRef | null;
+      ownerSession: string | null;
+    }
   | {
       path: "launch-selection-conflict";
       session: string;
@@ -127,6 +135,14 @@ export type OpenOutcome =
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
+const taskDocumentRef = (value: unknown): TaskDocumentRef | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return typeof record.repository === "string" && typeof record.path === "string"
+    ? { repository: record.repository, path: record.path }
+    : null;
+};
+
 function openedOutcome(record: Record<string, unknown>): OpenOutcome {
   return {
     path: "opened",
@@ -134,7 +150,7 @@ function openedOutcome(record: Record<string, unknown>): OpenOutcome {
     label: text(record.label),
     kind: text(record.kind) as TerminalOpenKind | null,
     harness: text(record.harness),
-    leafKey: text(record.leafKey),
+    taskDocumentRef: taskDocumentRef(record.taskDocumentRef),
     controlState: text(record.controlState) as HarnessControlState | null,
     resolvedModel: text(record.resolvedModel),
     resolvedEffort: text(record.resolvedEffort),
@@ -148,10 +164,10 @@ function badRequestOutcome(record: Record<string, unknown>, status: string | nul
 }
 
 function conflictOutcome(record: Record<string, unknown>, status: string | null): OpenOutcome {
-  if (status === "leaf-taken") {
+  if (status === "seat-taken") {
     return {
-      path: "leaf-taken",
-      leafKey: text(record.leafKey),
+      path: "seat-taken",
+      taskDocumentRef: taskDocumentRef(record.taskDocumentRef),
       ownerSession: text(record.session),
     };
   }
@@ -198,7 +214,7 @@ export interface OpenHostedSessionRequest {
   harness: string;
   selection: LaunchSelectionState;
   label?: string;
-  leafKey?: string;
+  taskDocumentRef?: TaskDocumentRef;
   lifecycleId?: string;
 }
 
@@ -206,7 +222,7 @@ function hostedSessionBody(request: OpenHostedSessionRequest): Record<string, un
   return {
     ...launchSelectionBody(request.selection),
     ...(request.label ? { label: request.label } : {}),
-    ...(request.leafKey ? { leafKey: request.leafKey } : {}),
+    ...(request.taskDocumentRef ? { taskDocumentRef: request.taskDocumentRef } : {}),
     ...(request.lifecycleId ? { lifecycleId: request.lifecycleId } : {}),
   };
 }
@@ -218,7 +234,7 @@ function openedOutcomeFromSession(session: OpenedTerminalSession): OpenOutcome {
     label: session.label,
     kind: session.kind,
     harness: session.harness ?? null,
-    leafKey: session.leafKey ?? null,
+    taskDocumentRef: session.taskDocumentRef ?? null,
     controlState: session.controlState ?? null,
     resolvedModel: session.resolvedModel ?? null,
     resolvedEffort: session.resolvedEffort ?? null,

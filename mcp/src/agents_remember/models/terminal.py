@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal, get_args
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 # These three vocabularies are declared here rather than beside the payload builders that write
 # them, and the direction is deliberate: `application.terminal_tools` imports them, not the reverse.
@@ -16,25 +17,26 @@ from agents_remember.models.base import ToolResponse
 # aliases, so the published enum is unchanged.
 LeafRefStatus = Literal["leaf-ref-not-found", "leaf-ref-ambiguous"]
 
-LeafAssignmentStatus = Literal[
+TaskAssignmentStatus = Literal[
     "attached",
-    "leaf-taken",
+    "seat-taken",
     "unknown-session",
     "role-required",
-    "sprint-binding-required",
-    "sprint-binding-conflict",
-    LeafRefStatus,
+    "task-binding-invalid",
+    "task-document-not-found",
+    "task-document-invalid",
+    "task-document-repo-mismatch",
 ]
 
 
-class AttachTerminalSessionToLeafResponse(ToolResponse):
-    """``attach_terminal_session_to_leaf``: move one hosted session to a leaf."""
+class AttachTerminalSessionToTaskResponse(ToolResponse):
+    """Trusted administration: move one hosted session to a document-owned role seat."""
 
-    operation: Literal["attach_terminal_session_to_leaf"] = "attach_terminal_session_to_leaf"
-    status: LeafAssignmentStatus
+    operation: Literal["attach_terminal_session_to_task"] = "attach_terminal_session_to_task"
+    status: TaskAssignmentStatus
     session: str
-    leafKey: str
-    previousLeafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef
+    previousTaskDocumentRef: TaskDocumentRef | None = None
     ownerSession: str | None = None
     role: Literal["chat", "terminal"] | None = None
     seatRole: str | None = None
@@ -45,7 +47,7 @@ class AttachTerminalSessionToLeafResponse(ToolResponse):
 SpawnAgentSessionStatus = Literal[
     "spawned-unbriefed",
     "brief-delivery-separate",
-    "leaf-taken",
+    "seat-taken",
     "harness-unknown",
     "harness-not-detected",
     # 260703-L16: the effort value is outside the resolved harness's known vocabulary (or a
@@ -65,10 +67,11 @@ SpawnAgentSessionStatus = Literal[
     "spend-override-unsupported",
     # 260703-L16 (ruling 2026-07-07T08:15): the dispatch level is outside leaf|master|portfolio.
     "level-invalid",
-    "sprint-binding-required",
-    "sprint-binding-conflict",
-    # Raised by `LeafRefResolutionError` and copied onto the refusal by `leaf_ref_refusal_payload`.
-    LeafRefStatus,
+    "task-binding-required",
+    "task-binding-invalid",
+    "task-document-not-found",
+    "task-document-invalid",
+    "task-document-repo-mismatch",
     "bad-kind",
 ]
 
@@ -87,9 +90,9 @@ class SpawnAgentSessionResponse(ToolResponse):
     session: str
     harness: str | None = None
     kind: Literal["harness", "terminal"] | None = None
-    leafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
     seatRole: str | None = None
-    replacementForLeaf: str | None = None
+    replacementForTaskDocumentRef: TaskDocumentRef | None = None
     label: str | None = None
     cwd: str | None = None
     tmuxName: str | None = None
@@ -103,8 +106,6 @@ class SpawnAgentSessionResponse(ToolResponse):
     # (260703-L16, ruling 2026-07-07T08:15), recorded on the catalog row.
     spawnLevel: str | None = None
     spawnLevelSource: str | None = None
-    spawnRepo: str | None = None
-    spawnSprint: str | None = None
     resolvedModel: str | None = None
     resolvedEffort: str | None = None
     # Free-form spawn provenance (260703-L16): launchArgs rode the base launch argv verbatim;
@@ -116,7 +117,7 @@ class SpawnAgentSessionResponse(ToolResponse):
     # Settings-owned launch/session commands remain spawn-phase configuration. Without a bound
     # brief log, ``False`` means their application was not proven; it is never a brief-delivery claim.
     sessionCommandsDelivered: bool | None = None
-    # Set on ``leaf-taken``: the running same-role session that already owns the leaf.
+    # Set internally on ``seat-taken``: the running occupant of the document+role seat.
     ownerSession: str | None = None
     # Failure-only launch-command evidence. Task instructions are delivered by dispatch-brief.
     deliveryCapture: str | None = None

@@ -30,6 +30,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.models.conversations.control_wire import SubmissionReceipt
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
 from agents_remember.serving._agent_notifier_actions import act_on_finding
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
@@ -48,17 +49,71 @@ from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 from agents_remember.serving.terminal_tmux import TmuxProbeResult
+from agents_remember.tasks import TaskDocument, write_task_doc
+from test_agent_notifier_ladder import MASTER_REF, SPRINT_REF, _leaf_ref, _write_topology
 
 NOW = datetime(2026, 7, 13, 15, 41, 0, tzinfo=UTC)
-MASTER = "repo-a/260707_master"
-MANAGER_ANCHOR = f"{MASTER}/manager-anchor"
-LEAF_A = f"{MASTER}/leaf-9"
-LEAF_B = f"{MASTER}/leaf-10"
-OTHER_MASTER_LEAF = "repo-b/other_master/leaf-11"
+LEAF_A = _leaf_ref(9)
+LEAF_B = _leaf_ref(10)
+OTHER_MASTER_LEAF = TaskDocumentRef(repository="repo-b", path="other_master/leaf-11.json")
+
+
+def _write_other_master(root: Path) -> None:
+    task_root = root / "tasks" / "repo-b"
+    common = {"repo": "repo-b", "createdAt": "2026-07-07T00:00"}
+    write_task_doc(
+        task_root / "sprint",
+        TaskDocument.model_validate(
+            {
+                **common,
+                "id": "OTHER-SPRINT",
+                "slug": "other-sprint",
+                "title": "Other Sprint",
+                "kind": "master",
+                "orchestrates": ["other_master"],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root / "other_master",
+        TaskDocument.model_validate(
+            {
+                **common,
+                "id": "OTHER-MASTER",
+                "slug": "other_master",
+                "title": "Other Master",
+                "kind": "master",
+                "subTasks": [
+                    {
+                        "number": "leaf-11",
+                        "name": "leaf-11",
+                        "file": "leaf-11.md",
+                        "status": "inProgress",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root / "other_master",
+        TaskDocument.model_validate(
+            {
+                **common,
+                "id": "leaf-11",
+                "slug": "leaf-11",
+                "title": "Leaf 11",
+                "kind": "subTask",
+                "master": "task.md",
+            }
+        ),
+    )
 
 
 def _entry(
-    session_id: str, *, leaf_key: str | None = None, **overrides: object
+    session_id: str,
+    *,
+    task_document_ref: TaskDocumentRef | None = None,
+    **overrides: object,
 ) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
@@ -72,7 +127,7 @@ def _entry(
         created_at="2026-07-13T00:00:00+00:00",
         last_attached_at="2026-07-13T00:00:00+00:00",
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
         **overrides,  # type: ignore[arg-type]
     )
 
@@ -86,6 +141,7 @@ def _orchestrator(session_id: str = "orchestrator-1", **overrides: object) -> Te
     return replace(
         _entry(
             session_id,
+            task_document_ref=SPRINT_REF,
             spawn_role="orchestrator",
             control_endpoint=Path("/tmp/orchestrator.sock"),
             control_state="ready",
@@ -103,7 +159,7 @@ def _manager(session_id: str = "manager-1", **overrides: object) -> TerminalCata
     return replace(
         _entry(
             session_id,
-            leaf_key=MANAGER_ANCHOR,
+            task_document_ref=MASTER_REF,
             spawn_role="manager",
             spawned_by_session="orchestrator-1",
             spawned_by_lifecycle="L-orch",
@@ -115,7 +171,7 @@ def _manager(session_id: str = "manager-1", **overrides: object) -> TerminalCata
 def _idle_worker(
     session_id: str,
     *,
-    leaf_key: str | None = LEAF_A,
+    task_document_ref: TaskDocumentRef | None = LEAF_A,
     **overrides: object,
 ) -> TerminalCatalogEntry:
     state: dict[str, object] = {
@@ -126,7 +182,7 @@ def _idle_worker(
     return replace(
         _entry(
             session_id,
-            leaf_key=leaf_key,
+            task_document_ref=task_document_ref,
             spawn_role="worker",
             spawned_by_session="manager-1",
         ),
@@ -135,10 +191,12 @@ def _idle_worker(
 
 
 def _idle_subordinate(session_id: str, role: str, **overrides: object) -> TerminalCatalogEntry:
-    leaf_key = overrides.pop("leaf_key", LEAF_A)
-    assert isinstance(leaf_key, str) or leaf_key is None
+    task_document_ref = overrides.pop("task_document_ref", LEAF_A)
+    assert isinstance(task_document_ref, TaskDocumentRef) or task_document_ref is None
     return replace(
-        _idle_worker(session_id, leaf_key=leaf_key, **overrides), spawn_role=role, seat_role=role
+        _idle_worker(session_id, task_document_ref=task_document_ref, **overrides),
+        spawn_role=role,
+        seat_role=role,
     )
 
 
@@ -174,6 +232,8 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.coordination_root = root / "ar-coordination"
+        self.topology = _write_topology(self.coordination_root)
+        _write_other_master(self.coordination_root)
         observer_root = self.coordination_root / "logs" / "observer"
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
@@ -218,7 +278,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-1"))
-        self.catalog.upsert(_idle_worker("worker-2", leaf_key=LEAF_B))
+        self.catalog.upsert(_idle_worker("worker-2", task_document_ref=LEAF_B))
         ctx = self._ctx()
         with mock.patch(
             "agents_remember.serving.inbox_delivery.submit_control_prompt",
@@ -231,15 +291,16 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.assertEqual(len(signals), 1, result.actions)
         signal = signals[0]
         self.assertEqual(signal.agentId, "orchestrator-1")
-        self.assertEqual(signal.leafKey, MANAGER_ANCHOR)
+        self.assertEqual(signal.taskDocumentRef, SPRINT_REF)
+        self.assertEqual(signal.subjectTaskDocumentRef, MASTER_REF)
         self.assertEqual(signal.seatRole, "manager")
         self.assertEqual(signal.subjectAgentId, "manager-1")
         self.assertTrue(
             signal.ask.startswith("Agent notifier observed state-signal: compound-idle")
         )
-        self.assertIn("manager-1", signal.response)
-        self.assertIn("worker-1", signal.response)
-        self.assertIn("worker-2", signal.response)
+        self.assertIn(MASTER_REF.path, signal.response)
+        self.assertIn(LEAF_A.path, signal.response)
+        self.assertIn(LEAF_B.path, signal.response)
         self.assertTrue(state_signal_landed(signal))
         self.assertEqual(submit.call_count, 1)
         manager = self.catalog.get("manager-1")
@@ -257,7 +318,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-2",
-                leaf_key=LEAF_B,
+                task_document_ref=LEAF_B,
                 turn_state="working",
                 turn_state_changed_at=NOW.isoformat(),
             )
@@ -271,13 +332,13 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-1"))
-        self.catalog.upsert(_idle_subordinate("reviewer-1", "reviewer", leaf_key=LEAF_B))
-        self.catalog.upsert(_idle_subordinate("curator-1", "curator", leaf_key=LEAF_B))
+        self.catalog.upsert(_idle_subordinate("reviewer-1", "reviewer", task_document_ref=LEAF_B))
+        self.catalog.upsert(_idle_subordinate("curator-1", "curator", task_document_ref=LEAF_B))
         ctx = self._ctx()
         run_agent_notifier_sweep(ctx, now=NOW)
         self.assertEqual(len(self._state_signals()), 1)
-        self.assertIn("reviewer-1", self._state_signals()[0].response)
-        self.assertIn("curator-1", self._state_signals()[0].response)
+        self.assertIn("as reviewer", self._state_signals()[0].response)
+        self.assertIn("as curator", self._state_signals()[0].response)
 
         reviewer = self.catalog.get("reviewer-1")
         assert reviewer is not None
@@ -323,20 +384,20 @@ class CompoundIdleRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=2))
         self.assertEqual(len(self._state_signals()), 1)
 
-    def test_future_manager_owned_leaf_role_blocks_then_joins_without_duplicates(self) -> None:
+    def test_unsupported_leaf_role_neither_blocks_nor_joins(self) -> None:
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-1"))
         future = _idle_subordinate(
             "analyst-1",
             "analyst",
-            leaf_key=LEAF_B,
+            task_document_ref=LEAF_B,
             turn_state="working",
         )
         self.catalog.upsert(future)
         ctx = self._ctx()
         run_agent_notifier_sweep(ctx, now=NOW)
-        self.assertEqual(self._state_signals(), [])
+        self.assertEqual(len(self._state_signals()), 1)
 
         self.catalog.upsert(
             replace(
@@ -347,7 +408,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         )
         run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=1))
         self.assertEqual(len(self._state_signals()), 1)
-        self.assertIn("analyst-1", self._state_signals()[0].response)
+        self.assertNotIn("as analyst", self._state_signals()[0].response)
         run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=2))
         self.assertEqual(len(self._state_signals()), 1)
 
@@ -355,15 +416,17 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-1"))
-        self.catalog.upsert(_idle_subordinate("architect-child", "architect", leaf_key=LEAF_B))
         self.catalog.upsert(
-            _idle_subordinate("other-master-child", "analyst", leaf_key=OTHER_MASTER_LEAF)
+            _idle_subordinate("architect-child", "architect", task_document_ref=LEAF_B)
+        )
+        self.catalog.upsert(
+            _idle_subordinate("other-master-child", "analyst", task_document_ref=OTHER_MASTER_LEAF)
         )
 
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertIn("worker-1", signals[0].response)
+        self.assertIn(LEAF_A.path, signals[0].response)
         self.assertNotIn("architect-child", signals[0].response)
         self.assertNotIn("other-master-child", signals[0].response)
 
@@ -371,7 +434,9 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-known"))
-        self.catalog.upsert(_idle_worker("worker-unknown", leaf_key=LEAF_B, turn_state=None))
+        self.catalog.upsert(
+            _idle_worker("worker-unknown", task_document_ref=LEAF_B, turn_state=None)
+        )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         self.assertEqual(self._state_signals(), [])
 
@@ -389,7 +454,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-2",
-                leaf_key=LEAF_B,
+                task_document_ref=LEAF_B,
                 turn_state="awaiting-input",
                 turn_state_changed_at=NOW.isoformat(),
             )
@@ -397,14 +462,14 @@ class CompoundIdleRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertIn("worker-2", signals[0].response)
+        self.assertIn(LEAF_B.path, signals[0].response)
 
     def test_flap_rearms_after_a_seat_returns_to_activity(self) -> None:
         self.catalog.upsert(_orchestrator())
         manager = _manager()
         self.catalog.upsert(manager)
         self.catalog.upsert(_idle_worker("worker-1"))
-        worker2 = _idle_worker("worker-2", leaf_key=LEAF_B)
+        worker2 = _idle_worker("worker-2", task_document_ref=LEAF_B)
         self.catalog.upsert(worker2)
         ctx = self._ctx()
         with mock.patch(
@@ -507,16 +572,21 @@ class CompoundIdleRelayTests(unittest.TestCase):
             self.assertEqual(submit.call_count, 1)
             self.assertEqual(len(self._state_signals()), 1)
 
-    def test_member_identity_same_master_without_manager_ownership_is_excluded(self) -> None:
+    def test_same_master_membership_ignores_spawn_provenance(self) -> None:
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
-        # A sibling manager's subordinate must not join this manager's idle episode.
+        # Runtime spawn provenance is private history; the leaf's parent master owns the seat.
         self.catalog.upsert(
-            _idle_worker("worker-bound", leaf_key=LEAF_A, spawned_by_session="other-manager")
+            _idle_worker(
+                "worker-bound",
+                task_document_ref=LEAF_A,
+                spawned_by_session="other-manager",
+            )
         )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
-        self.assertEqual(len(signals), 0)
+        self.assertEqual(len(signals), 1)
+        self.assertIn(LEAF_A.path, signals[0].response)
 
     def test_member_identity_other_master_worker_not_in_set(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -526,7 +596,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-other",
-                leaf_key=OTHER_MASTER_LEAF,
+                task_document_ref=OTHER_MASTER_LEAF,
                 spawned_by_session=None,
                 turn_state="working",
                 turn_state_changed_at=NOW.isoformat(),
@@ -535,7 +605,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertNotIn("worker-other", signals[0].response)
+        self.assertNotIn(OTHER_MASTER_LEAF.path, signals[0].response)
 
     def test_foreign_master_worker_active_does_not_block(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -546,7 +616,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-foreign",
-                leaf_key=OTHER_MASTER_LEAF,
+                task_document_ref=OTHER_MASTER_LEAF,
                 spawned_by_session="manager-1",
                 turn_state="working",
                 turn_state_changed_at=NOW.isoformat(),
@@ -555,7 +625,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertNotIn("worker-foreign", signals[0].response)
+        self.assertNotIn(OTHER_MASTER_LEAF.path, signals[0].response)
 
     def test_foreign_master_worker_idle_does_not_join(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -565,15 +635,15 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-foreign",
-                leaf_key=OTHER_MASTER_LEAF,
+                task_document_ref=OTHER_MASTER_LEAF,
                 spawned_by_session="manager-1",
             )
         )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertIn("worker-1", signals[0].response)
-        self.assertNotIn("worker-foreign", signals[0].response)
+        self.assertIn(LEAF_A.path, signals[0].response)
+        self.assertNotIn(OTHER_MASTER_LEAF.path, signals[0].response)
 
     def test_zero_worker_manager_does_not_signal(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -583,7 +653,9 @@ class CompoundIdleRelayTests(unittest.TestCase):
 
     def test_unbound_manager_never_forms_set(self) -> None:
         self.catalog.upsert(_orchestrator())
-        self.catalog.upsert(_manager(leaf_key=None, replacement_for_leaf=None))
+        self.catalog.upsert(
+            _manager(task_document_ref=None, replacement_for_task_document_ref=None)
+        )
         self.catalog.upsert(_idle_worker("worker-1"))
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         self.assertEqual(self._state_signals(), [])
@@ -597,8 +669,8 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-unbound",
-                leaf_key=None,
-                replacement_for_leaf=None,
+                task_document_ref=None,
+                replacement_for_task_document_ref=None,
                 turn_state="working",
                 turn_state_changed_at=NOW.isoformat(),
             )
@@ -606,7 +678,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertNotIn("worker-unbound", signals[0].response)
+        self.assertNotIn("- as worker", signals[0].response)
 
     def test_retired_rows_never_count_status_first(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -616,7 +688,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-retired",
-                leaf_key=LEAF_B,
+                task_document_ref=LEAF_B,
                 status="terminated",
                 terminated_at=NOW.isoformat(),
             )
@@ -625,23 +697,22 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(
             _idle_worker(
                 "worker-exited",
-                leaf_key=LEAF_B,
+                task_document_ref=LEAF_B,
                 status="exited",
             )
         )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertIn("worker-1", signals[0].response)
-        self.assertNotIn("worker-retired", signals[0].response)
-        self.assertNotIn("worker-exited", signals[0].response)
+        self.assertIn(LEAF_A.path, signals[0].response)
+        self.assertNotIn(LEAF_B.path, signals[0].response)
 
-    def test_no_signal_without_spawn_provenance_owner(self) -> None:
+    def test_structural_owner_routes_without_spawn_provenance(self) -> None:
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager(spawned_by_session=None, spawned_by_lifecycle=None))
         self.catalog.upsert(_idle_worker("worker-1"))
         run_agent_notifier_sweep(self._ctx(), now=NOW)
-        self.assertEqual(self._state_signals(), [])
+        self.assertEqual(len(self._state_signals()), 1)
 
     def test_manager_non_reaction_residue_relays_to_orchestrator(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -676,7 +747,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         residue = signals[0]
         self.assertIn("non-reaction", residue.ask)
         self.assertEqual(residue.agentId, "orchestrator-1")
-        self.assertIn("manager-1", residue.response)
+        self.assertIn(MASTER_REF.path, residue.response)
         self.assertIn("manager-landed-1", residue.response)
         manager = self.catalog.get("manager-1")
         assert manager is not None
@@ -686,7 +757,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=1))
         self.assertEqual(len(self._state_signals()), 1)
 
-    def test_manager_residue_skips_without_spawn_provenance_owner(self) -> None:
+    def test_manager_residue_routes_structurally_without_spawn_provenance(self) -> None:
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(
             _manager(
@@ -703,6 +774,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
             poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
         ).model_copy(
             update={
+                "state": "landed",
                 "deliveryState": "delivered",
                 "adapterDeliveryState": "accepted",
                 "deliveredToSession": "manager-1",
@@ -711,7 +783,8 @@ class CompoundIdleRelayTests(unittest.TestCase):
         )
         self.inbox_store.append(landed)
         run_agent_notifier_sweep(self._ctx(), now=NOW)
-        self.assertEqual(self._state_signals(), [])
+        self.assertEqual(len(self._state_signals()), 1)
+        self.assertEqual(self._state_signals()[0].agentId, "orchestrator-1")
 
     def test_compound_idle_marker_guard_suppresses_repeat_record(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -741,7 +814,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
             kind="compound-idle-due",
             detail="compound-idle",
             session_id=session_id,
-            leaf_key=MANAGER_ANCHOR,
+            task_document_ref=MASTER_REF,
             seat_role="manager",
             source_id=source_id,
         )
@@ -778,7 +851,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
                 kind="compound-idle-due",
                 detail="compound-idle",
                 session_id="manager-1",
-                leaf_key=MANAGER_ANCHOR,
+                task_document_ref=MASTER_REF,
                 seat_role="manager",
                 source_id="stale-trigger",
             ),
@@ -793,7 +866,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-1"))
         ctx = self._ctx()
-        findings = evaluate_compound_idle_findings(self.catalog)
+        findings = evaluate_compound_idle_findings(self.catalog, self.topology)
         self.assertEqual(len(findings), 1)
         worker = self.catalog.get("worker-1")
         assert worker is not None
@@ -814,7 +887,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.catalog.upsert(_manager())
         self.catalog.upsert(_idle_worker("worker-1"))
         ctx = self._ctx()
-        findings = evaluate_compound_idle_findings(self.catalog)
+        findings = evaluate_compound_idle_findings(self.catalog, self.topology)
         self.assertEqual(len(findings), 1)
         stale = findings[0]
         # A concurrent catalog write moves the worker's boundary while the set stays
@@ -836,7 +909,9 @@ class CompoundIdleRelayTests(unittest.TestCase):
         self.assertEqual(result.outcome, "delivered")
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        fresh = compound_idle_signature(compound_idle_sets(self.catalog)["manager-1"])
+        fresh = compound_idle_signature(
+            compound_idle_sets(self.catalog, self.topology)["manager-1"]
+        )
         self.assertNotEqual(fresh, stale.source_id)
         self.assertIn(fresh, signals[0].ask)
         manager = self.catalog.get("manager-1")

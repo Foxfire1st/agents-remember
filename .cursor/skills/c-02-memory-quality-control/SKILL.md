@@ -25,12 +25,14 @@ resolved by `c-08-ar-coordination-context-resolver` or MCP `resolve_context`.
 3. a pre-code-commit missing-onboarding report for newly added source files
 4. a closeout memory quality report covering integrity and style checks
 5. explicit next actions when memory quality is not clean
+6. one atomically overwritten curator checklist inside a leaf's worktree enclosure
 
 ## Quality Control Phases
 
 | Phase | Check | Purpose |
 | --- | --- | --- |
 | Task start | `drift_check` | Decide whether existing onboarding is trustworthy enough to plan against. |
+| Curator intake and repair loop | contract-scoped `memory_quality_check` | Replace one enclosure-local checklist combining quality, missing-onboarding, drift candidates, and route-index preview. |
 | Before code commit | `check_missing_onboarding` | Catch new source files in the current worktree that need sidecars before the code commit lands. |
 | Before memory commit | `memory_quality_check` | Validate refreshed memory after code commit and onboarding updates, including drift integrity and memory style. |
 | Targeted style repair | `history_order_fix.py` | Fix update-history ordering only after the report identifies that mechanical issue. |
@@ -177,7 +179,35 @@ onboarding through the `c-05-create-or-update-onboarding-files` skill before the
 refresh those onboarding files to the real code commit hash and date during the
 normal memory refresh.
 
-### 6. Run Closeout Memory Quality Control
+### 6. Run The Curator Checklist Loop
+
+The curator begins its pass with one full leaf-scoped call, before it writes onboarding:
+
+```text
+memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")
+```
+
+That full contract-scoped call atomically replaces exactly one operational artifact:
+
+```text
+<worktree-enclosure>/reports/curator-memory-quality.md
+```
+
+The report combines every repairable memory-quality finding, current-worktree missing-onboarding
+row, stale route index, source-change reconciliation candidate, closeout-owned real-commit
+residual, and report-only noteworthy row. It returns the same path plus component counts. The
+curator repairs the zeroable rows, applies `route_index_refresh` only when stale indexes are named,
+and reruns the same full call until `curatorActionableCount=0` and
+`checklistStatus=ready-for-closeout`. Each run replaces the predecessor; do not copy it to a
+timestamped name. Dirty-source drift and truthful real-commit provenance remain visible but do not
+create an impossible pre-commit gate; the curator dispositions those source-change candidates in
+the durable coherence report.
+
+The `reports/` directory is outside both Git worktrees. Normal cleanup and abandon remove it with
+the enclosure, so the checklist cannot enter code, memory, or ledger commits. A subset call with
+`checks=[...]` and an unscoped official-repository call do not create this checklist.
+
+### 7. Run Closeout Memory Quality Control
 
 After the code commit exists and the `c-05-create-or-update-onboarding-files` skill has refreshed the affected onboarding and
 entity fingerprints to that code commit, run the MCP memory quality tool before
@@ -204,7 +234,7 @@ If the report is clean, the memory content can be committed through the selected
 workflow's closeout procedure. If the report has findings, fix the reported
 memory issues and rerun the check before committing memory.
 
-### 7. Use Targeted Style Fixers Only After Findings
+### 8. Use Targeted Style Fixers Only After Findings
 
 When `memory_quality_check` reports update-history ordering findings, use the
 dedicated fixer rather than hand-writing one-off scripts:
@@ -232,3 +262,6 @@ check.
    accumulate silently.
 8. Generated quality reports belong under the resolved coordination/temp root,
    not inside durable memory unless the developer explicitly asks.
+9. A curator's full contract-scoped quality run is the one exception to the shared temp-report
+   location: it replaces `<worktree-enclosure>/reports/curator-memory-quality.md`, and worktree
+   cleanup garbage-collects that reserved directory.

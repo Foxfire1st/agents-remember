@@ -20,6 +20,7 @@ from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.models.conversations.control_wire import (
     SubmissionReceipt,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -67,7 +68,7 @@ def _target(root: Path, session_id: str = "worker-1") -> TerminalCatalogEntry:
         created_at=NOW,
         last_attached_at=NOW,
         status="running",
-        leaf_key="repo/master/leaf-1",
+        task_document_ref=TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
         seat_role="worker",
         spawn_role="worker",
         prompt_keywords=("ultracode",),
@@ -159,7 +160,7 @@ def test_ready_dispatch_is_inbox_rooted_lands_and_starts_expectation_clocks(
     assert paster.calls == []
     assert submit_prompt.call_count == 1
     assert "ultracode" in submit_prompt.call_args.args[1]
-    assert f"entry: {posted['entryId']}" in submit_prompt.call_args.args[1]
+    assert str(posted["entryId"]) not in submit_prompt.call_args.args[1]
 
     durable = OperatorInboxStore(observer_root(config)).current()[str(posted["entryId"])]
     assert durable.state == "landed"
@@ -230,7 +231,7 @@ def test_ambiguous_redelivery_reconciles_without_resubmitting(tmp_path: Path) ->
     assert paster.calls == []
 
 
-def test_not_ready_refuses_before_creating_durable_dispatch_row(tmp_path: Path) -> None:
+def test_not_ready_queues_one_durable_dispatch_row_for_plane_retry(tmp_path: Path) -> None:
     config = _config(tmp_path)
     catalog = TerminalCatalog(tmp_path / "terminal-sessions.json")
     target = _target(tmp_path)
@@ -239,20 +240,22 @@ def test_not_ready_refuses_before_creating_durable_dispatch_row(tmp_path: Path) 
     def not_ready(_catalog: TerminalCatalogPort, _host: object, session_id: str):
         return HostedReadinessResult("not-ready", session_id, entry=target, detail="starting")
 
-    with pytest.raises(ValueError, match="observed not-ready"):
-        operator_inbox_post_payload(
-            config,
-            address=InboxAddress(lifecycle_id=None, agent_id=target.id),
-            message=InboxMessage(ask="Brief", response="Work", message_kind="dispatch-brief"),
-            poster=InboxPoster(created_by="manager-1", created_via="cli"),
-            delivery=HostedDelivery(
-                catalog=catalog,
-                host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
-                paster=_NoRawPaster(),  # type: ignore[arg-type]
-                readiness=not_ready,
-            ),
-        )
-    assert OperatorInboxStore(observer_root(config)).current() == {}
+    posted = operator_inbox_post_payload(
+        config,
+        address=InboxAddress(lifecycle_id=None, agent_id=target.id),
+        message=InboxMessage(ask="Brief", response="Work", message_kind="dispatch-brief"),
+        poster=InboxPoster(created_by="manager-1", created_via="cli"),
+        delivery=HostedDelivery(
+            catalog=catalog,
+            host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
+            paster=_NoRawPaster(),  # type: ignore[arg-type]
+            readiness=not_ready,
+        ),
+    )
+    assert posted["state"] == "pending"
+    assert posted["deliveryState"] == "unconfirmed"
+    assert "not-ready" in str(posted["deliveryDetail"])
+    assert len(OperatorInboxStore(observer_root(config)).current()) == 1
 
 
 def _dispatch_row(store: OperatorInboxStore, target: TerminalCatalogEntry, *, kind: str):
@@ -373,7 +376,7 @@ def test_exact_agent_target_never_falls_back_to_matching_lifecycle(tmp_path: Pat
         Path("l-01-agent-lifecycles/roles/manager.md"),
     ),
 )
-def test_dispatch_instructions_encode_protocol_states_and_are_synced(relative: Path) -> None:
+def test_dispatch_instructions_encode_plane_owned_dispatch_and_are_synced(relative: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     canonical = (repo_root / "skills" / relative).read_text(encoding="utf-8")
     packaged = (
@@ -388,12 +391,9 @@ def test_dispatch_instructions_encode_protocol_states_and_are_synced(relative: P
     ).read_text(encoding="utf-8")
     normalized = " ".join(canonical.split())
     for phrase in (
-        "spawned-unbriefed",
-        "hosted_session_readiness",
-        "dispatch-brief",
-        "deliveryState=delivered",
-        "adapterDeliveryState=accepted|queued",
-        "not active work",
+        "dispatch_agent",
+        "control plane",
+        "task document",
     ):
         assert phrase in normalized
     assert packaged == canonical

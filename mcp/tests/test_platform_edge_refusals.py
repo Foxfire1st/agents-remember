@@ -648,7 +648,6 @@ class DispatchTargetTests(unittest.TestCase):
                 message_kind="dispatch-brief",
                 agent_id="agent-1",
                 delivery=HostedDelivery(enabled=True, catalog=None),
-                host=cast(Any, object()),
             )
 
         self.assertEqual(str(raised.exception), "dispatch-brief requires runtime configuration")
@@ -659,7 +658,6 @@ class DispatchTargetTests(unittest.TestCase):
                 message_kind="dispatch-brief",
                 agent_id=None,
                 delivery=HostedDelivery(enabled=True, catalog=cast(Any, object())),
-                host=cast(Any, object()),
             )
 
         self.assertIn("requires exact agent_id and deliver_to_hosted=true", str(raised.exception))
@@ -670,7 +668,6 @@ class DispatchTargetTests(unittest.TestCase):
                 message_kind="dispatch-brief",
                 agent_id="agent-1",
                 delivery=HostedDelivery(enabled=False, catalog=cast(Any, object())),
-                host=cast(Any, object()),
             )
 
         self.assertIn("deliver_to_hosted=true", str(raised.exception))
@@ -681,7 +678,6 @@ class DispatchTargetTests(unittest.TestCase):
                 message_kind="message",
                 agent_id=None,
                 delivery=HostedDelivery(enabled=False, catalog=None),
-                host=cast(Any, object()),
             )
         )
 

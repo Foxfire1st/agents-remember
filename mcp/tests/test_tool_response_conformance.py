@@ -63,6 +63,17 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.mcp import tools
 from agents_remember.models.base import FlexibleResponseModel
+from agents_remember.models.structural.agent import (
+    DispatchAgentRequest,
+    RenameChildRequest,
+    RetireChildRequest,
+    StructuralMessageRequest,
+)
+from agents_remember.models.structural.gates import (
+    StructuralGateDecisionRequest,
+    StructuralLifecycleGateRequest,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (
     AmbientLifecycle,
@@ -167,6 +178,7 @@ def _base_fixture(root: Path):
 
 def _simple_payloads(config) -> dict[str, dict]:
     """Tools whose real ``*_payload`` builder runs against the base fixture."""
+    leaf_ref = TaskDocumentRef(repository=REPO, path="master/leaf-1.json")
     return {
         "ping": tools.ping_payload(),
         "server_info": tools.server_info_payload(config),
@@ -174,10 +186,13 @@ def _simple_payloads(config) -> dict[str, dict]:
         "read_ar_files": tools.read_ar_files_payload(
             config, REPO, [{"path": "README.md", "source": "full"}]
         ),
-        "attach_terminal_session_to_leaf": tools.attach_terminal_session_to_leaf_payload(
+        "attach_terminal_session_to_task": tools.attach_terminal_session_to_task_payload(
             config,
             session_id="missing-session",
-            leaf_key=f"{REPO}/master/leaf-1",
+            task_document_ref=TaskDocumentRef(
+                repository=REPO,
+                path="master/leaf-1.json",
+            ),
         ),
         # Representative refusal payload: a legacy caller-supplied harness short-circuits before any
         # tmux spawn, so the conformance fixture never touches a real terminal host.
@@ -200,6 +215,37 @@ def _simple_payloads(config) -> dict[str, dict]:
             config,
             session_id="missing-session",
             label="New Label",
+        ),
+        "dispatch_agent": tools.dispatch_agent_payload(
+            config,
+            DispatchAgentRequest(leaf_ref, "worker", "Implement the leaf."),
+            environ={},
+        ),
+        "retire_child": tools.retire_child_payload(
+            config,
+            RetireChildRequest(leaf_ref, "worker", "done"),
+            environ={},
+        ),
+        "rename_child": tools.rename_child_payload(
+            config,
+            RenameChildRequest(leaf_ref, "worker", "Worker"),
+            environ={},
+        ),
+        "rename_self": tools.rename_self_payload(config, label="Seat", environ={}),
+        "message_parent": tools.message_parent_payload(
+            config,
+            StructuralMessageRequest("Review the report.", "The report is durable."),
+            environ={},
+        ),
+        "message_child": tools.message_child_payload(
+            config,
+            StructuralMessageRequest(
+                "Continue.",
+                "Address the review finding.",
+                task_document_ref=leaf_ref,
+                role="worker",
+            ),
+            environ={},
         ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, TaskRef(repo_id=REPO)),
@@ -460,15 +506,34 @@ def _gate_payloads(config) -> dict[str, dict]:
         anchor=GateAnchor(lifecycle_id="gate-demo"),
     )
     gate_id = created["gateId"]
+    internal_gate_decide = tools.gate_decide_payload(
+        config,
+        gate_id=gate_id,
+        lifecycle_id="gate-demo",
+        verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
+    )
+    internal_gate_list = tools.gate_list_payload(config, lifecycle_id="gate-demo")
+    task_ref = TaskDocumentRef(repository=REPO, path="master/leaf-1.json")
     return {
-        "lifecycle_gate": lifecycle_gate,
-        "gate_create": created,
-        "gate_decide": tools.gate_decide_payload(
+        # Public structural gate fixtures deliberately exercise the fail-closed ambient-seat
+        # boundary. Internal exact-id builders retain their own representative records below.
+        "lifecycle_gate": tools.structural_lifecycle_gate_payload(
             config,
-            gate_id=gate_id,
-            lifecycle_id="gate-demo",
-            verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
+            StructuralLifecycleGateRequest(kind="agent-question"),
+            environ={},
         ),
+        "lifecycle_gate_internal": lifecycle_gate,
+        "gate_create": created,
+        "gate_decide": tools.structural_gate_decide_payload(
+            config,
+            StructuralGateDecisionRequest(
+                task_document_ref=task_ref,
+                kind="closeout-approval",
+                decision="approve",
+            ),
+            environ={},
+        ),
+        "gate_decide_internal": internal_gate_decide,
         "gate_wait": tools.gate_wait_payload(
             config,
             gate_id=gate_id,
@@ -481,7 +546,8 @@ def _gate_payloads(config) -> dict[str, dict]:
             lifecycle_id="gate-demo",
             wait=GateWait(sleep=lambda _s: None),
         ),
-        "gate_list": tools.gate_list_payload(config, lifecycle_id="gate-demo"),
+        "gate_list": tools.structural_gate_list_payload(config, environ={}),
+        "gate_list_internal": internal_gate_list,
     }
 
 
@@ -590,7 +656,7 @@ class ToolResponseConformanceTests(unittest.TestCase):
         }
         self.assertIn("lifecycle_start", with_next_step)
         self.assertIn("lifecycle_start", with_banner)
-        self.assertIn("lifecycle_gate", with_banner)
+        self.assertIn("lifecycle_gate_internal", with_banner)
 
     def test_representative_payloads_conform_to_registered_models(self) -> None:
         for tool_name, model in TOOL_RESPONSE_MODELS.items():

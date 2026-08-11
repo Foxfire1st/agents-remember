@@ -307,7 +307,7 @@ class TestHarnessDispatch:
         ):
             dispatch, refusal = terminal_tools._resolve_harness_dispatch(
                 cast(McpRuntimeConfig, config),
-                leaf_key=None,
+                task_document_ref=None,
                 level=None,
                 env={"AR_SPAWN_ROLE": "worker"},
                 which=None,

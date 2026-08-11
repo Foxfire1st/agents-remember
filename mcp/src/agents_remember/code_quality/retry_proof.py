@@ -304,7 +304,8 @@ def _compatibility_key(inputs: RetryInputs) -> str:
             "platform": platform.platform(),
         },
         "tools": {
-            name: importlib.metadata.version(name) for name in ("coverage", "pytest", "pytest-cov")
+            name: importlib.metadata.version(name)
+            for name in ("coverage", "pytest", "pytest-cov", "pytest-xdist")
         },
         "environment": _environment_digest(os.environ),
     }

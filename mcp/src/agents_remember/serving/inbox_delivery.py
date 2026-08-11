@@ -361,16 +361,41 @@ def _target_session(
     return target_session_for_entry(catalog, entry)
 
 
-def target_session_for_entry(
+def _structural_target(
     catalog: TerminalCatalogPort,
     entry: OperatorInboxEntry,
 ) -> TerminalCatalogEntry | None:
-    """The running catalog session a durable row is addressed to, by exact agent id first."""
-    if entry.messageKind == DISPATCH_BRIEF_KIND:
-        if entry.agentId is None:
-            return None
-        target = catalog.get(entry.agentId)
-        return target if target is not None and target.status == "running" else None
+    document = entry.taskDocumentRef
+    role = entry.recipientRole
+    if document is None or role is None:
+        return None
+    primary = [
+        target
+        for target in catalog.list()
+        if target.status == "running"
+        and target.binding_role == role
+        and target.task_document_ref == document
+    ]
+    if len(primary) > 1:
+        raise ValueError(f"ambiguous structural inbox target: {document.key} as {role}")
+    if primary:
+        return primary[0]
+    replacements = [
+        target
+        for target in catalog.list()
+        if target.status == "running"
+        and target.binding_role == role
+        and target.replacement_for_task_document_ref == document
+    ]
+    if len(replacements) > 1:
+        raise ValueError(f"ambiguous structural inbox replacement: {document.key} as {role}")
+    return replacements[0] if replacements else None
+
+
+def _correlated_target(
+    catalog: TerminalCatalogPort,
+    entry: OperatorInboxEntry,
+) -> TerminalCatalogEntry | None:
     if entry.agentId:
         target = catalog.get(entry.agentId)
         if target is not None and target.status == "running":
@@ -387,15 +412,32 @@ def target_session_for_entry(
     return None
 
 
+def target_session_for_entry(
+    catalog: TerminalCatalogPort,
+    entry: OperatorInboxEntry,
+) -> TerminalCatalogEntry | None:
+    """Resolve the current occupant of the row's structural seat.
+
+    An initial dispatch brief is the sole exact-pinned exception: it creates the first message in
+    a newly spawned session before replacement semantics can apply. Every later row resolves from
+    task document + role, so an occupant change is transparent to the sender.
+    """
+    if entry.messageKind == DISPATCH_BRIEF_KIND:
+        if entry.agentId is None:
+            return None
+        target = catalog.get(entry.agentId)
+        return target if target is not None and target.status == "running" else None
+    if entry.taskDocumentRef is not None and entry.recipientRole is not None:
+        return _structural_target(catalog, entry)
+    return _correlated_target(catalog, entry)
+
+
 def _push_text(entry: OperatorInboxEntry) -> str:
     sender = entry.senderRole or "operator"
-    if entry.senderAgentId:
-        sender = f"{sender}:{entry.senderAgentId}"
     parts = [
         f"[Agents Remember inbox:{entry.messageKind}]",
         f"from: {sender}",
-        f"entry: {entry.id}",
-        f"ack: reply in this chat -- entry {entry.id} is the mechanical ack target",
+        "ack: reply in this chat; the control plane correlates acceptance automatically",
     ]
     if entry.artifactPath:
         parts.append(f"artifact: {entry.artifactPath}")

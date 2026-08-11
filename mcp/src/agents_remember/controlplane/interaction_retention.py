@@ -12,7 +12,7 @@ from agents_remember.controlplane.records import (
     GateRecord,
 )
 from agents_remember.controlplane.stamps import age_seconds
-from agents_remember.models.gates import (
+from agents_remember.models.structural.gates import (
     GateKind,
 )
 

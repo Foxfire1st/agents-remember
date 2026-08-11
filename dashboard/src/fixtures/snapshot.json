@@ -232,10 +232,22 @@
         "entryId": "entry-1",
         "lifecycleId": "sim-replay-lifecycle",
         "agentId": "agent-worker-1",
+        "taskDocumentRef": {
+          "repository": "sim-repo",
+          "path": "sim-master/SIM-1.json"
+        },
+        "subjectTaskDocumentRef": {
+          "repository": "sim-repo",
+          "path": "sim-master/SIM-1.json"
+        },
         "senderAgentId": "agent-manager-1",
         "senderRole": "manager",
         "recipientRole": "worker",
         "ownerRole": "worker",
+        "ownerTaskDocumentRef": {
+          "repository": "sim-repo",
+          "path": "sim-master/SIM-1.json"
+        },
         "ownerAgentId": "agent-worker-1",
         "ownerLifecycleId": "sim-replay-lifecycle",
         "gateId": "GATE-1",
@@ -260,7 +272,10 @@
         "sourceId": "agent-manager-1",
         "subjectAgentId": "agent-worker-1",
         "subjectLifecycleId": "sim-replay-lifecycle",
-        "leafKey": "SIM-1",
+        "taskDocumentRef": {
+          "repository": "sim-repo",
+          "path": "sim-master/SIM-1.json"
+        },
         "dueAt": "2026-06-14T09:30:00+00:00",
         "overdue": false,
         "note": "worker report on the contract guard"

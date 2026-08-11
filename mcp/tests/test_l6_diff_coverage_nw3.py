@@ -51,6 +51,7 @@ from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -423,7 +424,7 @@ class TestDispatchBriefBranches:
         store = SimpleNamespace(find_by_source=lambda entry_id, kind: SimpleNamespace(id="row"))
         entry = SimpleNamespace(id="e", createdAt="2026-08-05T00:00:00+00:00")
         target = SimpleNamespace(
-            binding_leaf_key="repo/master/leaf-1",
+            binding_task_document_ref=TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
             label="curator",
             spawn_role="curator",
             kind="harness",

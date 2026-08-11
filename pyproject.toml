@@ -119,6 +119,9 @@ minversion = "9.0"
 testpaths = ["mcp/tests"]
 
 addopts = [
+  # Use every logical CPU by default. pytest-xdist gives each worker its own temp root;
+  # mcp/tests/conftest.py also confines process-global application caches per worker.
+  "-n=auto",
   # An unregistered marker is a typo that quietly selects nothing. Fail on it.
   "--strict-markers",
   # An unknown or misspelled ini key is a setting that quietly does nothing. Fail on it.

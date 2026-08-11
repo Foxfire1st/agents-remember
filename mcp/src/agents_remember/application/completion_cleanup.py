@@ -8,9 +8,10 @@ from pathlib import Path
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.observer.events import now_iso
-from agents_remember.serving.landing import land_seats_for_leaf
+from agents_remember.serving.landing import land_seats_for_task
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.seat_events import log_landed_event, log_retire_event
 from agents_remember.serving.terminal import TerminalHost
@@ -18,6 +19,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     terminal_catalog_path,
 )
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.worktree_contract import load_contract
 
 CLOSABLE_LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
@@ -43,15 +45,17 @@ def auto_complete_seats(
     """
     try:
         contract = load_contract(contract_path)
-        leaf_key = f"{contract.repo_name}/{contract.task_root.name}/{contract.task_id}"
+        task_document_ref = TaskDocumentTopology(config.coordination_root).ref_for_id(
+            contract.repo_name, contract.task_root, contract.task_id
+        )
         catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
         closure = SeatClosure(reason=reason, edge=edge, at=now_iso())
         if config.retirement.auto_close_completed_seats:
-            return _retire_reported_leaf_seats(config, catalog, leaf_key, closure)
-        landed = land_seats_for_leaf(
+            return _retire_reported_leaf_seats(config, catalog, task_document_ref, closure)
+        landed = land_seats_for_task(
             catalog,
             closure,
-            leaf_key=leaf_key,
+            task_document_ref=task_document_ref,
             roles=CLOSABLE_LEAF_ROLES,
         )
         for entry in landed:
@@ -70,7 +74,7 @@ def auto_complete_seats(
 def _retire_reported_leaf_seats(
     config: McpRuntimeConfig,
     catalog: TerminalCatalog,
-    leaf_key: str,
+    task_document_ref: TaskDocumentRef,
     closure: SeatClosure,
 ) -> dict[str, list[str]]:
     """Retire eligible leaf seats after the durable turn-report ordering barrier."""
@@ -79,10 +83,10 @@ def _retire_reported_leaf_seats(
         report.senderAgentId
         for report in reports
         if report.messageKind == "turn-report"
-        and report.leafKey == leaf_key
+        and report.subjectTaskDocumentRef == task_document_ref
         and report.senderAgentId is not None
     }
-    candidates = _completion_candidates(catalog, leaf_key)
+    candidates = _completion_candidates(catalog, task_document_ref)
     host = TerminalHost()
     closed: list[str] = []
     deferred: list[str] = []
@@ -108,12 +112,14 @@ def _retire_reported_leaf_seats(
     }
 
 
-def _completion_candidates(catalog: TerminalCatalog, leaf_key: str) -> list[TerminalCatalogEntry]:
+def _completion_candidates(
+    catalog: TerminalCatalog, task_document_ref: TaskDocumentRef
+) -> list[TerminalCatalogEntry]:
     """Return live/archive leaf-altitude seats; never coordination-owner seats."""
     return [
         entry
         for entry in catalog.list(include_terminated=True)
-        if entry.leaf_key == leaf_key
+        if entry.task_document_ref == task_document_ref
         and entry.status != "terminated"
         and entry.binding_role in CLOSABLE_LEAF_ROLES
     ]

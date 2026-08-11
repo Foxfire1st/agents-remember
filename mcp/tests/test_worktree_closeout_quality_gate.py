@@ -46,6 +46,15 @@ def _checkout_with_wrapper(root: Path) -> Path:
     return root
 
 
+def _quality_target(
+    worktree: Path, worktree_group: Path | None = None
+) -> code_quality_gate.QualityGateTarget:
+    return code_quality_gate.QualityGateTarget(
+        code_worktree=worktree,
+        worktree_group=worktree_group or worktree / "enclosure",
+    )
+
+
 class CodeQualityGateTests(unittest.TestCase):
     def test_preview_requires_strict_wrapper_for_any_repo_that_carries_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,7 +110,7 @@ class CodeQualityGateTests(unittest.TestCase):
             worktree = Path(tmp)
 
             with self.assertRaisesRegex(RuntimeError, "project-owned wrapper is missing"):
-                code_quality_gate.run_strict_code_quality_gate(worktree)
+                code_quality_gate.run_strict_code_quality_gate(_quality_target(worktree))
 
     def test_gate_runs_current_worktree_source_with_default_strict_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -117,7 +126,10 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate, "quality_python", return_value=Path(sys.executable)
             ):
-                result = code_quality_gate.run_strict_code_quality_gate(worktree, runner=runner)
+                result = code_quality_gate.run_strict_code_quality_gate(
+                    _quality_target(worktree),
+                    runner=runner,
+                )
 
             self.assertTrue(result["passed"])
             self.assertEqual(result["status"], code_quality_gate.GATE_ENFORCED)
@@ -136,6 +148,73 @@ class CodeQualityGateTests(unittest.TestCase):
                 env["PYTHONPATH"].split(os.pathsep)[0],
                 (worktree / "mcp" / "src").as_posix(),
             )
+            report = worktree / "enclosure" / "reports" / "test-results.md"
+            self.assertEqual(result["reportPath"], report.as_posix())
+            report_text = report.read_text(encoding="utf-8")
+            self.assertIn("# Strict Quality Test Results", report_text)
+            self.assertIn("- Status: **passed**", report_text)
+            self.assertIn("    passed", report_text)
+
+    def test_gate_replaces_one_test_report_instead_of_accumulating_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            worktree = _checkout_with_wrapper(root / "code")
+            worktree_group = root / "enclosure"
+            report = worktree_group / "reports" / "test-results.md"
+            report.parent.mkdir(parents=True)
+            report.write_text("obsolete run\n", encoding="utf-8")
+
+            outputs = iter(("first completed run\n", "second completed run\n"))
+
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                del cwd, env
+                return subprocess.CompletedProcess(command, 0, stdout=next(outputs))
+
+            with mock.patch.object(
+                code_quality_gate, "quality_python", return_value=Path(sys.executable)
+            ):
+                code_quality_gate.run_strict_code_quality_gate(
+                    _quality_target(worktree, worktree_group), runner=runner
+                )
+                code_quality_gate.run_strict_code_quality_gate(
+                    _quality_target(worktree, worktree_group), runner=runner
+                )
+
+            report_text = report.read_text(encoding="utf-8")
+            self.assertNotIn("obsolete run", report_text)
+            self.assertNotIn("first completed run", report_text)
+            self.assertIn("second completed run", report_text)
+            self.assertEqual([path.name for path in report.parent.iterdir()], [report.name])
+
+    def test_interrupted_gate_keeps_the_previous_completed_test_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            worktree = _checkout_with_wrapper(root / "code")
+            worktree_group = root / "enclosure"
+            report = worktree_group / "reports" / "test-results.md"
+            report.parent.mkdir(parents=True)
+            report.write_text("previous completed run\n", encoding="utf-8")
+
+            def interrupted_runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                del command, cwd, env
+                raise KeyboardInterrupt
+
+            with (
+                mock.patch.object(
+                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                ),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                code_quality_gate.run_strict_code_quality_gate(
+                    _quality_target(worktree, worktree_group),
+                    runner=interrupted_runner,
+                )
+
+            self.assertEqual(report.read_text(encoding="utf-8"), "previous completed run\n")
 
     def test_gate_measures_the_leaf_diff_not_the_whole_branch(self) -> None:
         """The leaf's base commit reaches the wrapper as --diff-base.
@@ -159,7 +238,9 @@ class CodeQualityGateTests(unittest.TestCase):
                 code_quality_gate, "quality_python", return_value=Path(sys.executable)
             ):
                 result = code_quality_gate.run_strict_code_quality_gate(
-                    worktree, diff_base="c1dc5056", runner=runner
+                    _quality_target(worktree),
+                    diff_base="c1dc5056",
+                    runner=runner,
                 )
 
             self.assertEqual(
@@ -238,7 +319,7 @@ class CodeQualityGateTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "settings-owned memory cap"),
             ):
                 code_quality_gate.run_strict_code_quality_gate(
-                    worktree,
+                    _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
                     runner=lambda command, cwd, env: subprocess.CompletedProcess(
                         command, 0, stdout=""
@@ -256,7 +337,7 @@ class CodeQualityGateTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "unknown quality gate mode"),
             ):
                 code_quality_gate.run_strict_code_quality_gate(
-                    worktree,
+                    _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(mode="bogus"),
                     runner=lambda command, cwd, env: subprocess.CompletedProcess(
                         command, 0, stdout=""
@@ -278,7 +359,7 @@ class CodeQualityGateTests(unittest.TestCase):
                 code_quality_gate, "quality_python", return_value=Path(sys.executable)
             ):
                 result = code_quality_gate.run_strict_code_quality_gate(
-                    worktree,
+                    _quality_target(worktree),
                     diff_base="c1dc5056",
                     plan=code_quality_gate.QualityGatePlan(
                         mode=code_quality_gate.GATE_FULL,
@@ -313,7 +394,7 @@ class CodeQualityGateTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "killed by the memory cap") as caught,
             ):
                 code_quality_gate.run_strict_code_quality_gate(
-                    worktree,
+                    _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(
                         mode=code_quality_gate.GATE_FULL,
                         memory_cap_bytes=1024,
@@ -341,7 +422,7 @@ class CodeQualityGateTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "killed by the memory cap") as caught,
             ):
                 code_quality_gate.run_strict_code_quality_gate(
-                    worktree,
+                    _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(
                         mode=code_quality_gate.GATE_FULL,
                         memory_cap_bytes=1024,
@@ -372,10 +453,19 @@ class CodeQualityGateTests(unittest.TestCase):
                     RuntimeError, "strict code-quality gate failed before code commit"
                 ) as caught,
             ):
-                code_quality_gate.run_strict_code_quality_gate(worktree, runner=runner)
+                code_quality_gate.run_strict_code_quality_gate(
+                    _quality_target(worktree),
+                    runner=runner,
+                )
 
             self.assertNotIn("line-0", str(caught.exception))
             self.assertIn("line-49", str(caught.exception))
+            report = worktree / "enclosure" / "reports" / "test-results.md"
+            self.assertIn(report.as_posix(), str(caught.exception))
+            report_text = report.read_text(encoding="utf-8")
+            self.assertIn("- Status: **failed**", report_text)
+            self.assertIn("    line-0", report_text)
+            self.assertIn("    line-49", report_text)
 
     def test_quality_python_prefers_worktree_virtualenv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -419,6 +509,20 @@ class CodeQualityGateTests(unittest.TestCase):
                 os.pathsep.join([(worktree / "mcp" / "src").as_posix(), "/pre-existing"]),
             )
             self.assertIn("PATH", env)
+            if os.name != "nt":
+                self.assertEqual(
+                    {name: env[name] for name in ("TMPDIR", "TMP", "TEMP")},
+                    {"TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"},
+                )
+
+    def test_gate_capture_replaces_non_utf8_output_before_report_or_transport(self) -> None:
+        completed = subprocess.CompletedProcess(["quality"], 1, stdout="bad\ufffdoutput")
+        with mock.patch.object(subprocess, "run", return_value=completed) as run:
+            result = code_quality_gate.run_subprocess(["quality"], Path("/tmp"), {})
+
+        self.assertIs(result, completed)
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run.call_args.kwargs["errors"], "replace")
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
@@ -537,7 +641,10 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             self.assertEqual(deciders, [contract.code_worktree])
             gate_run.assert_called_once_with(
-                contract.code_worktree,
+                code_quality_gate.QualityGateTarget(
+                    code_worktree=contract.code_worktree,
+                    worktree_group=contract.worktree_group,
+                ),
                 diff_base=contract.code_base_commit,
                 plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_TARGETED),
             )
@@ -690,12 +797,13 @@ class _ScopeRecordingGate:
 
     def __call__(
         self,
-        worktree: Path,
+        target: code_quality_gate.QualityGateTarget,
         *,
         diff_base: str = "",
         plan: code_quality_gate.QualityGatePlan | None = None,
     ) -> dict[str, object]:
         del plan
+        worktree = target.code_worktree
         self.lint_paths = quality_check.posix_args(quality_check.derive_scope(worktree).lint_paths)
         completed = subprocess.run(
             [sys.executable, "-m", "ruff", "check", "--no-cache", *self.lint_paths],
@@ -868,7 +976,9 @@ class CertifiedIndexCommitTests(unittest.TestCase):
                 "run_strict_code_quality_gate",
                 return_value={"required": True, "passed": True},
             ):
-                result = closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+                result = closeout_module._gate_staged_code(
+                    worktree, worktree_group=worktree.parent, diff_base="HEAD"
+                )
             (worktree / "tracked.txt").write_text("three\n", encoding="utf-8")
             commit_verified_staged(worktree, "Commit the certified index")
 
@@ -932,7 +1042,9 @@ class TaskWorktreePreconditionTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,
                 self.assertRaises(RuntimeError) as caught,
             ):
-                closeout_module._gate_staged_code(repo, diff_base="HEAD")
+                closeout_module._gate_staged_code(
+                    repo, worktree_group=repo.parent, diff_base="HEAD"
+                )
 
             # The selection survives, and the untracked secret is still untracked with no
             # object written for it.
@@ -973,7 +1085,11 @@ class TaskWorktreePreconditionTests(unittest.TestCase):
             self.assertEqual(series.kind, "series")
             self.assertEqual(series.code_worktree, repo)
             with self.assertRaises(RuntimeError) as caught:
-                closeout_module._gate_staged_code(series.code_worktree, diff_base="HEAD")
+                closeout_module._gate_staged_code(
+                    series.code_worktree,
+                    worktree_group=series.worktree_group,
+                    diff_base="HEAD",
+                )
             self.assertIn("is not a task worktree", str(caught.exception))
 
     def test_a_task_worktree_passes_the_precondition_and_is_staged(self) -> None:
@@ -985,7 +1101,9 @@ class TaskWorktreePreconditionTests(unittest.TestCase):
             with mock.patch.object(
                 closeout_module, "run_strict_code_quality_gate", return_value=verdict
             ):
-                result = closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+                result = closeout_module._gate_staged_code(
+                    worktree, worktree_group=worktree.parent, diff_base="HEAD"
+                )
 
             self.assertEqual(result["required"], verdict["required"])
             self.assertEqual(result["passed"], verdict["passed"])
@@ -1004,7 +1122,9 @@ class TaskWorktreePreconditionTests(unittest.TestCase):
             (worktree / "created.py").write_text("VALUE = 1\n", encoding="utf-8")
 
             with _refusing_gate(), self.assertRaises(RuntimeError):
-                closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+                closeout_module._gate_staged_code(
+                    worktree, worktree_group=worktree.parent, diff_base="HEAD"
+                )
 
             self.assertIn("created.py", git(worktree, "ls-files"))
             git_dir = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-dir"))
@@ -1032,7 +1152,9 @@ class ConflictedIndexTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,
                 self.assertRaises(RuntimeError) as caught,
             ):
-                closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+                closeout_module._gate_staged_code(
+                    worktree, worktree_group=worktree.parent, diff_base="HEAD"
+                )
 
             message = str(caught.exception)
             self.assertIn("closeout cannot stage the code worktree", message)
@@ -1062,7 +1184,9 @@ class ConflictedIndexTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,
                 self.assertRaises(RuntimeError),
             ):
-                closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+                closeout_module._gate_staged_code(
+                    worktree, worktree_group=worktree.parent, diff_base="HEAD"
+                )
 
             gate.assert_not_called()
             self.assertTrue((git_dir / "MERGE_HEAD").exists())
@@ -1101,7 +1225,9 @@ class RetryStagesWhatAFirstRunWouldTests(unittest.TestCase):
             "run_strict_code_quality_gate",
             return_value={"required": True, "passed": True},
         ):
-            closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+            closeout_module._gate_staged_code(
+                worktree, worktree_group=worktree.parent, diff_base="HEAD"
+            )
         commit_if_dirty(worktree, message)
         return git(worktree, "rev-parse", "HEAD^{tree}")
 
@@ -1116,7 +1242,9 @@ class RetryStagesWhatAFirstRunWouldTests(unittest.TestCase):
             (retried / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
             (retried / DROPPED_TOOL_ARTEFACT).write_text('{"pid": 1}\n', encoding="utf-8")
             with _refusing_gate(), self.assertRaises(RuntimeError):
-                closeout_module._gate_staged_code(retried, diff_base="HEAD")
+                closeout_module._gate_staged_code(
+                    retried, worktree_group=retried.parent, diff_base="HEAD"
+                )
             self.assertIn(DROPPED_TOOL_ARTEFACT, git(retried, "ls-files"))
 
             # The leaf adds the ignore rule and retries, against a worktree still staged.

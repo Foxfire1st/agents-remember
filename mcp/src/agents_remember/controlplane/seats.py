@@ -32,6 +32,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
+
 
 class SeatRow(Protocol):
     """One seat's row, as the control plane reads it.
@@ -63,10 +65,10 @@ class SeatRow(Protocol):
     def landed_at(self) -> str | None: ...
 
     @property
-    def leaf_key(self) -> str | None: ...
+    def task_document_ref(self) -> TaskDocumentRef | None: ...
 
     @property
-    def replacement_for_leaf(self) -> str | None: ...
+    def replacement_for_task_document_ref(self) -> TaskDocumentRef | None: ...
 
     @property
     def spawned_by_session(self) -> str | None: ...
@@ -87,10 +89,7 @@ class SeatRow(Protocol):
     def binding_role(self) -> str: ...
 
     @property
-    def binding_leaf_key(self) -> str | None: ...
-
-    @property
-    def sprint_key(self) -> str | None: ...
+    def binding_task_document_ref(self) -> TaskDocumentRef | None: ...
 
 
 class SeatDirectory(Protocol):

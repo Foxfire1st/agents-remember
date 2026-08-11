@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
-import { findSessionForLeaf, fromTerminalSessionInfo, sessionStore } from "../data/sessions";
+import { findSessionForTask, fromTerminalSessionInfo, sessionStore } from "../data/sessions";
 import { submitSessionText, waitForSubmissionReady } from "../data/submitClient";
 import { startSubmitRecord } from "../data/submitMachine";
 import { dashboardStore } from "../data/store";
@@ -12,7 +12,14 @@ import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
-const SECOND_LEAF_KEY = "agents-remember/260628_operations-integration/260628-L9";
+const LEAF_REF = {
+  repository: "agents-remember",
+  path: "260628_operations-integration/05_sidebar-chat-attachment.json",
+};
+const SPRINT_REF = {
+  repository: "agents-remember",
+  path: "260628_operations-sprint/task.json",
+};
 
 vi.mock("../data/submitClient", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/submitClient")>();
@@ -66,18 +73,16 @@ function leafDoc(): TaskDocNode {
   });
 }
 
-function secondLeafDoc(): TaskDocNode {
+function sprintDoc(): TaskDocNode {
   return taskDoc({
-    id: "260628-L9",
-    lifecycleId: "lc-l9",
+    id: "260628-OPERATIONS-SPRINT",
     repository: "agents-remember",
-    kind: "subTask",
+    kind: "master",
     status: "planning",
-    docPath: "/tasks/agents-remember/260628_operations-integration/09_chat-leaf-reassignment-and-live-catalog-sync.json",
-    title: "Chat leaf reassignment",
-    objective: "Move a hosted chat between task leaves.",
-    requirements: ["Keep the terminal session alive."],
-    steps: [{ id: "S1", title: "Move the catalog leaf binding", status: "pending", substeps: [] }],
+    docPath: "/tasks/agents-remember/260628_operations-sprint/task.json",
+    title: "Operations sprint",
+    objective: "Coordinate the sprint portfolio.",
+    orchestrates: ["260628_operations-integration"],
   });
 }
 
@@ -124,7 +129,11 @@ class FakeBroadcastChannel {
   }
 }
 
-function openedHarnessResponse(id: string, leafKey?: string): Response {
+function openedHarnessResponse(
+  id: string,
+  taskDocumentRef?: typeof LEAF_REF,
+  seatRole?: string,
+): Response {
   return new Response(
     JSON.stringify({
       session: id,
@@ -132,7 +141,8 @@ function openedHarnessResponse(id: string, leafKey?: string): Response {
       kind: "harness",
       harness: "claude",
       lifecycleId: null,
-      leafKey: leafKey ?? null,
+      taskDocumentRef: taskDocumentRef ?? null,
+      seatRole: seatRole ?? null,
       status: "running",
       controlState: "starting",
     }),
@@ -167,8 +177,8 @@ afterEach(() => {
   FakeBroadcastChannel.reset();
 });
 
-describe("RailChat start affordances (L5 fix 2)", () => {
-  it("offers a harness choice (Claude/Codex) plus an open-terminal control for an empty leaf", async () => {
+describe("RailChat task-projected role controls (EFA-L19)", () => {
+  it("does not expose generic chat or terminal creation from a leaf task", async () => {
     const harnesses = [
       { id: "claude", name: "Claude Code", detected: true },
       { id: "codex", name: "Codex", detected: true },
@@ -179,19 +189,63 @@ describe("RailChat start affordances (L5 fix 2)", () => {
       vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ harnesses }) }),
     );
 
-    const { findByTestId, queryByTestId, getByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId, queryByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocumentRef={LEAF_REF} taskDocuments={[leafDoc()]} />,
+    );
 
-    expect(await findByTestId("rail-start-chat-claude")).not.toBeNull();
-    expect(getByTestId("rail-start-chat-codex")).not.toBeNull();
-    expect(queryByTestId("rail-start-chat-pi")).toBeNull(); // undetected → no button
-    expect(getByTestId("rail-open-terminal")).not.toBeNull();
+    expect((await findByTestId("rail-chat-empty")).textContent).toContain(
+      "No worker, reviewer, or curator chat occupies this leaf yet.",
+    );
+    expect(queryByTestId("rail-start-chat-claude")).toBeNull();
+    expect(queryByTestId("rail-start-chat-codex")).toBeNull();
+    expect(queryByTestId("rail-open-terminal")).toBeNull();
   });
 
-  it("starts a leaf chat as a harness session keyed to the leaf", async () => {
-    vi.stubGlobal("crypto", { randomUUID: () => "chat-id" });
+  it("switches among existing sprint-role chats and offers creation only for missing roles", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    sessionStore.getState().hydrate([
+      {
+        id: "architect",
+        label: "Architect",
+        kind: "harness",
+        seatRole: "architect",
+        taskDocumentRef: SPRINT_REF,
+        status: "running",
+      },
+      {
+        id: "strategist",
+        label: "Strategist",
+        kind: "harness",
+        seatRole: "strategist",
+        taskDocumentRef: SPRINT_REF,
+        status: "running",
+      },
+    ]);
+
+    const { findByTestId, getByRole, queryByTestId } = render(
+      <RailChat taskDocumentRef={SPRINT_REF} taskDocuments={[sprintDoc()]} />,
+    );
+
+    expect((await findByTestId("rail-pane-chat")).textContent).toContain("architect · Architect");
+    fireEvent.click(getByRole("button", { name: "Strategist" }));
+    await waitFor(async () =>
+      expect((await findByTestId("rail-pane-chat")).textContent).toContain(
+        "strategist · Strategist",
+      ),
+    );
+    expect(queryByTestId("rail-create-sprint-role-architect")).toBeNull();
+    expect(queryByTestId("rail-create-sprint-role-strategist")).toBeNull();
+    expect(await findByTestId("rail-create-sprint-role-orchestrator")).not.toBeNull();
+    expect(await findByTestId("rail-create-sprint-role-designer")).not.toBeNull();
+    expect(await findByTestId("rail-create-sprint-role-system-specialist")).not.toBeNull();
+  });
+
+  it("creates a missing sprint role on the sprint document and removes its create button", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "orchestrator-id" });
+    const requestBodies: Record<string, unknown>[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn((input: RequestInfo | URL) => {
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/api/harnesses")) {
           return Promise.resolve({
@@ -199,63 +253,32 @@ describe("RailChat start affordances (L5 fix 2)", () => {
             json: () => Promise.resolve({ harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }),
           });
         }
-        return Promise.resolve(openedHarnessResponse("chat-id", LEAF_KEY));
+        requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Promise.resolve(openedHarnessResponse("orchestrator-id", SPRINT_REF, "orchestrator"));
       }),
     );
 
-    const { findByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
-    fireEvent.click(await findByTestId("rail-start-chat-claude"));
+    const { findByTestId, queryByTestId } = render(
+      <RailChat taskDocumentRef={SPRINT_REF} taskDocuments={[sprintDoc()]} />,
+    );
+    fireEvent.click(await findByTestId("rail-create-sprint-role-orchestrator"));
 
     await waitFor(() => {
-      const session = findSessionForLeaf(LEAF_KEY, "chat");
-      expect(session?.kind).toBe("harness");
-      expect(session?.harness).toBe("claude");
+      const session = sessionStore.getState().sessions.find((candidate) => candidate.id === "orchestrator-id");
+      expect(session).toMatchObject({
+        taskDocumentRef: SPRINT_REF,
+        seatRole: "orchestrator",
+        kind: "harness",
+      });
     });
+    expect(requestBodies).toContainEqual(
+      expect.objectContaining({ taskDocumentRef: SPRINT_REF, role: "orchestrator" }),
+    );
+    expect(queryByTestId("rail-create-sprint-role-orchestrator")).toBeNull();
+    expect((await findByTestId("rail-pane-chat")).textContent).toContain("orchestrator");
   });
 
-  it("delivers leaf context after starting an agent chat on the viewed leaf", async () => {
-    vi.stubGlobal("crypto", { randomUUID: () => "chat-id" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/api/harnesses")) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }),
-          });
-        }
-        return Promise.resolve(openedHarnessResponse("chat-id", LEAF_KEY));
-      }),
-    );
-
-    const { findByTestId } = render(
-      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[leafProcess()]} />,
-    );
-    fireEvent.click(await findByTestId("rail-start-chat-claude"));
-
-    await waitFor(() =>
-      expect(submitSessionText).toHaveBeenCalledWith("chat-id", expect.any(String), {
-        source: "leaf-context",
-        clearDraftOnAccept: false,
-      }),
-    );
-    const packet = vi.mocked(submitSessionText).mock.calls[0]?.[1] ?? "";
-    expect(packet).toContain("Task: 260628-L5 -- Sidebar chat attachment");
-    expect(packet).toContain(`Leaf key: ${LEAF_KEY}`);
-    expect(packet).toContain("Lifecycle: lc-l5");
-    expect(packet).toContain("Code worktree: /worktrees/sidebar-chat-ar/sidebar-chat");
-    expect(packet).toContain("- [done] S1 -- Wire the leaf registry");
-    expect(packet).not.toContain("S1 -- Wire the leaf registry -- SKIPPED");
-    expect(packet).toContain(
-      "- [done] S2 -- Add the rail chat -- SKIPPED: The existing rail already covers it.",
-    );
-    expect(packet).toContain(
-      "  - [done] S2.1 -- Add a duplicate control -- SKIPPED: Duplicate control is unnecessary.",
-    );
-  });
-
-  it("surfaces a rejected harness open without a ghost row or context delivery", async () => {
+  it("surfaces a rejected sprint-role open without a ghost row", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => "rejected-chat" });
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -278,9 +301,9 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { findByTestId } = render(
-      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[leafProcess()]} />,
+      <RailChat taskDocumentRef={SPRINT_REF} taskDocuments={[sprintDoc()]} />,
     );
-    fireEvent.click(await findByTestId("rail-start-chat-claude"));
+    fireEvent.click(await findByTestId("rail-create-sprint-role-architect"));
 
     expect((await findByTestId("rail-session-open-error")).textContent).toContain(
       "session open harness",
@@ -331,7 +354,7 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(await findByTestId("rail-start-chat-claude"));
 
     await waitFor(() => {
-      const free = sessionStore.getState().sessions.find((s) => s.kind === "harness" && !s.leafKey);
+      const free = sessionStore.getState().sessions.find((s) => s.kind === "harness" && !s.taskDocumentRef);
       expect(free?.harness).toBe("claude");
     });
     expect(submitSessionText).not.toHaveBeenCalled();
@@ -342,7 +365,7 @@ describe("RailChat create from anywhere (L5)", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith("/api/terminal/f1/attach-leaf")) {
+        if (url.endsWith("/api/terminal/f1/attach-task")) {
           return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
         }
         return Promise.reject(new Error("no backend")); // harnesses fetch tolerated → []
@@ -363,7 +386,7 @@ describe("RailChat create from anywhere (L5)", () => {
 
     fireEvent.click(leaf);
 
-    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
+    await waitFor(() => expect(sessionStore.getState().sessions[0]?.taskDocumentRef).toEqual(LEAF_REF));
     await waitFor(() =>
       expect(submitSessionText).toHaveBeenCalledWith("f1", expect.any(String), {
         source: "leaf-context",
@@ -373,50 +396,12 @@ describe("RailChat create from anywhere (L5)", () => {
     expect(vi.mocked(submitSessionText).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
   });
 
-  it("offers a move picker for an attached chat and delivers the new leaf context", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/api/terminal/c1/attach-leaf")) {
-          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-        }
-        return Promise.reject(new Error("no backend"));
-      }),
-    );
-    sessionStore.getState().hydrate([
-      { id: "c1", label: "Claude Code 1", kind: "harness", harness: "claude", leafKey: LEAF_KEY, status: "running" },
-    ]);
-
-    const { findByTestId, findAllByTestId } = render(
-      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc(), secondLeafDoc()]} />,
-    );
-
-    fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
-    fireEvent.click(await findByTestId("rail-attach-leaf-picker-role-worker"));
-    const leaves = await findAllByTestId("rail-attach-leaf-picker-leaf");
-    const next = leaves.find((leaf) => leaf.getAttribute("data-leaf-key") === SECOND_LEAF_KEY);
-    expect(next).not.toBeUndefined();
-    fireEvent.click(next as HTMLElement);
-
-    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(SECOND_LEAF_KEY));
-    await waitFor(() =>
-      expect(submitSessionText).toHaveBeenCalledWith("c1", expect.any(String), {
-        source: "leaf-context",
-        clearDraftOnAccept: false,
-      }),
-    );
-    expect(vi.mocked(submitSessionText).mock.calls[0]?.[1]).toContain(
-      "Task: 260628-L9 -- Chat leaf reassignment",
-    );
-  });
-
   it("surfaces a note when the picked leaf is already taken (409) and does not bind", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith("/api/terminal/f1/attach-leaf")) {
+        if (url.endsWith("/api/terminal/f1/attach-task")) {
           return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({}) });
         }
         return Promise.reject(new Error("no backend"));
@@ -432,8 +417,8 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(await findByTestId("rail-attach-leaf-picker-leaf"));
 
     const note = await findByTestId("rail-leaf-attach-error");
-    expect(note.textContent).toContain("leaf already has a worker seat");
-    expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
+    expect(note.textContent).toContain("task document already has a worker seat");
+    expect(sessionStore.getState().sessions[0]?.taskDocumentRef).toBeUndefined();
     expect(submitSessionText).not.toHaveBeenCalled();
   });
 
@@ -456,7 +441,7 @@ describe("RailChat create from anywhere (L5)", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith("/api/terminal/f1/attach-leaf")) {
+        if (url.endsWith("/api/terminal/f1/attach-task")) {
           return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
         }
         return Promise.reject(new Error("no backend"));
@@ -482,7 +467,7 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
       ...L6_INTERACTION_FREETEXT,
       id: "rail-answer",
       lifecycleId: undefined,
-      leafKey: LEAF_KEY,
+      taskDocumentRef: LEAF_REF,
       controlPendingInteraction: {
         ...L6_INTERACTION_FREETEXT.controlPendingInteraction,
         interactionId: "ix-rail-answer",
@@ -513,7 +498,9 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
         throw new Error(`no backend for ${url}`);
       }),
     );
-    const { findByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocumentRef={LEAF_REF} taskDocuments={[leafDoc()]} />,
+    );
     await findByTestId("session-composer-answer-mode");
     act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "use ar/base"));
     fireEvent.click(await findByTestId("session-composer-send"));
@@ -536,24 +523,26 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
         kind: "harness",
         spawnRole: "worker",
         seatRole: "reviewer",
-        leafKey: LEAF_KEY,
+        taskDocumentRef: LEAF_REF,
         status: "running",
       },
     ]);
 
-    const { findByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocumentRef={LEAF_REF} taskDocuments={[leafDoc()]} />,
+    );
 
     expect((await findByTestId("rail-pane-chat")).textContent).toContain("reviewer · Claude Code 1");
   });
 
-  it("splits into a chat pane and a terminal pane when the leaf has both", async () => {
+  it("splits an unattached chat and raw terminal without assigning either to a task seat", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
     sessionStore.getState().hydrate([
-      { id: "c1", label: "Claude Code 1", kind: "harness", harness: "claude", leafKey: LEAF_KEY, status: "running" },
-      { id: "t1", label: "Terminal 1", kind: "terminal", leafKey: LEAF_KEY, status: "running" },
+      { id: "c1", label: "Claude Code 1", kind: "harness", harness: "claude", status: "running" },
+      { id: "t1", label: "Terminal 1", kind: "terminal", status: "running" },
     ]);
 
-    const { findByTestId, getByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId, getByTestId } = render(<RailChat />);
 
     expect(await findByTestId("rail-pane-chat")).not.toBeNull();
     expect(getByTestId("rail-pane-terminal")).not.toBeNull();
@@ -561,16 +550,18 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
     expect(getByTestId("term-t1")).not.toBeNull();
   });
 
-  it("offers open-terminal beside an existing chat (no terminal yet)", async () => {
+  it("does not offer a raw terminal beside a task-bound role chat", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
     sessionStore.getState().hydrate([
-      { id: "c1", label: "Claude Code 1", kind: "harness", leafKey: LEAF_KEY, status: "running" },
+      { id: "c1", label: "Claude Code 1", kind: "harness", seatRole: "worker", taskDocumentRef: LEAF_REF, status: "running" },
     ]);
 
-    const { findByTestId, getByTestId, queryByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId, queryByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocumentRef={LEAF_REF} taskDocuments={[leafDoc()]} />,
+    );
 
     expect(await findByTestId("rail-pane-chat")).not.toBeNull();
-    expect(getByTestId("rail-open-terminal")).not.toBeNull();
+    expect(queryByTestId("rail-open-terminal")).toBeNull();
     expect(queryByTestId("rail-pane-terminal")).toBeNull();
   });
 });
@@ -587,21 +578,23 @@ describe("RailChat terminate (L5 fix 3)", () => {
       }),
     );
     sessionStore.getState().hydrate([
-      { id: "c1", label: "Claude Code 1", kind: "harness", leafKey: LEAF_KEY, status: "running" },
+      { id: "c1", label: "Claude Code 1", kind: "harness", seatRole: "worker", taskDocumentRef: LEAF_REF, status: "running" },
     ]);
 
-    const { findByTestId, queryByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId, queryByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocumentRef={LEAF_REF} taskDocuments={[leafDoc()]} />,
+    );
     fireEvent.click(await findByTestId("rail-terminate-chat"));
 
-    await waitFor(() => expect(findSessionForLeaf(LEAF_KEY, "chat")).toBeUndefined());
-    // The chat slot is freed → the start affordance returns; the pane is gone.
+    await waitFor(() => expect(findSessionForTask(LEAF_REF, "chat")).toBeUndefined());
+    // The canonical worker seat is free and the pane is gone; task-bound generic launch stays hidden.
     await waitFor(() => expect(queryByTestId("rail-pane-chat")).toBeNull());
     expect(FakeBroadcastChannel.messages).toEqual([
       expect.objectContaining({ type: "terminal-catalog-changed", reason: "terminate", sessionId: "c1" }),
     ]);
   });
 
-  it("ends the terminal pane independently of the chat", async () => {
+  it("ends an unattached raw terminal independently of an unattached chat", async () => {
     vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
     vi.stubGlobal(
       "fetch",
@@ -612,14 +605,16 @@ describe("RailChat terminate (L5 fix 3)", () => {
       }),
     );
     sessionStore.getState().hydrate([
-      { id: "c1", label: "Claude Code 1", kind: "harness", leafKey: LEAF_KEY, status: "running" },
-      { id: "t1", label: "Terminal 1", kind: "terminal", leafKey: LEAF_KEY, status: "running" },
+      { id: "c1", label: "Claude Code 1", kind: "harness", status: "running" },
+      { id: "t1", label: "Terminal 1", kind: "terminal", status: "running" },
     ]);
 
-    const { findByTestId, getByTestId, queryByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    const { findByTestId, getByTestId, queryByTestId } = render(<RailChat />);
     fireEvent.click(await findByTestId("rail-terminate-terminal"));
 
-    await waitFor(() => expect(findSessionForLeaf(LEAF_KEY, "terminal")).toBeUndefined());
+    await waitFor(() =>
+      expect(sessionStore.getState().sessions.find((session) => session.id === "t1")).toBeUndefined(),
+    );
     // The chat survives the terminal's termination.
     await act(async () => {
       await Promise.resolve();

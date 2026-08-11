@@ -137,7 +137,8 @@ class ClaudeStreamTransportTests(unittest.IsolatedAsyncioTestCase):
             _Writer(write_error=BrokenPipeError("write failed")),
             _Writer(drain_error=ConnectionResetError("drain failed")),
         ):
-            with self.subTest(error=type(failing_writer.write_error or failing_writer.drain_error)):
+            failure = failing_writer.write_error or failing_writer.drain_error
+            with self.subTest(error=type(failure).__name__):
                 with self.assertRaises(HarnessAdapterDisconnectedError) as raised:
                     await _transport(_Process(stdout=_Reader(), stdin=failing_writer)).write_frame(
                         {"type": "prompt"}

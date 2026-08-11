@@ -7,7 +7,10 @@ import { taskDoc } from "../../test/fixtures/wire";
 import type { TaskDocNode } from "../../types/projection";
 import { ChatContextBar, ChatSessionActions } from "./ChatContextBar";
 
-const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
+const LEAF_REF = {
+  repository: "agents-remember",
+  path: "260628_operations-integration/05_sidebar-chat-attachment.json",
+};
 
 function leafDoc(): TaskDocNode {
   return taskDoc({
@@ -86,7 +89,7 @@ describe("canonical Chats duty bar", () => {
         close() {}
       },
     );
-    const focused = seedTerminal({ leafKey: "agents-remember/old-master/old-leaf" });
+    const focused = seedTerminal({ taskDocumentRef: { repository: "agents-remember", path: "old-master/old-leaf.json" } });
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal("fetch", fetchMock);
     const { getByTestId } = render(
@@ -97,20 +100,20 @@ describe("canonical Chats duty bar", () => {
       />,
     );
 
-    expect(getByTestId("chats-attach-leaf-picker").textContent).toContain("Move leaf");
+    expect(getByTestId("chats-attach-leaf-picker").textContent).toContain("Move task");
     fireEvent.click(getByTestId("chats-attach-leaf-picker"));
     fireEvent.click(getByTestId("chats-attach-leaf-picker-leaf"));
 
-    await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
+    await waitFor(() => expect(sessionStore.getState().sessions[0]?.taskDocumentRef).toEqual(LEAF_REF));
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/terminal/term-1/attach-leaf",
+      "/api/terminal/term-1/attach-task",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ leafKey: LEAF_KEY, role: "terminal" }),
+        body: JSON.stringify({ taskDocumentRef: LEAF_REF, role: "terminal" }),
       }),
     );
     expect(messages).toContainEqual(
-      expect.objectContaining({ reason: "leaf", sessionId: "term-1" }),
+      expect.objectContaining({ reason: "task", sessionId: "term-1" }),
     );
   });
 
@@ -128,8 +131,8 @@ describe("canonical Chats duty bar", () => {
     fireEvent.click(getByTestId("chats-attach-leaf-picker"));
     fireEvent.click(getByTestId("chats-attach-leaf-picker-leaf"));
 
-    expect((await findByRole("alert")).textContent).toContain("leaf already has a terminal seat");
-    expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
+    expect((await findByRole("alert")).textContent).toContain("task document already has a terminal seat");
+    expect(sessionStore.getState().sessions[0]?.taskDocumentRef).toBeUndefined();
   });
 
   it("focuses an exact accepted raw session once", async () => {

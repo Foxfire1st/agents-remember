@@ -2,7 +2,7 @@
 // serving/app.py `api_terminal_open`. Every path is mirrored so the launch flow can render each
 // outcome verbatim; the Python route is the source of truth — keep in lockstep by hand.
 
-import type { HarnessControlState, TerminalOpenKind } from "./terminalCatalog";
+import type { HarnessControlState, TaskDocumentRef, TerminalOpenKind } from "./terminalCatalog";
 
 /** 200 — the row was opened (or idempotently reused): controlState starts at 'starting' for a
  *  native harness; resolvedModel/resolvedEffort are the REQUESTED pair persisted verbatim BEFORE
@@ -13,7 +13,7 @@ export interface TerminalOpenSuccessBody {
   kind: TerminalOpenKind;
   harness: string | null;
   lifecycleId: string | null;
-  leafKey: string | null;
+  taskDocumentRef: TaskDocumentRef | null;
   seatRole: string | null;
   cwd: string;
   tmuxName: string;
@@ -39,10 +39,10 @@ export interface TerminalOpenBadKindBody {
   detail: string | null;
 }
 
-/** 409 — the (leaf, role) pair already has a live owner; the server names it. */
-export interface TerminalOpenLeafTakenBody {
-  status: "leaf-taken";
-  leafKey: string | null;
+/** 409 — the (task document, role) seat already has a live owner; the server names it. */
+export interface TerminalOpenSeatTakenBody {
+  status: "seat-taken";
+  taskDocumentRef: TaskDocumentRef | null;
   session: string | null;
 }
 

@@ -1,14 +1,8 @@
-"""Worker→manager and compound-idle state-signal relay: facts from catalog turn truth, never
-inference.
-
-The relay emits exactly one durable state-signal per seat+turn from the lifted
-terminal outcome, one compound-idle signal per manager set to the owning
-orchestrator, holds delivery at the target's turn boundary, drains pending rows
-when a boundary arrives, and surfaces the non-reaction residue fact.
-"""
+"""Task-structural state-signal relay over catalog turn truth."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from agents_remember.controlplane.operator_inbox_records import (
@@ -16,91 +10,104 @@ from agents_remember.controlplane.operator_inbox_records import (
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.signal_routing import is_seat_dead, master_key
+from agents_remember.controlplane.signal_routing import TaskHierarchy, is_seat_dead
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry, seat_at_turn_boundary
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
 from agents_remember.serving.inbox_delivery import target_session_for_entry
 from agents_remember.serving.ports import TerminalCatalogPort
 
 NON_REACTION_WINDOW_SECONDS = 300.0
-"""Bounded window after which a seat that landed rows at a boundary and never left
-``turn-ended`` is relayed to its owner as the non-reaction residue fact."""
-
 COMPOUND_IDLE_SWEEP_LATENCY_SECONDS = 10.0
-"""Upper bound on compound-idle relay latency: one agent-notifier sweep at the default
-10 s cadence (N6). The predicate is evaluated from catalog truth at each projection tick,
-so a set observed idle is signaled no later than this bound after that tick."""
-
-_OWNER_TIER_ROLES = frozenset({"architect", "orchestrator", "manager"})
+_LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 
 
-def _manager_owned_subordinate(catalog: TerminalCatalogPort, entry: TerminalCatalogEntry) -> bool:
-    """Whether ``entry`` is a leaf seat directly owned by its recorded manager.
+@dataclass(frozen=True)
+class NonReactionRuntime:
+    """Structural stores required to re-evaluate one non-reaction episode."""
 
-    Role labels intentionally do not define subordinate membership: a future leaf role joins
-    when its direct spawn edge and exact ``repo/master`` scope prove manager ownership. The
-    three owner tiers remain excluded because they represent control-plane seats, not leaf work.
-    A missing/unknown parent or scope therefore fails closed.
-    """
+    catalog: TerminalCatalogPort
+    hierarchy: TaskHierarchy
+    inbox_store: OperatorInboxStore
 
-    if entry.kind != "harness" or entry.binding_role in _OWNER_TIER_ROLES:
-        return False
-    if entry.spawned_by_session is None or entry.binding_leaf_key is None:
-        return False
-    manager = catalog.get(entry.spawned_by_session)
-    return (
-        manager is not None
-        and manager.kind == "harness"
+
+@dataclass(frozen=True)
+class _NonReactionEvaluation:
+    runtime: NonReactionRuntime
+    current: dict[str, OperatorInboxEntry]
+    now: datetime
+    window: float
+
+
+def _manager_owned_subordinate(
+    hierarchy: TaskHierarchy,
+    manager: TerminalCatalogEntry,
+    entry: TerminalCatalogEntry,
+) -> bool:
+    """Whether ``entry`` occupies a leaf directly contained by ``manager``'s master."""
+
+    manager_document = manager.binding_task_document_ref
+    entry_document = entry.binding_task_document_ref
+    return bool(
+        manager_document is not None
+        and entry_document is not None
         and manager.binding_role == "manager"
-        and master_key(manager.binding_leaf_key) is not None
-        and master_key(manager.binding_leaf_key) == master_key(entry.binding_leaf_key)
+        and entry.binding_role in _LEAF_ROLES
+        and hierarchy.parent(entry_document) == manager_document
     )
 
 
-def _compound_subordinate_index(
+def _manager_for_subordinate(
     catalog: TerminalCatalogPort,
-) -> tuple[
-    list[TerminalCatalogEntry],
-    dict[str, list[TerminalCatalogEntry]],
-]:
-    """Live managers and owned leaf subordinates indexed by their direct manager.
-
-    One catalog scan feeds every compound-idle set, so the sweep stays O(catalog + sets),
-    never O(managers x catalog). Status is gated FIRST here: non-running rows
-    (retired/exited/landed) are never indexed, so their stale turn state never counts.
-    """
-    managers: list[TerminalCatalogEntry] = []
-    by_spawner: dict[str, list[TerminalCatalogEntry]] = {}
-    for entry in catalog.list():
-        if entry.kind != "harness" or entry.status != "running":
-            continue
-        if entry.binding_role == "manager":
-            managers.append(entry)
-        elif entry.binding_role not in _OWNER_TIER_ROLES and entry.spawned_by_session is not None:
-            by_spawner.setdefault(entry.spawned_by_session, []).append(entry)
-    return managers, by_spawner
+    hierarchy: TaskHierarchy,
+    entry: TerminalCatalogEntry,
+) -> TerminalCatalogEntry | None:
+    document = entry.binding_task_document_ref
+    if document is None or entry.binding_role not in _LEAF_ROLES:
+        return None
+    master = hierarchy.parent(document)
+    if master is None:
+        return None
+    primary = [
+        row
+        for row in catalog.list()
+        if row.status == "running"
+        and row.binding_role == "manager"
+        and row.task_document_ref == master
+    ]
+    if len(primary) > 1:
+        raise ValueError(f"multiple managers claim {master.key}")
+    if primary:
+        return primary[0]
+    replacements = [
+        row
+        for row in catalog.list()
+        if row.status == "running"
+        and row.binding_role == "manager"
+        and row.replacement_for_task_document_ref == master
+    ]
+    if len(replacements) > 1:
+        raise ValueError(f"multiple replacement managers claim {master.key}")
+    return replacements[0] if replacements else None
 
 
 def compound_idle_sets(
     catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
 ) -> dict[str, tuple[TerminalCatalogEntry, ...]]:
-    """Every live manager's compound-idle member set, keyed by manager id.
+    """Every current manager whose complete running task-owned set is at a boundary."""
 
-    Membership is master-scoped on EVERY arm: an owned leaf subordinate joins only when its
-    direct manager spawn edge and bound (``binding_leaf_key`` / ``replacement_for_leaf``) scope
-    prove that it belongs to the manager's master. A running member with unclassified turn
-    state is unknown and fails the set closed; ``working``/``stale`` members mean
-    the set is not idle. A manager with no owned leaf subordinates never forms a set.
-    """
-    managers, by_spawner = _compound_subordinate_index(catalog)
+    running = [
+        entry for entry in catalog.list() if entry.kind == "harness" and entry.status == "running"
+    ]
     sets: dict[str, tuple[TerminalCatalogEntry, ...]] = {}
-    for manager in managers:
+    for manager in (entry for entry in running if entry.binding_role == "manager"):
         members = [manager]
-        for subordinate in by_spawner.get(manager.id, ()):
-            if not _manager_owned_subordinate(catalog, subordinate):
-                continue
-            members.append(subordinate)
-        if not members[1:]:
+        members.extend(
+            entry
+            for entry in running
+            if entry.id != manager.id and _manager_owned_subordinate(hierarchy, manager, entry)
+        )
+        if len(members) == 1:
             continue
         if all(member.turn_state in {"turn-ended", "awaiting-input"} for member in members):
             sets[manager.id] = tuple(members)
@@ -108,7 +115,8 @@ def compound_idle_sets(
 
 
 def compound_idle_signature(members: tuple[TerminalCatalogEntry, ...]) -> str:
-    """Identity of one idle episode: every member's seat, state and boundary time."""
+    """Private identity of one idle episode."""
+
     return ";".join(
         sorted(
             f"{member.id}:{member.turn_state}:{member.turn_state_changed_at or ''}"
@@ -118,12 +126,6 @@ def compound_idle_signature(members: tuple[TerminalCatalogEntry, ...]) -> str:
 
 
 def state_signal_held_on_boundary(catalog: TerminalCatalogPort, entry: OperatorInboxEntry) -> bool:
-    """Whether a non-landed state-signal row is merely boundary-held by a LIVE target seat.
-
-    A live addressee's availability gate owns delivery timing: the row must not be
-    redelivered while its target is running but not at a turn boundary. Dead/archived
-    targets keep the ordinary redelivery schedule.
-    """
     if entry.messageKind != "state-signal" or state_signal_landed(entry):
         return False
     target = target_session_for_entry(catalog, entry)
@@ -132,26 +134,26 @@ def state_signal_held_on_boundary(catalog: TerminalCatalogPort, entry: OperatorI
 
 def evaluate_state_signal_findings(
     catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
 ) -> list[AgentNotifierFinding]:
-    """A live seat whose turn ended with a terminal outcome not yet relayed."""
     return [
         finding
         for entry in catalog.list()
-        if (finding := _state_signal_finding(catalog, entry)) is not None
+        if (finding := _state_signal_finding(catalog, hierarchy, entry)) is not None
     ]
 
 
 def current_state_signal_finding(
     catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
     *,
     session_id: str,
     source_id: str,
 ) -> tuple[TerminalCatalogEntry, AgentNotifierFinding] | None:
-    """Return a still-current terminal finding whose evidence matches the swept episode."""
     entry = catalog.get(session_id)
     if entry is None:
         return None
-    finding = _state_signal_finding(catalog, entry)
+    finding = _state_signal_finding(catalog, hierarchy, entry)
     if finding is None or finding.source_id != source_id:
         return None
     return entry, finding
@@ -159,24 +161,25 @@ def current_state_signal_finding(
 
 def _state_signal_finding(
     catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
     entry: TerminalCatalogEntry,
 ) -> AgentNotifierFinding | None:
+    manager = _manager_for_subordinate(catalog, hierarchy, entry)
     if not (
         entry.kind == "harness"
         and entry.status == "running"
-        and _manager_owned_subordinate(catalog, entry)
+        and manager is not None
         and entry.turn_state == "turn-ended"
         and entry.terminal_outcome in {"completed", "interrupted"}
         and entry.terminal_evidence_id is not None
+        and entry.state_signal_emitted_for != entry.terminal_evidence_id
     ):
-        return None
-    if entry.state_signal_emitted_for == entry.terminal_evidence_id:
         return None
     return AgentNotifierFinding(
         kind="state-signal-due",
         detail=entry.terminal_outcome,
         session_id=entry.id,
-        leaf_key=entry.binding_leaf_key,
+        task_document_ref=entry.binding_task_document_ref,
         seat_role=entry.binding_role,
         source_id=entry.terminal_evidence_id,
     )
@@ -184,10 +187,10 @@ def _state_signal_finding(
 
 def evaluate_compound_idle_findings(
     catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
 ) -> list[AgentNotifierFinding]:
-    """A manager seat whose whole live set is at a turn boundary, not yet relayed."""
     findings: list[AgentNotifierFinding] = []
-    for manager_id, members in compound_idle_sets(catalog).items():
+    for manager_id, members in compound_idle_sets(catalog, hierarchy).items():
         manager = members[0]
         signature = compound_idle_signature(members)
         if manager.compound_idle_emitted_for == signature:
@@ -197,7 +200,7 @@ def evaluate_compound_idle_findings(
                 kind="compound-idle-due",
                 detail="compound-idle",
                 session_id=manager_id,
-                leaf_key=manager.binding_leaf_key,
+                task_document_ref=manager.binding_task_document_ref,
                 seat_role=manager.binding_role,
                 source_id=signature,
             )
@@ -207,69 +210,82 @@ def evaluate_compound_idle_findings(
 
 def evaluate_non_reaction_findings(
     catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
     inbox_store: OperatorInboxStore,
     *,
     now: datetime,
     window: float = NON_REACTION_WINDOW_SECONDS,
 ) -> list[AgentNotifierFinding]:
-    """A seat still ``turn-ended`` long after rows landed at its boundary."""
     current = inbox_store.current()
+    evaluation = _NonReactionEvaluation(
+        NonReactionRuntime(catalog, hierarchy, inbox_store),
+        current,
+        now,
+        window,
+    )
     return [
         finding
         for entry in catalog.list()
-        if (finding := _non_reaction_finding(catalog, entry, current, now=now, window=window))
-        is not None
+        if (finding := _non_reaction_finding(evaluation, entry)) is not None
     ]
 
 
 def current_non_reaction_finding(
-    catalog: TerminalCatalogPort,
-    inbox_store: OperatorInboxStore,
+    runtime: NonReactionRuntime,
     finding: AgentNotifierFinding,
     *,
     now: datetime,
     window: float = NON_REACTION_WINDOW_SECONDS,
 ) -> tuple[TerminalCatalogEntry, OperatorInboxEntry, AgentNotifierFinding] | None:
-    """Return a freshly folded, still-landed non-reaction episode for one seat."""
     if finding.session_id is None or finding.source_id is None:
         return None
-    entry = catalog.get(finding.session_id)
+    entry = runtime.catalog.get(finding.session_id)
     if entry is None:
         return None
-    current = inbox_store.current()
-    current_finding = _non_reaction_finding(catalog, entry, current, now=now, window=window)
+    current = runtime.inbox_store.current()
+    current_finding = _non_reaction_finding(
+        _NonReactionEvaluation(runtime, current, now, window),
+        entry,
+    )
     if current_finding is None or current_finding.source_id != finding.source_id:
         return None
-    row = current[finding.source_id]
-    return entry, row, current_finding
+    return entry, current[finding.source_id], current_finding
 
 
 def _non_reaction_finding(
-    catalog: TerminalCatalogPort,
+    evaluation: _NonReactionEvaluation,
     entry: TerminalCatalogEntry,
-    current: dict[str, OperatorInboxEntry],
-    *,
-    now: datetime,
-    window: float,
 ) -> AgentNotifierFinding | None:
+    is_subject = (
+        entry.binding_role == "manager"
+        or _manager_for_subordinate(
+            evaluation.runtime.catalog,
+            evaluation.runtime.hierarchy,
+            entry,
+        )
+        is not None
+    )
     if not (
         entry.kind == "harness"
         and entry.status == "running"
         and entry.turn_state == "turn-ended"
-        and (entry.binding_role == "manager" or _manager_owned_subordinate(catalog, entry))
+        and is_subject
     ):
         return None
-    episode = _oldest_landed_episode(current, entry)
+    episode = _oldest_landed_episode(evaluation.current, entry)
     if episode is None:
         return None
     oldest, accepted_at = episode
-    if entry.non_reaction_emitted_for == oldest.id or (now - accepted_at).total_seconds() < window:
+    if (
+        entry.non_reaction_emitted_for == oldest.id
+        or (evaluation.now - accepted_at).total_seconds() < evaluation.window
+    ):
         return None
     return AgentNotifierFinding(
         kind="non-reaction-due",
         detail=oldest.id,
         session_id=entry.id,
-        leaf_key=entry.binding_leaf_key,
+        task_document_ref=entry.binding_task_document_ref,
         seat_role=entry.binding_role,
         source_id=oldest.id,
     )
@@ -304,28 +320,20 @@ def evaluate_boundary_drain_findings(
     *,
     limit: int | None = None,
 ) -> list[AgentNotifierFinding]:
-    """Pending rows whose target seat crossed a turn boundary after the last attempt.
-
-    The boundary transition is the event-driven drain (N15): the durable backoff schedule
-    remains the backstop for seats that never go idle. Rows whose last attempt already
-    happened at this boundary stay on the schedule.
-    """
     findings: list[AgentNotifierFinding] = []
     for entry in current.values():
-        if entry.state != "pending":
-            continue
-        if state_signal_landed(entry):
+        if entry.state != "pending" or state_signal_landed(entry):
             continue
         if entry.agentId is not None and is_seat_dead(catalog, entry.agentId):
-            # The rebind machinery owns rows to dead seats (N2/N14); a dead seat has no
-            # boundary to cross.
             continue
         if entry.lastAttemptAt is None:
             continue
         target = target_session_for_entry(catalog, entry)
-        if target is None or not seat_at_turn_boundary(target):
-            continue
-        if target.turn_state_changed_at is None:
+        if (
+            target is None
+            or not seat_at_turn_boundary(target)
+            or target.turn_state_changed_at is None
+        ):
             continue
         try:
             boundary_at = datetime.fromisoformat(target.turn_state_changed_at)
@@ -339,7 +347,7 @@ def evaluate_boundary_drain_findings(
                 kind="boundary-drain",
                 detail=entry.messageKind,
                 session_id=entry.agentId,
-                leaf_key=entry.leafKey,
+                task_document_ref=entry.taskDocumentRef,
                 seat_role=entry.seatRole,
                 source_id=entry.id,
             )
@@ -347,33 +355,28 @@ def evaluate_boundary_drain_findings(
     return findings[:limit] if limit is not None else findings
 
 
+def _seat_label(entry: TerminalCatalogEntry) -> str:
+    document = entry.binding_task_document_ref
+    return f"{document.key if document is not None else '-'} as {entry.binding_role}"
+
+
 def state_signal_response(entry: TerminalCatalogEntry) -> str:
-    """The self-contained state-signal payload: seat, leaf, turn, outcome, timestamps, origin."""
     origin = entry.interrupted_by or "-"
     return (
-        f"session {entry.id} leaf {entry.binding_leaf_key or '-'} "
-        f"turn {entry.terminal_evidence_id or '-'} outcome {entry.terminal_outcome or 'unknown'} "
-        f"at {entry.terminal_outcome_at or '-'} interrupted_by={origin}"
+        f"seat {_seat_label(entry)} turn {entry.terminal_evidence_id or '-'} "
+        f"outcome {entry.terminal_outcome or 'unknown'} at {entry.terminal_outcome_at or '-'} "
+        f"interrupted_by={origin}"
     )
 
 
 def compound_idle_response(members: tuple[TerminalCatalogEntry, ...]) -> str:
-    """The self-contained compound-idle payload naming every set member."""
     manager = members[0]
-    subordinates = ", ".join(
-        f"{entry.id}@{entry.binding_leaf_key or entry.replacement_for_leaf or '-'}"
-        for entry in members[1:]
-    )
-    return (
-        f"compound-idle set: manager {manager.id} leaf {manager.binding_leaf_key or '-'} "
-        f"subordinates {subordinates or '-'}"
-    )
+    subordinates = ", ".join(_seat_label(entry) for entry in members[1:])
+    return f"compound-idle set: manager {_seat_label(manager)}; subordinates {subordinates or '-'}"
 
 
 def non_reaction_response(entry: TerminalCatalogEntry, row: OperatorInboxEntry) -> str:
-    """The non-reaction residue fact: rows landed at a boundary, seat never left turn-ended."""
     return (
-        f"session {entry.id} leaf {entry.binding_leaf_key or '-'} "
-        f"landed-row {row.id} accepted-at {row.adapterAcceptedAt or '-'} "
-        "still turn-ended (non-reaction fact)"
+        f"seat {_seat_label(entry)} landed-row {row.id} accepted-at "
+        f"{row.adapterAcceptedAt or '-'} still turn-ended (non-reaction fact)"
     )

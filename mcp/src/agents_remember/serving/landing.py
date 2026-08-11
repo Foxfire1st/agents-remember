@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -9,17 +10,17 @@ from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.retire import SeatClosure
 
 
-def land_seats_for_leaf(
+def land_seats_for_task(
     catalog: TerminalCatalogPort,
     closure: SeatClosure,
     *,
-    leaf_key: str,
+    task_document_ref: TaskDocumentRef,
     roles: frozenset[str],
 ) -> list[TerminalCatalogEntry]:
     """Mark every non-terminated matching seat as landed/archive, leaving tmux intact."""
     landed: list[TerminalCatalogEntry] = []
     for candidate in catalog.list(include_terminated=True):
-        if candidate.leaf_key != leaf_key or candidate.status == "terminated":
+        if candidate.task_document_ref != task_document_ref or candidate.status == "terminated":
             continue
         if candidate.binding_role not in roles:
             continue

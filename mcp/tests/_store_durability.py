@@ -34,6 +34,7 @@ stop flag, and :func:`require_stress_measurement` refuses incomplete worker or r
 from __future__ import annotations
 
 import contextlib
+import importlib
 import json
 import multiprocessing
 import os
@@ -41,7 +42,7 @@ import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import agents_remember
 from _durability_measurement import (
@@ -73,9 +74,19 @@ from agents_remember.controlplane.records import (
     GateRecord,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.models.gates import (
-    GateState,
-)
+
+if TYPE_CHECKING:
+    from agents_remember.models.structural.gates import GateState
+else:
+    try:
+        from agents_remember.models.structural.gates import GateState
+    except ModuleNotFoundError as exc:
+        # The sensitivity case imports this current harness against an extracted historical base
+        # commit, which predates the structural models subpackage. This branch exists only in the
+        # cross-version test harness; the installed package exposes no compatibility module.
+        if exc.name != "agents_remember.models.structural":
+            raise
+        GateState = importlib.import_module("agents_remember.models.gates").GateState
 from agents_remember.providers.degradation import (
     DEGRADATION_EVENT_SCHEMA,
     ProviderDegradationStore,

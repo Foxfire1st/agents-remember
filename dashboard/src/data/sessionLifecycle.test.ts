@@ -217,7 +217,9 @@ describe("lifecycleCopy honesty rules", () => {
     const session = fromTerminalSessionInfo(L6_CONTROLLED_WORKING);
     const copy = terminateConfirmCopy(session);
     expect(copy).toContain("worker-l6-controlled");
-    expect(copy).toContain("leaf 06_pty-stage-interactions-lifecycle");
+    expect(copy).toContain(
+      "task 260715_react-tui-cockpit-frontend/06_pty-stage-interactions-lifecycle.json",
+    );
     expect(copy).toContain("state working");
   });
 

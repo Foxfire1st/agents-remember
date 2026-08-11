@@ -46,6 +46,7 @@ from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeRecord,
     OrchestrationNudgeStore,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -73,6 +74,7 @@ from agents_remember.serving.terminal_liveness import (
 from agents_remember.serving.terminal_tmux import TmuxProbeResult
 
 NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
+MASTER_REF = TaskDocumentRef(repository="repo", path="260707_master/task.json")
 
 
 def _signal(
@@ -84,7 +86,8 @@ def _signal(
         targetAgentId="manager-1",
         targetLifecycleId=None,
         targetRole="manager",
-        leafKey="repo/260707_master/leaf-1",
+        taskDocumentRef=MASTER_REF,
+        seatRole="manager",
         findingKind="seat-liveness",
         detail=detail,
         deliveryState="delivered",
@@ -137,7 +140,8 @@ class AgentNotifierSignalStoreScalingTests(unittest.TestCase):
                         agent_id="manager-1",
                         lifecycle_id=None,
                         role="manager",
-                        leaf_key="repo/260707_master/leaf-1",
+                        task_document_ref=MASTER_REF,
+                        seat_role="manager",
                     ),
                     finding_kind="seat-liveness",
                     detail="turn-state-stale",

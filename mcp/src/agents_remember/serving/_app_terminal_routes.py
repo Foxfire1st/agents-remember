@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -21,7 +22,7 @@ from agents_remember.serving._app_common import (
     _IMAGE_EXTS,
     _MAX_IMAGE_BYTES,
     DEFAULT_SHELL,
-    TerminalAttachLeafRequest,
+    TerminalAttachTaskRequest,
     TerminalLandedCleanupRequest,
     TerminalOpenRequest,
     TerminalPasteRequest,
@@ -30,9 +31,7 @@ from agents_remember.serving._app_common import (
     _attach_terminal_session,
     _bridge_terminal,
     _catalog_payload,
-    _leaf_ref_response,
     _looks_like_image,
-    _resolve_request_leaf_key,
     _ServingRuntime,
 )
 from agents_remember.serving.harness_control_api import resolve_terminal_open_selection
@@ -45,8 +44,7 @@ from agents_remember.serving.harnesses import detect_harnesses
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.response_contract import (
     DetectedHarnessesResponse,
-    LeafRefRefusal,
-    LeafTakenConflict,
+    SeatTakenConflict,
     StatusRefusal,
     TerminalAlreadyRetired,
     TerminalCleanupResult,
@@ -55,14 +53,14 @@ from agents_remember.serving.response_contract import (
     TerminalImageRefusal,
     TerminalImageStored,
     TerminalLaunchConflict,
-    TerminalLeafAttached,
-    TerminalLeafRefused,
     TerminalOpened,
     TerminalPaneDelivery,
     TerminalRenamed,
     TerminalRetired,
     TerminalRetireRefused,
     TerminalSessionsResponse,
+    TerminalTaskAttached,
+    TerminalTaskRefused,
     TerminalTerminated,
     UnknownActorRefusal,
     UnknownSessionRefusal,
@@ -70,7 +68,6 @@ from agents_remember.serving.response_contract import (
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.retire_policy import RetirePolicyError, SeatRef, check_retire_authority
 from agents_remember.serving.seat_events import log_rename_event, log_retire_event
-from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.serving.terminal_liveness import LivenessProbe, observe_terminal_liveness
 from agents_remember.serving.terminal_opener import (
     ControlRunnerRequest,
@@ -79,7 +76,11 @@ from agents_remember.serving.terminal_opener import (
     TerminalLaunchRequest,
     open_terminal_session,
 )
-from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
+from agents_remember.serving.terminal_task_assignment import (
+    TaskAssignmentRuntime,
+    assign_terminal_session_to_task,
+)
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 
 async def _serve_terminal_websocket(
@@ -225,14 +226,10 @@ def _open_terminal_response(
     runtime: _ServingRuntime, session: str, request: TerminalOpenRequest
 ) -> Response:
     # Mode B2 opener: the dashboard *spawns + owns* a
-    # session, then the WebSocket above attaches to it. The leaf-claim + ensure + upsert
+    # session, then the WebSocket above attaches to it. The task-seat claim + ensure + upsert
     # composition lives in the shared `open_terminal_session` so this route and the agent-facing
     # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
     config = runtime.config
-    try:
-        leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
-    except LeafRefResolutionError as exc:
-        return _leaf_ref_response(exc, request.leaf_key or "")
     try:
         resolved_launch = resolve_terminal_open_selection(
             kind=request.kind,
@@ -254,6 +251,7 @@ def _open_terminal_response(
             workspace_root=config.workspace_root,
             shell=os.environ.get("SHELL") or DEFAULT_SHELL,
             harness=request.harness,
+            env={"AR_SPAWN_ROLE": request.role} if request.role is not None else None,
             # Resolve harness ids against the effective GLOBAL registry (builtin merged
             # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
             # Loaded only for harness-kind opens: a malformed settings file must
@@ -271,10 +269,10 @@ def _open_terminal_response(
         provenance=SpawnProvenance(
             label=request.label,
             lifecycle_id=request.lifecycle_id,
-            leaf_key=leaf_key,
+            task_document_ref=request.task_document_ref,
         ),
     )
-    refusal = _open_terminal_refusal_response(result, leaf_key)
+    refusal = _open_terminal_refusal_response(result, request.task_document_ref)
     if refusal is not None:
         return refusal
     entry = result.entry
@@ -293,7 +291,11 @@ def _open_terminal_response(
             **_terminal_entry_payload(entry),
             "label": entry.label,
             "lifecycleId": entry.lifecycle_id,
-            "leafKey": entry.leaf_key,
+            "taskDocumentRef": (
+                entry.task_document_ref.model_dump()
+                if entry.task_document_ref is not None
+                else None
+            ),
             "seatRole": entry.binding_role,
             "cwd": str(entry.cwd),
             "status": "running",
@@ -303,7 +305,7 @@ def _open_terminal_response(
 
 
 def _open_terminal_refusal_response(
-    result: OpenTerminalResult, leaf_key: str | None
+    result: OpenTerminalResult, task_document_ref: TaskDocumentRef | None
 ) -> Response | None:
     """Map opener refusals before the route reads an opened catalog row."""
 
@@ -311,16 +313,18 @@ def _open_terminal_refusal_response(
         return JSONResponse(
             content={"status": "bad-kind", "detail": result.detail}, status_code=400
         )
-    if result.status.startswith("sprint-binding-"):
+    if result.status.startswith("task-binding-"):
         return JSONResponse(
             content={"status": result.status, "detail": "named role scope is required"},
             status_code=400,
         )
-    if result.status == "leaf-taken":
+    if result.status == "seat-taken":
         return JSONResponse(
             content={
-                "status": "leaf-taken",
-                "leafKey": leaf_key,
+                "status": "seat-taken",
+                "taskDocumentRef": (
+                    task_document_ref.model_dump() if task_document_ref is not None else None
+                ),
                 "session": result.owner_session_id,
             },
             status_code=409,
@@ -328,30 +332,28 @@ def _open_terminal_refusal_response(
     return None
 
 
-def _attach_leaf_response(
-    runtime: _ServingRuntime, session: str, request: TerminalAttachLeafRequest
+def _attach_task_response(
+    runtime: _ServingRuntime, session: str, request: TerminalAttachTaskRequest
 ) -> Response:
-    # Claim or move one existing session's leaf-role binding (enclosure-free, no respawn).
-    try:
-        leaf_key = _resolve_request_leaf_key(runtime.config, request.leaf_key)
-    except LeafRefResolutionError as exc:
-        return _leaf_ref_response(exc, request.leaf_key)
-    assert leaf_key is not None
-    result = assign_terminal_session_to_leaf(
-        runtime.catalog,
-        runtime.host,
+    # Trusted dashboard administration: claim or move one document-role binding, no respawn.
+    result = assign_terminal_session_to_task(
+        TaskAssignmentRuntime(
+            runtime.catalog,
+            runtime.host,
+            TaskDocumentTopology(runtime.config.coordination_root),
+        ),
         session_id=session,
-        leaf_key=leaf_key,
+        task_document_ref=request.task_document_ref,
         role=request.role,
     )
     if result.status == "unknown-session":
         return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-    if result.status == "leaf-taken":
+    if result.status == "seat-taken":
         return JSONResponse(
             content={
                 "session": result.owner_session_id,
-                "status": "leaf-taken",
-                "leafKey": leaf_key,
+                "status": "seat-taken",
+                "taskDocumentRef": request.task_document_ref.model_dump(),
             },
             status_code=409,
         )
@@ -360,26 +362,26 @@ def _attach_leaf_response(
             content={
                 "session": session,
                 "status": "role-required",
-                "leafKey": leaf_key,
+                "taskDocumentRef": request.task_document_ref.model_dump(),
                 "detail": "role is required for a hand-opened harness session",
             },
             status_code=400,
         )
-    if result.status.startswith("sprint-binding-"):
+    if result.status == "task-binding-invalid":
         return JSONResponse(
             content={
                 "session": session,
                 "status": result.status,
-                "leafKey": leaf_key,
-                "detail": "named role scope is immutable",
+                "taskDocumentRef": request.task_document_ref.model_dump(),
+                "detail": "task document is missing/invalid or role does not match its altitude",
             },
-            status_code=409,
+            status_code=400,
         )
     return JSONResponse(
         content={
             "session": session,
             "status": "attached",
-            "leafKey": leaf_key,
+            "taskDocumentRef": request.task_document_ref.model_dump(),
             "role": result.role,
             "seatRole": result.seat_role,
             "previousSeatRole": result.previous_seat_role,
@@ -566,7 +568,11 @@ def _retire_response(
             status_code=200,
         )
     try:
-        check_retire_authority(_seat_ref(actor_entry), _seat_ref(target_entry))
+        check_retire_authority(
+            _seat_ref(actor_entry),
+            _seat_ref(target_entry),
+            TaskDocumentTopology(runtime.config.coordination_root),
+        )
     except RetirePolicyError as exc:
         return JSONResponse(
             content={"session": session, "status": "retire-refused", "detail": str(exc)},
@@ -596,11 +602,11 @@ def _retire_response(
 
 
 def _seat_ref(entry: TerminalCatalogEntry) -> SeatRef:
-    """The three facts retire authority is decided from: who, on which leaf, in which role."""
+    """The document-owned seat facts retire authority is decided from."""
 
     return SeatRef(
         session_id=entry.id,
-        leaf_key=entry.binding_leaf_key,
+        task_document_ref=entry.binding_task_document_ref,
         seat_role=entry.binding_role,
     )
 
@@ -679,12 +685,12 @@ def _register_terminal_control_routes(app: FastAPI, runtime: _ServingRuntime) ->
         response_model=TerminalOpened,
         responses={
             400: {
-                "model": LeafRefRefusal | StatusRefusal,
-                "description": "Unresolvable leaf ref, bad kind, or an invalid launch selection",
+                "model": StatusRefusal,
+                "description": "Invalid task binding, kind, or launch selection",
             },
             409: {
-                "model": LeafTakenConflict | TerminalLaunchConflict,
-                "description": "The leaf role is taken, or the seat was launched differently",
+                "model": SeatTakenConflict | TerminalLaunchConflict,
+                "description": "The task role is taken, or the seat was launched differently",
             },
         },
     )
@@ -692,19 +698,19 @@ def _register_terminal_control_routes(app: FastAPI, runtime: _ServingRuntime) ->
         return _open_terminal_response(runtime, session, request)
 
     @app.post(
-        "/api/terminal/{session}/attach-leaf",
-        response_model=TerminalLeafAttached,
+        "/api/terminal/{session}/attach-task",
+        response_model=TerminalTaskAttached,
         responses={
             400: {
-                "model": LeafRefRefusal | TerminalLeafRefused,
-                "description": "Unresolvable leaf ref, or a hand-opened seat with no role",
+                "model": TerminalTaskRefused,
+                "description": "Invalid task binding, or a hand-opened seat with no role",
             },
             404: {"model": UnknownSessionRefusal, "description": "No such session"},
-            409: {"model": TerminalLeafRefused, "description": "The leaf role is already held"},
+            409: {"model": TerminalTaskRefused, "description": "The task role is already held"},
         },
     )
-    def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
-        return _attach_leaf_response(runtime, session, request)
+    def api_terminal_attach_task(session: str, request: TerminalAttachTaskRequest) -> Response:
+        return _attach_task_response(runtime, session, request)
 
     # Two success shapes, because a protocol harness and a plain pane can prove different
     # things: the harness path returns submission evidence, the pane path only transport.

@@ -5,6 +5,7 @@
 
 import type { FetchLike } from "../conversation/client";
 import type { HarnessId } from "../conversation/types";
+import type { TaskDocumentRef } from "../../types/terminalCatalog";
 import type {
   ConversationLibraryPage,
   HistoricalConversationPage,
@@ -100,7 +101,12 @@ export interface OpenRequestBody {
   requestId: string;
   expectedIdentityDigest: string;
   cwd?: string;
-  launchContext?: { leafKey?: string; seatRole?: string };
+  launchContext?: ConversationLaunchContext;
+}
+
+export interface ConversationLaunchContext {
+  taskDocumentRef?: TaskDocumentRef;
+  seatRole?: string;
 }
 
 async function postOpen(

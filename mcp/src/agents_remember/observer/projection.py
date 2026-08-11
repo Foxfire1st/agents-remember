@@ -24,6 +24,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.lifecycle_state import (
     LIVE_STATES,
     LifecycleVocabularyError,
@@ -401,10 +402,13 @@ class AgentPickupNode(BaseModel):
     entryId: str
     lifecycleId: str | None = None
     agentId: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
+    subjectTaskDocumentRef: TaskDocumentRef | None = None
     senderAgentId: str | None = None
     senderRole: str | None = None
     recipientRole: str | None = None
     ownerRole: str | None = None
+    ownerTaskDocumentRef: TaskDocumentRef | None = None
     ownerAgentId: str | None = None
     ownerLifecycleId: str | None = None
     gateId: str | None = None
@@ -434,7 +438,7 @@ class ExpectationRowNode(BaseModel):
     sourceId: str
     subjectAgentId: str | None = None
     subjectLifecycleId: str | None = None
-    leafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
     dueAt: str
     overdue: bool = False
     note: str | None = None

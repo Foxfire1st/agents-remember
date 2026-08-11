@@ -180,7 +180,11 @@ describe("BusPane", () => {
       ask: "Developer decision for inbox inbox-decision-1",
       response: "Proceed with the narrow implementation.",
     });
-    expect(view.getByRole("status").textContent).toContain("recipient acknowledgment remains MCP-only");
+    await waitFor(() =>
+      expect(view.getByRole("status").textContent).toContain(
+        "recipient acknowledgment remains MCP-only",
+      ),
+    );
   });
 
   it("renders a lifecycle-only source as unavailable and performs zero POSTs", () => {

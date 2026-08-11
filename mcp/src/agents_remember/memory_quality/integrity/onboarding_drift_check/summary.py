@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,15 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.models impo
 )
 
 
+@dataclass(frozen=True)
+class DriftSummaryOutput:
+    """Optional report/row materialization requested by an internal caller."""
+
+    report_path: Path | None = None
+    include_rows: bool = False
+    write_report: bool = True
+
+
 def not_checked() -> DriftSummaryPacket:
     return {"status": "notChecked"}
 
@@ -27,6 +37,7 @@ def run_drift_summary(
     code_repository_root: Path,
     context: Any,
     detail_limit: int = 10,
+    output: DriftSummaryOutput | None = None,
 ) -> DriftSummaryPacket:
     if not context.onboarding_root.exists():
         return {
@@ -52,25 +63,31 @@ def run_drift_summary(
         )
     )
     rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    report_path = drift.resolve_report_path(
+    output = output or DriftSummaryOutput()
+    report_path = output.report_path or drift.resolve_report_path(
         None,
         context.coordination_root,
         context.temp_root,
         code_repository_root,
         context.memory_root,
     )
-    drift.write_markdown_report(
-        rows,
-        report_path,
-        code_repository_root,
-        context.onboarding_root,
-    )
+    if output.write_report:
+        drift.write_markdown_report(
+            rows,
+            report_path,
+            code_repository_root,
+            context.onboarding_root,
+        )
     _write_drift_snapshot(code_repository_root, context, rows, report_path=report_path)
-    return summarize_rows(
-        [_row_to_dict(row, context.onboarding_root) for row in rows],
+    serialized_rows = [_row_to_dict(row, context.onboarding_root) for row in rows]
+    packet = summarize_rows(
+        serialized_rows,
         report_path=report_path.as_posix(),
         detail_limit=detail_limit,
     )
+    if output.include_rows:
+        packet["rows"] = serialized_rows
+    return packet
 
 
 def summarize_rows(

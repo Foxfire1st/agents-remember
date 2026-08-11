@@ -216,6 +216,7 @@ class PytestConfigurationTests(unittest.TestCase):
     """The pytest configuration this repository had none of until 260731-EFA-L2."""
 
     def test_strictness_switches_are_on(self) -> None:
+        self.assertIn("-n=auto", ini_strings("addopts"))
         self.assertIn("--strict-markers", ini_strings("addopts"))
         self.assertIn("--strict-config", ini_strings("addopts"))
         self.assertIs(pytest_ini_options()["xfail_strict"], True)

@@ -16,6 +16,7 @@ class DriftSummaryPacket(TypedDict):
     actionableCount: NotRequired[int]
     reportPath: NotRequired[str]
     actionableSample: NotRequired[list[dict[str, Any]]]
+    rows: NotRequired[list[dict[str, Any]]]
     error: NotRequired[str]
 
 

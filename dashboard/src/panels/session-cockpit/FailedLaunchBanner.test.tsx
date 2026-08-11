@@ -68,7 +68,10 @@ describe("FailedLaunchBanner (R6) — uniform across Claude, Codex, and Pi", () 
     const row = catalogRow({
       ...FAILED_CLAUDE_ROW,
       id: "failed-leafy",
-      leafKey: "agents-remember/260715_react-tui-cockpit-frontend/03_capability-catalog-and-launch",
+      taskDocumentRef: {
+        repository: "agents-remember",
+        path: "260715_react-tui-cockpit-frontend/03_capability-catalog-and-launch.json",
+      },
     });
     const { getByTestId, queryByTestId } = renderBanner(row);
     // nothing fires before the explicit confirm — no auto-retry, no auto-retire

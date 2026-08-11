@@ -75,7 +75,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from agents_remember.models.gates import GateDecideResponse
+from agents_remember.models.structural.gates import GateDecideResponse
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 __all__ = [
     "ACTION_RESPONSES",
@@ -304,9 +305,9 @@ class TerminalCatalogEntryWire(WireResponse):
     harness: str | None = None
     lifecycle_id: str | None = None
     terminated_at: str | None = None
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str
-    replacement_for_leaf: str | None = None
+    replacement_for_task_document_ref: TaskDocumentRef | None = None
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
     spawn_role: str | None = None
@@ -315,8 +316,6 @@ class TerminalCatalogEntryWire(WireResponse):
     session_commands: list[str] | None = None
     spawn_level: str | None = None
     spawn_level_source: str | None = None
-    spawn_repo: str | None = None
-    spawn_sprint: str | None = None
     resolved_model: str | None = None
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None
@@ -402,7 +401,7 @@ class TerminalOpened(TerminalEntryFacts):
 
     label: str
     lifecycle_id: str | None = None
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str
     cwd: str
     status: Literal["running"]
@@ -415,19 +414,11 @@ class TerminalLaunchConflict(TerminalEntryFacts):
     detail: str | None = None
 
 
-class LeafRefRefusal(WireResponse):
-    """400: the supplied leaf reference did not resolve to exactly one leaf."""
+class SeatTakenConflict(WireResponse):
+    """409 from open/attach: a document-owned role seat already has an occupant."""
 
-    status: str
-    leaf_key: str
-    detail: str
-
-
-class LeafTakenConflict(WireResponse):
-    """409 from the open path: the leaf's role is already held by another session."""
-
-    status: Literal["leaf-taken"]
-    leaf_key: str
+    status: Literal["seat-taken"]
+    task_document_ref: TaskDocumentRef
     session: str | None = None
 
 
@@ -448,23 +439,23 @@ class TerminalCleanupSkip(WireResponse):
     reason: str
 
 
-class TerminalLeafAttached(WireResponse):
-    """200 from ``/attach-leaf``: the binding as it now stands, plus what it displaced."""
+class TerminalTaskAttached(WireResponse):
+    """200 from ``/attach-task``: the binding as it now stands."""
 
     session: str
     status: Literal["attached"]
-    leaf_key: str
+    task_document_ref: TaskDocumentRef
     role: str | None = None
     seat_role: str | None = None
     previous_seat_role: str | None = None
 
 
-class TerminalLeafRefused(WireResponse):
-    """409/400 from ``/attach-leaf``: a taken leaf or a hand-opened seat with no role."""
+class TerminalTaskRefused(WireResponse):
+    """409/400 from ``/attach-task``: taken, roleless, or wrong-altitude binding."""
 
     session: str | None = None
-    status: Literal["leaf-taken", "role-required"]
-    leaf_key: str
+    status: Literal["seat-taken", "role-required", "task-binding-invalid"]
+    task_document_ref: TaskDocumentRef
     detail: str | None = None
 
 

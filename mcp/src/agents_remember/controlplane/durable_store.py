@@ -26,13 +26,14 @@ to strict validation in the same change.
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -271,6 +272,46 @@ class DurableRecord(BaseModel):
                 f"the record says something this code cannot be trusted to read."
             )
         return value
+
+
+RecordT = TypeVar("RecordT", bound=BaseModel)
+
+
+def migrate_jsonl_records(
+    log_path: Path,
+    ownership: StoreOwnership,
+    model: type[RecordT],
+    transform: Callable[[dict[str, Any]], dict[str, Any]],
+) -> int:
+    """Apply one explicit schema migration under the log's existing lock.
+
+    The transform receives each raw JSON object before current-schema validation. The whole log
+    is validated before one atomic replacement, so a failed row leaves the original file intact.
+    Re-running after migration is a no-op; this is a bounded migration, not a parallel reader.
+    """
+
+    ownership.check_declared_writer()
+    with exclusive_access(log_path, ownership):
+        source = [line for line in read_log_text(log_path).splitlines() if line.strip()]
+        if not source:
+            return 0
+        changed = 0
+        records: list[RecordT] = []
+        for line in source:
+            raw = json.loads(line)
+            if not isinstance(raw, dict):
+                raise ValueError(f"{ownership.store}: durable record is not a JSON object")
+            migrated = transform(raw)
+            if migrated != raw:
+                changed += 1
+            records.append(model.model_validate(migrated))
+        if changed:
+            rewrite_lines(
+                log_path,
+                [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
+                ownership,
+            )
+        return changed
 
 
 class _LockDepth(threading.local):

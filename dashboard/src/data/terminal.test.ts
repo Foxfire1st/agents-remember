@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { HARNESS_CATALOG_REQUEST_TIMEOUT_MS } from "./harnessCatalog";
 import {
-  attachSessionToLeaf,
+  attachSessionToTask,
   bracketedPaste,
   cleanupLandedTerminalSessions,
   connectTerminal,
@@ -361,7 +361,7 @@ describe("openTerminalSession", () => {
           label: "Terminal 1",
           kind: "terminal",
           lifecycleId: "LC1",
-          leafKey: null,
+          taskDocumentRef: null,
           status: "running",
         }),
         { status: 200 },
@@ -685,17 +685,18 @@ describe("cleanupLandedTerminalSessions", () => {
   });
 });
 
-describe("attachSessionToLeaf", () => {
-  it("posts the leaf and explicit seat role as one binding move", async () => {
+describe("attachSessionToTask", () => {
+  it("posts the canonical task document and explicit seat role as one binding move", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(attachSessionToLeaf("s 1", "repo/master/leaf", "curator")).resolves.toBe("ok");
+    const taskDocumentRef = { repository: "repo", path: "master/leaf.json" };
+    await expect(attachSessionToTask("s 1", taskDocumentRef, "curator")).resolves.toBe("ok");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/terminal/s%201/attach-leaf",
+      "/api/terminal/s%201/attach-task",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ leafKey: "repo/master/leaf", role: "curator" }),
+        body: JSON.stringify({ taskDocumentRef, role: "curator" }),
       }),
     );
     vi.unstubAllGlobals();

@@ -28,8 +28,8 @@ import {
   groupEnclosuresByLifecycle,
   lifecycleSelectionKey,
   parseTaskSelection,
-  qualifiedLeafKey,
   seriesSelectionKey,
+  taskDocumentRefForDoc,
   taskDocSelectionKey,
   taskLabel,
 } from "../../data/taskIdentity";
@@ -728,9 +728,9 @@ function taskGate(lifecycle: LifecycleProjection | undefined): string {
 function taskChatIdentity(
   doc: TaskDocNode,
   lifecycle: LifecycleProjection | undefined,
-): { leafKey: string | undefined; lifecycleId?: string } {
+): ChatActivityIdentity {
   return {
-    leafKey: qualifiedLeafKey(doc),
+    ...(taskDocumentRefForDoc(doc) ? { taskDocumentRef: taskDocumentRefForDoc(doc) } : {}),
     ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
   };
 }
@@ -895,7 +895,9 @@ function lifecycleRow(
     gate,
     pickup,
     chatIdentity: {
-      leafKey: docs.length === 1 ? qualifiedLeafKey(docs[0]) : undefined,
+      ...(docs.length === 1 && taskDocumentRefForDoc(docs[0])
+        ? { taskDocumentRef: taskDocumentRefForDoc(docs[0]) }
+        : {}),
       lifecycleId: lifecycle.id,
     },
     createdAt: lifecycle.startedAt,

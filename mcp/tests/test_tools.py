@@ -153,6 +153,73 @@ class McpToolTests(unittest.TestCase):
             ]
             self.assertEqual(missing, [], f"tools missing a description: {missing}")
 
+    def test_agent_control_surface_exposes_only_structural_addresses(self) -> None:
+        """L19 machine ban: models cannot request or retain private plane correlations."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            server = create_server(load_config(path))
+            tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+        self.assertTrue(
+            {
+                "dispatch_agent",
+                "message_parent",
+                "message_child",
+                "retire_child",
+                "rename_child",
+                "rename_self",
+                "lifecycle_gate",
+                "gate_decide",
+                "gate_list",
+            }.issubset(tools)
+        )
+        self.assertTrue(
+            {
+                "spawn_agent_session",
+                "attach_terminal_session_to_task",
+                "hosted_session_readiness",
+                "session_retire",
+                "session_rename",
+                "operator_inbox_post",
+                "operator_inbox_poll",
+                "operator_inbox_consume",
+                "operator_inbox_supersede",
+                "orchestration_nudge_manager",
+            }.isdisjoint(tools)
+        )
+
+        forbidden_fragments = (
+            "sessionid",
+            "lifecycleid",
+            "agentid",
+            "inboxrowid",
+            "adapterrequestid",
+            "vendorcorrelationid",
+            "gateid",
+        )
+        for name in (
+            "dispatch_agent",
+            "message_parent",
+            "message_child",
+            "retire_child",
+            "rename_child",
+            "rename_self",
+            "lifecycle_gate",
+            "gate_decide",
+            "gate_list",
+        ):
+            schema_text = json.dumps(tools[name].inputSchema).lower().replace("_", "")
+            with self.subTest(tool=name):
+                self.assertFalse(
+                    any(fragment in schema_text for fragment in forbidden_fragments),
+                    schema_text,
+                )
+        message_schema = json.dumps(tools["message_parent"].inputSchema)
+        self.assertNotIn("dispatch-brief", message_schema)
+        self.assertNotIn("state-signal", message_schema)
+
     def test_closeout_tool_descriptions_pin_strict_quality_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -334,12 +401,14 @@ class McpToolTests(unittest.TestCase):
             "codex_benchmark_prepare",
             "codex_benchmark_run",
             "lifecycle_gate",
-            "operator_inbox_post",
-            "operator_inbox_poll",
-            "operator_inbox_consume",
-            "attach_terminal_session_to_leaf",
-            "spawn_agent_session",
-            "hosted_session_readiness",
+            "gate_decide",
+            "gate_list",
+            "dispatch_agent",
+            "retire_child",
+            "rename_child",
+            "rename_self",
+            "message_parent",
+            "message_child",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
         for retired in (
@@ -347,6 +416,14 @@ class McpToolTests(unittest.TestCase):
             "gate_create",
             "gate_wait",
             "gate_response_wait",
+            "operator_inbox_post",
+            "operator_inbox_poll",
+            "operator_inbox_consume",
+            "attach_terminal_session_to_task",
+            "spawn_agent_session",
+            "hosted_session_readiness",
+            "session_retire",
+            "session_rename",
         ):
             self.assertNotIn(retired, PUBLIC_TOOLS)
         self.assertNotIn("cgc_query", PUBLIC_TOOLS)

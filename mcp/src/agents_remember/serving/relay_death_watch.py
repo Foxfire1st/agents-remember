@@ -27,7 +27,6 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.signal_routing import derive_architect_owner
 from agents_remember.kernel.agentic_settings import (
     DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
     load_agentic_settings,
@@ -116,7 +115,6 @@ def post_relay_death_signal(runtime: _ServingRuntime, *, now: datetime) -> bool:
     marker = marker_store.read()
     if marker is not None and marker.lastTickAt == heartbeat.lastTickAt:
         return False
-    owner = derive_architect_owner(runtime.catalog)
     entry = create_operator_inbox_entry(
         InboxMessage(
             ask="Agent notifier relay death: heartbeat stale",
@@ -131,13 +129,9 @@ def post_relay_death_signal(runtime: _ServingRuntime, *, now: datetime) -> bool:
         now=now.isoformat(),
         routing=InboxRouting(
             address=InboxAddress(
-                lifecycle_id=owner.lifecycle_id,
-                agent_id=owner.agent_id,
-                recipient_role=owner.role,
+                recipient_role="developer",
             ),
-            owner=InboxOwner(
-                role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
-            ),
+            owner=InboxOwner(role="developer"),
         ),
         poster=InboxPoster(
             created_by="agent-notifier-death-watch",

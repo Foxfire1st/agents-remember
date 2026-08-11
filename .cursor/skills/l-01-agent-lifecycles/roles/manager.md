@@ -1,7 +1,7 @@
 # Lifecycle — Manager
 
 > One master, one seat, self-contained. The manager lifecycle drives exactly one master series:
-> spawn a fresh worker per leaf, review turn reports, decide the delegated leaf gates, close out and
+> dispatch a fresh worker per leaf, review turn reports, decide the delegated leaf gates, close out and
 > integrate each leaf, hand the completed master to the orchestrator through the master-exit seam.
 > Your **brief is your session start**.
 >
@@ -9,15 +9,15 @@
 
 ## What This Seat Is
 
-**One per master task.** Spawned by the orchestrator with the master's context packet. It owns its own
-coordination leaf + chat (**no worktree**) and drives exactly one master series: spawns/respawns a fresh
+**One per master task.** Dispatched by the orchestrator on the canonical master document with the
+master's context packet. It owns that master chat (**no worktree**) and drives exactly one master series: dispatches/replaces a fresh
 worker per leaf, runs the manager -> builder -> reviewer -> curator closeout chain, decides
 **delegated** leaf gates, integrates leaves into the master integration branch via the
 `c-11-memory-carryover-from-branch` skill, and hands the completed master to the orchestrator
 through the master-exit adversarial seam.
 
 The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → builder code →
-reviewer verdict → curator memory pass → closeout preview/apply (deciding the delegated gates per
+reviewer verdict → curator coherence pass → closeout preview/apply (deciding the delegated gates per
 the gate policy) → `worktree_integrate` → finalize — task-doc statuses via the finalizer, **steps
 checked by this seat by hand** (the tool does not reconcile checkboxes). The worker's terminal
 state is checks-green + turn report; everything after that is this seat's.
@@ -33,20 +33,18 @@ everything below.
 
 In dashboard-owned sessions, this seat stays manager for its lifetime. A pasted brief for another
 role is refused and escalated to the backend orchestrator via inbox instead of rerouting this chat.
-Roles expand horizontally into new chats (`spawn_agent_session` with the target role) — a role
+Roles expand horizontally into new chats (`dispatch_agent` with the leaf document and target role) — a role
 seat is never a native sub-agent of this one, and this seat uses no native sub-agents: analysis
 and report checks are its own work, or a dispatched reviewer/curator seat's. A spawned manager
 never absorbs architect, orchestrator, strategist, reviewer, curator, or worker briefs.
 
 ## Hosted Role Dispatch
 
-Every worker, reviewer, or curator dispatch below uses the shared three-state protocol in
-`../SKILL.md`: call `spawn_agent_session` with `context` omitted and `submit=false`, retain the exact
-`spawned-unbriefed` session id, and require `hosted_session_readiness(...)=status=ready` for that
-same id before posting one exact-agent durable `dispatch-brief`. Spawned-only and not-ready seats
-are not active work. Briefed means both `deliveryState=delivered` and
-`adapterDeliveryState=accepted|queued`. If delivery fails, keep the original row and session pending
-for standard retry; never duplicate the brief or respawn merely because delivery is pending.
+Every worker, reviewer, or curator dispatch below uses the shared structural transaction in
+`../SKILL.md`: call `dispatch_agent` with the canonical leaf document, target role, and complete
+brief. The control plane owns readiness, occupant identity, and exact initial brief pinning. A
+`dispatch-queued` outcome remains durable for standard retry; never request or retain an occupant
+id, poll exact readiness, duplicate its brief, or respawn merely because delivery is pending.
 
 ## Lens
 
@@ -80,8 +78,8 @@ dependency-blocked items are future queue; unclear fit escalates one rung instea
 
 ### 1 — Seat & intake
 
-Take the master's own coordination leaf (`task_doc`, no enclosure); the chat is attached so the
-developer can walk in any time. Read the master + leaf docs; order the leaves.
+Take the canonical master document; Operations resolves its current manager chat from that
+document, so the developer can walk in any time. Read the master + leaf docs; order the leaves.
 
 ### Provider Degradation Alert
 
@@ -110,11 +108,10 @@ stops belong to the orchestrator via the system-specialist protocol.
   fix rounds resume the SAME builder); **every round must shrink the finding set** — a
   non-shrinking round escalates to the orchestrator immediately, with the full round history
   attached, regardless of the count.
-- `spawn_agent_session(worker)` — a **fresh session** on the leaf: after exact-session readiness,
-  one durable `dispatch-brief` compiled from `../templates/worker-brief.md` is delivered and proven,
-  with `env={"AR_SPAWN_ROLE": "worker"}` and
-  the **qualified** leaf key `<repository>/<master>/<docId>`; together they claim the worker's
-  `(leaf, role)` seat, and the worker edits inside the leaf worktrees the brief names.
+- `dispatch_agent(task_document_ref=<leaf document>, role="worker", brief=...)` — a **fresh
+  document-bound worker seat**. Compile the complete brief from `../templates/worker-brief.md`;
+  the control plane claims `(leaf document, worker)` and the worker edits inside the leaf
+  worktrees the brief names.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
   **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep evaluates each expected
   artifact at every hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays
@@ -126,22 +123,23 @@ stops belong to the orchestrator via the system-specialist protocol.
   **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
   agent-notifier sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.
 - **Review artifact vs `task_doc`** — completion vs requirements/steps · checks green ·
-  builder changed-path/code evidence sufficient for the curator pass (the manager's own
+  builder changed-path/code evidence sufficient for the curator coherence pass (the manager's own
   leaf-level review; **this is not an adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
   (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
   genuinely new changes.
-- **Curator memory pass — mandatory, not skippable.** After builder code is ready and the reviewer
+- **Curator coherence pass — mandatory, not skippable.** After builder code is ready and the reviewer
   verdict is available (when the leaf tier ran one), compile a brief from
   `../templates/curator-brief.md` carrying the leaf's **landed change set** (code diff over the
   leaf contract's recorded base-to-head range, with paths/counters — pulled from the leaf contract,
-  never guessed), the **leaf task doc**, and **notes/** (builder turn report + reviewer verdict),
-  then spawn a **fresh curator** (`roles/curator.md`, `env={"AR_SPAWN_ROLE": "curator"}`) with it.
-  The curator routes each fed piece to the right onboarding home (specific sidecar or governing
-  overview; the L3 Operational-Notes target is last-resort only) and writes onboarding only,
-  returning a memory-pass report. **Do not run the closeout preview before this pass exists** — the
+  never guessed), the **leaf task doc**, approved design/developer decisions, existing
+  onboarding/entity intent anchors, and **notes/** (builder turn report + reviewer verdict), then
+  dispatch a **fresh curator** on the canonical leaf document with role `curator` and the complete
+  coherence brief. The curator reconciles existing intent, ruled change intent, and implemented
+  reality; routes each accepted truth to the right onboarding home; and writes onboarding only,
+  returning a coherence report. **Do not run the closeout preview before this pass exists** — the
   `c-12-closeout` skill's missing-onboarding and changed-sidecar checks are this pass's output, not
   something this seat patches inline. Leaf closeout inputs are exactly: **builder code + reviewer
-  verdict + curator memory pass**.
+  verdict + curator coherence pass**.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
@@ -176,7 +174,7 @@ stops belong to the orchestrator via the system-specialist protocol.
   never automatic cleanup targets. When a leaf's worker/reviewer/curator seat goes stuck or
   abandoned before integration (a dead-end
   retry, a duplicate spawn), retire it by hand:
-  `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`. Server
+  `retire_child(task_document_ref=<leaf document>, role=<seat role>, reason=...)`. Server
   policy enforces the authority split: **you may retire only worker/reviewer/curator seats of your
   OWN master** — you live outside the master stack you manage, so you can never unseat yourself
   (owner-never-self-retires); a target of any other role, or of a different master, is refused
@@ -186,7 +184,7 @@ stops belong to the orchestrator via the system-specialist protocol.
 ### 3 — Master-exit seam
 
 When all leaves have landed on the master integration branch, spawn the **adversarial reviewer**
-(master-exit) via `spawn_agent_session` with `env={"AR_SPAWN_ROLE": "reviewer"}` and the reviewer
+(master-exit) via `dispatch_agent` on the review task document with role `reviewer` and the reviewer
 role file (`roles/reviewer.md`), passing the master branch ref,
 master/leaf task docs, worker turn reports, decision logs, changed paths, resolved
 `system/tools.md` evidence, and carry-over state. The verdict lands at
@@ -195,37 +193,32 @@ master/leaf task docs, worker turn reports, decision logs, changed paths, resolv
 — a verdict over completion vs task docs · `system/tools.md` quality · onboarding-vs-code. **Blocked? → the verdict decomposes into fix leaves** the manager dispatches (loop
 back to the leaf loop). Verdicts are **evidence, not decisions**. The seam channel, exactly:
 **raise without blocking** — `lifecycle_gate(kind="master-handover-approval",
-enclosure="<master task name>", evidence_refs=[<the verdict ref>], wait=false)` (raise-and-continue
-is allowed precisely because the kind is a delegated seam kind; the `enclosure` MUST carry the
-master's identity — it is the address integration enforcement matches the gate by, and the match
-is exact-string: pass the EXACT master task name as the contracts carry it (`worktree_start`'s
-`task_name`) — the raise refuses without an enclosure; the call
-returns the **gateId**); then **carry that gateId in the handover
-packet** (§4) — the packet is the orchestrator's trigger AND its address for the gate. Under an
-all-human policy the raise blocks and the developer decides — do not pass wait=false. Identity
-truth, as-built: the gate pins to your ambient lifecycle when you raise it; the deciding
-orchestrator resolves the gate **by the packet-carried gate id** (gate ids are model-visible —
-only LIFECYCLE ids stay server-side) and its own ambient identity becomes `decidedBy`;
+evidence_refs=[<the verdict ref>], wait=false)` (raise-and-continue is allowed precisely because
+the kind is a delegated seam kind). The control plane derives this manager's canonical master
+document and privately binds the gate. Then write the handover packet (§4) with the master
+document and verdict; the packet is the orchestrator's trigger while structural gate resolution
+finds the one matching open gate. Under an all-human policy the raise blocks and the developer
+decides — do not pass wait=false. The deciding orchestrator's ambient seat supplies attribution;
 owner-never-self-approves holds by construction. A handover carrying serious issues the
 orchestrator cannot answer on its own escalates up the ladder (orchestrator → architect).
 
 ### 4 — Handover to the orchestrator
 
-Post the **master-handover packet** (`../templates/master-handover-packet.md`) — inbox (durable) + stdin
-push — integration branch ref · change-set summary · verdict ref · **handover gateId** ·
-carry-over state. The seat (chat + coordination leaf) **stays reachable** until the series
-retires; your raised gate stays open until the orchestrator decides it (poll `gate_list` on your
-own lifecycle if you need its state).
+Write the **master-handover packet** (`../templates/master-handover-packet.md`) — integration
+branch ref · change-set summary · verdict ref · canonical master document · carry-over state.
+Terminal/finalizer truth wakes the structurally current orchestrator. The `(master document,
+manager)` seat **stays reachable** until the series retires; `gate_list` shows the structural gate
+state without exposing its private correlation.
 
 ## Artifact Obligations
 
 - The **master-handover packet** at master exit (the manager's primary durable artifact).
-- Leaf-review notes (completion vs task_doc) — lightweight, on the master's coordination leaf.
+- Leaf-review notes (completion vs task_doc) — lightweight, on the relevant leaf document.
 - Delegated-gate decision records (attributed).
 
 ## Comms Protocol
 
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down to workers, escalation
+- **Structural messages** (`message_parent` / `message_child`) — follow-ups down to leaf seats, escalation
   intake up from workers, handover up to the orchestrator; all durable + dashboard-visible.
 - **Stdin push** — the L2 agent-notifier's injector (HFX2-L3, the one standard wake mechanism) delivers
   nudges and messages into hosted worker sessions on the sweep's own tick, never on this seat's
@@ -248,6 +241,6 @@ own lifecycle if you need its state).
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · `session_retire` (your own master's worker/reviewer/curator seats only) · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |
+| tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `dispatch_agent` · `retire_child` (your own master's worker/reviewer/curator seats only) · `message_parent`/`message_child` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` |
 
 Settings.json `orchestration.roles.manager` overrides these, and `orchestration.rolesPerLevel.<level>.manager` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

@@ -6,16 +6,13 @@ import type {
 } from '../types/projection';
 import { sessionHasPendingInteraction, sessionSeatRole, type OpenSession } from './sessions';
 import { seatVisualState } from './stateGrammar';
-import { pathDir } from './taskHierarchy';
-import { qualifiedLeafKey } from './taskIdentity';
+import { isOrchestrationDoc, masterCommandNames, pathDir } from './taskHierarchy';
+import { qualifiedLeafKey, taskDocumentRefForDoc } from './taskIdentity';
+import type { TaskDocumentRef } from '../types/terminalCatalog';
 
-// The session-rail model: pure role-driven derivations, never spawn-edge nesting. Bound
-// architect / orchestrator / manager seats render flat inside their sprint command group; only
-// leaf agents indent, clustered per leaf under their manager, base order worker → reviewer →
-// curator with the ACTIVE seat sorted to the top.
-// Completed seats fold into a per-master collapsed folder; bulk end lives at master AND sprint
-// level with honest preview counts. The top-level spine is migration compatibility for legacy
-// unbound rows, never canonical global architecture.
+// The default chat hierarchy is a projection of canonical task-document altitude + role. Spawn
+// ancestry is provenance only and is available through buildSpawnTree below. No runtime id, label,
+// or synthetic "logical agent id" participates in hierarchy or routing identity.
 
 /** Three-letter role codes (RULED): ARC/ORC/MGR/WKR/REV/CUR; other known roles keep the pattern. */
 const ROLE_CODES: Record<string, string> = {
@@ -39,22 +36,21 @@ export function roleCode(
   return ROLE_CODES[role] ?? role.slice(0, 3).toUpperCase();
 }
 
-// Migration-spine order: architect → orchestrator → (strategist/designer) → unresolvable managers.
-const SPINE_RANK: Record<string, number> = {
+const SPRINT_RANK: Record<string, number> = {
   architect: 0,
   orchestrator: 1,
   strategist: 2,
-  designer: 2,
-  manager: 3,
+  designer: 3,
+  'system-specialist': 4,
 };
-const SPINE_ROLES = new Set(Object.keys(SPINE_RANK));
+const SPRINT_ROLES = new Set(Object.keys(SPRINT_RANK));
+const LEAF_ROLES = new Set(['worker', 'reviewer', 'curator']);
 
 // In-cluster base order (RULED): worker → reviewer → curator; specialists behind, unknown last.
 const CLUSTER_RANK: Record<string, number> = {
   worker: 0,
   reviewer: 1,
   curator: 2,
-  'system-specialist': 3,
 };
 
 const isWorking = (session: OpenSession): boolean => seatVisualState(session).key === 'working';
@@ -72,73 +68,75 @@ export function compareClusterSeats(left: OpenSession, right: OpenSession): numb
   return rankDelta !== 0 ? rankDelta : left.id.localeCompare(right.id);
 }
 
-function compareSpine(left: OpenSession, right: OpenSession): number {
+function compareSprintSeats(left: OpenSession, right: OpenSession): number {
   const rankDelta =
-    (SPINE_RANK[sessionSeatRole(left)] ?? 4) - (SPINE_RANK[sessionSeatRole(right)] ?? 4);
+    (SPRINT_RANK[sessionSeatRole(left)] ?? 5) - (SPRINT_RANK[sessionSeatRole(right)] ?? 5);
   return rankDelta !== 0 ? rankDelta : left.id.localeCompare(right.id);
 }
 
-function masterKeyOf(session: OpenSession): string | undefined {
-  if (session.spawnRepo && session.spawnSprint)
-    return `${session.spawnRepo}/${session.spawnSprint}`;
-  const parts = session.leafKey?.split('/').filter(Boolean);
-  return parts && parts.length >= 3 ? `${parts[0]}/${parts[1]}` : undefined;
+function documentKey(ref: TaskDocumentRef): string {
+  return `${ref.repository}:${ref.path}`;
 }
 
 const isLive = (session: OpenSession): boolean => (session.status ?? 'running') === 'running';
 
 export interface RailLeafCluster {
-  /** The qualified leaf key (cluster identity). */
+  /** Canonical task-document key (cluster identity). */
   key: string;
-  /** The `└ leaf-id` caption label. */
   label: string;
+  taskDocumentRef: TaskDocumentRef;
+  /** Legacy gate-projection join only; never seat identity. */
+  gateLeafKey?: string;
   seats: OpenSession[];
 }
 
 export interface RailMasterSection {
-  /** `repo/master`. */
+  /** Canonical master task-document key. */
   key: string;
   label: string;
-  /** Sprint-bound command seats render flat (never indented) at the section top. */
-  commandSeats: OpenSession[];
+  taskDocumentRef: TaskDocumentRef;
+  manager?: OpenSession;
   clusters: RailLeafCluster[];
-  /** Landed seats of this master — the collapsed completed folder (R17). */
   completed: OpenSession[];
+}
+
+export interface RailSprintSection {
+  key: string;
+  label: string;
+  taskDocumentRef: TaskDocumentRef;
+  seats: OpenSession[];
+  masters: RailMasterSection[];
 }
 
 export interface RailModel {
-  /** Legacy-unbound command seats kept only for migration compatibility, flat and in order. */
-  spine: OpenSession[];
+  sprints: RailSprintSection[];
+  /** Masters not named by a sprint document remain structurally valid top-level masters. */
   masters: RailMasterSection[];
-  /** Live seats with no leaf claim and no command role. */
+  /** Live rows without a resolvable and altitude-valid document+role seat. */
   unattached: OpenSession[];
-  /** Landed seats with no resolvable master (bulk-ended only at sprint level). */
   completedUnattached: OpenSession[];
-  /** Sprint-level bulk-end target: every landed seat in the rail. */
   completedTotal: number;
 }
 
-export interface RailModelLabels {
-  masterLabel?: (masterKey: string) => string | undefined;
-  leafLabel?: (leafKey: string) => string | undefined;
-}
-
-/** `repo/master` → master-doc title (the sessionGroups.masterDocsBySprint derivation). */
-export function masterLabels(taskDocuments: readonly TaskDocNode[]): Map<string, string> {
-  const labels = new Map<string, string>();
-  for (const doc of taskDocuments) {
-    if (doc.kind !== 'master' || !doc.repository || !doc.title) continue;
-    const folder = pathDir(doc.docPath).split('/').filter(Boolean).pop() ?? '';
-    const key = folder ? `${doc.repository}/${folder}` : undefined;
-    if (key && !labels.has(key)) labels.set(key, doc.title);
-  }
-  return labels;
-}
-
 interface MasterAccumulator {
-  commandSeats: OpenSession[];
-  leaf: Map<string, OpenSession[]>;
+  doc: TaskDocNode;
+  ref: TaskDocumentRef;
+  manager?: OpenSession;
+  leaf: Map<string, LeafAccumulator>;
   completed: OpenSession[];
+}
+
+interface LeafAccumulator {
+  doc: TaskDocNode;
+  ref: TaskDocumentRef;
+  seats: OpenSession[];
+}
+
+interface SprintAccumulator {
+  doc: TaskDocNode;
+  ref: TaskDocumentRef;
+  seats: OpenSession[];
+  masters: Set<string>;
 }
 
 function pickupAging(pickup: AgentPickupNode): boolean {
@@ -160,108 +158,246 @@ function pickupTargetSession(
   );
 }
 
-function bucketSession(
-  session: OpenSession,
-  spine: OpenSession[],
-  unattached: OpenSession[],
-  completedUnattached: OpenSession[],
-  sectionFor: (masterKey: string) => MasterAccumulator,
-): void {
-  if (session.status === 'terminated') return;
-  const role = sessionSeatRole(session);
-  const masterKey = masterKeyOf(session);
-  if (session.status === 'landed') {
-    bucketCompleted(session, masterKey, completedUnattached, sectionFor);
-    return;
-  }
-  if (isSprintCommandSeat(role, masterKey)) {
-    sectionFor(masterKey).commandSeats.push(session);
-    return;
-  }
-  if (SPINE_ROLES.has(role)) {
-    spine.push(session);
-    return;
-  }
-  if (masterKey && session.leafKey) {
-    const section = sectionFor(masterKey);
-    const seats = section.leaf.get(session.leafKey);
-    if (seats) seats.push(session);
-    else section.leaf.set(session.leafKey, [session]);
-  } else {
-    unattached.push(session);
-  }
+function masterForLeaf(
+  doc: TaskDocNode,
+  mastersByPath: ReadonlyMap<string, MasterAccumulator>,
+): MasterAccumulator | undefined {
+  const ref = taskDocumentRefForDoc(doc);
+  return ref ? mastersByPath.get(`${pathDir(ref.path)}/task.json`) : undefined;
 }
 
-function bucketCompleted(
-  session: OpenSession,
-  masterKey: string | undefined,
-  completedUnattached: OpenSession[],
-  sectionFor: (masterKey: string) => MasterAccumulator,
-): void {
-  if (masterKey) sectionFor(masterKey).completed.push(session);
-  else completedUnattached.push(session);
-}
-
-function isSprintCommandSeat(role: string, masterKey: string | undefined): masterKey is string {
-  return (
-    masterKey !== undefined &&
-    (role === 'manager' || role === 'architect' || role === 'orchestrator')
+function sprintForMaster(
+  master: TaskDocNode,
+  sprints: readonly SprintAccumulator[],
+): SprintAccumulator | undefined {
+  const names = new Set(masterCommandNames(master));
+  return sprints.find(
+    (sprint) =>
+      sprint.doc.repository === master.repository &&
+      sprint.doc.docPath !== master.docPath &&
+      sprint.doc.orchestrates.some((name) => names.has(name)),
   );
 }
 
-export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels = {}): RailModel {
-  const spine: OpenSession[] = [];
+function materializeMaster(acc: MasterAccumulator): RailMasterSection {
+  return {
+    key: documentKey(acc.ref),
+    label: acc.doc.title || acc.doc.id,
+    taskDocumentRef: acc.ref,
+    ...(acc.manager ? { manager: acc.manager } : {}),
+    clusters: [...acc.leaf.values()]
+      .sort((left, right) => left.doc.docPath.localeCompare(right.doc.docPath))
+      .map((leaf) => ({
+        key: documentKey(leaf.ref),
+        label: leaf.doc.title || leaf.doc.id,
+        taskDocumentRef: leaf.ref,
+        ...(qualifiedLeafKey(leaf.doc) ? { gateLeafKey: qualifiedLeafKey(leaf.doc) } : {}),
+        seats: [...leaf.seats].sort(compareClusterSeats),
+      })),
+    completed: [...acc.completed].sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}
+
+function currentSessions(sessions: readonly OpenSession[]): OpenSession[] {
+  return sessions.filter((session) => session.status !== 'terminated');
+}
+
+interface RailAccumulators {
+  docsByKey: Map<string, TaskDocNode>;
+  mastersByPath: Map<string, MasterAccumulator>;
+  sprints: SprintAccumulator[];
+}
+
+function initializeRailAccumulators(taskDocuments: readonly TaskDocNode[]): RailAccumulators {
+  const docsByKey = new Map<string, TaskDocNode>();
+  const mastersByPath = new Map<string, MasterAccumulator>();
+  const sprints: SprintAccumulator[] = [];
+  for (const doc of taskDocuments) {
+    const ref = taskDocumentRefForDoc(doc);
+    if (!ref) continue;
+    docsByKey.set(documentKey(ref), doc);
+    if (doc.kind !== 'master') continue;
+    mastersByPath.set(ref.path, { doc, ref, leaf: new Map(), completed: [] });
+    if (isOrchestrationDoc(doc)) sprints.push({ doc, ref, seats: [], masters: new Set() });
+  }
+  return { docsByKey, mastersByPath, sprints };
+}
+
+function appendDetached(
+  session: OpenSession,
+  unattached: OpenSession[],
+  completedUnattached: OpenSession[],
+): void {
+  (session.status === 'landed' ? completedUnattached : unattached).push(session);
+}
+
+function attachSprintSeat(
+  session: OpenSession,
+  doc: TaskDocNode,
+  ref: TaskDocumentRef,
+  role: string,
+  sprints: SprintAccumulator[],
+  completedUnattached: OpenSession[],
+): boolean {
+  if (!isOrchestrationDoc(doc) || !SPRINT_ROLES.has(role)) return false;
+  const sprint = sprints.find((item) => documentKey(item.ref) === documentKey(ref));
+  if (!sprint || session.status === 'landed') completedUnattached.push(session);
+  else sprint.seats.push(session);
+  return true;
+}
+
+function attachManagerSeat(
+  session: OpenSession,
+  doc: TaskDocNode,
+  ref: TaskDocumentRef,
+  role: string,
+  mastersByPath: Map<string, MasterAccumulator>,
+  unattached: OpenSession[],
+  completedUnattached: OpenSession[],
+): boolean {
+  if (doc.kind !== 'master' || isOrchestrationDoc(doc) || role !== 'manager') return false;
+  const master = mastersByPath.get(ref.path);
+  if (!master) appendDetached(session, unattached, completedUnattached);
+  else if (session.status === 'landed') master.completed.push(session);
+  else if (!master.manager) master.manager = session;
+  else unattached.push(session);
+  return true;
+}
+
+function attachLeafSeat(
+  session: OpenSession,
+  doc: TaskDocNode,
+  ref: TaskDocumentRef,
+  role: string,
+  mastersByPath: Map<string, MasterAccumulator>,
+  unattached: OpenSession[],
+  completedUnattached: OpenSession[],
+): boolean {
+  if (doc.kind === 'master' || !LEAF_ROLES.has(role)) return false;
+  const master = masterForLeaf(doc, mastersByPath);
+  if (!master) appendDetached(session, unattached, completedUnattached);
+  else if (session.status === 'landed') master.completed.push(session);
+  else {
+    const key = documentKey(ref);
+    const leaf = master.leaf.get(key) ?? { doc, ref, seats: [] };
+    leaf.seats.push(session);
+    master.leaf.set(key, leaf);
+  }
+  return true;
+}
+
+function attachSession(
+  session: OpenSession,
+  accumulators: RailAccumulators,
+  unattached: OpenSession[],
+  completedUnattached: OpenSession[],
+): void {
+  const ref = session.taskDocumentRef;
+  const doc = ref ? accumulators.docsByKey.get(documentKey(ref)) : undefined;
+  if (!ref || !doc) return appendDetached(session, unattached, completedUnattached);
+  const role = sessionSeatRole(session);
+  if (attachSprintSeat(session, doc, ref, role, accumulators.sprints, completedUnattached)) return;
+  if (
+    attachManagerSeat(
+      session,
+      doc,
+      ref,
+      role,
+      accumulators.mastersByPath,
+      unattached,
+      completedUnattached,
+    )
+  )
+    return;
+  if (
+    attachLeafSeat(
+      session,
+      doc,
+      ref,
+      role,
+      accumulators.mastersByPath,
+      unattached,
+      completedUnattached,
+    )
+  )
+    return;
+  appendDetached(session, unattached, completedUnattached);
+}
+
+function materializeRailSections(
+  mastersByPath: Map<string, MasterAccumulator>,
+  sprints: SprintAccumulator[],
+): Pick<RailModel, 'sprints' | 'masters'> {
+  const visibleMasters = [...mastersByPath.values()].filter(
+    (master) => master.manager || master.leaf.size > 0 || master.completed.length > 0,
+  );
+  const masterSprint = new Map<string, SprintAccumulator>();
+  for (const master of visibleMasters) {
+    const sprint = sprintForMaster(master.doc, sprints);
+    if (!sprint) continue;
+    sprint.masters.add(documentKey(master.ref));
+    masterSprint.set(documentKey(master.ref), sprint);
+  }
+  const sprintSections = sprints
+    .filter((sprint) => sprint.seats.length > 0 || sprint.masters.size > 0)
+    .sort((left, right) => left.doc.docPath.localeCompare(right.doc.docPath))
+    .map((sprint) => ({
+      key: documentKey(sprint.ref),
+      label: sprint.doc.title || sprint.doc.id,
+      taskDocumentRef: sprint.ref,
+      seats: [...sprint.seats].sort(compareSprintSeats),
+      masters: visibleMasters
+        .filter((master) => masterSprint.get(documentKey(master.ref)) === sprint)
+        .sort((left, right) => left.doc.docPath.localeCompare(right.doc.docPath))
+        .map(materializeMaster),
+    }));
+  const masters = visibleMasters
+    .filter((master) => !masterSprint.has(documentKey(master.ref)))
+    .sort((left, right) => left.doc.docPath.localeCompare(right.doc.docPath))
+    .map(materializeMaster);
+  return { sprints: sprintSections, masters };
+}
+
+export function buildRailModel(
+  sessions: OpenSession[],
+  taskDocuments: readonly TaskDocNode[] = [],
+): RailModel {
   const unattached: OpenSession[] = [];
   const completedUnattached: OpenSession[] = [];
-  const byMaster = new Map<string, MasterAccumulator>();
+  const accumulators = initializeRailAccumulators(taskDocuments);
+  for (const session of currentSessions(sessions))
+    attachSession(session, accumulators, unattached, completedUnattached);
 
-  const sectionFor = (masterKey: string): MasterAccumulator => {
-    const existing = byMaster.get(masterKey);
-    if (existing) return existing;
-    const created: MasterAccumulator = { commandSeats: [], leaf: new Map(), completed: [] };
-    byMaster.set(masterKey, created);
-    return created;
-  };
-
-  for (const session of sessions) {
-    bucketSession(session, spine, unattached, completedUnattached, sectionFor);
-  }
-
-  spine.sort(compareSpine);
   unattached.sort(
     (left, right) =>
       Number(isLive(right)) - Number(isLive(left)) || left.id.localeCompare(right.id),
   );
-
-  const masters: RailMasterSection[] = [...byMaster.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, section]) => ({
-      key,
-      label: labels.masterLabel?.(key) ?? key.split('/').pop() ?? key,
-      commandSeats: [...section.commandSeats].sort(compareSpine),
-      clusters: [...section.leaf.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([leafKey, seats]) => ({
-          key: leafKey,
-          label: labels.leafLabel?.(leafKey) ?? leafKey.split('/').pop() ?? leafKey,
-          seats: [...seats].sort(compareClusterSeats),
-        })),
-      completed: [...section.completed].sort((l, r) => l.id.localeCompare(r.id)),
-    }));
+  const { sprints, masters } = materializeRailSections(
+    accumulators.mastersByPath,
+    accumulators.sprints,
+  );
 
   const completedTotal =
-    masters.reduce((sum, master) => sum + master.completed.length, 0) + completedUnattached.length;
+    [...masters, ...sprints.flatMap((sprint) => sprint.masters)].reduce(
+      (sum, master) => sum + master.completed.length,
+      0,
+    ) + completedUnattached.length;
 
-  return { spine, masters, unattached, completedUnattached, completedTotal };
+  return { sprints, masters, unattached, completedUnattached, completedTotal };
 }
 
-/** Rail order flattened for alt+↑/↓ session cycling (spine → masters → unattached; live rows only). */
+/** Task hierarchy flattened for alt+↑/↓ session cycling; spawn ancestry never changes this order. */
 export function railCycleOrder(model: RailModel): string[] {
-  const ids: string[] = model.spine.map((session) => session.id);
-  for (const master of model.masters) {
-    for (const commandSeat of master.commandSeats) ids.push(commandSeat.id);
+  const ids: string[] = [];
+  const appendMaster = (master: RailMasterSection) => {
+    if (master.manager) ids.push(master.manager.id);
     for (const cluster of master.clusters) for (const seat of cluster.seats) ids.push(seat.id);
+  };
+  for (const sprint of model.sprints) {
+    for (const seat of sprint.seats) ids.push(seat.id);
+    for (const master of sprint.masters) appendMaster(master);
   }
+  for (const master of model.masters) appendMaster(master);
   for (const session of model.unattached) ids.push(session.id);
   return ids;
 }
@@ -307,13 +443,13 @@ export const ROW_SEGMENTS = ['dot', 'role', 'title', 'status', 'end'] as const;
 export const ROW_ELIDABLE_SEGMENTS: readonly (typeof ROW_SEGMENTS)[number][] = ['status'];
 
 /** The full untruncated row truth — the tooltip the elided status chip falls back to. */
-export function railRowTooltip(session: OpenSession, leafLabel?: string): string {
+export function railRowTooltip(session: OpenSession, taskLabel?: string): string {
   const visual = seatVisualState(session);
   const parts = [session.label];
   const role = session.spawnRole ?? session.seatRole;
   if (role) parts.push(`role: ${role}`);
   parts.push(`state: ${visual.word}`);
-  if (leafLabel) parts.push(`leaf: ${leafLabel}`);
+  if (taskLabel) parts.push(`task: ${taskLabel}`);
   if (session.landedReason) parts.push(`landed: ${session.landedReason}`);
   if (session.retiredReason) parts.push(`retired: ${session.retiredReason}`);
   return parts.join(' · ');
@@ -389,7 +525,7 @@ export function masterAttentionBadge(
   rollup: AttentionRollup,
 ): { glyph: string; count: number; kind: 'needsInput' | 'failed' } | null {
   const memberIds = new Set<string>([
-    ...master.commandSeats.map((session) => session.id),
+    ...(master.manager ? [master.manager.id] : []),
     ...master.clusters.flatMap((cluster) => cluster.seats.map((seat) => seat.id)),
   ]);
   const needsInput = rollup.needsInput.filter((id) => memberIds.has(id)).length;

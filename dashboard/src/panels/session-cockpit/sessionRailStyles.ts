@@ -22,8 +22,10 @@ export const staleBanner = css({
 export const attnStrip = css({
   display: "flex",
   gap: "0.3rem",
-  flexWrap: "wrap",
+  flexWrap: "nowrap",
   flexShrink: 0,
+  minWidth: "0",
+  overflow: "hidden",
 });
 export const attnButton = cva({
   base: {
@@ -68,7 +70,11 @@ export const sprintRow = css({
   gap: "0.4rem",
   fontSize: "0.66rem",
   color: "muted",
-  flexShrink: 0,
+  flex: "1 1 auto",
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 });
 export const bulkButton = css({
   font: "inherit",
@@ -97,6 +103,8 @@ export const confirmRow = css({
   fontSize: "0.64rem",
   color: "amber",
   minWidth: "0",
+  flexWrap: "nowrap",
+  overflow: "hidden",
   "& > span": {
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -200,13 +208,10 @@ export const groupRows = css({
   display: "grid",
   gap: "0.25rem",
 });
-// Row anatomy (RULED): a LABEL group (dot | role | title | markers | chip) and an ACTION
-// group (End, or the armed confirm/cancel). The row is `flex-wrap: wrap`: when the two groups cannot
-// share one line at a narrow rail, the ACTION group wraps whole to a second line — the actions stay
-// single-line and reachable at EVERY width down to the collapse threshold, never letter-wrapping,
-// clipping, or overflowing the `overflow:hidden` aside. Priority when squeezed: actions > chip >
-// inline copy — the label group's title/chip elide (min-width:0 through every nested level) and the
-// armed state drops the chip entirely (the confirm copy already carries the state).
+// Row anatomy (RULED): a LABEL group (dot | role | title | markers | chip) and an ACTION group.
+// Hierarchy entries never create a second line. The flexible label chain owns every min-width:0
+// boundary and live CSS ellipsis responds to the real available width, including when controls are
+// added or removed; action buttons keep their intrinsic single-line size.
 export const rowLabelGroup = css({
   display: "flex",
   alignItems: "center",
@@ -219,18 +224,17 @@ export const rowActionGroup = css({
   display: "flex",
   alignItems: "center",
   gap: "0.35rem",
-  // Grows never, shrinks yes: it takes only the width its controls need on line 1, and on a wrapped
-  // line 2 it shrinks so the elidable inline copy yields while the confirm/cancel buttons hold.
-  flex: "0 1 auto",
+  flex: "0 0 auto",
   minWidth: "0",
+  flexWrap: "nowrap",
 });
 export const rowShell = css({
   display: "flex",
   alignItems: "center",
-  flexWrap: "wrap",
+  flexWrap: "nowrap",
   gap: "0.35rem",
-  rowGap: "0.2rem",
   minWidth: "0",
+  overflow: "hidden",
   width: "100%",
   textAlign: "left",
   font: "inherit",
@@ -388,10 +392,11 @@ export const treeIndent = css({ display: "grid", gap: "0.25rem" });
 export const railTop = css({
   display: "flex",
   alignItems: "center",
-  flexWrap: "wrap",
-  rowGap: "0.25rem",
+  flexWrap: "nowrap",
   gap: "0.4rem",
   flexShrink: 0,
+  minWidth: "0",
+  overflow: "hidden",
 });
 export const treeToggleButton = css({
   font: "inherit",

@@ -153,18 +153,24 @@ class ServingResponseConformance2(ServingResponseConformanceTests):
             self._check(
                 client,
                 "POST",
-                "/api/terminal/live/attach-leaf",
+                "/api/terminal/live/attach-task",
                 status=200,
-                route="/api/terminal/{session}/attach-leaf",
-                json={"leafKey": "R/t/leaf-1", "role": "worker"},
+                route="/api/terminal/{session}/attach-task",
+                json={
+                    "taskDocumentRef": {"repository": "R", "path": "t/leaf-1.json"},
+                    "role": "worker",
+                },
             )
             self._check(
                 client,
                 "POST",
-                "/api/terminal/ghost/attach-leaf",
+                "/api/terminal/ghost/attach-task",
                 status=404,
-                route="/api/terminal/{session}/attach-leaf",
-                json={"leafKey": "R/t/leaf-1", "role": "worker"},
+                route="/api/terminal/{session}/attach-task",
+                json={
+                    "taskDocumentRef": {"repository": "R", "path": "t/leaf-1.json"},
+                    "role": "worker",
+                },
             )
             # A plain pane: the paster's tmux call fails in this fixture, which is still a real
             # ``TerminalPaneDelivery`` body -- ``delivered: false`` with the capture attached.

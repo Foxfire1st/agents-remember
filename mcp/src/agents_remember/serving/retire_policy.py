@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 MANAGER_RETIRE_ROLES = frozenset({"worker", "reviewer", "curator"})
 
@@ -22,31 +24,14 @@ class RetirePolicyError(AgentsRememberError):
 
 @dataclass(frozen=True)
 class SeatRef:
-    """One retire-policy seat, identified by its ``(leaf_key, seat_role)`` binding."""
+    """One retire-policy seat, identified by its canonical document+role binding."""
 
     session_id: str
-    leaf_key: str | None
+    task_document_ref: TaskDocumentRef | None
     seat_role: str
 
-    @property
-    def master(self) -> str | None:
-        return master_of(self.leaf_key)
 
-
-def master_of(leaf_key: str | None) -> str | None:
-    """The master-folder segment of a qualified leaf key (``repo/master/doc-id``), or ``None``.
-
-    Uniform for every dispatch level: a worker/reviewer's ``leaf_key`` names its own leaf under the
-    master folder, and a manager's own ``leaf_key`` names the master task-doc itself under the same
-    folder -- either way the second path segment is the master identity retire authority compares.
-    """
-    if not leaf_key:
-        return None
-    parts = leaf_key.split("/", 2)
-    return parts[1] if len(parts) >= 2 else None
-
-
-def check_retire_authority(actor: SeatRef, target: SeatRef) -> None:
+def check_retire_authority(actor: SeatRef, target: SeatRef, topology: TaskDocumentTopology) -> None:
     """Raise :class:`RetirePolicyError` unless ``actor`` may retire ``target``.
 
     Owner-never-self-retires is checked FIRST, unconditionally -- no role's authority ever
@@ -56,10 +41,23 @@ def check_retire_authority(actor: SeatRef, target: SeatRef) -> None:
     if actor.session_id == target.session_id:
         raise RetirePolicyError("a seat never retires itself (owner-never-self-retires)")
     if actor.seat_role == "manager":
-        if target.seat_role not in MANAGER_RETIRE_ROLES or target.master != actor.master:
+        try:
+            target_parent = (
+                topology.parent(target.task_document_ref)
+                if target.task_document_ref is not None
+                else None
+            )
+        except TaskDocumentRefError as exc:
+            raise RetirePolicyError(f"cannot resolve target task containment: {exc}") from exc
+        if (
+            actor.task_document_ref is None
+            or target.seat_role not in MANAGER_RETIRE_ROLES
+            or target_parent != actor.task_document_ref
+        ):
             raise RetirePolicyError(
                 "manager may retire only worker/reviewer/curator seats of its own master "
-                f"({actor.master!r}); target is {target.seat_role!r} of {target.master!r}"
+                f"({actor.task_document_ref!r}); target is {target.seat_role!r} "
+                f"under {target_parent!r}"
             )
         return
     if actor.seat_role == "orchestrator":

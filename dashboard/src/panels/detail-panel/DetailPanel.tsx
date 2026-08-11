@@ -13,29 +13,28 @@ import {
   TaskDocumentPanel,
 } from "./taskDocPanels";
 import { LifecycleDetailBody } from "./lifecycleBody";
-import { useDetailPanelState } from "./state";
+import { useDetailPanelState, type ViewedTaskContext } from "./state";
 
 function DetailPanelImpl({
   selectedId,
   onOpenLifecycle,
   onOpenChangeSet,
   onOpenNotes,
-  onViewLeaf,
+  onViewTask,
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
   // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view.
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
-  // Report the QUALIFIED LEAF ID of the leaf the panel is actually SHOWING — a drilled sub-task or a
-  // directly-opened leaf doc — so the rail chat + "attach to leaf" key by that leaf, not the master.
-  // `undefined` while only a master/series overview (or the empty state) is shown.
-  onViewLeaf?: (leafKey: string | undefined) => void;
+  // Report the canonical task document actually shown. The Operations chat projection resolves
+  // sprint/master/leaf roles from this document; a leaf key remains supplementary task context.
+  onViewTask?: (context: ViewedTaskContext | undefined) => void;
 }) {
   const state = useDetailPanelState({
     selectedId,
     onOpenLifecycle,
-    onViewLeaf,
+    onViewTask,
   });
 
   if (state.selectedTaskDoc && !state.lifecycle) {

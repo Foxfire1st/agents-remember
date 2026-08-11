@@ -31,7 +31,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
-from agents_remember.models.gates import (
+from agents_remember.models.structural.gates import (
     GateKind,
 )
 

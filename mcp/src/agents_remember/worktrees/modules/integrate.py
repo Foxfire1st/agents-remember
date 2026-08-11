@@ -23,6 +23,7 @@ from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
     GATE_TARGETED,
     QualityGatePlan,
+    QualityGateTarget,
     code_quality_gate_preview,
     requires_strict_code_quality,
     run_strict_code_quality_gate,
@@ -678,7 +679,10 @@ def _run_integration_quality_gate(
     memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
     try:
         gate = run_strict_code_quality_gate(
-            contract.code_worktree,
+            QualityGateTarget(
+                code_worktree=contract.code_worktree,
+                worktree_group=contract.worktree_group,
+            ),
             diff_base=contract.code_base_commit,
             plan=QualityGatePlan(
                 mode=mode,

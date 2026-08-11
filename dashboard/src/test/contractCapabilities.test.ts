@@ -16,7 +16,7 @@ import { RECONCILIATIONS, SUBMISSION_RECEIPTS } from "./fixtures/controlMessages
 import {
   FAILED_LAUNCH_ROWS,
   LAUNCH_CONFLICT,
-  LEAF_TAKEN,
+  SEAT_TAKEN,
   OPENED_STARTING,
   OPENED_VENDOR_DEFAULTS,
   PENDING_INTERACTION_ROW,
@@ -175,8 +175,8 @@ describe("open responses + failed rows", () => {
     expect(LAUNCH_CONFLICT.detail).toContain("requested 'sonnet'/'high'");
   });
 
-  it("leaf-taken names the owning session", () => {
-    expect(LEAF_TAKEN.session).toBe("worker-l3-live");
+  it("seat-taken names the owning session", () => {
+    expect(SEAT_TAKEN.session).toBe("worker-l3-live");
   });
 
   it("failed rows exist for ALL THREE harnesses, retain the refused pair, and the bridgeError names alternatives", () => {

@@ -16,12 +16,12 @@ import { useDashboard } from '../../data/store';
 import type { AgentPickupNode, TaskDocNode } from '../../types/projection';
 import { RailBody, type BulkTarget, type RailRowProps } from './sessionRailParts';
 
-// The session rail: the role-driven hierarchy — sprint-local flat command groups, indented
-// per-leaf clusters with the active seat on top, per-master completed folders with master+sprint
-// bulk end — plus the fleet-attention strip, gate badges,
+// The session rail: the document+role hierarchy — sprint roles, a manager on each master row,
+// and worker/reviewer/curator seats below each leaf — plus per-master completed folders, fleet
+// attention, gate badges,
 // the two-state brief column, the poll-health banner, and the bus-summary footer.
-// Legacy-unbound rows use the top-level migration spine; the orchestration-tree (spawn-edge) view
-// stays available as a palette/button toggle for provenance inspection. Render parts live in
+// Unresolved rows remain visibly unattached; the orchestration-tree (spawn-edge) view stays
+// available only as a provenance inspection toggle. Render parts live in
 // sessionRailParts.tsx and the shared styles in sessionRailStyles.ts.
 
 export type { BulkTarget } from './sessionRailParts';
@@ -85,16 +85,21 @@ function useRailData() {
 }
 
 function rolesRowCount(model: RailModel, openDoneFolders: Record<string, boolean>): number {
-  return (
-    model.spine.length +
-    model.masters.reduce(
+  const masterRows = (masters: RailModel['masters']): number =>
+    masters.reduce(
       (sum, master) =>
         sum +
-        master.commandSeats.length +
+        Number(master.manager !== undefined) +
         master.clusters.reduce((clusterSum, cluster) => clusterSum + cluster.seats.length, 0) +
         ((openDoneFolders[master.key] ?? false) ? master.completed.length : 0),
       0,
+    );
+  return (
+    model.sprints.reduce(
+      (sum, sprint) => sum + sprint.seats.length + masterRows(sprint.masters),
+      0,
     ) +
+    masterRows(model.masters) +
     model.unattached.length +
     model.completedUnattached.length
   );
@@ -172,9 +177,10 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
     [data.pickups, data.sessions],
   );
 
-  const landedByMaster = new Map(model.masters.map((master) => [master.key, master.completed]));
+  const allMasters = [...model.sprints.flatMap((sprint) => sprint.masters), ...model.masters];
+  const landedByMaster = new Map(allMasters.map((master) => [master.key, master.completed]));
   const allLanded = [
-    ...model.masters.flatMap((master) => master.completed),
+    ...allMasters.flatMap((master) => master.completed),
     ...model.completedUnattached,
   ];
   const treeRows = useMemo(() => buildSpawnTree(data.sessions), [data.sessions]);

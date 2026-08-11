@@ -2,7 +2,7 @@ import type { TerminalCatalogRow } from "../../types/terminalCatalog";
 import type {
   TerminalOpenBadKindBody,
   TerminalOpenConflictBody,
-  TerminalOpenLeafTakenBody,
+  TerminalOpenSeatTakenBody,
   TerminalOpenSelectionInvalidBody,
   TerminalOpenSuccessBody,
 } from "../../types/terminalOpen";
@@ -20,7 +20,7 @@ export const OPENED_STARTING: TerminalOpenSuccessBody = {
   kind: "harness",
   harness: "claude",
   lifecycleId: null,
-  leafKey: null,
+  taskDocumentRef: null,
   seatRole: "chat",
   cwd: "/workspace",
   tmuxName: "ar-launch-1",
@@ -61,9 +61,12 @@ export const BAD_KIND: TerminalOpenBadKindBody = {
 };
 
 /** 409 — the (leaf, role) pair already has a live owner; the server NAMES it. */
-export const LEAF_TAKEN: TerminalOpenLeafTakenBody = {
-  status: "leaf-taken",
-  leafKey: "agents-remember/260715_react-tui-cockpit-frontend/03_capability-catalog-and-launch",
+export const SEAT_TAKEN: TerminalOpenSeatTakenBody = {
+  status: "seat-taken",
+  taskDocumentRef: {
+    repository: "agents-remember",
+    path: "260715_react-tui-cockpit-frontend/03_capability-catalog-and-launch.json",
+  },
   session: "worker-l3-live",
 };
 

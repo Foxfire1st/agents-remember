@@ -122,13 +122,21 @@ async function routeProductionApis(page: Page) {
     }
     const kind = body.kind === "harness" ? "harness" : "terminal";
     const label = typeof body.label === "string" ? body.label : kind === "harness" ? "Claude" : "Terminal";
+    const requestedTask =
+      typeof body.taskDocumentRef === "object" && body.taskDocumentRef !== null
+        ? body.taskDocumentRef as Record<string, unknown>
+        : undefined;
+    const taskDocumentRef =
+      typeof requestedTask?.repository === "string" && typeof requestedTask.path === "string"
+        ? { repository: requestedTask.repository, path: requestedTask.path }
+        : undefined;
     const row = {
       id,
       label,
       kind,
       ...(kind === "harness" && typeof body.harness === "string" ? { harness: body.harness } : {}),
       ...(typeof body.lifecycleId === "string" ? { lifecycleId: body.lifecycleId } : {}),
-      ...(typeof body.leafKey === "string" ? { leafKey: body.leafKey } : {}),
+      ...(taskDocumentRef ? { taskDocumentRef } : {}),
       seatRole: kind === "harness" ? "chat" : "terminal",
       cwd: "/workspace",
       tmuxName: `ar-${id}`,
@@ -148,7 +156,7 @@ async function routeProductionApis(page: Page) {
         kind,
         harness: kind === "harness" && typeof body.harness === "string" ? body.harness : null,
         lifecycleId: typeof body.lifecycleId === "string" ? body.lifecycleId : null,
-        leafKey: typeof body.leafKey === "string" ? body.leafKey : null,
+        taskDocumentRef: taskDocumentRef ?? null,
         seatRole: row.seatRole,
         cwd: row.cwd,
         tmuxName: row.tmuxName,

@@ -25,12 +25,14 @@ import tempfile
 import unittest
 from dataclasses import dataclass, replace
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.memory_tools import memory_quality_check_tool
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -42,6 +44,7 @@ from agents_remember.mcp.tools import (
     route_index_refresh_payload,
 )
 from agents_remember.memory_quality.check import DRIFT_CHECK_NAME
+from agents_remember.memory_quality.curator_checklist import split_commit_owned_findings
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -208,6 +211,7 @@ class RouteIndexRefreshWritesTheNamedTreeTests(EnclosureScopeTestCase):
 
         self.assertTrue(payload["dryRun"])
         self.assertEqual(payload["written"], 2)
+        self.assertEqual(len(payload["staleIndexes"]), 2)
         self.assertEqual(_tree_snapshot(self.enclosure.official_onboarding), official)
         self.assertEqual(_tree_snapshot(self.enclosure.leaf_onboarding), leaf)
 
@@ -228,11 +232,93 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
         self.assertEqual(payload["checks"][DRIFT_CHECK_NAME]["checkedCount"], 3)
         self.assertTrue(payload["ok"])
 
+    def test_full_contract_check_replaces_one_enclosure_local_curator_report(self) -> None:
+        expected = self.enclosure.contract.worktree_group / "reports" / "curator-memory-quality.md"
+
+        first = memory_quality_check_payload(self.config, REPO, contract_path=self.contract_path)
+        expected.write_text("obsolete predecessor\n", encoding="utf-8")
+        second = memory_quality_check_payload(self.config, REPO, contract_path=self.contract_path)
+
+        self.assertEqual(first["reportPath"], expected.as_posix())
+        self.assertEqual(second["reportPath"], expected.as_posix())
+        report = expected.read_text(encoding="utf-8")
+        self.assertNotEqual(report, "obsolete predecessor\n")
+        self.assertIn("# Curator Memory Quality Checklist", report)
+        self.assertEqual([path.name for path in expected.parent.iterdir()], [expected.name])
+        self.assertIn(second["checklistStatus"], {"action-required", "ready-for-closeout"})
+        self.assertEqual(
+            second["curatorActionableCount"],
+            second["memoryRepairCount"]
+            + second["missingOnboardingCount"]
+            + second["staleRouteIndexCount"],
+        )
+
+    def test_subset_contract_check_does_not_replace_the_curator_report(self) -> None:
+        report = self.enclosure.contract.worktree_group / "reports" / "curator-memory-quality.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("keep me\n", encoding="utf-8")
+
+        payload = memory_quality_check_payload(
+            self.config,
+            REPO,
+            checks=[DRIFT_CHECK_NAME],
+            contract_path=self.contract_path,
+        )
+
+        self.assertNotIn("reportPath", payload)
+        self.assertEqual(report.read_text(encoding="utf-8"), "keep me\n")
+
+    def test_only_untracked_card_provenance_is_deferred_to_closeout(self) -> None:
+        tracked_path = f"{LEAF_ONLY_SOURCE}.md"
+        new_path = "new_source.py.md"
+        assert self.enclosure.contract.memory_worktree is not None
+        git(self.enclosure.contract.memory_worktree, "add", "onboarding")
+        git(self.enclosure.contract.memory_worktree, "commit", "-m", "track current onboarding")
+        (self.enclosure.leaf_onboarding / new_path).write_text("# New source\n", encoding="utf-8")
+        findings = [
+            {"code": "citation_provenance_missing", "path": tracked_path},
+            {"code": "citation_provenance_missing", "path": new_path},
+        ]
+
+        repairable, closeout_owned = split_commit_owned_findings(
+            findings, self.enclosure.leaf_onboarding
+        )
+
+        self.assertEqual(repairable, [findings[0]])
+        self.assertEqual(closeout_owned, [findings[1]])
+
     def test_the_bare_call_still_reads_the_official_repo(self) -> None:
         payload = memory_quality_check_payload(self.config, REPO, checks=[DRIFT_CHECK_NAME])
 
         self.assertEqual(payload["onboardingRoot"], self.enclosure.official_onboarding.as_posix())
         self.assertEqual(payload["checks"][DRIFT_CHECK_NAME]["checkedCount"], 1)
+
+    def test_a_contract_scoped_check_uses_the_leaf_base_for_unstamped_claims(self) -> None:
+        with patch(
+            "agents_remember.application.memory_tools.run_memory_quality_check",
+            return_value={"ok": True, "findingCount": 0, "findings": []},
+        ) as run_check:
+            memory_quality_check_tool(
+                self.config,
+                repo_id=REPO,
+                contract_path=self.contract_path,
+            )
+
+        drift_context = run_check.call_args.kwargs["drift_context"]
+        self.assertEqual(
+            drift_context.unstamped_code_commit,
+            self.enclosure.contract.code_base_commit,
+        )
+
+    def test_the_bare_check_does_not_invent_unstamped_claim_provenance(self) -> None:
+        with patch(
+            "agents_remember.application.memory_tools.run_memory_quality_check",
+            return_value={"ok": True, "findingCount": 0, "findings": []},
+        ) as run_check:
+            memory_quality_check_tool(self.config, repo_id=REPO)
+
+        drift_context = run_check.call_args.kwargs["drift_context"]
+        self.assertIsNone(drift_context.unstamped_code_commit)
 
 
 class DriftCheckReadsTheNamedTreesTests(EnclosureScopeTestCase):

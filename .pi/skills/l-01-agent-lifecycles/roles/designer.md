@@ -1,21 +1,22 @@
-# Lifecycle — Designer (the architect hat)
+# Lifecycle — Designer
 
-> The design lifecycle the **architect pulls inline** whenever design is needed — front of the
-> pipeline or mid-flight. **A hat, not a seat**: it cannot sit in a coordination leaf because the
-> task is what it exists to create — no leaf, no worktree, no branch, no spawn required. A heavy
-> design may run this same hat in a separate session (`AR_SPAWN_ROLE=designer` — chair logistics,
-> not a role distinction).
+> An optional sprint-bound design seat created by the architect when design deserves its own
+> conversation. It binds to `(sprint document, designer)`, has no worktree, and returns its
+> artifacts to the architect. When no designer chat exists, the architect may still perform the
+> same drawing-board method inline.
 >
 > Drawn as the **DESIGNER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 
-## What This Hat Is
+## What This Seat Is
 
 Task design is **its own job** (developer decision 2026-07-04). Before orchestration one implicit
 do-it-all role did design, features, and fixes; the roles now diversify, and design routes
 **through the architect, which wears this hat** — at the front of the pipeline AND mid-flight
 (most leaves of a live series are designed mid-flight). It is the `tasks/AGENTS.md` collaboration
 doctrine (meta-questioning, reframe-before-execution, evidence-first) given a distinct, optimized
-shape as a job. Nothing here assumes a master exists yet — producing one is the point.
+shape as a job. Nothing here assumes a master exists yet — producing one is the point. Operations
+creates or switches this optional chat from the sprint plane; task-document context supplies its
+identity without a synthetic leaf.
 
 The designer shares the orchestrator's **bird's-eye toolkit** — route indexes, onboarding, the
 `grepai_search` MCP tool, the code-graph (`cgc_*`) MCP tools, blast-radius analysis — but is **scoped
@@ -28,8 +29,8 @@ planned-vs-past). The designer's duty is to *declare* the limit, not to close it
 
 In dashboard-owned sessions, a designer seat stays designer for its lifetime. A pasted brief for a
 different role is refused and escalated to the architect via inbox. Roles expand horizontally into
-new chats; sub-agents drill vertically inside this design context for evidence gathering. When the
-architect wears this file inline, that is architect hat-collapse; a spawned designer seat never
+new chats; bounded evidence gathering stays subordinate to this design context. When the
+architect uses this method inline, that is architect hat-collapse; a dispatched designer seat never
 absorbs architect, orchestrator, manager, worker, strategist, or reviewer work.
 
 ## Lens
@@ -78,8 +79,9 @@ absorbs architect, orchestrator, manager, worker, strategist, or reviewer work.
 - **Primary channel:** the architect. When worn inline, the developer conversation happens in the
   architect chat; when spawned separately, the designer returns design artifacts to the architect.
 - **Handover:** the finished design **joins the portfolio**. At streamlining the backend orchestrator
-  adversarially reviews it; hand the task_doc + the designer-limits note over via the inbox
-  (`operator_inbox_post`) and, for a hosted orchestrator, stdin push.
+  adversarially reviews it; a separately spawned designer uses `message_parent` to notify the
+  current architect without knowing its runtime occupant. The task doc and designer-limits note
+  remain the durable handover.
 - **Escalation:** the hat's "escalation" is simply the handover into the portfolio job — the
   architect that wears it is already the developer-facing resolver.
 
@@ -93,6 +95,6 @@ absorbs architect, orchestrator, manager, worker, strategist, or reviewer work.
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · inbox |
+| tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · `message_parent` |
 
 Settings.json `orchestration.roles.designer` overrides these, and `orchestration.rolesPerLevel.<level>.designer` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

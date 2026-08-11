@@ -44,6 +44,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionStatus,
@@ -425,8 +426,8 @@ class LandedCleanupRaceTests(_AppFixture):
         )
 
 
-class AttachLeafRoleTests(_AppFixture):
-    """A hand-opened harness seat must say what role it is before it may claim a leaf."""
+class AttachTaskRoleTests(_AppFixture):
+    """A hand-opened harness must name a role before occupying a task document."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -438,30 +439,47 @@ class AttachLeafRoleTests(_AppFixture):
         self.register(_harness_row("hand-opened", cwd=self.tmp))
         with TestClient(self.app) as client:
             response = client.post(
-                "/api/terminal/hand-opened/attach-leaf",
-                json={"leafKey": "repo/master/leaf-1"},
+                "/api/terminal/hand-opened/attach-task",
+                json={
+                    "taskDocumentRef": {
+                        "repository": "repo",
+                        "path": "master/leaf-1.json",
+                    }
+                },
             )
         self.assertEqual(response.status_code, 400)
         body = response.json()
         self.assertEqual(body["status"], "role-required")
-        self.assertEqual(body["leafKey"], "repo/master/leaf-1")
+        self.assertEqual(
+            body["taskDocumentRef"],
+            {"repository": "repo", "path": "master/leaf-1.json"},
+        )
         self.assertEqual(body["detail"], "role is required for a hand-opened harness session")
         entry = self.catalog.get("hand-opened")
         assert entry is not None
-        self.assertIsNone(entry.leaf_key)
+        self.assertIsNone(entry.task_document_ref)
 
     def test_the_same_seat_binds_once_it_declares_a_role(self) -> None:
         self.register(_harness_row("hand-opened", cwd=self.tmp))
         with TestClient(self.app) as client:
             response = client.post(
-                "/api/terminal/hand-opened/attach-leaf",
-                json={"leafKey": "repo/master/leaf-1", "role": "worker"},
+                "/api/terminal/hand-opened/attach-task",
+                json={
+                    "taskDocumentRef": {
+                        "repository": "repo",
+                        "path": "master/leaf-1.json",
+                    },
+                    "role": "worker",
+                },
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["seatRole"], "worker")
         entry = self.catalog.get("hand-opened")
         assert entry is not None
-        self.assertEqual(entry.leaf_key, "repo/master/leaf-1")
+        self.assertEqual(
+            entry.task_document_ref,
+            TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
+        )
         self.assertEqual(entry.binding_role, "worker")
 
 
@@ -666,7 +684,9 @@ class RenameRouteTests(_AppFixture):
     def test_renaming_a_harness_seat_never_touches_its_immutable_seat_role(self) -> None:
         self.register(_harness_row("chat-1", cwd=self.tmp, label="Worker"))
         self.catalog.upsert(
-            self.catalog.get("chat-1").with_leaf_binding("repo/master/leaf-1", "worker")  # type: ignore[union-attr]
+            self.catalog.get("chat-1").with_task_binding(  # type: ignore[union-attr]
+                TaskDocumentRef(repository="repo", path="master/leaf-1.json"), "worker"
+            )
         )
         with TestClient(self.app) as client:
             response = client.post("/api/terminal/chat-1/rename", json={"label": "Worker B"})
@@ -675,7 +695,10 @@ class RenameRouteTests(_AppFixture):
         assert entry is not None
         self.assertEqual(entry.label, "Worker B")
         self.assertEqual(entry.binding_role, "worker")
-        self.assertEqual(entry.leaf_key, "repo/master/leaf-1")
+        self.assertEqual(
+            entry.task_document_ref,
+            TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
+        )
 
     def test_renaming_an_unknown_session_is_not_found(self) -> None:
         with TestClient(self.app) as client:

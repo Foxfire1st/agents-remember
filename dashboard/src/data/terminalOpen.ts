@@ -1,12 +1,15 @@
 import type {
   HarnessControlState,
+  TaskDocumentRef,
   TerminalOpenKind,
 } from "../types/terminalCatalog";
 
 export interface OpenTerminalOptions {
   label?: string;
   lifecycleId?: string;
-  leafKey?: string;
+  taskDocumentRef?: TaskDocumentRef;
+  /** Trusted dashboard role selector; the server validates it against the document altitude. */
+  role?: string;
   // 260715-FEUI-L3 R5: the launch pair. COMPLETE pair or neither — a partial pair is refused
   // synchronously (400 launch-selection-invalid); catalog validity is NOT checked at open time.
   model?: string;
@@ -20,7 +23,7 @@ export interface OpenedTerminalSession {
   kind: TerminalOpenKind;
   harness?: string;
   lifecycleId?: string;
-  leafKey?: string;
+  taskDocumentRef?: TaskDocumentRef;
   seatRole?: string;
   status: "running";
   controlState?: HarnessControlState;
@@ -55,6 +58,18 @@ export type TerminalOpenFailure = Extract<TerminalOpenResult, { outcome: "failed
 
 const stringField = (record: Record<string, unknown>, key: string): string | null =>
   typeof record[key] === "string" ? record[key] : null;
+
+const taskDocumentRefField = (
+  record: Record<string, unknown>,
+  key: string,
+): TaskDocumentRef | null => {
+  const value = record[key];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.repository === "string" && typeof candidate.path === "string"
+    ? { repository: candidate.repository, path: candidate.path }
+    : null;
+};
 
 function failedOpen(
   failure: TerminalOpenFailureKind,
@@ -196,7 +211,7 @@ function openedResult(
   httpStatus: number,
 ): TerminalOpenResult {
   const lifecycleId = stringField(record, "lifecycleId");
-  const leafKey = stringField(record, "leafKey");
+  const taskDocumentRef = taskDocumentRefField(record, "taskDocumentRef");
   const seatRole = stringField(record, "seatRole");
   const controlState =
     typeof record.controlState === "string"
@@ -214,7 +229,7 @@ function openedResult(
       kind,
       ...(responseHarness ? { harness: responseHarness } : {}),
       ...(lifecycleId ? { lifecycleId } : {}),
-      ...(leafKey ? { leafKey } : {}),
+      ...(taskDocumentRef ? { taskDocumentRef } : {}),
       ...(seatRole ? { seatRole } : {}),
       status: "running",
       ...(controlState ? { controlState } : {}),
@@ -284,7 +299,8 @@ function openRequestBody(
     ...(harness ? { harness } : {}),
     ...(options.label ? { label: options.label } : {}),
     ...(options.lifecycleId ? { lifecycleId: options.lifecycleId } : {}),
-    ...(options.leafKey ? { leafKey: options.leafKey } : {}),
+    ...(options.taskDocumentRef ? { taskDocumentRef: options.taskDocumentRef } : {}),
+    ...(options.role ? { role: options.role } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.effort ? { effort: options.effort } : {}),
   };

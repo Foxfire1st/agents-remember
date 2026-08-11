@@ -1,7 +1,8 @@
 # Master-Handover-Packet Template
 
-The artifact a **manager** posts to the **orchestrator** at master exit (`roles/manager.md`), after the
-master-exit adversarial seam. Delivered via the inbox (durable) + stdin push. It is what the
+The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after the
+master-exit adversarial seam. The artifact is durable and terminal/finalizer truth wakes the current
+orchestrator. It is what the
 orchestrator integrates a completed master into the super branch from.
 
 ## Rules
@@ -10,8 +11,8 @@ orchestrator integrates a completed master into the super branch from.
 2. Name the integration branch precisely; the orchestrator bases its C-11 integration on it.
 3. The carry-over state must let the orchestrator's `c-11-memory-carryover-from-branch` integration run
    without re-deriving what landed.
-4. Post the packet as an `operator_inbox_post` row with `messageKind="master-handover"` and push
-   delivery enabled so the durable inbox row and stdin notification agree.
+4. Do not address an orchestrator occupant. `message_parent` is available for clarification or a
+   blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth.
 
 ## Shape
 
@@ -21,9 +22,9 @@ orchestrator integrates a completed master into the super branch from.
 | Field              | Value                                        |
 | ------------------ | -------------------------------------------- |
 | master             | <master id / task_doc path>                  |
-| manager seat       | <master's coordination leaf / chat ref>      |
+| manager seat       | <master task_doc path> + manager             |
 | integration branch | <branch ref the leaves landed on>            |
-| handover gateId    | <gate id returned by the wait=false raise>   |
+| handover evidence  | <review verdict / delegated decision ref>    |
 | base               | <super branch @ commit the master based off> |
 | verdict            | <master-exit verdict artifact ref>           |
 | verdict outcome    | pass | pass-with-notes                        |
@@ -45,5 +46,5 @@ orchestrator integrates a completed master into the super branch from.
 - <fix leaf the verdict named but scoped as post-integration> | none
 
 ## Reachability
-- Manager seat (chat + coordination leaf) stays reachable until the series retires.
+- The `(master task_doc, manager)` seat remains structurally reachable across occupant replacement.
 ```

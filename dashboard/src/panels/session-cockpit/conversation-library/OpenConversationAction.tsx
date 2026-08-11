@@ -8,6 +8,7 @@ import { useEffect, useMemo } from "react";
 
 import { css } from "../../../../styled-system/css";
 import type { HarnessId } from "../../../data/conversation/types";
+import type { ConversationLaunchContext } from "../../../data/conversation-library/client";
 import {
   beginOpen,
   reconcileOpen,
@@ -81,7 +82,7 @@ export function OpenConversationAction({
   harnessId: HarnessId;
   row: ConversationLibraryRow;
   cwd?: string;
-  launchContext?: { leafKey?: string; seatRole?: string };
+  launchContext?: ConversationLaunchContext;
   deps?: LibraryDeps;
   onOpened: (arSessionId: string) => void;
 }) {

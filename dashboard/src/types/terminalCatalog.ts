@@ -14,6 +14,11 @@ export type HarnessAcceptanceState = "immediate" | "queued" | "rejected" | "unkn
 export type SeatTurnState = "working" | "turn-ended" | "awaiting-input" | "stale";
 export type TerminalLivenessEvidence = "tmux-command-failed" | "pane-gone";
 
+export interface TaskDocumentRef {
+  repository: string;
+  path: string;
+}
+
 // `controlRaw` is the retained verbatim adapter state. Two keys the cockpit reads are named here;
 // everything else stays opaque (the backend retains vendor payloads the UI must not re-shape).
 export interface ControlRawDiagnostics extends Record<string, unknown> {
@@ -35,12 +40,12 @@ export interface TerminalCatalogRow {
   harness?: string;
   lifecycleId?: string;
   terminatedAt?: string;
-  /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat claims. */
-  leafKey?: string;
-  /** The role occupying the leaf binding (always serialized — the server migrates legacy rows). */
+  /** The canonical JSON-primary task document this seat occupies. */
+  taskDocumentRef?: TaskDocumentRef;
+  /** The role occupying that task document (always serialized). */
   seatRole?: string;
-  /** Manager-declared leaf linkage for an unbound replacement seat. */
-  replacementForLeaf?: string;
+  /** The same structural seat declared by a staged replacement. */
+  replacementForTaskDocumentRef?: TaskDocumentRef;
   // Spawned-by provenance: the dispatching session/lifecycle, the AR_SPAWN_ROLE this seat was
   // spawned AS, and the escape-hatch role knobs recorded verbatim at spawn.
   spawnedBySession?: string;
@@ -52,9 +57,6 @@ export interface TerminalCatalogRow {
   /** The RESOLVED dispatch level (leaf|master|portfolio) + whether it was explicit or defaulted. */
   spawnLevel?: string;
   spawnLevelSource?: string;
-  /** Immutable repository+sprint provenance for named orchestration seats. */
-  spawnRepo?: string;
-  spawnSprint?: string;
   // Settings-resolved model/effort pinned on the harness argv at launch — REQUESTED provenance,
   // never proof of the effective pair (evidence tiers live in the cockpit store, L4).
   resolvedModel?: string;

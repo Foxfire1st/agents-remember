@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import git_environment, run_git
 from agents_remember.kernel.primitives import memory_cap
 
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
 QUALITY_MODULE = "agents_remember.code_quality.check"
 FAILURE_OUTPUT_LINES = 40
+REPORT_DIRECTORY_NAME = "reports"
+TEST_RESULTS_REPORT_NAME = "test-results.md"
 
 GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
@@ -34,9 +40,36 @@ class QualityGatePlan:
     systemd_run_available: bool | None = None
 
 
+@dataclass(frozen=True)
+class QualityGateTarget:
+    """The checkout being certified and its owning enclosure."""
+
+    code_worktree: Path
+    worktree_group: Path
+
+
+@dataclass(frozen=True)
+class _QualityGateReport:
+    path: Path
+    result: subprocess.CompletedProcess[str]
+    command: list[str]
+    invocation: str
+    mode: str
+    diff_base: str
+    started_at: datetime
+    finished_at: datetime
+    elapsed_seconds: float
+    cap_plan: memory_cap.MemoryCapPlan | None
+
+
 def quality_wrapper_path(code_worktree: Path) -> Path:
     """Where a checkout carries the project-owned quality wrapper."""
     return code_worktree / QUALITY_WRAPPER
+
+
+def test_results_report_path(worktree_group: Path) -> Path:
+    """Return the enclosure-owned report for the latest completed quality run."""
+    return worktree_group / REPORT_DIRECTORY_NAME / TEST_RESULTS_REPORT_NAME
 
 
 def _gate_command(
@@ -152,6 +185,8 @@ def run_subprocess(
         cwd=cwd,
         env=dict(env),
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -160,7 +195,7 @@ def run_subprocess(
 
 
 def run_strict_code_quality_gate(
-    code_worktree: Path,
+    target: QualityGateTarget,
     *,
     diff_base: str = "",
     plan: QualityGatePlan | None = None,
@@ -174,6 +209,7 @@ def run_strict_code_quality_gate(
     index/working tree it is handed; on failure nothing is committed and closeout
     deliberately leaves its staging in place.
     """
+    code_worktree = target.code_worktree
     wrapper = quality_wrapper_path(code_worktree)
     if not wrapper.is_file():
         raise RuntimeError(
@@ -184,13 +220,31 @@ def run_strict_code_quality_gate(
     if plan.mode not in {GATE_TARGETED, GATE_FULL}:
         raise ValueError(f"unknown quality gate mode: {plan.mode}")
     command, invocation, cap_plan = _gate_command_parts(code_worktree, plan, diff_base, invocation)
+    started_at = datetime.now(UTC)
+    started = time.monotonic()
     result = runner(
         command,
         code_worktree,
         quality_environment(code_worktree, invocation=invocation),
     )
+    finished_at = datetime.now(UTC)
+    report_path = test_results_report_path(target.worktree_group)
+    _write_test_results_report(
+        _QualityGateReport(
+            path=report_path,
+            result=result,
+            command=command,
+            invocation=invocation,
+            mode=plan.mode,
+            diff_base=diff_base,
+            started_at=started_at,
+            finished_at=finished_at,
+            elapsed_seconds=time.monotonic() - started,
+            cap_plan=cap_plan,
+        )
+    )
     if result.returncode != 0:
-        raise RuntimeError(_gate_failure_message(result, cap_plan))
+        raise RuntimeError(_gate_failure_message(result, cap_plan, report_path))
     return {
         "required": True,
         "status": GATE_ENFORCED,
@@ -203,6 +257,7 @@ def run_strict_code_quality_gate(
         ),
         "diffBase": diff_base,
         "mode": plan.mode,
+        "reportPath": report_path.as_posix(),
         **(
             {
                 "memoryCap": {
@@ -215,6 +270,50 @@ def run_strict_code_quality_gate(
             else {}
         ),
     }
+
+
+def _write_test_results_report(report: _QualityGateReport) -> None:
+    """Atomically replace the one durable report for a completed strict gate run."""
+    output = (report.result.stdout or "").rstrip()
+    lines = [
+        "# Strict Quality Test Results",
+        "",
+        f"- Status: **{'passed' if report.result.returncode == 0 else 'failed'}**",
+        f"- Invocation: `{report.invocation}`",
+        f"- Mode: `{report.mode}`",
+        f"- Diff base: `{report.diff_base or '(none)'}`",
+        f"- Exit code: `{report.result.returncode}`",
+        f"- Started: `{report.started_at.replace(microsecond=0).isoformat()}`",
+        f"- Finished: `{report.finished_at.replace(microsecond=0).isoformat()}`",
+        f"- Elapsed seconds: `{report.elapsed_seconds:.3f}`",
+        f"- Command: `{shlex.join(report.command)}`",
+    ]
+    if report.cap_plan is not None:
+        lines.extend(
+            [
+                f"- Memory-cap policy: `{report.cap_plan.policy}`",
+                f"- Memory-cap mechanism: `{report.cap_plan.mechanism}`",
+                f"- Memory-cap bytes: `{report.cap_plan.cap_bytes}`",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            (
+                "This file contains the latest completed strict quality run, including its "
+                "pytest rail. The next completed run atomically replaces it; worktree cleanup "
+                "removes it with the enclosure."
+            ),
+            "",
+            "## Output",
+            "",
+        ]
+    )
+    if output:
+        lines.extend(f"    {line}" for line in output.splitlines())
+    else:
+        lines.append("_No output was captured._")
+    atomic_write_text(report.path, "\n".join(lines) + "\n")
 
 
 def _gate_command_parts(
@@ -249,6 +348,7 @@ def _gate_command_parts(
 def _gate_failure_message(
     result: subprocess.CompletedProcess[str],
     cap_plan: memory_cap.MemoryCapPlan | None,
+    report_path: Path,
 ) -> str:
     """One refusal message: nothing committed, plus cap policy when a cap ran."""
     details = _failure_output(result.stdout)
@@ -269,6 +369,7 @@ def _gate_failure_message(
     return (
         "strict code-quality gate failed before code commit"
         f" with exit code {result.returncode}; code, memory, and ledger remain uncommitted."
+        f" Full output: {report_path.as_posix()}."
         f"{details}"
     )
 
@@ -313,6 +414,13 @@ def quality_environment(
     # closeout has already reset and staged the whole task worktree; integration runs
     # on a clean checkout at the commit about to land.
     env["AR_QUALITY_INVOCATION"] = invocation
+    if os.name != "nt":
+        # A WSL-hosted harness can inherit Windows TEMP/TMP paths. Besides letting one test
+        # delete another process's shared capture file, those long mount paths push local
+        # harness-control sockets past the Unix-domain path limit. Quality scratch is ephemeral;
+        # keep it on the platform's short, process-safe temp root while the durable, self-
+        # overwriting result remains under the worktree enclosure's reports directory.
+        env.update({name: "/tmp" for name in ("TMPDIR", "TMP", "TEMP")})
     return env
 
 

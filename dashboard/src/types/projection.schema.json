@@ -215,6 +215,17 @@
           "default": null,
           "title": "Ownerrole"
         },
+        "ownerTaskDocumentRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "recipientRole": {
           "anyOf": [
             {
@@ -254,6 +265,28 @@
         "state": {
           "title": "State",
           "type": "string"
+        },
+        "subjectTaskDocumentRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "taskDocumentRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "ttlSeconds": {
           "title": "Ttlseconds",
@@ -1161,18 +1194,6 @@
           "title": "Kind",
           "type": "string"
         },
-        "leafKey": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Leafkey"
-        },
         "note": {
           "anyOf": [
             {
@@ -1221,6 +1242,17 @@
           ],
           "default": null,
           "title": "Subjectlifecycleid"
+        },
+        "taskDocumentRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2478,6 +2510,26 @@
         "docPath"
       ],
       "title": "TaskDocNode",
+      "type": "object"
+    },
+    "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "One JSON-primary task document under ``tasks/<repository>``.\n\n``path`` is coordination-root-relative *inside* the repository task root.  Keeping\nthe root out of the value makes the reference stable when the same coordination\ntree is mounted at another absolute location, while ``repository`` prevents two\nrepositories with the same task-folder layout from colliding.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "repository": {
+          "title": "Repository",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "path"
+      ],
+      "title": "TaskDocumentRef",
       "type": "object"
     },
     "TaskSectionNode": {

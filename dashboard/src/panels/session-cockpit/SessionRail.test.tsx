@@ -20,16 +20,67 @@ import { seatVisualState } from "../../data/stateGrammar";
 import { dashboardStore } from "../../data/store";
 import { catalogRow, FLEET } from "../../test/fixtures/catalogRows";
 import { agentPickup, analytics, lifecycleWithGate, taskDoc } from "../../test/fixtures/wire";
-import type { AgentNotifierHeartbeat } from "../../types/projection";
+import type { AgentNotifierHeartbeat, TaskDocNode } from "../../types/projection";
 import { HeaderStrip } from "./HeaderStrip";
 import { LandedCleanupNotice } from "./LandedCleanupNotice";
 import { RAIL_VIRTUALIZE_THRESHOLD, SessionRail } from "./SessionRail";
 
 const fleet = () => sessionStore.getState().sessions;
 
-function renderRail(overrides: { focusedSessionId?: string | null } = {}) {
+const FLEET_TASK_DOCS = [
+  taskDoc({
+    id: "sprint",
+    repository: "agents-remember",
+    kind: "master",
+    title: "Sprint",
+    docPath: "/tasks/agents-remember/260700_sprint/task.json",
+    orchestrates: [
+      "260714_own-adapter-capability",
+      "260715_react-tui-cockpit-frontend",
+    ],
+  }),
+  taskDoc({
+    id: "adapter-master",
+    repository: "agents-remember",
+    kind: "master",
+    title: "Own adapter capability",
+    docPath: "/tasks/agents-remember/260714_own-adapter-capability/task.json",
+  }),
+  ...["01_protocol", "04_serving", "05_capabilities"].map((id) =>
+    taskDoc({
+      id,
+      repository: "agents-remember",
+      kind: "subTask",
+      title: id,
+      docPath: `/tasks/agents-remember/260714_own-adapter-capability/${id}.json`,
+    }),
+  ),
+  taskDoc({
+    id: "cockpit-master",
+    repository: "agents-remember",
+    kind: "master",
+    title: "React TUI cockpit frontend",
+    docPath: "/tasks/agents-remember/260715_react-tui-cockpit-frontend/task.json",
+  }),
+  taskDoc({
+    id: "01_view-shell",
+    repository: "agents-remember",
+    kind: "subTask",
+    title: "01_view-shell",
+    docPath: "/tasks/agents-remember/260715_react-tui-cockpit-frontend/01_view-shell.json",
+  }),
+];
+
+const SPRINT_KEY = "agents-remember:260700_sprint/task.json";
+const ADAPTER_MASTER_KEY = "agents-remember:260714_own-adapter-capability/task.json";
+const COCKPIT_MASTER_KEY = "agents-remember:260715_react-tui-cockpit-frontend/task.json";
+const SERVING_LEAF_KEY = "agents-remember:260714_own-adapter-capability/04_serving.json";
+
+function renderRail(
+  overrides: { focusedSessionId?: string | null; taskDocuments?: TaskDocNode[] } = {},
+) {
   const sessions = fleet();
-  const model = buildRailModel(sessions);
+  const model = buildRailModel(sessions, overrides.taskDocuments ?? FLEET_TASK_DOCS);
   const rollup = attentionRollup(sessions);
   const onFocusSession = vi.fn();
   const view = render(
@@ -62,7 +113,7 @@ beforeEach(() => {
   });
   dashboardStore.setState({
     agentNotifierHeartbeat: HEARTBEAT,
-    analytics: null,
+    analytics: analytics({ taskDocuments: FLEET_TASK_DOCS, agentPickups: [] }),
     lifecycles: {},
   });
 });
@@ -157,28 +208,29 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
   });
 });
 
-describe("ruled hierarchy (R5)", () => {
-  it("bound architect/orchestrator/manager seats render flat inside their sprint box", () => {
+describe("task-projected hierarchy (EFA-L19)", () => {
+  it("renders sprint roles on the sprint and combines each master with its manager on one row", () => {
     const { getByTestId } = renderRail();
     const rail = getByTestId("session-rail");
     const architect = getByTestId("rail-row-architect");
-    const masterBox = getByTestId(
-      "rail-master-agents-remember/260714_own-adapter-capability",
-    );
-    expect(architect.closest("[data-testid^='rail-master-']")).toBe(masterBox);
+    const sprintBox = getByTestId(`rail-sprint-${SPRINT_KEY}`);
+    const masterBox = getByTestId(`rail-master-${ADAPTER_MASTER_KEY}`);
+    expect(architect.closest("[data-testid^='rail-sprint-']")).toBe(sprintBox);
+    expect(architect.closest("[data-testid^='rail-master-']")).toBeNull();
     expect(
       getByTestId("rail-row-orchestrator").closest(
         "[data-testid^='rail-master-']",
       ),
-    ).toBe(masterBox);
-    expect(within(masterBox).getByTestId("rail-row-manager-l4")).toBeDefined();
+    ).toBeNull();
+    const manager = within(masterBox).getByTestId("rail-row-manager-l4");
+    expect(manager.textContent).toContain("Own adapter capability · manager-L4");
     expect(rail.contains(architect)).toBe(true);
   });
 
   it("leaf clusters indent under the manager with the active seat on top", () => {
     const { getByTestId } = renderRail();
     const cluster = getByTestId(
-      "rail-cluster-agents-remember/260714_own-adapter-capability/04_serving",
+      `rail-cluster-${SERVING_LEAF_KEY}`,
     );
     const rows = within(cluster).getAllByTestId(/^rail-row-/);
     expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
@@ -224,7 +276,7 @@ describe("fleet attention strip (R12)", () => {
     const props = () => {
       const current = fleet();
       return {
-        model: buildRailModel(current),
+        model: buildRailModel(current, FLEET_TASK_DOCS),
         rollup: attentionRollup(current),
       };
     };
@@ -280,7 +332,7 @@ describe("fleet attention strip (R12)", () => {
     const { getByTestId } = renderRail();
     expect(
       getByTestId(
-        "rail-master-attention-agents-remember/260715_react-tui-cockpit-frontend",
+        `rail-master-attention-${COCKPIT_MASTER_KEY}`,
       ).textContent,
     ).toContain("1 need input");
   });
@@ -360,7 +412,7 @@ describe("completed folder + bulk end (R17)", () => {
     const { getByTestId, queryByTestId } = renderRail();
     expect(queryByTestId("rail-row-landed-w1")).toBeNull();
     const toggle = getByTestId(
-      "rail-done-toggle-agents-remember/260714_own-adapter-capability",
+      `rail-done-toggle-${ADAPTER_MASTER_KEY}`,
     );
     expect(toggle.textContent).toContain("completed · 2");
     fireEvent.click(toggle);
@@ -401,12 +453,12 @@ describe("completed folder + bulk end (R17)", () => {
       "✕ end 3 completed",
     );
     const masterBulk = getByTestId(
-      "rail-bulk-master-agents-remember/260714_own-adapter-capability",
+      `rail-bulk-master-${ADAPTER_MASTER_KEY}`,
     );
     expect(masterBulk.textContent).toBe("✕ end 2 done");
     fireEvent.click(masterBulk);
     const confirm = await findByTestId(
-      "rail-bulk-confirm-agents-remember/260714_own-adapter-capability",
+      `rail-bulk-confirm-${ADAPTER_MASTER_KEY}`,
     );
     expect(confirm.textContent).toContain("reviewer-done-1");
     expect(confirm.textContent).toContain("worker-done-1");
@@ -425,7 +477,7 @@ describe("freshness (R15) + bus-footer removal (F-c)", () => {
         <SessionRail
           onFocusSession={vi.fn()}
           focusedSessionId={null}
-          model={buildRailModel(sessions)}
+          model={buildRailModel(sessions, FLEET_TASK_DOCS)}
           rollup={attentionRollup(sessions)}
         />
       </Profiler>,
@@ -589,19 +641,35 @@ describe("L8: measured rail virtualization boundary", () => {
   });
 
   it("recomputes from collapsed and expanded master-completed folders", () => {
-    const masterKey = "agents-remember/virtual-master";
+    const masterKey = "agents-remember:virtual-master/task.json";
+    const virtualDocs = [
+      taskDoc({
+        id: "virtual-master",
+        repository: "agents-remember",
+        kind: "master",
+        title: "Virtual master",
+        docPath: "/tasks/agents-remember/virtual-master/task.json",
+      }),
+      taskDoc({
+        id: "leaf-a",
+        repository: "agents-remember",
+        kind: "subTask",
+        title: "Leaf A",
+        docPath: "/tasks/agents-remember/virtual-master/leaf-a.json",
+      }),
+    ];
     sessionStore.getState().hydrate([
       ...Array.from({ length: RAIL_VIRTUALIZE_THRESHOLD }, (_, index) =>
         virtualRow(index + 1),
       ),
       virtualRow(1001, {
         status: "landed",
-        leafKey: `${masterKey}/leaf-a`,
+        taskDocumentRef: { repository: "agents-remember", path: "virtual-master/leaf-a.json" },
         seatRole: "worker",
         spawnRole: "worker",
       }),
     ]);
-    const view = renderRail();
+    const view = renderRail({ taskDocuments: virtualDocs });
     expectRenderedBoundary(view, RAIL_VIRTUALIZE_THRESHOLD);
 
     fireEvent.click(view.getByTestId(`rail-done-toggle-${masterKey}`));
@@ -612,7 +680,6 @@ describe("L8: measured rail virtualization boundary", () => {
   });
 
   it("uses landed rows in the flattened tree population at the exact 50/51 boundary", () => {
-    const masterKey = "agents-remember/tree-master";
     const seedTreeFleet = (liveRows: number) => {
       sessionStore.getState().hydrate([
         ...Array.from({ length: liveRows }, (_, index) =>
@@ -620,13 +687,13 @@ describe("L8: measured rail virtualization boundary", () => {
         ),
         virtualRow(1001, {
           status: "landed",
-          leafKey: `${masterKey}/leaf-a`,
+          taskDocumentRef: { repository: "agents-remember", path: "tree-master/leaf-a.json" },
           seatRole: "worker",
           spawnRole: "worker",
         }),
         virtualRow(1002, {
           status: "landed",
-          leafKey: `${masterKey}/leaf-b`,
+          taskDocumentRef: { repository: "agents-remember", path: "tree-master/leaf-b.json" },
           seatRole: "reviewer",
           spawnRole: "reviewer",
         }),
@@ -679,7 +746,7 @@ describe("L6/F-g: immediate terminate + failure honesty + cleanup outcome + lega
     const end = getByTestId("rail-end-worker-l4");
     // The honest name · leaf · state moved to the button title (was the armed confirm copy).
     expect(end.getAttribute("title")).toContain("worker-L4-serving");
-    expect(end.getAttribute("title")).toContain("leaf 04_serving");
+    expect(end.getAttribute("title")).toContain("task 260714_own-adapter-capability/04_serving.json");
     expect(end.getAttribute("title")).toContain("state working");
     fireEvent.click(end);
     await act(async () => {});

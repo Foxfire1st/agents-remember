@@ -22,6 +22,7 @@ from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
+    ENCLOSURE_REPORTS_DIRECTORY,
     delete_branch_force,
     delete_branch_if_merged,
     local_branch_presence,
@@ -416,13 +417,24 @@ def _abandon_directories(
     contract: WorktreeContract, *, dry_run: bool, force: bool
 ) -> dict[str, dict[str, object]]:
     group = contract.worktree_group
-    directories = {
-        "worktree_group": (
-            worktree_services().provider_lifecycle.remove_tree(group, dry_run=dry_run)
-            if force
-            else remove_empty_dir(group, dry_run)
-        ),
-    }
+    if force:
+        directories = {
+            "worktree_group": worktree_services().provider_lifecycle.remove_tree(
+                group, dry_run=dry_run
+            )
+        }
+    else:
+        reports_path = group / ENCLOSURE_REPORTS_DIRECTORY
+        reports = worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
+        planned = (
+            {reports_path.resolve()}
+            if reports.get("removed") or reports.get("would_remove")
+            else set()
+        )
+        directories = {
+            "reports": reports,
+            "worktree_group": remove_empty_dir(group, dry_run, planned),
+        }
     if group.parent.exists():
         directories["repo_worktree_group"] = remove_empty_dir(group.parent, dry_run)
     return directories

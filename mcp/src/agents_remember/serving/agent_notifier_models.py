@@ -13,6 +13,7 @@ from agents_remember.controlplane.agent_notifier_signals import (
 from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.inbox_reclamation import (
@@ -57,7 +58,7 @@ class AgentNotifierFinding:
     kind: FindingKind
     detail: str
     session_id: str | None = None
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str | None = None
     source_id: str | None = None
 

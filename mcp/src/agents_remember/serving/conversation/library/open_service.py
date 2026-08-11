@@ -48,6 +48,7 @@ from agents_remember.models.conversations.primitives import (
 from agents_remember.models.conversations.telemetry import (
     operation_fingerprint,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -118,7 +119,7 @@ class _OpenRecord:
     ref: NativeConversationRef
     scope: ConversationLibraryScope
     key_token: str
-    launch_context: Mapping[str, str | None]
+    launch_context: Mapping[str, object]
     revision: int = 1
     phase: str = "requested"
     outcome: str = "pending"
@@ -235,7 +236,7 @@ class OpenRequest:
     request_id: str
     expected_identity_digest: str
     cwd: str | None = None
-    launch_context: Mapping[str, str | None] = field(default_factory=dict)
+    launch_context: Mapping[str, object] = field(default_factory=dict)
 
 
 class ConversationOpenService:
@@ -433,7 +434,7 @@ class ConversationOpenService:
         # the runtime's Protocol type is narrower than the tracked opener's requirement.
         env: dict[str, str] = {}
         seat_role = record.launch_context.get("seatRole")
-        if seat_role:
+        if isinstance(seat_role, str) and seat_role:
             env["AR_SPAWN_ROLE"] = seat_role
         existing = self._runtime.catalog.get(record.ar_session_id)
         record.absorbed_existing = (
@@ -466,7 +467,11 @@ class ConversationOpenService:
                         f"Library open: {record.harness_id} "
                         f"{record.ref.vendor_conversation_id[-6:]}"
                     ),
-                    leaf_key=record.launch_context.get("leafKey") or None,
+                    task_document_ref=(
+                        TaskDocumentRef.model_validate(record.launch_context["taskDocumentRef"])
+                        if record.launch_context.get("taskDocumentRef") is not None
+                        else None
+                    ),
                 ),
             )
         except Exception as exc:  # the opener raises typed errors on internal failures

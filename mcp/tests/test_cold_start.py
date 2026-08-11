@@ -130,10 +130,12 @@ except BlockedNetwork:
 else:
     raise SystemExit("the network block did not take effect; the run proves nothing")
 
+from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.server import create_server
 from agents_remember.models.tokens import DEFAULT_TOKEN_COUNTER
 
+declare_test_process()
 root = Path(tempfile.mkdtemp())
 server = create_server(
     McpRuntimeConfig(

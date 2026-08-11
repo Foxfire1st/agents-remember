@@ -31,6 +31,7 @@ from agents_remember.models.conversations.opening import (
 from agents_remember.models.conversations.primitives import (
     WireModel,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.conversation.dependencies import (
     get_conversation_runtime,
     resolve_conversation_authorization,
@@ -91,7 +92,7 @@ _OPEN_STATUS_BY_OUTCOME: dict[str, int] = {
 
 
 class OpenLaunchContext(WireModel):
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str | None = None
 
 
@@ -341,11 +342,16 @@ def _read_cursor(raw: str | None) -> LibraryReadCursor | None:
         raise InvalidLibraryCursorError(f"read cursor is malformed: {exc}") from exc
 
 
-def _launch_context(body: OpenConversationRequest) -> dict[str, str | None]:
+def _launch_context(body: OpenConversationRequest) -> dict[str, object]:
     context = body.launch_context
     if context is None:
         return {}
-    return {"leafKey": context.leaf_key, "seatRole": context.seat_role}
+    return {
+        "taskDocumentRef": (
+            context.task_document_ref.model_dump() if context.task_document_ref else None
+        ),
+        "seatRole": context.seat_role,
+    }
 
 
 __all__ = ["router"]

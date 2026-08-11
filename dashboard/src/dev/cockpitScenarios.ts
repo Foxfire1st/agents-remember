@@ -536,6 +536,15 @@ function openedString(body: Record<string, unknown>, key: string, fallback: stri
   return typeof body[key] === "string" ? (body[key] as string) : fallback;
 }
 
+function openedTaskDocumentRef(body: Record<string, unknown>) {
+  const value = body.taskDocumentRef;
+  if (typeof value !== "object" || value === null) return null;
+  const ref = value as Record<string, unknown>;
+  return typeof ref.repository === "string" && typeof ref.path === "string"
+    ? { repository: ref.repository, path: ref.path }
+    : null;
+}
+
 function openedLabel(body: Record<string, unknown>): string {
   return typeof body.label === "string" ? (body.label as string) : "claude";
 }
@@ -565,7 +574,7 @@ function openedSessionBody(
     kind,
     harness,
     lifecycleId: openedString(body, "lifecycleId", null),
-    leafKey: openedString(body, "leafKey", null),
+    taskDocumentRef: openedTaskDocumentRef(body),
     seatRole: kind === "harness" ? "chat" : null,
     controlState: kind === "harness" ? "starting" : null,
     resolvedModel: openedResolved(body, kind, "model"),
@@ -607,7 +616,7 @@ function openedCatalogRow(opened: TerminalOpenSuccessBody): TerminalCatalogRow {
     kind: opened.kind,
     harness: opened.harness ?? undefined,
     lifecycleId: opened.lifecycleId ?? undefined,
-    leafKey: opened.leafKey ?? undefined,
+    taskDocumentRef: opened.taskDocumentRef ?? undefined,
     seatRole: opened.seatRole ?? undefined,
     command:
       opened.kind === "harness"

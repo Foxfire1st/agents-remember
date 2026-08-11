@@ -229,7 +229,7 @@ def _recorded_gate_decision(
             verdict=verdict,
             evidence_refs=None,
         )
-        return finalize_tool_response("gate_decide", payload)
+        return finalize_tool_response("gate_decide_internal", payload)
     assert decision.gate_id is not None
     payload = record_gate_decision(
         context,
@@ -238,7 +238,7 @@ def _recorded_gate_decision(
         verdict=verdict,
         evidence_refs=None,
     )
-    return finalize_tool_response("gate_decide", payload)
+    return finalize_tool_response("gate_decide_internal", payload)
 
 
 def _gate_decision_response(

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
+    DriftSummaryOutput,
     run_drift_summary,
 )
 from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
@@ -98,6 +99,9 @@ class DriftCheckContext:
     context: Any
     detail_limit: int = 50
     unstamped_code_commit: str | None = None
+    report_path: Path | None = None
+    include_rows: bool = False
+    write_report: bool = True
 
 
 def run_memory_quality_check(
@@ -105,6 +109,7 @@ def run_memory_quality_check(
     *,
     checks: Sequence[str] | None = None,
     drift_context: DriftCheckContext | None = None,
+    include_report_only_findings: bool = False,
 ) -> dict[str, Any]:
     selected = normalize_checks(checks, include_integrity=drift_context is not None)
     check_results: dict[str, Any] = {}
@@ -119,7 +124,7 @@ def run_memory_quality_check(
         finding_count += int(result.get("findingCount", 0))
         findings.extend(result["findings"])
         report_only.extend(result.get("reportOnlyFindings", []))
-    return {
+    payload = {
         "ok": all(result.get("ok", False) for result in check_results.values()),
         "checks": check_results,
         "findingCount": finding_count,
@@ -128,6 +133,9 @@ def run_memory_quality_check(
         "reportOnlySample": report_only[:REPORT_ONLY_SAMPLE_LIMIT],
         "reportOnlySampleCount": min(len(report_only), REPORT_ONLY_SAMPLE_LIMIT),
     }
+    if include_report_only_findings:
+        payload["reportOnlyFindings"] = report_only
+    return payload
 
 
 def run_check(
@@ -159,6 +167,11 @@ def run_drift_quality_check(drift_context: DriftCheckContext) -> dict[str, Any]:
         code_repository_root=drift_context.code_repository_root,
         context=drift_context.context,
         detail_limit=drift_context.detail_limit,
+        output=DriftSummaryOutput(
+            report_path=drift_context.report_path,
+            include_rows=drift_context.include_rows,
+            write_report=drift_context.write_report,
+        ),
     )
     if packet.get("status") != "checked":
         return {
@@ -178,7 +191,7 @@ def run_drift_quality_check(drift_context: DriftCheckContext) -> dict[str, Any]:
     findings = [drift_row_to_finding(row) for row in packet.get("actionableSample", [])]
     # `.get` throughout: `count`/`reportPath`/`actionableCount` only accompany a `checked`
     # status, which the guard above has established but the type cannot carry across it.
-    return {
+    result = {
         "ok": packet.get("actionableCount", 0) == 0,
         "check": DRIFT_CHECK_NAME,
         "status": packet["status"],
@@ -188,6 +201,9 @@ def run_drift_quality_check(drift_context: DriftCheckContext) -> dict[str, Any]:
         "sampleCount": len(findings),
         "findings": findings,
     }
+    if drift_context.include_rows:
+        result["rows"] = packet.get("rows", [])
+    return result
 
 
 def drift_row_to_finding(row: dict[str, Any]) -> dict[str, Any]:

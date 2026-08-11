@@ -26,6 +26,33 @@ import { agentPickup, gate, lifecycle, taskDoc } from '../test/fixtures/wire';
 import type { AgentPickupNode, LifecycleProjection, TaskDocNode } from '../types/projection';
 
 const fleet = FLEET.map(fromTerminalSessionInfo);
+const projectedDoc = (
+  folder: string,
+  id: string,
+  kind: 'master' | 'subTask',
+  orchestrates: string[] = [],
+): TaskDocNode =>
+  taskDoc({
+    repository: 'agents-remember',
+    id,
+    title: id,
+    kind,
+    orchestrates,
+    docPath: `/coordination/tasks/agents-remember/${folder}/${id === 'master' ? 'task' : id}.json`,
+  });
+const FLEET_DOCS: TaskDocNode[] = [
+  projectedDoc('260700_sprint', 'master', 'master', [
+    '260714_own-adapter-capability',
+    '260715_react-tui-cockpit-frontend',
+  ]),
+  projectedDoc('260714_own-adapter-capability', 'master', 'master'),
+  projectedDoc('260714_own-adapter-capability', '01_protocol', 'subTask'),
+  projectedDoc('260714_own-adapter-capability', '04_serving', 'subTask'),
+  projectedDoc('260714_own-adapter-capability', '05_capabilities', 'subTask'),
+  projectedDoc('260715_react-tui-cockpit-frontend', 'master', 'master'),
+  projectedDoc('260715_react-tui-cockpit-frontend', '01_view-shell', 'subTask'),
+];
+const buildFleetModel = (sessions = fleet) => buildRailModel(sessions, FLEET_DOCS);
 const byId = (id: string) => {
   const found = fleet.find((session) => session.id === id);
   if (!found) throw new Error(`fixture missing: ${id}`);
@@ -45,23 +72,22 @@ describe('role codes (R6 — RULED three-letter chips)', () => {
 });
 
 describe('buildRailModel (sprint-local command groups and leaf-subordinate clusters)', () => {
-  const model = buildRailModel(fleet);
+  const model = buildFleetModel();
 
-  it('places bound command seats flat inside their sprint section, never nested by spawn edges', () => {
-    expect(model.spine).toEqual([]);
-    const master = model.masters.find((section) =>
-      section.key.endsWith('260714_own-adapter-capability'),
-    );
-    expect(master?.commandSeats.map((session) => session.id)).toEqual([
+  it('projects sprint roles onto the sprint and the manager onto the master row', () => {
+    expect(model.sprints[0]?.seats.map((session) => session.id)).toEqual([
       'architect',
       'orchestrator',
-      'manager-l4',
     ]);
+    const master = model.sprints[0]?.masters.find((section) =>
+      section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
+    );
+    expect(master?.manager?.id).toBe('manager-l4');
   });
 
   it("clusters leaf agents per leaf under the manager's master", () => {
-    const master = model.masters.find((section) =>
-      section.key.endsWith('260714_own-adapter-capability'),
+    const master = model.sprints[0]?.masters.find((section) =>
+      section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
     );
     expect(master?.clusters.map((cluster) => cluster.label)).toEqual(
       ['01_protocol', '04_serving', '05_capabilities'].filter((label) => label !== '01_protocol'),
@@ -69,10 +95,11 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
   });
 
   it('sorts the ACTIVE seat to the top of its cluster; ties keep worker → reviewer → curator', () => {
-    const master = buildRailModel(fleet).masters.find((section) =>
-      section.key.endsWith('260714_own-adapter-capability'),
+    const master = buildFleetModel().sprints[0]?.masters.find((section) =>
+      section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
     );
-    const serving = master?.clusters.find((cluster) => cluster.key.endsWith('04_serving'));
+    const serving = master?.clusters.find((cluster) =>
+      cluster.taskDocumentRef.path.endsWith('/04_serving.json'));
     // worker-l4 is working → top; reviewer/curator idle keep base order.
     expect(serving?.seats.map((seat) => seat.id)).toEqual([
       'worker-l4',
@@ -88,9 +115,11 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
           ? { ...session, turnState: 'turn-ended' }
           : session,
     );
-    const reordered = buildRailModel(flipped)
-      .masters.find((section) => section.key.endsWith('260714_own-adapter-capability'))
-      ?.clusters.find((cluster) => cluster.key.endsWith('04_serving'));
+    const reordered = buildFleetModel(flipped)
+      .sprints[0]?.masters.find((section) =>
+        section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'))
+      ?.clusters.find((cluster) =>
+        cluster.taskDocumentRef.path.endsWith('/04_serving.json'));
     expect(reordered?.seats.map((seat) => seat.id)).toEqual([
       'curator-l4',
       'worker-l4',
@@ -109,65 +138,38 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
   });
 
   it('moves landed seats into the per-master completed folder (R17) and counts the sprint total', () => {
-    const master = buildRailModel(fleet).masters.find((section) =>
-      section.key.endsWith('260714_own-adapter-capability'),
+    const master = buildFleetModel().sprints[0]?.masters.find((section) =>
+      section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
     );
     expect(master?.completed.map((seat) => seat.id)).toEqual(['landed-r1', 'landed-w1']);
     // 2 in the master + pi-probe unattached = 3 sprint-wide.
-    expect(buildRailModel(fleet).completedTotal).toBe(3);
-    expect(buildRailModel(fleet).completedUnattached.map((seat) => seat.id)).toEqual(['pi-probe']);
+    expect(buildFleetModel().completedTotal).toBe(3);
+    expect(buildFleetModel().completedUnattached.map((seat) => seat.id)).toEqual(['pi-probe']);
   });
 
   it('keeps unclaimed non-command seats in unattached; terminated tombstones never render', () => {
     const model2 = buildRailModel([
       ...fleet,
       fromTerminalSessionInfo(catalogRow({ id: 'tomb', status: 'terminated' })),
-    ]);
+    ], FLEET_DOCS);
     expect(model2.unattached.map((seat) => seat.id)).toEqual(['scout']);
   });
 
-  it('applies master labels when provided', () => {
-    const labeled = buildRailModel(fleet, {
-      masterLabel: (key) =>
-        key.endsWith('260714_own-adapter-capability') ? 'Own-adapter capability' : undefined,
-    });
-    expect(labeled.masters.find((m) => m.label === 'Own-adapter capability')).toBeDefined();
-  });
-
-  it('keeps two sprint-local architect and orchestrator pairs in their own master groups', () => {
-    const local = (
-      id: string,
-      role: 'architect' | 'orchestrator',
-      repo: string,
-      sprint: string,
-    ): OpenSession =>
-      fromTerminalSessionInfo(
-        catalogRow({ id, seatRole: role, spawnRole: role, spawnRepo: repo, spawnSprint: sprint }),
-      );
-    const model = buildRailModel([
-      local('architect-a', 'architect', 'repo-a', 'sprint-a'),
-      local('orchestrator-a', 'orchestrator', 'repo-a', 'sprint-a'),
-      local('architect-b', 'architect', 'repo-b', 'sprint-b'),
-      local('orchestrator-b', 'orchestrator', 'repo-b', 'sprint-b'),
+  it('surfaces altitude-invalid role bindings as unattached instead of guessing', () => {
+    const invalid = fromTerminalSessionInfo(catalogRow({
+      id: 'worker-on-master',
+      seatRole: 'worker',
+      taskDocumentRef: { repository: 'agents-remember', path: '260714_own-adapter-capability/task.json' },
+    }));
+    expect(buildRailModel([invalid], FLEET_DOCS).unattached.map((seat) => seat.id)).toEqual([
+      'worker-on-master',
     ]);
-
-    expect(model.spine).toEqual([]);
-    expect(
-      model.masters
-        .find((section) => section.key === 'repo-a/sprint-a')
-        ?.commandSeats.map((s) => s.id),
-    ).toEqual(['architect-a', 'orchestrator-a']);
-    expect(
-      model.masters
-        .find((section) => section.key === 'repo-b/sprint-b')
-        ?.commandSeats.map((s) => s.id),
-    ).toEqual(['architect-b', 'orchestrator-b']);
   });
 });
 
 describe('railCycleOrder (alt+↑/↓)', () => {
   it('cycles migration spine → sprint command seats → clusters → unattached, live rows only', () => {
-    const order = railCycleOrder(buildRailModel(fleet));
+    const order = railCycleOrder(buildFleetModel());
     expect(order).toEqual([
       'architect',
       'orchestrator',
@@ -279,13 +281,13 @@ describe('fleet attention (R12)', () => {
   });
 
   it('group headers surface the dominant attention class (❗ input beats ✖ failed)', () => {
-    const model = buildRailModel(fleet);
+    const model = buildFleetModel();
     const rollup = attentionRollup(fleet);
-    const cockpitMaster = model.masters.find((section) =>
-      section.key.endsWith('260715_react-tui-cockpit-frontend'),
+    const cockpitMaster = model.sprints[0]?.masters.find((section) =>
+      section.taskDocumentRef.path.startsWith('260715_react-tui-cockpit-frontend/'),
     );
-    const adapterMaster = model.masters.find((section) =>
-      section.key.endsWith('260714_own-adapter-capability'),
+    const adapterMaster = model.sprints[0]?.masters.find((section) =>
+      section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
     );
     expect(cockpitMaster && masterAttentionBadge(cockpitMaster, rollup)).toEqual({
       glyph: '❗',

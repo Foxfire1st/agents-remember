@@ -116,9 +116,13 @@ def require_dispatch_target(
     message_kind: InboxMessageKind,
     agent_id: str | None,
     delivery: HostedDelivery,
-    host: HostedReadinessHost,
 ) -> TerminalCatalogEntry | None:
-    """Return the exact ready dispatch target, or refuse before persistence."""
+    """Return the exact running dispatch target before durable persistence.
+
+    Readiness gates the delivery attempt, not creation of the durable brief. This lets the
+    control plane queue one exact-pinned initial brief while a newly launched adapter finishes
+    negotiating, then retry it without asking the spawning model to retain a runtime id.
+    """
 
     if message_kind != DISPATCH_BRIEF_KIND:
         return None
@@ -126,13 +130,12 @@ def require_dispatch_target(
         raise ValueError("dispatch-brief requires runtime configuration")
     if agent_id is None or not delivery.enabled:
         raise ValueError("dispatch-brief requires exact agent_id and deliver_to_hosted=true")
-    observed = (delivery.readiness or _readiness_check)(delivery.catalog, host, agent_id)
-    if observed.status != "ready" or observed.entry is None or observed.entry.id != agent_id:
+    target = delivery.catalog.get(agent_id)
+    if target is None or target.status != "running":
         raise ValueError(
-            "dispatch-brief requires prior exact-session status=ready; "
-            f"observed {observed.status}: {observed.detail or 'not ready'}"
+            "dispatch-brief requires one exact running target selected internally by the plane"
         )
-    return observed.entry
+    return target
 
 
 def start_dispatch_expectations(
@@ -148,7 +151,7 @@ def start_dispatch_expectations(
 
     store = expectation_store(config)
     created_at = datetime.fromisoformat(entry.createdAt)
-    leaf_key = target.binding_leaf_key
+    task_document_ref = target.binding_task_document_ref
     if store.find_by_source(entry.id, kind="briefed-by") is not None:
         return
     write_expectation_row(
@@ -159,7 +162,7 @@ def start_dispatch_expectations(
             subject=ExpectationSubject(
                 agent_id=target.id,
                 lifecycle_id=target.lifecycle_id,
-                leaf_key=leaf_key,
+                task_document_ref=task_document_ref,
                 seat_role=target.binding_role,
             ),
             note=f"briefed-by: {target.label} ({target.spawn_role or target.kind})",

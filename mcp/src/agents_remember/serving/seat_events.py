@@ -40,7 +40,11 @@ def log_retire_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> N
                 "label": entry.label,
                 "spawnRole": entry.spawn_role,
                 "seatRole": entry.binding_role,
-                "leafKey": entry.leaf_key,
+                "taskDocumentRef": (
+                    entry.binding_task_document_ref.model_dump()
+                    if entry.binding_task_document_ref
+                    else None
+                ),
                 "retiredBySession": entry.retired_by_session,
                 "retiredReason": entry.retired_reason,
                 "retiredEdge": entry.retired_edge,
@@ -64,7 +68,11 @@ def log_landed_event(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> N
                 "label": entry.label,
                 "spawnRole": entry.spawn_role,
                 "seatRole": entry.binding_role,
-                "leafKey": entry.leaf_key,
+                "taskDocumentRef": (
+                    entry.binding_task_document_ref.model_dump()
+                    if entry.binding_task_document_ref
+                    else None
+                ),
                 "landedReason": entry.landed_reason,
                 "landedEdge": entry.landed_edge,
             },

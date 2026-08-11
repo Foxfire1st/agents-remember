@@ -330,13 +330,10 @@ class RegistrationWiringTests2(RegistrationWiringTests):
     ) -> None:
         recorder = self.invoke(
             "lifecycle_gate",
-            "agents_remember.mcp.registration.gates.registered_lifecycle_gate_payload",
+            "agents_remember.mcp.registration.gates.structural_lifecycle_gate_payload",
             {
                 "kind": "plan-approval",
                 "ask": {"kind": "decision", "question": "ship?"},
-                "lifecycle_id": "life-1",
-                "enclosure": "260731-EFA-MASTER",
-                "repo_id": "agents-remember",
                 "packet": {"summary": "the plan"},
                 "required_decision": ["approve", "reject"],
                 "evidence_refs": [{"path": "plan.md"}],
@@ -345,237 +342,64 @@ class RegistrationWiringTests2(RegistrationWiringTests):
 
         config, request = recorder.args
         self.assertIs(config, self.config)
-        self.assertEqual(request.kind, "plan-approval")
-        self.assertEqual(request.ask, {"kind": "decision", "question": "ship?"})
-        self.assertEqual(request.lifecycle_id, "life-1")
-        self.assertEqual(request.enclosure, "260731-EFA-MASTER")
-        self.assertEqual(request.repo_id, "agents-remember")
-        self.assertEqual(request.packet, {"summary": "the plan"})
-        self.assertEqual(request.required_decision, ["approve", "reject"])
-        self.assertEqual(request.evidence_refs, [{"path": "plan.md"}])
-        self.assertIs(request.wait, True)
+        self.assertEqual(
+            [
+                request.kind,
+                request.ask,
+                request.packet,
+                request.required_decision,
+                request.evidence_refs,
+                request.wait,
+            ],
+            [
+                "plan-approval",
+                {"kind": "decision", "question": "ship?"},
+                {"summary": "the plan"},
+                ["approve", "reject"],
+                [{"path": "plan.md"}],
+                True,
+            ],
+        )
+        self.assertEqual(recorder.kwargs, {})
 
     def test_lifecycle_gate_wait_false_raises_without_a_timeout(self) -> None:
         """A non-blocking raise has nothing to time out; the wait it passes must say so
         rather than inheriting ``GateWait``'s blocking default of 300 seconds."""
         recorder = self.invoke(
             "lifecycle_gate",
-            "agents_remember.mcp.registration.gates.registered_lifecycle_gate_payload",
+            "agents_remember.mcp.registration.gates.structural_lifecycle_gate_payload",
             {"kind": "master-handover-approval", "wait": False},
         )
 
         self.assertIs(recorder.args[1].wait, False)
+        self.assertEqual(recorder.kwargs, {})
 
-    def test_gate_decide_attributes_a_plain_decision_to_the_model_via_cli(self) -> None:
+    def test_gate_decide_forwards_document_and_kind_without_gate_id(self) -> None:
+        task_ref = {"repository": "repo-a", "path": "master/task.json"}
         recorder = self.invoke(
             "gate_decide",
-            "agents_remember.mcp.registration.gates.registered_gate_decide_payload",
-            {"gate_id": "gate-1", "decision": "approve", "note": "looks right"},
+            "agents_remember.mcp.registration.gates.structural_gate_decide_payload",
+            {
+                "task_document_ref": task_ref,
+                "kind": "master-handover-approval",
+                "decision": "approve",
+                "note": "looks right",
+            },
         )
 
         config, request = recorder.args
         self.assertIs(config, self.config)
-        self.assertEqual(request.gate_id, "gate-1")
+        self.assertEqual(request.task_document_ref.model_dump(), task_ref)
+        self.assertEqual(request.kind, "master-handover-approval")
         self.assertEqual(request.decision, "approve")
         self.assertEqual(request.note, "looks right")
-        self.assertEqual(request.decided_by, "model")
-        self.assertEqual(request.decided_via, "cli")
-        self.assertIsNone(request.deciding_role)
-
-    def test_gate_decide_with_a_deciding_role_attributes_via_orchestration(self) -> None:
-        """A role-attributed decision is checked against the gate policy, so it must not
-        arrive claiming to be the model's own cli decision: ``by`` is left for the server
-        to fill from the role and ``via`` becomes orchestration."""
-        recorder = self.invoke(
-            "gate_decide",
-            "agents_remember.mcp.registration.gates.registered_gate_decide_payload",
-            {
-                "gate_id": "gate-1",
-                "decision": "approve",
-                "deciding_role": "manager",
-                "evidence_refs": [{"path": "review.md"}],
-            },
-        )
-
-        request = recorder.args[1]
-        self.assertEqual(request.deciding_role, "manager")
-        self.assertEqual(request.decision, "approve")
-        self.assertEqual(request.decided_via, "orchestration")
-        self.assertEqual(request.decided_by, "")
-        self.assertEqual(request.evidence_refs, [{"path": "review.md"}])
+        self.assertIsNone(request.evidence_refs)
+        self.assertEqual(recorder.kwargs, {})
 
     def test_gate_list_defaults_to_the_ambient_lifecycle(self) -> None:
         recorder = self.invoke(
-            "gate_list", "agents_remember.mcp.registration.gates.gate_list_payload"
+            "gate_list", "agents_remember.mcp.registration.gates.structural_gate_list_payload"
         )
 
         self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(recorder.kwargs, {"lifecycle_id": None})
-
-    def test_registered_gate_list_executes_the_real_application_operation(self) -> None:
-        result = self.call("gate_list")
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["operation"], "gate_list")
-        self.assertEqual(result["gates"], [])
-
-    def test_operator_inbox_post_forwards_flat_fields_for_application_composition(self) -> None:
-        recorder = self.invoke(
-            "operator_inbox_post",
-            "agents_remember.mcp.registration.orchestration.registered_operator_inbox_post_payload",
-            {
-                "ask": "status?",
-                "response": "green",
-                "lifecycle_id": "life-1",
-                "agent_id": "agent-1",
-                "gate_id": "gate-1",
-                "sender_agent_id": "agent-0",
-                "sender_role": "manager",
-                "recipient_role": "worker",
-                "message_kind": "dispatch-brief",
-                "artifact_path": "/tmp/brief.md",
-            },
-        )
-
-        config, request = recorder.args
-        self.assertIs(config, self.config)
-        self.assertEqual(request.lifecycle_id, "life-1")
-        self.assertEqual(request.agent_id, "agent-1")
-        self.assertEqual(request.recipient_role, "worker")
-        self.assertEqual(request.ask, "status?")
-        self.assertEqual(request.response, "green")
-        self.assertEqual(request.message_kind, "dispatch-brief")
-        self.assertEqual(request.gate_id, "gate-1")
-        self.assertEqual(request.artifact_path, "/tmp/brief.md")
-        self.assertEqual(request.sender_agent_id, "agent-0")
-        self.assertEqual(request.sender_role, "manager")
-        self.assertIs(request.deliver_to_hosted, True)
-
-    def test_operator_inbox_post_over_mcp_is_always_attributed_to_the_model(self) -> None:
-        """The docstring is explicit that this route is the model's: attribution is fixed
-        here, not taken from the caller, so an agent cannot post as the developer."""
-        recorder = self.invoke(
-            "operator_inbox_post",
-            "agents_remember.mcp.registration.orchestration.registered_operator_inbox_post_payload",
-            {"ask": "status?", "response": "green", "agent_id": "agent-1"},
-        )
-
-        request = recorder.args[1]
-        self.assertEqual(request.created_by, "model")
-        self.assertEqual(request.created_via, "cli")
-
-    def test_operator_inbox_post_can_opt_out_of_hosted_push_delivery(self) -> None:
-        recorder = self.invoke(
-            "operator_inbox_post",
-            "agents_remember.mcp.registration.orchestration.registered_operator_inbox_post_payload",
-            {
-                "ask": "status?",
-                "response": "green",
-                "agent_id": "agent-1",
-                "deliver_to_hosted": False,
-            },
-        )
-
-        self.assertIs(recorder.args[1].deliver_to_hosted, False)
-
-    def test_registered_operator_post_executes_real_application_composition(self) -> None:
-        result = self.call(
-            "operator_inbox_post",
-            {
-                "ask": "status?",
-                "response": "green",
-                "agent_id": "agent-1",
-                "deliver_to_hosted": False,
-            },
-        )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["operation"], "operator_inbox_post")
-        self.assertEqual(result["agentId"], "agent-1")
-        self.assertEqual(result["state"], "pending")
-        self.assertEqual(result["messageKind"], "message")
-
-    def test_operator_inbox_poll_forwards_every_mailbox_key(self) -> None:
-        recorder = self.invoke(
-            "operator_inbox_poll",
-            "agents_remember.mcp.registration.orchestration.operator_inbox_poll_payload",
-            {"lifecycle_id": "life-1", "agent_id": "agent-1", "recipient_role": "worker"},
-        )
-
-        self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(
-            recorder.kwargs,
-            {
-                "lifecycle_id": "life-1",
-                "agent_id": "agent-1",
-                "recipient_role": "worker",
-                "include_terminal": False,
-            },
-        )
-
-    def test_operator_inbox_consume_records_the_model_as_the_consumer(self) -> None:
-        recorder = self.invoke(
-            "operator_inbox_consume",
-            "agents_remember.mcp.registration.orchestration.operator_inbox_consume_payload",
-            {"entry_id": "entry-1"},
-        )
-
-        self.assertEqual(
-            recorder.kwargs,
-            {"entry_id": "entry-1", "consumed_by": "model", "consumed_via": "cli"},
-        )
-
-    def test_operator_inbox_supersede_forwards_entry_reason_and_attribution(self) -> None:
-        recorder = self.invoke(
-            "operator_inbox_supersede",
-            "agents_remember.mcp.registration.orchestration.operator_inbox_supersede_payload",
-            {"entry_id": "entry-1", "reason": "overtaken", "superseded_by": "developer"},
-        )
-
-        self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(
-            recorder.kwargs,
-            {
-                "entry_id": "entry-1",
-                "reason": "overtaken",
-                "superseded_by": "developer",
-            },
-        )
-
-    def test_orchestration_nudge_manager_separates_target_from_subject(self) -> None:
-        """The manager being nudged and the seat the nudge is about are different agents;
-        collapsing them would nudge the wrong mailbox."""
-        recorder = self.invoke(
-            "orchestration_nudge_manager",
-            "agents_remember.mcp.registration.orchestration.registered_orchestration_nudge_payload",
-            {
-                "reason": "inactive",
-                "subject": "worker stalled",
-                "manager_agent_id": "agent-manager",
-                "manager_lifecycle_id": "life-manager",
-                "subject_agent_id": "agent-worker",
-                "subject_lifecycle_id": "life-worker",
-                "artifact_path": "/tmp/report.md",
-            },
-        )
-
-        config, request = recorder.args
-        self.assertIs(config, self.config)
-        self.assertEqual(request.reason, "inactive")
-        self.assertEqual(request.manager_agent_id, "agent-manager")
-        self.assertEqual(request.manager_lifecycle_id, "life-manager")
-        self.assertEqual(request.subject, "worker stalled")
-        self.assertEqual(request.subject_agent_id, "agent-worker")
-        self.assertEqual(request.subject_lifecycle_id, "life-worker")
-        self.assertEqual(request.artifact_path, "/tmp/report.md")
-
-    def test_orchestration_nudge_manager_rate_limits_to_fifteen_minutes_by_default(
-        self,
-    ) -> None:
-        recorder = self.invoke(
-            "orchestration_nudge_manager",
-            "agents_remember.mcp.registration.orchestration.registered_orchestration_nudge_payload",
-            {"reason": "missing-turn-report", "subject": "no report"},
-        )
-
-        self.assertEqual(recorder.args[1].rate_limit_seconds, 900)
+        self.assertEqual(recorder.kwargs, {})

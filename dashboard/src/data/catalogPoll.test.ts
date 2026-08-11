@@ -278,7 +278,7 @@ describe("startCatalogReconciler (eager + cross-tab)", () => {
       expect(FakeBroadcastChannel.instances).toHaveLength(1);
 
       // Releasing one subscriber twice is inert; the remaining owner still receives immediate
-      // create/leaf invalidations, including an authoritative empty catalog.
+      // Create/task invalidations, including an authoritative empty catalog.
       releaseA();
       releaseA();
       expect(FakeBroadcastChannel.instances[0]?.closed).toBe(false);
@@ -286,7 +286,7 @@ describe("startCatalogReconciler (eager + cross-tab)", () => {
       FakeBroadcastChannel.dispatch({
         type: "terminal-catalog-changed",
         source: "other-tab",
-        reason: "leaf",
+        reason: "task",
         sessionId: "remote-row",
       });
       await vi.waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));

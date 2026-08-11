@@ -295,7 +295,7 @@ class ProjectionSchemaDriftTests(unittest.TestCase):
             normalized = " ".join(
                 (REPO_ROOT / relative_path).read_text(encoding="utf-8").lower().split()
             )
-            with self.subTest(path=relative_path):
+            with self.subTest(path=relative_path.as_posix()):
                 for pattern in forbidden:
                     self.assertIsNone(re.search(pattern, normalized), pattern)
 

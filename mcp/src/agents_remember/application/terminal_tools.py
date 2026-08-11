@@ -25,6 +25,7 @@ from agents_remember.kernel.agentic_settings import (
 )
 from agents_remember.kernel.harnesses import Harness
 from agents_remember.kernel.primitives.observer_paths import observer_root
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal import (
     SessionRenameStatus,
     SessionRetireStatus,
@@ -48,7 +49,6 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.operator_inbox_posts import (
     OperatorInboxPostContext,
     post_operator_inbox_entry,
@@ -60,18 +60,10 @@ from agents_remember.serving.retire_policy import (
     check_retire_authority,
 )
 from agents_remember.serving.seat_events import log_rename_event, log_retire_event
-from agents_remember.serving.sprint_role_binding import (
-    SprintBindingRefusal,
-    sprint_binding_for_spawn,
-)
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     terminal_catalog_path,
-)
-from agents_remember.serving.terminal_leaf_assignment import (
-    LeafAssignmentHost,
-    assign_terminal_session_to_leaf,
 )
 from agents_remember.serving.terminal_opener import (
     ControlRunnerRequest,
@@ -82,7 +74,12 @@ from agents_remember.serving.terminal_opener import (
     open_terminal_session,
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
-from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
+from agents_remember.serving.terminal_task_assignment import (
+    TaskAssignmentHost,
+    TaskAssignmentRuntime,
+    assign_terminal_session_to_task,
+)
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -95,19 +92,29 @@ def _result(_tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _leaf_ref_refusal_result(
+def _task_ref_refusal_result(
     operation: str,
-    leaf_key: str,
-    error: LeafRefResolutionError,
+    task_document_ref: TaskDocumentRef,
+    error: TaskDocumentRefError,
     *,
     kind: str | None = None,
 ) -> dict[str, Any]:
+    status = (
+        error.status
+        if error.status
+        in {
+            "task-document-not-found",
+            "task-document-invalid",
+            "task-document-repo-mismatch",
+        }
+        else "task-binding-invalid"
+    )
     payload: dict[str, Any] = {
         "ok": False,
         "operation": operation,
-        "status": error.status,
+        "status": status,
         "session": "",
-        "leafKey": leaf_key,
+        "taskDocumentRef": task_document_ref.model_dump(),
         "detail": str(error),
     }
     if operation == "spawn_agent_session":
@@ -161,45 +168,49 @@ _HARNESS_NATIVE_SPEND_ENV_KEYS = (
 _SPEND_ENV_KEYS = ("AR_SPAWN_MODEL", "AR_SPAWN_EFFORT", *_HARNESS_NATIVE_SPEND_ENV_KEYS)
 
 
-def attach_terminal_session_to_leaf_tool(
+def attach_terminal_session_to_task_tool(
     config: McpRuntimeConfig,
     *,
     session_id: str,
-    leaf_key: str,
+    task_document_ref: TaskDocumentRef,
     role: str | None = None,
-    host: LeafAssignmentHost | None = None,
+    host: TaskAssignmentHost | None = None,
 ) -> dict[str, Any]:
-    """Move an existing hosted terminal/chat session to a durable leaf key."""
+    """Trusted administration: move a hosted session to a document-owned role seat."""
 
+    topology = TaskDocumentTopology(config.coordination_root)
     try:
-        leaf_key = resolve_catalog_leaf_key(config, leaf_key)
-    except LeafRefResolutionError as exc:
-        return _leaf_ref_refusal_result("attach_terminal_session_to_leaf", leaf_key, exc)
+        topology.resolve(task_document_ref)
+    except TaskDocumentRefError as exc:
+        return _task_ref_refusal_result("attach_terminal_session_to_task", task_document_ref, exc)
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     assignment_host = host if host is not None else TerminalHost()
-    result = assign_terminal_session_to_leaf(
-        catalog,
-        assignment_host,
+    result = assign_terminal_session_to_task(
+        TaskAssignmentRuntime(catalog, assignment_host, topology),
         session_id=session_id,
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
         role=role,
     )
     return _result(
-        "attach_terminal_session_to_leaf",
+        "attach_terminal_session_to_task",
         {
             "ok": result.status == "attached",
-            "operation": "attach_terminal_session_to_leaf",
+            "operation": "attach_terminal_session_to_task",
             "status": result.status,
             "session": result.session_id,
-            "leafKey": result.leaf_key,
-            "previousLeafKey": result.previous_leaf_key,
+            "taskDocumentRef": result.task_document_ref.model_dump(),
+            "previousTaskDocumentRef": (
+                result.previous_task_document_ref.model_dump()
+                if result.previous_task_document_ref is not None
+                else None
+            ),
             "ownerSession": result.owner_session_id,
             "role": result.role,
             "seatRole": result.seat_role,
             "previousSeatRole": result.previous_seat_role,
             "detail": (
-                "named role seats require a matching immutable repository+sprint binding"
-                if result.status.startswith("sprint-binding-")
+                "role does not match the referenced task document's structural altitude"
+                if result.status == "task-binding-invalid"
                 else None
             ),
         },
@@ -233,18 +244,18 @@ def _ambient_lifecycle_id() -> str | None:
     return None
 
 
-def _spawn_repo_root(config: McpRuntimeConfig, leaf_key: str | None) -> Path | None:
+def _spawn_repo_root(
+    config: McpRuntimeConfig, task_document_ref: TaskDocumentRef | None
+) -> Path | None:
     """The code-repo root whose repo-local agentic settings apply to this spawn.
 
-    Derived from the qualified leaf key (``<repository>/<master>/<docId>`` -- the
-    l-01 catalog-binding contract): a leaf-attached spawn works on that repo, so
-    its ``<repo>/system/settings.json`` layer participates. Leafless spawns (and
+    Derived from the canonical task-document reference: a task-bound spawn works on that repo, so
+    its ``<repo>/system/settings.json`` layer participates. Unbound spawns (and
     unconfigured repo segments) resolve against the global layer only.
     """
-    if not leaf_key:
+    if task_document_ref is None:
         return None
-    repo_id = leaf_key.split("/", 1)[0]
-    scope = config.repositories.get(repo_id)
+    scope = config.repositories.get(task_document_ref.repository)
     return scope.path if scope is not None else None
 
 
@@ -357,7 +368,7 @@ class _HarnessDispatch:
 def _resolve_harness_dispatch(
     config: McpRuntimeConfig,
     *,
-    leaf_key: str | None,
+    task_document_ref: TaskDocumentRef | None,
     level: str | None,
     env: dict[str, str] | None,
     which: Which | None,
@@ -366,8 +377,9 @@ def _resolve_harness_dispatch(
 
     Realizes the settings-only dispatch chain repo-local level override > global level override >
     repo-local role default > global role default > spawn preference > detection-gated default: the
-    settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the repo-local
-    layer selected by the qualified leaf key), the harness resolves against the EFFECTIVE registry, and
+    settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the
+    repo-local layer selected by the canonical task document), the harness resolves against the
+    EFFECTIVE registry, and
     model/effort must both be present. Their vendor validity is checked token-free against L1's
     dynamic catalog inside the hosted runner before the real harness process starts. Returns
     ``(dispatch, refusal)`` with exactly one side set.
@@ -383,7 +395,7 @@ def _resolve_harness_dispatch(
             detail=f"unknown dispatch level {spawn_level!r}; valid levels: [{valid}]",
         )
     settings = load_agentic_settings(
-        config.coordination_root, repo_root=_spawn_repo_root(config, leaf_key)
+        config.coordination_root, repo_root=_spawn_repo_root(config, task_document_ref)
     )
     # The settings rungs, keyed by the AR_SPAWN_ROLE riding the caller's env (no role = no settings
     # rung, today's behavior); role/level settings are the sole spend source for ordinary spawns.
@@ -472,13 +484,13 @@ def _knob_refusal(
 
 @dataclass(frozen=True)
 class SpawnSeat:
-    """The seat a spawn creates: which leaf it binds to (or replaces), at what dispatch level,
+    """The seat a spawn creates: which task document it binds to (or replaces), at what level,
     under what display label, as a harness or a plain terminal, and the environment that
     declares its role (``env.AR_SPAWN_ROLE``) to the settings-owned knob resolution."""
 
     kind: str = "harness"
-    leaf_key: str | None = None
-    replacement_for_leaf: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
+    replacement_for_task_document_ref: TaskDocumentRef | None = None
     level: str | None = None
     label: str | None = None
     env: dict[str, str] | None = None
@@ -541,7 +553,7 @@ class SpawnOverrides:
 
 
 DEFAULT_SPAWN_SEAT = SpawnSeat()
-"""An unbound harness seat: no leaf, no label, settings-resolved knobs."""
+"""An unbound harness seat: no task document, no label, settings-resolved knobs."""
 
 NO_RETIRED_INPUTS = RetiredSpawnInputs()
 """The supported call shape -- none of the retired inputs supplied."""
@@ -582,7 +594,7 @@ def _caller_spend_override_refusal(
         f"({fields}) for ordinary agent-driven spawns. Configure harness/model/effort and "
         "launch/session spend controls in agentic settings under orchestration.roles, "
         "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses; call "
-        "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, leaf_key, label, env, and "
+        "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, task_document_ref, label, env, and "
         "provenance only, with context omitted and submit=false."
     )
     return _spawn_refusal(
@@ -631,31 +643,33 @@ def _spawn_request_refusal(
     return _caller_spend_override_refusal(seat, retired)
 
 
-def _resolve_spawn_leaf(
-    config: McpRuntimeConfig, leaf_ref: str | None, *, kind: str
-) -> tuple[str | None, dict[str, Any] | None]:
-    """Resolve one optional spawn leaf reference, preserving the public refusal payload."""
-    if leaf_ref is None:
+def _resolve_spawn_document(
+    config: McpRuntimeConfig, task_ref: TaskDocumentRef | None, *, kind: str
+) -> tuple[TaskDocumentRef | None, dict[str, Any] | None]:
+    """Validate one optional canonical task-document reference before any spawn side effect."""
+    if task_ref is None:
         return None, None
     try:
-        return resolve_catalog_leaf_key(config, leaf_ref), None
-    except LeafRefResolutionError as exc:
-        return None, _leaf_ref_refusal_result("spawn_agent_session", leaf_ref, exc, kind=kind)
+        return TaskDocumentTopology(config.coordination_root).resolve(task_ref).ref, None
+    except TaskDocumentRefError as exc:
+        return None, _task_ref_refusal_result("spawn_agent_session", task_ref, exc, kind=kind)
 
 
-def _resolve_spawn_leaves(
+def _resolve_spawn_documents(
     config: McpRuntimeConfig,
-    leaf_key: str | None,
-    replacement_for_leaf: str | None,
+    task_document_ref: TaskDocumentRef | None,
+    replacement_for_task_document_ref: TaskDocumentRef | None,
     *,
     kind: str,
-) -> tuple[str | None, str | None, dict[str, Any] | None]:
-    """Resolve both spawn leaf references; the first unresolvable one refuses the spawn."""
-    resolved_leaf, refusal = _resolve_spawn_leaf(config, leaf_key, kind=kind)
+) -> tuple[TaskDocumentRef | None, TaskDocumentRef | None, dict[str, Any] | None]:
+    """Resolve both spawn document references; the first invalid one refuses the spawn."""
+    resolved_document, refusal = _resolve_spawn_document(config, task_document_ref, kind=kind)
     if refusal is not None:
         return None, None, refusal
-    resolved_replacement, refusal = _resolve_spawn_leaf(config, replacement_for_leaf, kind=kind)
-    return resolved_leaf, resolved_replacement, refusal
+    resolved_replacement, refusal = _resolve_spawn_document(
+        config, replacement_for_task_document_ref, kind=kind
+    )
+    return resolved_document, resolved_replacement, refusal
 
 
 def _open_terminal_refusal(
@@ -664,28 +678,30 @@ def _open_terminal_refusal(
     harness: str | None,
     kind: str,
     session_id: str,
-    leaf_key: str | None,
+    task_document_ref: TaskDocumentRef | None,
 ) -> dict[str, Any] | None:
     """Translate a non-opened terminal outcome into its public refusal payload."""
     if result.status == "bad-kind":
         return _spawn_refusal("bad-kind", harness, kind, detail=result.detail)
     if result.status == "launch-conflict":
         return _spawn_refusal("launch-selection-invalid", harness, kind, detail=result.detail)
-    if result.status == "sprint-binding-required":
-        return _spawn_refusal("sprint-binding-required", harness, kind)
-    if result.status == "sprint-binding-conflict":
-        return _spawn_refusal("sprint-binding-conflict", harness, kind)
-    if result.status == "leaf-taken":
+    if result.status == "task-binding-required":
+        return _spawn_refusal("task-binding-required", harness, kind)
+    if result.status == "task-binding-invalid":
+        return _spawn_refusal("task-binding-invalid", harness, kind)
+    if result.status == "seat-taken":
         return _result(
             "spawn_agent_session",
             {
                 "ok": False,
                 "operation": "spawn_agent_session",
-                "status": "leaf-taken",
+                "status": "seat-taken",
                 "session": session_id,
                 "harness": harness,
                 "kind": result.kind,
-                "leafKey": leaf_key,
+                "taskDocumentRef": (
+                    task_document_ref.model_dump() if task_document_ref is not None else None
+                ),
                 "seatRole": result.seat_role,
                 "ownerSession": result.owner_session_id,
             },
@@ -719,7 +735,7 @@ def _spawn_launch_plan(
     seat: SpawnSeat,
     retired: RetiredSpawnInputs,
     overrides: SpawnOverrides,
-    leaf: str | None,
+    task_document_ref: TaskDocumentRef | None,
 ) -> tuple[_SpawnLaunchPlan | None, dict[str, Any] | None]:
     """The launch plan for one spawn, or the refusal that stops it before any side effect.
 
@@ -739,7 +755,7 @@ def _spawn_launch_plan(
         return caller_inputs, None
     dispatch, refusal = _resolve_harness_dispatch(
         config,
-        leaf_key=leaf,
+        task_document_ref=task_document_ref,
         level=seat.level,
         env=seat.env,
         which=overrides.which,
@@ -832,13 +848,20 @@ def spawn_agent_session_tool(
     caller_refusal = _spawn_request_refusal(seat, retired)
     if caller_refusal is not None:
         return caller_refusal
-    leaf_key, replacement_for_leaf, refusal = _resolve_spawn_leaves(
-        config, seat.leaf_key, seat.replacement_for_leaf, kind=seat.kind
+    task_document_ref, replacement_for_task_document_ref, refusal = _resolve_spawn_documents(
+        config,
+        seat.task_document_ref,
+        seat.replacement_for_task_document_ref,
+        kind=seat.kind,
     )
     if refusal is not None:
         return refusal
     plan, refusal = _spawn_launch_plan(
-        config, seat, retired, overrides, leaf_key or replacement_for_leaf
+        config,
+        seat,
+        retired,
+        overrides,
+        task_document_ref or replacement_for_task_document_ref,
     )
     if refusal is not None:
         return refusal
@@ -846,17 +869,6 @@ def spawn_agent_session_tool(
 
     sid = overrides.session_id or uuid4().hex
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
-    parent = catalog.get(spawned_by.session_id) if spawned_by.session_id is not None else None
-    role = seat.env.get("AR_SPAWN_ROLE") if seat.env is not None else None
-    sprint_binding, binding_refusal = sprint_binding_for_spawn(
-        role,
-        leaf_key=leaf_key,
-        replacement_for_leaf=replacement_for_leaf,
-        parent=parent,
-        parent_session_id=spawned_by.session_id,
-    )
-    if binding_refusal is not None:
-        return _sprint_binding_refusal(binding_refusal, plan.harness, seat.kind)
     spawn_host = overrides.host if overrides.host is not None else TerminalHost()
     result = open_terminal_session(
         runtime=HostedSessionRuntime(catalog=catalog, host=spawn_host),
@@ -864,19 +876,21 @@ def spawn_agent_session_tool(
         launch=_spawn_launch_request(config, seat, overrides, plan),
         provenance=SpawnProvenance(
             label=seat.label,
-            leaf_key=leaf_key,
-            replacement_for_leaf=replacement_for_leaf,
+            task_document_ref=task_document_ref,
+            replacement_for_task_document_ref=replacement_for_task_document_ref,
             spawn_level=plan.spawn_level,
             spawn_level_source=plan.spawn_level_source,
-            spawn_repo=sprint_binding.repo if sprint_binding is not None else None,
-            spawn_sprint=sprint_binding.sprint if sprint_binding is not None else None,
             spawned_by_session=spawned_by.session_id,
             spawned_by_lifecycle=spawned_by.lifecycle_id or _ambient_lifecycle_id(),
         ),
     )
 
     open_refusal = _open_terminal_refusal(
-        result, harness=plan.harness, kind=seat.kind, session_id=sid, leaf_key=leaf_key
+        result,
+        harness=plan.harness,
+        kind=seat.kind,
+        session_id=sid,
+        task_document_ref=task_document_ref,
     )
     if open_refusal is not None:
         return open_refusal
@@ -897,9 +911,15 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "session": entry.id,
         "harness": entry.harness,
         "kind": entry.kind,
-        "leafKey": entry.leaf_key,
+        "taskDocumentRef": (
+            entry.task_document_ref.model_dump() if entry.task_document_ref is not None else None
+        ),
         "seatRole": entry.binding_role,
-        "replacementForLeaf": entry.replacement_for_leaf,
+        "replacementForTaskDocumentRef": (
+            entry.replacement_for_task_document_ref.model_dump()
+            if entry.replacement_for_task_document_ref is not None
+            else None
+        ),
         "label": entry.label,
         "cwd": str(entry.cwd),
         "tmuxName": entry.tmux_name,
@@ -909,8 +929,6 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
         "spawnLevel": entry.spawn_level,
         "spawnLevelSource": entry.spawn_level_source,
-        "spawnRepo": entry.spawn_repo,
-        "spawnSprint": entry.spawn_sprint,
         "resolvedModel": entry.resolved_model,
         "resolvedEffort": entry.resolved_effort,
         # Free-form spawn provenance (260703-L16), echoed as recorded on the catalog row.
@@ -951,17 +969,6 @@ def _spawn_refusal(
             "detail": detail,
         },
     )
-
-
-def _sprint_binding_refusal(
-    status: SprintBindingRefusal, harness: str | None, kind: str
-) -> dict[str, Any]:
-    """Return the refusal for a named role without constructing a terminal."""
-
-    detail = "named role seats require the caller's or request's repository+sprint binding"
-    if status == "sprint-binding-required":
-        return _spawn_refusal("sprint-binding-required", harness, kind, detail=detail)
-    return _spawn_refusal("sprint-binding-conflict", harness, kind, detail=detail)
 
 
 # ``SessionRetireResponse.ok`` by its own documented rule, in one place: the two idempotent
@@ -1045,14 +1052,15 @@ def session_retire_tool(
         check_retire_authority(
             SeatRef(
                 session_id=actor_entry.id,
-                leaf_key=actor_entry.binding_leaf_key,
+                task_document_ref=actor_entry.binding_task_document_ref,
                 seat_role=actor_entry.binding_role,
             ),
             SeatRef(
                 session_id=target_entry.id,
-                leaf_key=target_entry.binding_leaf_key,
+                task_document_ref=target_entry.binding_task_document_ref,
                 seat_role=target_entry.binding_role,
             ),
+            TaskDocumentTopology(config.coordination_root),
         )
     except RetirePolicyError as exc:
         return _retire_payload("retire-refused", session_id, detail=str(exc))
@@ -1128,7 +1136,7 @@ def _surface_stranded_rows(
             response=", ".join(row.id for row in stranded),
             message_kind="message",
             subject=InboxSubject(
-                leaf_key=target.binding_leaf_key,
+                task_document_ref=target.binding_task_document_ref,
                 seat_role=target.binding_role,
                 agent_id=target.id,
             ),

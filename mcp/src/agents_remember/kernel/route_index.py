@@ -88,6 +88,7 @@ class RouteIndexBuildResult:
     written: int
     unchanged: int
     indexes: list[str]
+    stale_indexes: list[str]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +96,7 @@ class RouteIndexBuildResult:
             "written": self.written,
             "unchanged": self.unchanged,
             "indexes": self.indexes,
+            "staleIndexes": self.stale_indexes,
         }
 
 
@@ -206,6 +208,7 @@ def build_route_indexes(
     written = 0
     unchanged = 0
     indexes: list[str] = []
+    stale_indexes: list[str] = []
 
     for route in sorted(survey.route_overviews.keys(), key=_route_sort_key):
         index_rel = _route_index_path(route)
@@ -217,6 +220,7 @@ def build_route_indexes(
         if index_path.exists() and index_path.read_text(encoding="utf-8") == rendered:
             unchanged += 1
             continue
+        stale_indexes.append(index_rel)
         if not dry_run:
             index_path.parent.mkdir(parents=True, exist_ok=True)
             index_path.write_text(rendered, encoding="utf-8")
@@ -227,6 +231,7 @@ def build_route_indexes(
         written=written,
         unchanged=unchanged,
         indexes=indexes,
+        stale_indexes=stale_indexes,
     )
 
 

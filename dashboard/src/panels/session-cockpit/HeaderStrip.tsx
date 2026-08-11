@@ -2,7 +2,6 @@ import { css } from "../../../styled-system/css";
 import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { seatVisualState } from "../../data/stateGrammar";
-import { leafIdFromKey } from "../../data/taskIdentity";
 import { ModelEffortControl } from "./ModelEffortControl";
 import { StateDot } from "./StateDot";
 
@@ -95,8 +94,9 @@ function stateWord(visual: ReturnType<typeof seatVisualState>): string | null {
   return visual.key === "unclassified" ? null : visual.word;
 }
 
-function leafContextLabel(session: OpenSession): string | null {
-  return session.leafKey ? `leaf ${leafIdFromKey(session.leafKey)}` : null;
+function taskContextLabel(session: OpenSession): string | null {
+  const path = session.taskDocumentRef?.path;
+  return path ? path.split("/").pop()?.replace(/\.json$/i, "") ?? path : null;
 }
 
 function freshnessWords(
@@ -145,7 +145,7 @@ export function HeaderStrip({
   const freshness = cockpit?.freshness ?? { ptyWs: "none" as const, lastOutputAt: null };
   const quiet = quietFor(freshness.lastOutputAt, now);
   const word = stateWord(visual);
-  const leaf = leafContextLabel(session);
+  const leaf = taskContextLabel(session);
   const provenance = provenanceLabel(session);
   const popoverProps = controlPopoverProps(controlPopover);
 

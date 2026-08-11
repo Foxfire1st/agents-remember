@@ -1,34 +1,41 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react';
 
-import { useDashboard } from "../../data/store";
+import { useDashboard } from '../../data/store';
 import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
   parseTaskSelection,
   qualifiedLeafKey,
+  taskDocumentRefForDoc,
   type TaskSelection,
-} from "../../data/taskIdentity";
-import { useTaskDocumentBody } from "../../data/useTaskDocumentBody";
+} from '../../data/taskIdentity';
+import type { TaskDocumentRef } from '../../types/terminalCatalog';
+import { useTaskDocumentBody } from '../../data/useTaskDocumentBody';
 import type {
   Analytics,
   EnclosureNode,
   LifecycleProjection,
   SeriesNode,
   TaskDocNode,
-} from "../../types/projection";
-import { displayedLeafDoc, displayedReaderDoc } from "./model";
+} from '../../types/projection';
+import { displayedLeafDoc, displayedReaderDoc } from './model';
 
 export interface DetailPanelProps {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
-  onViewLeaf?: (leafKey: string | undefined) => void;
+  onViewTask?: (context: ViewedTaskContext | undefined) => void;
+}
+
+export interface ViewedTaskContext {
+  taskDocumentRef: TaskDocumentRef;
+  leafKey?: string;
 }
 
 function resolveSelectedTaskDoc(
   selection: TaskSelection | null,
   allDocs: TaskDocNode[],
 ): TaskDocNode | undefined {
-  if (selection?.kind !== "taskdoc") return undefined;
+  if (selection?.kind !== 'taskdoc') return undefined;
   return allDocs.find((doc) => doc.docPath === selection.docPath);
 }
 
@@ -36,7 +43,7 @@ function resolveLifecycleId(
   selection: TaskSelection | null,
   selectedTaskDoc: TaskDocNode | undefined,
 ): string | undefined {
-  if (selection?.kind === "lifecycle") return selection.lifecycleId;
+  if (selection?.kind === 'lifecycle') return selection.lifecycleId;
   return selectedTaskDoc?.lifecycleId;
 }
 
@@ -56,10 +63,9 @@ export function isRootTaskSelection(
   selectedEnclosure: EnclosureNode | undefined,
 ): boolean {
   return (
-    selection?.kind === "lifecycle" &&
+    selection?.kind === 'lifecycle' &&
     Boolean(lifecycle && selectedEnclosure) &&
-    (lifecycle?.id === selectedEnclosure?.taskId ||
-      lifecycle?.id === selectedEnclosure?.taskName)
+    (lifecycle?.id === selectedEnclosure?.taskId || lifecycle?.id === selectedEnclosure?.taskName)
   );
 }
 
@@ -72,24 +78,35 @@ export function resolveSelectedSeries(
   if (!selection || !analytics) return undefined;
   return analytics.series.find(
     (item) =>
-      (selection.kind === "series" && item.seriesId === selection.seriesId) ||
+      (selection.kind === 'series' && item.seriesId === selection.seriesId) ||
       (selectedIsRootTask && item.seriesId === selectedEnclosure?.taskName),
   );
 }
 
-export function resolveViewedLeafKey(
-  viewedLeafDoc: TaskDocNode | undefined,
-): string | undefined {
-  return viewedLeafDoc && viewedLeafDoc.kind !== "master"
+export function resolveViewedLeafKey(viewedLeafDoc: TaskDocNode | undefined): string | undefined {
+  return viewedLeafDoc && viewedLeafDoc.kind !== 'master'
     ? qualifiedLeafKey(viewedLeafDoc)
     : undefined;
 }
 
-export function useDetailPanelState({
-  selectedId,
-  onOpenLifecycle,
-  onViewLeaf,
-}: DetailPanelProps) {
+function useViewedTaskNotification(
+  viewedTaskDocumentRef: ReturnType<typeof taskDocumentRefForDoc> | undefined,
+  viewedLeafKey: string | undefined,
+  onViewTask: DetailPanelProps['onViewTask'],
+): void {
+  useEffect(() => {
+    onViewTask?.(
+      viewedTaskDocumentRef
+        ? {
+            taskDocumentRef: viewedTaskDocumentRef,
+            ...(viewedLeafKey ? { leafKey: viewedLeafKey } : {}),
+          }
+        : undefined,
+    );
+  }, [viewedLeafKey, viewedTaskDocumentRef, onViewTask]);
+}
+
+export function useDetailPanelState({ selectedId, onOpenLifecycle, onViewTask }: DetailPanelProps) {
   const jump = onOpenLifecycle ?? (() => {});
   const lifecycles = useDashboard((s) => s.lifecycles);
   const analytics = useDashboard((s) => s.analytics);
@@ -111,11 +128,7 @@ export function useDetailPanelState({
       )
     : undefined;
   const directDocs = resolveDirectDocs(lifecycle, selectedTaskDoc, allDocs);
-  const selectedIsRootTask = isRootTaskSelection(
-    selection,
-    lifecycle,
-    selectedEnclosure,
-  );
+  const selectedIsRootTask = isRootTaskSelection(selection, lifecycle, selectedEnclosure);
   const selectedSeries = resolveSelectedSeries(
     selection,
     analytics,
@@ -140,9 +153,8 @@ export function useDetailPanelState({
     openSlug,
   });
   const viewedLeafKey = resolveViewedLeafKey(viewedLeafDoc);
-  useEffect(() => {
-    onViewLeaf?.(viewedLeafKey);
-  }, [viewedLeafKey, onViewLeaf]);
+  const viewedTaskDocumentRef = bodyTargetDoc ? taskDocumentRefForDoc(bodyTargetDoc) : undefined;
+  useViewedTaskNotification(viewedTaskDocumentRef, viewedLeafKey, onViewTask);
 
   return {
     jump,
@@ -162,5 +174,6 @@ export function useDetailPanelState({
     fullTaskDoc,
     taskDocumentBodyState,
     viewedLeafKey,
+    viewedTaskDocumentRef,
   };
 }

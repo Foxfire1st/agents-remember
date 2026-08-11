@@ -3,12 +3,12 @@
 Slice L2 (agent-facing dispatch) extracts the opener composition that used to live inline in
 ``app.py``'s ``POST /api/terminal/{session}`` handler so the FastAPI route AND the agent-facing
 ``spawn_agent_session`` MCP tool spawn through the *same* function -- the invariant is **no parallel
-spawn path**. It mirrors ``terminal_leaf_assignment.assign_terminal_session_to_leaf``: a serving-layer
-policy helper both call paths reuse instead of duplicating the leaf-claim + ensure + upsert sequence.
+spawn path**. It mirrors ``terminal_task_assignment.assign_terminal_session_to_task``: a serving-layer
+policy helper both call paths reuse instead of duplicating the task-seat claim + ensure + upsert sequence.
 
 The opener is transport-agnostic. It returns a small :class:`OpenTerminalResult`; ``app.py`` maps it to
 an HTTP ``JSONResponse`` (200 / 409 / 400) and the MCP tool maps it to a validated tool payload. The
-leaf-uniqueness check stays **server-arbitrated**: a taken leaf returns ``leaf-taken`` (the 409) and the
+structural-seat uniqueness check stays **server-arbitrated**: a taken seat returns ``seat-taken`` and the
 caller surfaces it, never overrides it.
 
 One open is described by exactly two values plus the runtime it lands in: a
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
@@ -32,6 +32,7 @@ from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     ControlState,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionKind,
@@ -55,25 +56,25 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.sprint_role_binding import (
-    SprintOpenBindingRequest,
-    sprint_binding_for_reopen,
-)
 from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSessionBinding,
     TerminalSessionSpec,
 )
-from agents_remember.serving.terminal_leaf_assignment import leaf_conflict_owner
+from agents_remember.serving.terminal_task_assignment import (
+    replacement_binding_conflict_owner,
+    task_binding_conflict_owner,
+)
 from agents_remember.serving.terminal_tmux import tmux_session_name
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 OpenTerminalStatus = Literal[
     "opened",
-    "leaf-taken",
+    "seat-taken",
     "launch-conflict",
     "bad-kind",
-    "sprint-binding-required",
-    "sprint-binding-conflict",
+    "task-binding-required",
+    "task-binding-invalid",
 ]
 
 
@@ -157,7 +158,7 @@ class SpawnProvenance:
     """What the dispatcher declares ABOUT the seat it is creating, recorded on the durable row.
 
     None of it reaches the argv: it is the seat's identity (its label, the lifecycle it correlates
-    to), its claim (the leaf it occupies, the leaf it replaces) and its origin (who dispatched it, at
+    to), its claim (the task document it occupies or replaces) and its origin (who dispatched it, at
     which level, and whether that level was explicit). Reopening a session may relaunch the process,
     but it must not rewrite this -- :func:`_preserved` keeps every field write-once, which is only
     checkable because they travel as one value.
@@ -165,14 +166,12 @@ class SpawnProvenance:
 
     label: str | None = None
     lifecycle_id: str | None = None
-    leaf_key: str | None = None
-    replacement_for_leaf: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
+    replacement_for_task_document_ref: TaskDocumentRef | None = None
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
     spawn_level: str | None = None
     spawn_level_source: str | None = None
-    spawn_repo: str | None = None
-    spawn_sprint: str | None = None
 
 
 NO_SPAWN_PROVENANCE = SpawnProvenance()
@@ -429,7 +428,10 @@ def _resolved_pair(resolved_launch: ResolvedLaunch | None) -> tuple[str | None, 
     return resolved_launch.model_key, resolved_launch.effort
 
 
-_DAEMON_IDENTITY_ENV_EXACT = frozenset({"CODEX_THREAD_ID", "CODEX_CI", "CLAUDE_DOC_FOCUS_PATHS"})
+HOSTED_SESSION_ENV = "AR_HOSTED_SESSION_ID"
+_DAEMON_IDENTITY_ENV_EXACT = frozenset(
+    {"CODEX_THREAD_ID", "CODEX_CI", "CLAUDE_DOC_FOCUS_PATHS", HOSTED_SESSION_ENV}
+)
 
 
 def _scrub_daemon_identity_env(env: Mapping[str, str]) -> dict[str, str]:
@@ -546,10 +548,12 @@ def _opened_catalog_entry(
         created_at=reopen.created_at,
         last_attached_at=outcome.attached_at,
         status="running",
-        leaf_key=_preserved(existing, provenance.leaf_key, "leaf_key"),
+        task_document_ref=_preserved(existing, provenance.task_document_ref, "task_document_ref"),
         seat_role=outcome.seat_role,
-        replacement_for_leaf=_preserved(
-            existing, provenance.replacement_for_leaf, "replacement_for_leaf"
+        replacement_for_task_document_ref=_preserved(
+            existing,
+            provenance.replacement_for_task_document_ref,
+            "replacement_for_task_document_ref",
         ),
         spawned_by_session=_preserved(
             existing, provenance.spawned_by_session, "spawned_by_session"
@@ -563,13 +567,37 @@ def _opened_catalog_entry(
         session_commands=tuple(knobs.session_commands) if knobs.session_commands else None,
         spawn_level=provenance.spawn_level,
         spawn_level_source=provenance.spawn_level_source,
-        spawn_repo=_preserved(existing, provenance.spawn_repo, "spawn_repo"),
-        spawn_sprint=_preserved(existing, provenance.spawn_sprint, "spawn_sprint"),
         resolved_model=resolved_model,
         resolved_effort=resolved_effort,
         control_state=control_state,
         control_endpoint=resolved_endpoint,
         control_protocol=control_protocol,
+    )
+
+
+def _binding_conflict_owner(
+    runtime: HostedSessionRuntime,
+    provenance: SpawnProvenance,
+    *,
+    session_id: str,
+    seat_role: str,
+) -> str | None:
+    """Return the occupant that prevents this task-role binding, if any."""
+
+    if provenance.task_document_ref is not None:
+        return task_binding_conflict_owner(
+            runtime.catalog,
+            task_document_ref=provenance.task_document_ref,
+            session_id=session_id,
+            seat_role=seat_role,
+            host=runtime.host,
+        )
+    return replacement_binding_conflict_owner(
+        runtime.catalog,
+        task_document_ref=provenance.replacement_for_task_document_ref,
+        session_id=session_id,
+        seat_role=seat_role,
+        host=runtime.host,
     )
 
 
@@ -604,24 +632,27 @@ def _open_terminal_transaction(
         launch=launch,
     )
     spawn_env = _scrub_daemon_identity_env(launch.env or {})
+    # Each harness starts its own MCP child process. Seed the exact hosted identity only into that
+    # process environment so structural tools can resolve the caller without any model argument.
+    # Scrubbing above guarantees a parent process's identity can never leak into its child.
+    spawn_env[HOSTED_SESSION_ENV] = session_id
     seat_role = migrated_seat_role(
         persisted=existing.seat_role if existing is not None else None,
         spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),
         kind=resolved_kind,
     )
-    binding, binding_refusal = _sprint_binding(existing, provenance, seat_role)
+    binding_refusal = _task_binding_refusal(runtime, provenance, seat_role)
     if binding_refusal is not None:
         return OpenTerminalResult(status=binding_refusal)
-    owner = leaf_conflict_owner(
-        catalog,
-        leaf_key=provenance.leaf_key,
+    owner = _binding_conflict_owner(
+        runtime,
+        provenance,
         session_id=session_id,
         seat_role=seat_role,
-        host=host,
     )
     if owner is not None:
         return OpenTerminalResult(
-            status="leaf-taken",
+            status="seat-taken",
             kind=resolved_kind,
             seat_role=seat_role,
             owner_session_id=owner,
@@ -654,12 +685,7 @@ def _open_terminal_transaction(
         ),
         reopen=reopen,
         launch=launch,
-        provenance=replace(
-            provenance,
-            spawn_repo=provenance.spawn_repo or (binding.repo if binding is not None else None),
-            spawn_sprint=provenance.spawn_sprint
-            or (binding.sprint if binding is not None else None),
-        ),
+        provenance=provenance,
     )
     catalog.upsert(entry)
     return OpenTerminalResult(
@@ -667,23 +693,30 @@ def _open_terminal_transaction(
     )
 
 
-def _sprint_binding(
-    existing: TerminalCatalogEntry | None,
+def _task_binding_refusal(
+    runtime: HostedSessionRuntime,
     provenance: SpawnProvenance,
     seat_role: str,
-):
-    """Resolve the named-seat sprint scope before opening its host session."""
-    return sprint_binding_for_reopen(
-        SprintOpenBindingRequest(
-            role=seat_role,
-            leaf_key=provenance.leaf_key,
-            replacement_for_leaf=provenance.replacement_for_leaf,
-            existing=existing,
-            spawned_by_session=provenance.spawned_by_session,
-            spawn_repo=provenance.spawn_repo,
-            spawn_sprint=provenance.spawn_sprint,
-        )
-    )
+) -> Literal["task-binding-required", "task-binding-invalid"] | None:
+    """Validate one role against the real task document before any host side effect."""
+
+    if (
+        provenance.task_document_ref is not None
+        and provenance.replacement_for_task_document_ref is not None
+    ):
+        return "task-binding-invalid"
+    ref = provenance.task_document_ref or provenance.replacement_for_task_document_ref
+    structural_role = seat_role not in {"chat", "terminal"}
+    if ref is None:
+        return "task-binding-required" if structural_role else None
+    topology = TaskDocumentTopology(runtime.catalog.path.parent.parent.parent)
+    try:
+        topology.resolve(ref)
+        if structural_role:
+            topology.validate_role(ref, seat_role)
+    except TaskDocumentRefError:
+        return "task-binding-invalid"
+    return None
 
 
 def open_terminal_session(
@@ -696,9 +729,10 @@ def open_terminal_session(
     """Spawn + own one hosted session, the single opener both the route and the MCP tool call.
 
     Resolves the launch command server-side (``resolve_terminal_launch`` -- a harness **id**, never a
-    wire argv), claims ``provenance.leaf_key`` under the per-(leaf, role) uniqueness rule, ensures the
+    wire argv), claims ``provenance.task_document_ref`` under the per-(document, role) uniqueness rule,
+    ensures the
     detached tmux session (seeding ``launch.env`` at spawn -- the L2 knob-injection seam), and upserts
-    the durable catalog row (carrying spawned-by provenance). A taken leaf returns ``leaf-taken``
+    the durable catalog row (carrying spawned-by provenance). A taken seat returns ``seat-taken``
     WITHOUT spawning or mutating; an unknown/undetected kind/harness returns ``bad-kind``.
 
     L2 carries one typed ``ResolvedLaunch`` into the hosted runner (``launch.control``). The runner

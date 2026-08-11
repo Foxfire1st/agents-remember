@@ -353,14 +353,10 @@ export function CapabilitySection({
 
 export function OptionalFields({
   label,
-  leafKey,
   setLabel,
-  setLeafKey,
 }: {
   label: string;
-  leafKey: string;
   setLabel: (value: string) => void;
-  setLeafKey: (value: string) => void;
 }) {
   return (
     <div className={optionRow}>
@@ -371,17 +367,6 @@ export function OptionalFields({
         placeholder="label (optional)"
         aria-label="Session label"
         data-testid="launch-label"
-      />
-      <input
-        className={smallInput}
-        value={leafKey}
-        onChange={(event) => setLeafKey(event.target.value)}
-        // V7 — the placeholder no longer truncates its own sentence; the arbitration note moves to
-        // the field tooltip (progressive disclosure) so the input reads at any width.
-        placeholder="leaf key (optional)"
-        title="If set, the server arbitrates leaf ownership — a leaf already owned is refused, never silently reassigned."
-        aria-label="Leaf key"
-        data-testid="launch-leaf-key"
       />
     </div>
   );
@@ -438,20 +423,20 @@ export function LaunchFooter({
   );
 }
 
-export function LeafTakenOutcome({
+export function SeatTakenOutcome({
   outcome,
   onFocusSession,
   onClose,
 }: {
-  outcome: Extract<OpenOutcome, { path: "leaf-taken" }>;
+  outcome: Extract<OpenOutcome, { path: "seat-taken" }>;
   onFocusSession: (id: string) => void;
   onClose: () => void;
 }) {
   const owner = outcome.ownerSession;
   return (
-    <div className={outcomeBox} role="alert" data-testid="launch-outcome-leaf-taken">
+    <div className={outcomeBox} role="alert" data-testid="launch-outcome-seat-taken">
       <span className={errorLine}>
-        leaf-taken: {outcome.leafKey ?? "the requested leaf"} is already owned by session{" "}
+        seat-taken: {outcome.taskDocumentRef?.path ?? "the requested task document"} is already owned by session{" "}
         {owner ?? "(unnamed)"}
       </span>
       {owner ? (
@@ -539,9 +524,9 @@ function LaunchOutcome({
       </div>
     );
   }
-  if (outcome.path === "leaf-taken") {
+  if (outcome.path === "seat-taken") {
     return (
-      <LeafTakenOutcome
+      <SeatTakenOutcome
         outcome={outcome}
         onFocusSession={onFocusSession}
         onClose={onClose}
@@ -574,7 +559,6 @@ export interface LaunchFlowDialogProps {
   entry: PerHarnessCapabilities | undefined;
   selection: LaunchSelectionState;
   label: string;
-  leafKey: string;
   outcome: OpenOutcome | null;
   posting: boolean;
   unknownId: string | null;
@@ -589,7 +573,6 @@ export interface LaunchFlowDialogProps {
   onRetryCapabilities: () => void;
   onRefreshCapabilities: () => void;
   setLabel: (value: string) => void;
-  setLeafKey: (value: string) => void;
   onLaunch: () => void;
   onDismiss: () => void;
   onOutcomeFocus: (id: string) => void;
@@ -645,9 +628,7 @@ export function LaunchFlowDialog(props: LaunchFlowDialogProps) {
         <span className={heading}>Optional</span>
         <OptionalFields
           label={props.label}
-          leafKey={props.leafKey}
           setLabel={props.setLabel}
-          setLeafKey={props.setLeafKey}
         />
 
         {props.outcome ? (

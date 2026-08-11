@@ -34,6 +34,7 @@ import { AttentionQueue } from "../panels/AttentionQueue";
 import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
 import { NotesReaderViewer, type NotesReaderTarget } from "../panels/notes-reader/NotesReaderViewer";
 import { DetailPanel } from "../panels/detail-panel/DetailPanel";
+import type { ViewedTaskContext } from "../panels/detail-panel/state";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
@@ -398,6 +399,7 @@ interface CockpitShellState {
   animate: boolean;
   selectedLifecycleId: string | undefined;
   viewedLeafKey: string | undefined;
+  viewedTask: ViewedTaskContext | undefined;
   taskDocuments: TaskDocNode[];
   engineProcesses: EngineProcessNode[];
   contextMaster: string | undefined;
@@ -417,7 +419,7 @@ interface CockpitShellState {
   setChatRail: (value: boolean) => void;
   setLeftRailWidth: (width: number) => void;
   setRightRailWidth: (width: number) => void;
-  setViewedLeafKey: (key: string | undefined) => void;
+  setViewedTask: (context: ViewedTaskContext | undefined) => void;
 }
 
 function useCockpitShellState(initialView: CockpitView): CockpitShellState {
@@ -434,7 +436,8 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const selectedLifecycleId = useDashboard((s) =>
     lifecycleIdForSelection(selectedId, s.lifecycles, s.analytics),
   );
-  const [viewedLeafKey, setViewedLeafKey] = useState<string | undefined>(undefined);
+  const [viewedTask, setViewedTask] = useState<ViewedTaskContext | undefined>(undefined);
+  const viewedLeafKey = viewedTask?.leafKey;
   const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
   const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
   const contextMaster = useDashboard((s) =>
@@ -459,6 +462,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     animate,
     selectedLifecycleId,
     viewedLeafKey,
+    viewedTask,
     taskDocuments,
     engineProcesses,
     contextMaster,
@@ -473,7 +477,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     setChatRail,
     setLeftRailWidth,
     setRightRailWidth,
-    setViewedLeafKey,
+    setViewedTask,
   };
 }
 
@@ -645,6 +649,7 @@ function RightRail({
   rightRailWidth,
   setRailView,
   viewedLeafKey,
+  viewedTask,
   selectedLifecycleId,
   taskDocuments,
   engineProcesses,
@@ -657,6 +662,7 @@ function RightRail({
   rightRailWidth: number;
   setRailView: (next: "river" | "chat") => void;
   viewedLeafKey: string | undefined;
+  viewedTask: ViewedTaskContext | undefined;
   selectedLifecycleId: string | undefined;
   taskDocuments: TaskDocNode[];
   engineProcesses: EngineProcessNode[];
@@ -679,6 +685,7 @@ function RightRail({
       ) : (
         <RailChat
           leafKey={viewedLeafKey}
+          taskDocumentRef={viewedTask?.taskDocumentRef}
           selectedLifecycleId={selectedLifecycleId}
           taskDocuments={taskDocuments}
           engineProcesses={engineProcesses}
@@ -720,7 +727,7 @@ function MainLayers({
   onOpen,
   onOpenChangeSet,
   onOpenNotes,
-  onViewLeaf,
+  onViewTask,
 }: {
   view: CockpitView;
   takeover: boolean;
@@ -732,7 +739,7 @@ function MainLayers({
   onOpen: (id: string) => void;
   onOpenChangeSet: (target: ChangeSetTarget) => void;
   onOpenNotes: (target: NotesReaderTarget) => void;
-  onViewLeaf: (key: string | undefined) => void;
+  onViewTask: (context: ViewedTaskContext | undefined) => void;
 }) {
   return (
     <main className={cx(viewport, "viewport")} data-view={view}>
@@ -756,7 +763,7 @@ function MainLayers({
           onOpenLifecycle={onOpen}
           onOpenChangeSet={onOpenChangeSet}
           onOpenNotes={onOpenNotes}
-          onViewLeaf={onViewLeaf}
+          onViewTask={onViewTask}
         />
       </ViewLayer>
       {/* The File Viewer is never unmounted — only hidden — so its repo/scope selection, open
@@ -828,7 +835,7 @@ function RailedBody({
         onOpen={actions.open}
         onOpenChangeSet={actions.openChangeSet}
         onOpenNotes={actions.openNotes}
-        onViewLeaf={state.setViewedLeafKey}
+        onViewTask={state.setViewedTask}
       />
       <RightRail
         fullBleed={state.fullBleed}
@@ -837,6 +844,7 @@ function RailedBody({
         rightRailWidth={state.rightRailWidth}
         setRailView={actions.setRailView}
         viewedLeafKey={state.viewedLeafKey}
+        viewedTask={state.viewedTask}
         selectedLifecycleId={state.selectedLifecycleId}
         taskDocuments={state.taskDocuments}
         engineProcesses={state.engineProcesses}

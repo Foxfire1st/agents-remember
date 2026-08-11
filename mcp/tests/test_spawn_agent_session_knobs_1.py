@@ -3,6 +3,9 @@ from __future__ import annotations
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from test_spawn_agent_session import (
     _DAEMON_PACKAGE_ROOT,
+    LEAF_REF,
+    MASTER_REF,
+    SPRINT_REF,
     SpawnKnobApplicationTests,
     _FakePaster,
     _ObservedPaster,
@@ -68,6 +71,7 @@ class SpawnKnobApplicationTests1(SpawnKnobApplicationTests):
                 "AR_SPAWN_ROLE": "worker",
                 "AR_SPAWN_MODEL": "claude-fable-5",
                 "AR_SPAWN_EFFORT": "ultracode",
+                "AR_HOSTED_SESSION_ID": "worker-1",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
@@ -114,6 +118,7 @@ class SpawnKnobApplicationTests1(SpawnKnobApplicationTests):
                 "AR_SPAWN_ROLE": "worker",
                 "AR_SPAWN_MODEL": "gpt-5.6-sol",
                 "AR_SPAWN_EFFORT": "xhigh",
+                "AR_HOSTED_SESSION_ID": "worker-1",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
@@ -133,11 +138,8 @@ class SpawnKnobApplicationTests1(SpawnKnobApplicationTests):
             }
         )
         self.catalog.upsert(
-            _running_chat("orchestrator-tier", leaf_key="repo/master/leaf-1").with_leaf_binding(
-                "repo/master/leaf-1",
-                "orchestrator",
-                spawn_repo="repo",
-                spawn_sprint="master",
+            _running_chat("orchestrator-tier", task_document_ref=SPRINT_REF).with_task_binding(
+                SPRINT_REF, "orchestrator"
             )
         )
         for role, (model, effort) in tiers.items():
@@ -145,9 +147,11 @@ class SpawnKnobApplicationTests1(SpawnKnobApplicationTests):
             spawn_args: dict[str, object] = {}
             if role == "manager":
                 spawn_args = {
-                    "leaf_key": "repo/master/leaf-1",
+                    "task_document_ref": MASTER_REF,
                     "spawned_by_session": "orchestrator-tier",
                 }
+            elif role in {"worker", "curator"}:
+                spawn_args = {"task_document_ref": LEAF_REF}
             payload = self._spawn(
                 session_id=f"{role}-tier",
                 env={"AR_SPAWN_ROLE": role},

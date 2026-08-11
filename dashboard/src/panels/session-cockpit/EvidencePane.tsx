@@ -139,7 +139,11 @@ function EvidenceSeatSection({ session }: { session: OpenSession }) {
         value={paneArchetypeCopy(session)}
         testId="inspector-archetype"
       />
-      <InspectorFact label="leaf" value={session.leafKey} testId="inspector-leaf" />
+      <InspectorFact
+        label="task"
+        value={session.taskDocumentRef?.path}
+        testId="inspector-task-document"
+      />
     </InspectorSection>
   );
 }

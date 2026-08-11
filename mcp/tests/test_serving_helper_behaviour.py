@@ -57,6 +57,7 @@ from agents_remember.models.conversations.control_wire import (
     ControlOperationRef,
     PendingInteraction,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -83,6 +84,7 @@ from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
 )
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
 NOW = "2026-07-31T10:00:00+00:00"
@@ -158,7 +160,9 @@ class _RecordingTerminalHost:
         self.terminated.append((sid, tmux_name))
 
 
-def _seat(session_id: str, *, role: str, leaf_key: str | None, cwd: Path) -> TerminalCatalogEntry:
+def _seat(
+    session_id: str, *, role: str, task_document_ref: TaskDocumentRef, cwd: Path
+) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
         label=f"seat {session_id}",
@@ -171,7 +175,7 @@ def _seat(session_id: str, *, role: str, leaf_key: str | None, cwd: Path) -> Ter
         created_at=NOW,
         last_attached_at=NOW,
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
         seat_role=role,
     )
 
@@ -196,14 +200,80 @@ class RetireResponseTests(unittest.TestCase):
             )
         )
         self.addCleanup(self.client.close)
+        task_root = self.tmp / "tasks" / "repo"
+        write_task_doc(
+            task_root / "sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "SPRINT",
+                    "slug": "sprint",
+                    "title": "Sprint",
+                    "kind": "master",
+                    "repo": "repo",
+                    "createdAt": NOW,
+                    "orchestrates": ["master-a", "master-b"],
+                }
+            ),
+        )
+        for master, leaf in (("master-a", "leaf-1"), ("master-b", "leaf-9")):
+            write_task_doc(
+                task_root / master,
+                TaskDocument.model_validate(
+                    {
+                        "id": master.upper(),
+                        "slug": master,
+                        "title": master,
+                        "kind": "master",
+                        "repo": "repo",
+                        "createdAt": NOW,
+                        "subTasks": [
+                            {
+                                "number": leaf,
+                                "name": leaf,
+                                "file": f"{leaf}.md",
+                                "status": "inProgress",
+                            }
+                        ],
+                    }
+                ),
+            )
+            write_task_doc(
+                task_root / master,
+                TaskDocument.model_validate(
+                    {
+                        "id": leaf.upper(),
+                        "slug": leaf,
+                        "title": leaf,
+                        "kind": "subTask",
+                        "repo": "repo",
+                        "createdAt": NOW,
+                        "master": "task.md",
+                    }
+                ),
+            )
         self.catalog.upsert(
-            _seat("mgr", role="manager", leaf_key="repo/master-a/master", cwd=self.tmp)
+            _seat(
+                "mgr",
+                role="manager",
+                task_document_ref=TaskDocumentRef(repository="repo", path="master-a/task.json"),
+                cwd=self.tmp,
+            )
         )
         self.catalog.upsert(
-            _seat("worker", role="worker", leaf_key="repo/master-a/leaf-1", cwd=self.tmp)
+            _seat(
+                "worker",
+                role="worker",
+                task_document_ref=TaskDocumentRef(repository="repo", path="master-a/leaf-1.json"),
+                cwd=self.tmp,
+            )
         )
         self.catalog.upsert(
-            _seat("foreign", role="worker", leaf_key="repo/master-b/leaf-9", cwd=self.tmp)
+            _seat(
+                "foreign",
+                role="worker",
+                task_document_ref=TaskDocumentRef(repository="repo", path="master-b/leaf-9.json"),
+                cwd=self.tmp,
+            )
         )
 
     def _retire(self, session: str, actor: str, reason: str = "manual retire"):

@@ -4,6 +4,7 @@ import type {
   LifecycleProjection,
   TaskDocNode,
 } from "../types/projection";
+import type { TaskDocumentRef } from "../types/terminalCatalog";
 
 export type TaskSelection =
   | { kind: "taskdoc"; docPath: string }
@@ -67,6 +68,28 @@ export function qualifiedLeafKey(
   const master = doc.docPath.split("/").slice(0, -1).filter(Boolean).pop() ?? "";
   if (!doc.repository || !master || !doc.id) return undefined;
   return `${doc.repository}/${master}/${doc.id}`;
+}
+
+/** Canonical repository-qualified document reference for a projected task node. */
+export function taskDocumentRefForDoc(
+  doc: Pick<TaskDocNode, "repository" | "docPath">,
+): TaskDocumentRef | undefined {
+  if (!doc.repository || !doc.docPath) return undefined;
+  const normalized = doc.docPath.replaceAll("\\", "/");
+  const marker = `/tasks/${doc.repository}/`;
+  const markerAt = normalized.lastIndexOf(marker);
+  if (markerAt < 0) return undefined;
+  const path = normalized.slice(markerAt + marker.length);
+  return path.endsWith(".json") ? { repository: doc.repository, path } : undefined;
+}
+
+export function sameTaskDocumentRef(
+  left: TaskDocumentRef | null | undefined,
+  right: TaskDocumentRef | null | undefined,
+): boolean {
+  return Boolean(
+    left && right && left.repository === right.repository && left.path === right.path,
+  );
 }
 
 // The selected leaf's qualified key, from the OPEN TASK DOC (taskdoc or lifecycle selection). A series

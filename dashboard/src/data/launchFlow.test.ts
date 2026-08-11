@@ -12,7 +12,7 @@ import {
   INVALID_NON_NATIVE,
   INVALID_PARTIAL_PAIR,
   LAUNCH_CONFLICT,
-  LEAF_TAKEN,
+  SEAT_TAKEN,
   OPENED_STARTING,
   OPENED_VENDOR_DEFAULTS,
 } from "../test/fixtures/openResponses";
@@ -168,10 +168,10 @@ describe("classifyOpenResponse", () => {
     });
   });
 
-  it("409 leaf-taken → names the owning session", () => {
-    expect(classifyOpenResponse(409, LEAF_TAKEN)).toEqual({
-      path: "leaf-taken",
-      leafKey: LEAF_TAKEN.leafKey,
+  it("409 seat-taken → names the owning session", () => {
+    expect(classifyOpenResponse(409, SEAT_TAKEN)).toEqual({
+      path: "seat-taken",
+      taskDocumentRef: SEAT_TAKEN.taskDocumentRef,
       ownerSession: "worker-l3-live",
     });
   });

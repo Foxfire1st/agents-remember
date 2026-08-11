@@ -79,10 +79,13 @@ export interface AgentPickupNode {
   ownerAgentId?: string;
   ownerLifecycleId?: string;
   ownerRole?: string;
+  ownerTaskDocumentRef?: TaskDocumentRef;
   recipientRole?: string;
   senderAgentId?: string;
   senderRole?: string;
   state: string;
+  subjectTaskDocumentRef?: TaskDocumentRef;
+  taskDocumentRef?: TaskDocumentRef;
   ttlSeconds: number;
 }
 
@@ -215,13 +218,13 @@ export interface ExpectationRowNode {
   dueAt: string;
   id: string;
   kind: string;
-  leafKey?: string;
   note?: string;
   overdue: boolean;
   sourceId: string;
   state: string;
   subjectAgentId?: string;
   subjectLifecycleId?: string;
+  taskDocumentRef?: TaskDocumentRef;
 }
 
 export interface GateNode {
@@ -460,6 +463,11 @@ export interface TaskDocNode {
   stepsTotal: number;
   subTasks: TaskSubTaskRefNode[];
   title: string;
+}
+
+export interface TaskDocumentRef {
+  path: string;
+  repository: string;
 }
 
 export interface TaskSectionNode {

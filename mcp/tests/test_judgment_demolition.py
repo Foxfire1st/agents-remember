@@ -44,6 +44,7 @@ from agents_remember.controlplane.orchestration_nudges import OrchestrationNudge
 from agents_remember.kernel import _agentic_settings_core as settings_core
 from agents_remember.kernel import agentic_settings
 from agents_remember.kernel.agentic_settings import AgenticSettingsError, _parse_expectations
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _agent_notifier_actions as notifier_actions
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
@@ -52,17 +53,22 @@ from agents_remember.serving.agent_notifier_models import ActionKind, FindingKin
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
+from agents_remember.tasks import TaskDocument, write_task_doc
 
 NOW = datetime(2026, 7, 13, 15, 41, 0, tzinfo=UTC)
-LEAF = "repo-a/260707_master/leaf-9"
-MANAGER_ANCHOR = "repo-a/260707_master/manager-anchor"
-MASTER = "repo-a/260707_master"
+SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo-a", path="260707_master/task.json")
+LEAF_REF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-9.json")
 
 ACTIONS_SOURCE = Path(notifier_actions.__file__)
 
 
 def _entry(
-    session_id: str, *, leaf_key: str | None = None, **overrides: Any
+    session_id: str,
+    *,
+    task_document_ref: TaskDocumentRef | None = None,
+    seat_role: str | None = None,
+    **overrides: Any,
 ) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
@@ -76,7 +82,8 @@ def _entry(
         created_at="2026-07-13T00:00:00+00:00",
         last_attached_at="2026-07-13T00:00:00+00:00",
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
+        seat_role=seat_role,
         **overrides,  # type: ignore[arg-type]
     )
 
@@ -84,6 +91,8 @@ def _entry(
 def _orchestrator(session_id: str = "orchestrator-1", **overrides: Any) -> TerminalCatalogEntry:
     return _entry(
         session_id,
+        task_document_ref=SPRINT_REF,
+        seat_role="orchestrator",
         spawn_role="orchestrator",
         turn_state="turn-ended",
         turn_state_changed_at=NOW.isoformat(),
@@ -94,7 +103,8 @@ def _orchestrator(session_id: str = "orchestrator-1", **overrides: Any) -> Termi
 def _manager(session_id: str = "manager-1", **overrides: Any) -> TerminalCatalogEntry:
     return _entry(
         session_id,
-        leaf_key=MANAGER_ANCHOR,
+        task_document_ref=MASTER_REF,
+        seat_role="manager",
         spawn_role="manager",
         spawned_by_session="orchestrator-1",
         turn_state="turn-ended",
@@ -106,7 +116,8 @@ def _manager(session_id: str = "manager-1", **overrides: Any) -> TerminalCatalog
 def _done_worker(session_id: str = "worker-1", **overrides: Any) -> TerminalCatalogEntry:
     return _entry(
         session_id,
-        leaf_key=LEAF,
+        task_document_ref=LEAF_REF,
+        seat_role="worker",
         spawn_role="worker",
         spawned_by_session="manager-1",
         turn_state="turn-ended",
@@ -155,6 +166,56 @@ class _DemolitionCase(unittest.TestCase):
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
+        task_root = self.coordination_root / "tasks" / "repo-a"
+        write_task_doc(
+            task_root / "sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "SPRINT",
+                    "slug": "sprint",
+                    "title": "Sprint",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-07T00:00",
+                    "orchestrates": ["260707_master"],
+                }
+            ),
+        )
+        write_task_doc(
+            task_root / "260707_master",
+            TaskDocument.model_validate(
+                {
+                    "id": "MASTER",
+                    "slug": "260707_master",
+                    "title": "Master",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-07T00:00",
+                    "subTasks": [
+                        {
+                            "number": "leaf-9",
+                            "name": "Leaf 9",
+                            "file": "leaf-9.md",
+                            "status": "inProgress",
+                        }
+                    ],
+                }
+            ),
+        )
+        write_task_doc(
+            task_root / "260707_master",
+            TaskDocument.model_validate(
+                {
+                    "id": "LEAF-9",
+                    "slug": "leaf-9",
+                    "title": "Leaf 9",
+                    "kind": "subTask",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-07T00:00",
+                    "master": "task.md",
+                }
+            ),
+        )
 
     def _ctx(self, **overrides: object) -> AgentNotifierContext:
         base: dict[str, object] = dict(
@@ -364,7 +425,11 @@ class TurnReportByRetirementTests(_DemolitionCase):
             Expectation(
                 kind="turn-report-by",  # type: ignore[arg-type]
                 source_id="legacy-tr",
-                subject=ExpectationSubject(agent_id="worker-1", leaf_key=LEAF),
+                subject=ExpectationSubject(
+                    agent_id="worker-1",
+                    task_document_ref=LEAF_REF,
+                    seat_role="worker",
+                ),
             ),
             row_id="legacy-tr",
             now=NOW - timedelta(hours=2),
@@ -427,7 +492,11 @@ class LiveChainShapeTests(_DemolitionCase):
             Expectation(
                 kind="verdict-by",
                 source_id="worker-1",
-                subject=ExpectationSubject(agent_id="worker-1", leaf_key=LEAF),
+                subject=ExpectationSubject(
+                    agent_id="worker-1",
+                    task_document_ref=LEAF_REF,
+                    seat_role="worker",
+                ),
             ),
             row_id="exp-1",
             now=NOW - timedelta(minutes=10),
@@ -456,7 +525,8 @@ class LiveChainShapeTests(_DemolitionCase):
         compound = [s for s in signals if "compound-idle" in s.ask]
         self.assertEqual(len(compound), 1, first.actions)
         self.assertEqual(compound[0].agentId, "orchestrator-1")
-        self.assertIn("worker-1", compound[0].response)
+        self.assertIn("repo-a/260707_master/leaf-9.json as worker", compound[0].response)
+        self.assertNotIn("worker-1", compound[0].response)
         # No inferred nudge from the overdue verdict-by row, and the row stays pending
         # (relocated to owner agents: surfaced, never judged by the relay).
         self.assertFalse(any(a.action == "auto-nudge" for a in first.actions))

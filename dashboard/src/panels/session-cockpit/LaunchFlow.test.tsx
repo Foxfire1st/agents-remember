@@ -15,7 +15,7 @@ import { catalogRow } from "../../test/fixtures/catalogRows";
 import {
   INVALID_PARTIAL_PAIR,
   LAUNCH_CONFLICT,
-  LEAF_TAKEN,
+  SEAT_TAKEN,
   OPENED_STARTING,
 } from "../../test/fixtures/openResponses";
 import { LaunchFlow } from "./LaunchFlow";
@@ -590,11 +590,11 @@ describe("LaunchFlow — response paths (R5)", () => {
     expect(view.onClose).not.toHaveBeenCalled();
   });
 
-  it("409 leaf-taken → names the owning session and offers focus", async () => {
-    stubFetch(defaultRouter({ status: 409, body: LEAF_TAKEN }));
+  it("409 seat-taken → names the owning session and offers focus", async () => {
+    stubFetch(defaultRouter({ status: 409, body: SEAT_TAKEN }));
     const view = renderFlow();
     await launchClaudePair(view);
-    const outcome = await view.findByTestId("launch-outcome-leaf-taken");
+    const outcome = await view.findByTestId("launch-outcome-seat-taken");
     expect(outcome.textContent).toContain("worker-l3-live");
     fireEvent.click(view.getByTestId("launch-focus-owner"));
     expect(view.onFocusSession).toHaveBeenCalledWith("worker-l3-live");

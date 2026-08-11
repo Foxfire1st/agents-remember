@@ -4,9 +4,39 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fromTerminalSessionInfo, sessionStore } from "../../../data/sessions";
 import { sessionCockpitStore } from "../../../data/sessionCockpitStore";
 import { catalogRow, FLEET } from "../../../test/fixtures/catalogRows";
+import { taskDoc } from "../../../test/fixtures/wire";
+import type { TaskDocNode } from "../../../types/projection";
 import { SessionsView } from "./SessionsView";
 // Registers the shared afterEach (store/localStorage reset) for this split file.
 import "./test-utils";
+
+const projectedDoc = (
+  folder: string,
+  id: string,
+  kind: "master" | "subTask",
+  orchestrates: string[] = [],
+): TaskDocNode =>
+  taskDoc({
+    repository: "agents-remember",
+    id,
+    title: id,
+    kind,
+    orchestrates,
+    docPath: `/tasks/agents-remember/${folder}/${id === "master" ? "task" : id}.json`,
+  });
+
+const FLEET_TASK_DOCUMENTS: TaskDocNode[] = [
+  projectedDoc("260700_sprint", "master", "master", [
+    "260714_own-adapter-capability",
+    "260715_react-tui-cockpit-frontend",
+  ]),
+  projectedDoc("260714_own-adapter-capability", "master", "master"),
+  projectedDoc("260714_own-adapter-capability", "01_protocol", "subTask"),
+  projectedDoc("260714_own-adapter-capability", "04_serving", "subTask"),
+  projectedDoc("260714_own-adapter-capability", "05_capabilities", "subTask"),
+  projectedDoc("260715_react-tui-cockpit-frontend", "master", "master"),
+  projectedDoc("260715_react-tui-cockpit-frontend", "01_view-shell", "subTask"),
+];
 
 vi.mock("../../Terminal", async () => {
   const { useEffect } = await import("react");
@@ -185,7 +215,7 @@ describe("smart-default focus + handoff + session cycling (L2: R9, F17)", () => 
   });
 
   it("alt+↓ / alt+↑ cycle the rail order from the chrome zone", async () => {
-    render(<SessionsView active />);
+    render(<SessionsView active taskDocuments={FLEET_TASK_DOCUMENTS} />);
     await waitFor(() =>
       expect(sessionCockpitStore.getState().focusedSessionId).toBe(
         "worker-tui",
@@ -284,7 +314,11 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
   });
 
   it("keeps a focused landed row on palette failure, then hands it to the smart live default after retry", async () => {
-    const master = "repo/cleanup-master";
+    const masterKey = "agents-remember:cleanup-master/task.json";
+    const taskDocuments = [
+      projectedDoc("cleanup-master", "master", "master"),
+      projectedDoc("cleanup-master", "leaf-1", "subTask"),
+    ];
     const rows = [
       catalogRow({
         id: "cleanup-smart-live",
@@ -297,7 +331,12 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
         id: "cleanup-focused-landed",
         label: "focused landed row",
         status: "landed",
-        leafKey: `${master}/leaf-1`,
+        spawnRole: "worker",
+        seatRole: "worker",
+        taskDocumentRef: {
+          repository: "agents-remember",
+          path: "cleanup-master/leaf-1.json",
+        },
         landedReason: "leaf integrated",
       }),
     ];
@@ -332,7 +371,9 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
         return { ok: true, json: async () => ({}) } as Response;
       }),
     );
-    const { findByTestId, getByTestId } = render(<SessionsView active />);
+    const { findByTestId, getByTestId } = render(
+      <SessionsView active taskDocuments={taskDocuments} />,
+    );
     await waitFor(() =>
       expect(sessionCockpitStore.getState().focusedSessionId).toBe(
         "cleanup-smart-live",
@@ -341,7 +382,7 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
     // A controlled seat's live body is now the structured ConversationSurface, not
     // the PTY, so this test asserts the focus-handoff subject only; conversation keep-alive across
     // focus is the LRU'd active-conversation store (covered by its own store tests).
-    fireEvent.click(getByTestId(`rail-done-toggle-${master}`));
+    fireEvent.click(getByTestId(`rail-done-toggle-${masterKey}`));
     fireEvent.click(getByTestId("rail-row-cleanup-focused-landed"));
     await waitFor(() =>
       expect(sessionCockpitStore.getState().focusedSessionId).toBe(
@@ -356,7 +397,7 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
       ctrlKey: true,
     });
     fireEvent.click(
-      await findByTestId(`palette-cmd-sessions.endDone.${master}`),
+      await findByTestId(`palette-cmd-sessions.endDone.${masterKey}`),
     );
     await findByTestId("landed-cleanup-failure");
     expect(sessionCockpitStore.getState().focusedSessionId).toBe(

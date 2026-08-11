@@ -1,10 +1,12 @@
 import { css, cva } from "../../styled-system/css";
 import { sessionSeatRole, type OpenSession } from "../data/sessions";
+import { sameTaskDocumentRef } from "../data/taskIdentity";
+import type { TaskDocumentRef } from "../types/terminalCatalog";
 
 export type ChatActivityState = "needs-input" | "working" | "unknown" | "idle";
 
 export interface ChatActivityIdentity {
-  leafKey?: string;
+  taskDocumentRef?: TaskDocumentRef;
   lifecycleId?: string;
 }
 
@@ -94,13 +96,15 @@ function boundSessions(
   identity: ChatActivityIdentity,
 ): OpenSession[] {
   const liveHarnesses = sessions.filter(isLiveHarness);
-  const exactLeaf = identity.leafKey
-    ? liveHarnesses.filter((session) => session.leafKey === identity.leafKey)
+  const exactTask = identity.taskDocumentRef
+    ? liveHarnesses.filter((session) =>
+        sameTaskDocumentRef(session.taskDocumentRef, identity.taskDocumentRef),
+      )
     : [];
-  if (exactLeaf.length > 0) return exactLeaf;
+  if (exactTask.length > 0) return exactTask;
   if (!identity.lifecycleId) return [];
   return liveHarnesses.filter(
-    (session) => !session.leafKey && session.lifecycleId === identity.lifecycleId,
+    (session) => !session.taskDocumentRef && session.lifecycleId === identity.lifecycleId,
   );
 }
 

@@ -26,6 +26,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer import observer_root, reset_ambient
 from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.tasks import TaskDocument, write_task_doc
@@ -117,7 +118,7 @@ class SpawnExpectationRowTests(unittest.TestCase):
         payload = call_spawn(
             self.config,
             session_id="worker-1",
-            leaf_key="repo/master/leaf-1",
+            task_document_ref=TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
             env={"AR_SPAWN_ROLE": "worker"},
             host=self.host,
             which=_detected,

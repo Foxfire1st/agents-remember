@@ -24,12 +24,11 @@ manager watching for it (uniform-mechanism ruling 2026-07-07).
 | ------------ | --------------------------------------- |
 | leaf         | <leaf id / task_doc path>               |
 | master       | <master id>                             |
-| worker       | <this session's agent/lifecycle id>     |
+| worker seat  | <leaf task_doc path> + worker           |
 | worktree     | <branch / worktree>                     |
 | status       | in-progress | leaf-complete | blocked    |
 | checks       | green | failing:<which> | not-yet-run    |
 | written      | <YYYY-MM-DDTHH:MM>                       |
-| inbox        | <operator_inbox entry id or none>        |
 
 ## What Was Done
 - <concrete change> (files: `<path>`, …)

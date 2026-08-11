@@ -30,8 +30,9 @@ from agents_remember.controlplane.durable_store import (
     read_log_text,
     rewrite_lines,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
-EXPECTATION_ROW_SCHEMA = "ar-expectation-row/v1"
+EXPECTATION_ROW_SCHEMA = "ar-expectation-row/v2"
 
 # 260707-HFX2-L12 F4: how long a met/missed row is kept for dashboard/provenance before the
 # store reclaims it. Pending rows are always kept. Terminal rows older than this can no longer
@@ -46,7 +47,7 @@ ExpectationState = Literal["pending", "met", "missed"]
 
 
 class ExpectationRow(DurableRecord):
-    """One append-only ``ar-expectation-row/v1`` snapshot: what must happen, by when."""
+    """One append-only ``ar-expectation-row/v2`` snapshot: what must happen, by when."""
 
     schema_version: str = Field(default=EXPECTATION_ROW_SCHEMA, alias="schema")
     id: str
@@ -61,7 +62,7 @@ class ExpectationRow(DurableRecord):
     sourceId: str
     subjectAgentId: str | None = None
     subjectLifecycleId: str | None = None
-    leafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
     seatRole: str | None = None
     note: str | None = None
     metAt: str | None = None
@@ -76,7 +77,7 @@ class ExpectationSubject:
 
     agent_id: str | None = None
     lifecycle_id: str | None = None
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str | None = None
 
 
@@ -111,7 +112,7 @@ def create_expectation_row(
         sourceId=expectation.source_id,
         subjectAgentId=subject.agent_id,
         subjectLifecycleId=subject.lifecycle_id,
-        leafKey=subject.leaf_key,
+        taskDocumentRef=subject.task_document_ref,
         seatRole=subject.seat_role,
         note=expectation.note,
     )

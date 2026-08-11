@@ -16,6 +16,7 @@ import {
   type HarnessActivityState,
   type HarnessControlState,
 } from "./terminal";
+import type { TaskDocumentRef } from "../types/terminalCatalog";
 
 export { terminalOpenFailureMessage } from "./terminal";
 
@@ -31,11 +32,11 @@ export interface OpenSession {
   kind?: TerminalOpenKind;
   harness?: string;
   lifecycleId?: string;
-  /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat is bound to. */
-  leafKey?: string;
+  /** The canonical JSON-primary task document this seat occupies. */
+  taskDocumentRef?: TaskDocumentRef;
   /** The AR_SPAWN_ROLE recorded at spawn — the Chats command-tree grouping key. */
   spawnRole?: string;
-  /** The role occupying the leaf binding; authoritative for grouping and seat identity. */
+  /** The role occupying the task document; authoritative for grouping and seat identity. */
   seatRole?: string;
   status?: TerminalSessionStatus;
   createdAt?: string;
@@ -53,8 +54,6 @@ export interface OpenSession {
   /** The RESOLVED dispatch level (leaf|master|portfolio) + explicit-vs-default provenance. */
   spawnLevel?: string;
   spawnLevelSource?: string;
-  spawnRepo?: string;
-  spawnSprint?: string;
   // The settings-resolved model/effort pinned at launch — REQUESTED provenance, never proof of
   // the effective pair (evidence tiers live in sessionCockpitStore).
   resolvedModel?: string;
@@ -84,7 +83,7 @@ export interface OpenSession {
   exitEvidence?: string;
 }
 
-type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
+type SessionCatalogChangeReason = "create" | "terminate" | "task";
 
 interface SessionCatalogChangeMessage {
   type: "terminal-catalog-changed";
@@ -107,7 +106,7 @@ function isSessionCatalogChangeMessage(data: unknown): data is SessionCatalogCha
   return (
     message.type === "terminal-catalog-changed" &&
     typeof message.source === "string" &&
-    (message.reason === "create" || message.reason === "terminate" || message.reason === "leaf") &&
+    (message.reason === "create" || message.reason === "terminate" || message.reason === "task") &&
     (message.sessionId === undefined || typeof message.sessionId === "string")
   );
 }
@@ -162,18 +161,22 @@ interface SessionState {
   /** Attach a hosted session to one lifecycle; latest attachment owns that lifecycle route. */
   setLifecycle: (id: string, lifecycleId: string | null) => void;
   /**
-   * Bind a hosted session to one durable leaf (qualified leaf id), or clear it (`null`). Advisory
+   * Bind a hosted session to one canonical task document, or clear it (`null`). Advisory
    * uniqueness is scoped to the session's current role; the server remains the real arbiter.
    */
-  setLeaf: (id: string, leafKey: string | null) => void;
+  setTask: (id: string, taskDocumentRef: TaskDocumentRef | null) => void;
   /**
-   * Apply a server/catalog-authoritative leaf assignment after a successful backend attach or hydrate.
-   * Same-role local owners of the destination leaf are cleared because the catalog result wins.
+   * Apply a server/catalog-authoritative task assignment after backend attach or hydrate.
+   * Same-role local occupants of the destination seat are cleared because the catalog wins.
    */
-  applyLeafAssignment: (id: string, leafKey: string | null, seatRole: string) => void;
+  applyTaskAssignment: (
+    id: string,
+    taskDocumentRef: TaskDocumentRef | null,
+    seatRole: string,
+  ) => void;
 }
 
-/** A session's leaf-uniqueness role: a plain shell is a TERMINAL, any agent harness is a CHAT. */
+/** A session's transport-role fallback: a plain shell is a TERMINAL, a harness is a CHAT. */
 export type SessionRole = "chat" | "terminal";
 
 /** Derive a session's role from its kind (mirrors the backend `role_for_kind`). */
@@ -181,7 +184,7 @@ export function sessionRole(session: Pick<OpenSession, "kind">): SessionRole {
   return session.kind === "terminal" ? "terminal" : "chat";
 }
 
-/** The role occupying a leaf binding; legacy rows fall back to origin provenance, then transport. */
+/** The role occupying a task binding; unbound rows fall back to origin provenance, then transport. */
 export function sessionSeatRole(
   session: Pick<OpenSession, "kind" | "seatRole" | "spawnRole">,
 ): string {
@@ -202,10 +205,19 @@ function clearLifecycle(session: OpenSession): OpenSession {
   return next;
 }
 
-function clearLeaf(session: OpenSession): OpenSession {
+function clearTask(session: OpenSession): OpenSession {
   const next = { ...session };
-  delete next.leafKey;
+  delete next.taskDocumentRef;
   return next;
+}
+
+function sameTaskDocument(
+  left: TaskDocumentRef | null | undefined,
+  right: TaskDocumentRef | null | undefined,
+): boolean {
+  return Boolean(
+    left && right && left.repository === right.repository && left.path === right.path,
+  );
 }
 
 function inferOrdinal(label: string): number | null {
@@ -436,19 +448,17 @@ function lifecycleSessionState(set: SessionStoreSet): Pick<SessionState, "setLif
   };
 }
 
-function leafSessionState(set: SessionStoreSet): Pick<SessionState, "setLeaf"> {
+function taskSessionState(set: SessionStoreSet): Pick<SessionState, "setTask"> {
   return {
-    setLeaf: (id, leafKey) =>
+    setTask: (id, taskDocumentRef) =>
       set((state) => {
-      if (leafKey) {
-        // Advisory guard, scoped to the binding session's role (chat vs. terminal): a live session of
-        // the SAME role already owning this leaf wins — the new bind is a no-op. A chat and a terminal
-        // can both bind one leaf, so they never block each other. The server's 409 is the real arbiter.
+      if (taskDocumentRef) {
+        // Advisory same-role guard; the server remains the real structural-seat arbiter.
         const role = sessionSeatRole(state.sessions.find((session) => session.id === id) ?? {});
         const owner = state.sessions.find(
           (session) =>
             session.id !== id &&
-            session.leafKey === leafKey &&
+            sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
             isLiveSession(session) &&
             sessionSeatRole(session) === role,
         );
@@ -457,9 +467,9 @@ function leafSessionState(set: SessionStoreSet): Pick<SessionState, "setLeaf"> {
       return {
         sessions: state.sessions.map((session) =>
           session.id === id
-            ? leafKey
-              ? { ...session, leafKey }
-              : clearLeaf(session)
+            ? taskDocumentRef
+              ? { ...session, taskDocumentRef }
+              : clearTask(session)
             : session,
         ),
       };
@@ -467,24 +477,26 @@ function leafSessionState(set: SessionStoreSet): Pick<SessionState, "setLeaf"> {
   };
 }
 
-function assignmentSessionState(set: SessionStoreSet): Pick<SessionState, "applyLeafAssignment"> {
+function assignmentSessionState(set: SessionStoreSet): Pick<SessionState, "applyTaskAssignment"> {
   return {
-    applyLeafAssignment: (id, leafKey, seatRole) =>
+    applyTaskAssignment: (id, taskDocumentRef, seatRole) =>
       set((state) => {
       const target = state.sessions.find((session) => session.id === id);
       if (!target) return state;
       return {
         sessions: state.sessions.map((session) => {
           if (session.id === id) {
-            return leafKey ? { ...session, leafKey, seatRole } : clearLeaf(session);
+            return taskDocumentRef
+              ? { ...session, taskDocumentRef, seatRole }
+              : clearTask(session);
           }
           if (
-            leafKey &&
-            session.leafKey === leafKey &&
+            taskDocumentRef &&
+            sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
             isLiveSession(session) &&
             sessionSeatRole(session) === seatRole
           ) {
-            return clearLeaf(session);
+            return clearTask(session);
           }
           return session;
         }),
@@ -505,7 +517,7 @@ export const sessionStore = createStore<SessionState>((set) => ({
   ...patchSessionState(set),
   setActive: (id) => set({ activeId: id }),
   ...lifecycleSessionState(set),
-  ...leafSessionState(set),
+  ...taskSessionState(set),
   ...assignmentSessionState(set),
 }));
 
@@ -544,15 +556,17 @@ export function sessionPendingInteractionPayload(
 }
 
 /**
- * The single LIVE session bound to `leafKey` (mirrors {@link findSessionForLifecycle}). Pass `role`
- * to find the leaf's chat vs. its terminal independently — a leaf can hold one of each.
+ * The single LIVE session bound to a task document (mirrors {@link findSessionForLifecycle}).
  */
-export function findSessionForLeaf(leafKey: string, role?: SessionRole): OpenSession | undefined {
+export function findSessionForTask(
+  taskDocumentRef: TaskDocumentRef,
+  role?: SessionRole,
+): OpenSession | undefined {
   return sessionStore
     .getState()
     .sessions.find(
       (session) =>
-        session.leafKey === leafKey &&
+        sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
         isLiveSession(session) &&
         (role === undefined || sessionRole(session) === role),
     );
@@ -567,7 +581,7 @@ const OPTIONAL_SESSION_FIELDS: {
 }[] = [
   { from: "harness", to: "harness" },
   { from: "lifecycleId", to: "lifecycleId" },
-  { from: "leafKey", to: "leafKey" },
+  { from: "taskDocumentRef", to: "taskDocumentRef" },
   { from: "spawnRole", to: "spawnRole" },
   { from: "seatRole", to: "seatRole" },
   { from: "createdAt", to: "createdAt" },
@@ -583,8 +597,6 @@ const OPTIONAL_SESSION_FIELDS: {
   { from: "spawnedLabel", to: "spawnedLabel" },
   { from: "spawnLevel", to: "spawnLevel" },
   { from: "spawnLevelSource", to: "spawnLevelSource" },
-  { from: "spawnRepo", to: "spawnRepo" },
-  { from: "spawnSprint", to: "spawnSprint" },
   { from: "resolvedModel", to: "resolvedModel" },
   { from: "resolvedEffort", to: "resolvedEffort" },
   { from: "turnState", to: "turnState" },
@@ -773,14 +785,16 @@ export async function createSession(
   kind: "terminal" | "harness" = "terminal",
   harness?: string,
   lifecycleId?: string,
-  leafKey?: string,
+  taskDocumentRef?: TaskDocumentRef,
+  role?: string,
 ): Promise<CreateSessionResult> {
   const id = crypto.randomUUID();
   const label = nextSessionLabel(prefix, sessionStore.getState().sessions);
   const result = await openTerminalSession(id, kind, "", harness, {
     label,
     lifecycleId,
-    leafKey,
+    taskDocumentRef,
+    role,
   });
   if (result.outcome === "failed") return result;
   sessionStore.getState().upsert(result.session, true);

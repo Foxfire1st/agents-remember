@@ -132,8 +132,8 @@ export function LibraryAndDiagnostics({
         <ConversationLibrarySurface
           harnessId={harnessId}
           launchContext={
-            focused.leafKey
-              ? { leafKey: focused.leafKey, seatRole: focused.seatRole }
+            focused.taskDocumentRef
+              ? { taskDocumentRef: focused.taskDocumentRef, seatRole: focused.seatRole }
               : undefined
           }
           onOpened={(arSessionId) => {

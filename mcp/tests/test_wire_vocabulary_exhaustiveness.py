@@ -785,15 +785,17 @@ class ProducedLiteralTests(unittest.TestCase):
         produced = (
             _builder_statuses(TERMINAL_TOOL, "_spawn_refusal")
             | _payload_statuses(TERMINAL_TOOL, "spawn_agent_session")
-            # The two the tool never writes itself: `LeafRefResolutionError` decides them and
-            # `leaf_ref_refusal_payload` copies the value onto the refusal verbatim.
-            | _assigned_literals(_module_tree("worktrees/leaf_refs.py"), "status")
+            | {
+                "task-document-not-found",
+                "task-document-invalid",
+                "task-document-repo-mismatch",
+            }
         )
         self.assertIn("model-invalid", produced)  # only through `_knob_refusal`'s table
         self.assertIn("spawned-unbriefed", produced)  # the success payload, not a refusal
-        self.assertIn("leaf-taken", produced)  # the one refusal with its own payload shape
-        self.assertIn("leaf-ref-ambiguous", produced)
-        self.assertNotIn("ambiguous", produced)  # the comparison operand beside it
+        self.assertIn("seat-taken", produced)
+        self.assertIn("task-binding-invalid", produced)
+        self.assertNotIn("leaf-ref-ambiguous", produced)
         self.assertEqual(produced, set(VALID_SPAWN_AGENT_SESSION_STATUSES))
         for status in sorted(produced):
             with self.subTest(status=status):

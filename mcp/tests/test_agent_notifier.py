@@ -28,6 +28,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionKind,
@@ -53,7 +54,7 @@ def _entry(
     *,
     kind: TerminalSessionKind = "harness",
     status: TerminalSessionStatus = "running",
-    leaf_key: str | None = None,
+    task_document_ref: TaskDocumentRef | None = None,
 ) -> TerminalCatalogEntry:
     """A seat row. Turn state comes from the row's own ``with_turn_state``; anything else
     from ``replace(...)`` -- ``TerminalCatalogEntry`` already carries every field, so the
@@ -71,7 +72,7 @@ def _entry(
         created_at="2026-07-08T00:00:00+00:00",
         last_attached_at="2026-07-08T00:00:00+00:00",
         status=status,
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
     )
 
 

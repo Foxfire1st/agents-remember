@@ -5,7 +5,6 @@ import { hydrateTerminalSessionsFromCatalog } from "../../data/catalogPoll";
 import { verbatimBridgeError } from "../../data/launchEvidence";
 import type { OpenSession } from "../../data/sessions";
 import { terminateTerminalSession } from "../../data/terminal";
-import { leafIdFromKey } from "../../data/taskIdentity";
 import { EvidenceBadge } from "../../grammar/EvidenceBadge";
 import type { LaunchPrefill } from "./LaunchFlow";
 
@@ -193,7 +192,7 @@ function RetireConfirmation({
     <div className={confirmBox} data-testid="failed-launch-retire-confirm">
       <span>
         retire session “{session.label}”
-        {session.leafKey ? ` (leaf ${leafIdFromKey(session.leafKey)})` : ""}? This ends the
+        {session.taskDocumentRef ? ` (task ${session.taskDocumentRef.path})` : ""}? This ends the
         refused runner and removes the row from the live rail.
       </span>
       <div className={actionRow}>

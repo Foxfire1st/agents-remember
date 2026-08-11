@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from pydantic import Field, ValidationError
@@ -41,6 +42,7 @@ from agents_remember.mcp.tools import operator_inbox as inbox_tools
 from agents_remember.models.conversations.control_wire import (
     SubmissionReceipt,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -59,6 +61,14 @@ from agents_remember.serving.terminal_paste import PasteResult
 
 T1 = "2026-06-23T10:00:00+00:00"
 T2 = "2026-06-23T10:05:00+00:00"
+SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo-a", path="master/task.json")
+LEAF_REF = TaskDocumentRef(repository="repo-a", path="master/leaf-9.json")
+
+
+class _TaskHierarchy:
+    def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
+        return {LEAF_REF: MASTER_REF, MASTER_REF: SPRINT_REF, SPRINT_REF: None}[ref]
 
 
 class OperatorInboxRecordTests(unittest.TestCase):
@@ -121,7 +131,7 @@ class OperatorInboxRecordTests(unittest.TestCase):
             poster=InboxPoster(created_by="developer", created_via="dashboard"),
         )
         line = entry.model_dump_json(by_alias=True, exclude_none=True)
-        self.assertIn('"schema":"ar-operator-inbox-entry/v1"', line)
+        self.assertIn('"schema":"ar-operator-inbox-entry/v2"', line)
         self.assertEqual(OperatorInboxEntry.model_validate_json(line), entry)
 
     def test_legacy_reader_preserves_named_adapter_evidence_only(self) -> None:
@@ -590,14 +600,22 @@ class OperatorInboxToolTests(unittest.TestCase):
         catalog = TerminalCatalog(self.store.root / "terminal-sessions.json")
         exact = operator_inbox_posts._post_address(
             catalog,
-            RoutedOwner(role="architect", agent_id="architect-a", lifecycle_id="L-architect"),
+            RoutedOwner(
+                role="architect",
+                task_document_ref=SPRINT_REF,
+                agent_id="architect-a",
+                lifecycle_id="L-architect",
+            ),
             message_kind="decision-item",
             address=InboxAddress(recipient_role="architect"),
         )
         self.assertEqual(
             exact,
             InboxAddress(
-                lifecycle_id="L-architect", agent_id="architect-a", recipient_role="architect"
+                task_document_ref=SPRINT_REF,
+                lifecycle_id="L-architect",
+                agent_id="architect-a",
+                recipient_role="architect",
             ),
         )
         catalog.upsert(
@@ -613,11 +631,8 @@ class OperatorInboxToolTests(unittest.TestCase):
                 created_at=T1,
                 last_attached_at=T1,
                 status="running",
-                leaf_key="repo-a/sprint-a/leaf-1",
                 spawn_role="manager",
                 seat_role="manager",
-                spawn_repo="repo-a",
-                spawn_sprint="sprint-a",
             )
         )
         refused = operator_inbox_posts.post_operator_inbox_entry(
@@ -658,7 +673,6 @@ class OperatorInboxToolTests(unittest.TestCase):
         """Live halt regression: a completed reviewer with stale manager provenance must address
         and paste the existing turn-report signal into the current manager session."""
         catalog = TerminalCatalog(self.store.root / "terminal-sessions.json")
-        leaf_key = "repo-a/260707_master/leaf-9"
         catalog.upsert(
             TerminalCatalogEntry(
                 id="manager-old",
@@ -672,7 +686,7 @@ class OperatorInboxToolTests(unittest.TestCase):
                 created_at=T1,
                 last_attached_at=T1,
                 status="terminated",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                task_document_ref=MASTER_REF,
                 spawn_role="manager",
                 control_state="ready",
                 control_endpoint=self.store.root / "manager.sock",
@@ -692,7 +706,7 @@ class OperatorInboxToolTests(unittest.TestCase):
                 created_at=T1,
                 last_attached_at=T2,
                 status="running",
-                leaf_key="repo-a/260707_master/current-manager-anchor",
+                task_document_ref=MASTER_REF,
                 spawn_role="manager",
                 control_state="ready",
                 control_endpoint=self.store.root / "manager-current.sock",
@@ -712,7 +726,7 @@ class OperatorInboxToolTests(unittest.TestCase):
                 created_at=T1,
                 last_attached_at=T2,
                 status="running",
-                leaf_key=leaf_key,
+                task_document_ref=LEAF_REF,
                 spawned_by_session="manager-old",
                 spawn_role="reviewer",
             )
@@ -731,10 +745,17 @@ class OperatorInboxToolTests(unittest.TestCase):
                 pasted_to.append(tmux_name)
                 return PasteResult(delivered=True, submitted=submit)
 
-        with mock.patch(
-            "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            autospec=True,
-        ) as submit_prompt:
+        with (
+            mock.patch(
+                "agents_remember.serving.inbox_delivery.submit_control_prompt",
+                autospec=True,
+            ) as submit_prompt,
+            mock.patch.object(
+                operator_inbox_posts,
+                "TaskDocumentTopology",
+                return_value=_TaskHierarchy(),
+            ),
+        ):
             submit_prompt.side_effect = lambda _target, _text, submission: SubmissionReceipt(
                 request_id=submission.request_id,
                 acceptance="immediate",
@@ -742,9 +763,12 @@ class OperatorInboxToolTests(unittest.TestCase):
                 accepted_at=T1,
             )
             posted = inbox_tools.operator_inbox_post_payload(
-                None,  # type: ignore[arg-type]
+                SimpleNamespace(coordination_root=self.store.root),  # type: ignore[arg-type]
                 address=InboxAddress(
-                    lifecycle_id="L-old", agent_id="manager-old", recipient_role="manager"
+                    task_document_ref=MASTER_REF,
+                    lifecycle_id="L-old",
+                    agent_id="manager-old",
+                    recipient_role="manager",
                 ),
                 message=InboxMessage(
                     ask="Reviewer report complete",

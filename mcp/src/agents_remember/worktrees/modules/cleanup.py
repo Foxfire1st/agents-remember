@@ -29,6 +29,7 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 TerminalItems: TypeAlias = dict[str, dict[str, object]]
+ENCLOSURE_REPORTS_DIRECTORY = "reports"
 CleanupOutputs: TypeAlias = tuple[
     dict[str, object],
     TerminalItems,
@@ -355,12 +356,18 @@ def _scheduled_removal_paths(
 def _removed_directories(
     contract, dry_run: bool, planned_removed: set[Path] | None = None
 ) -> dict[str, dict[str, object]]:
+    reports_path = contract.worktree_group / ENCLOSURE_REPORTS_DIRECTORY
+    reports = worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
+    planned = set(planned_removed or ())
+    if reports.get("removed") or reports.get("would_remove"):
+        planned.add(reports_path.resolve())
     directories = {
-        "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned_removed),
+        "reports": reports,
+        "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned),
     }
     if contract.worktree_group.parent.exists():
         directories["repo_worktree_group"] = remove_empty_dir(
-            contract.worktree_group.parent, dry_run, planned_removed
+            contract.worktree_group.parent, dry_run, planned
         )
     return directories
 

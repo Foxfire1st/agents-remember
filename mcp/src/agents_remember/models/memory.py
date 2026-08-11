@@ -32,6 +32,21 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     repoId: str | None = None
     onboardingRoot: str | None = None
     checks: dict[str, Any] | list[dict[str, Any]] | None = None
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "For a full contract-scoped check, the single enclosure-local curator checklist "
+            "that this invocation atomically replaced."
+        ),
+    )
+    checklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
+    curatorActionableCount: int | None = Field(default=None, ge=0)
+    memoryRepairCount: int | None = Field(default=None, ge=0)
+    missingOnboardingCount: int | None = Field(default=None, ge=0)
+    staleRouteIndexCount: int | None = Field(default=None, ge=0)
+    sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
+    closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
+    noteworthyFindingCount: int | None = Field(default=None, ge=0)
 
 
 class RouteIndexRefreshResponse(FlexibleToolResponse):
@@ -41,6 +56,10 @@ class RouteIndexRefreshResponse(FlexibleToolResponse):
     # caller has to be able to see whether it just wrote its leaf or the official repo.
     onboardingRoot: str | None = None
     dryRun: bool | None = None
+    staleIndexes: list[str] | None = Field(
+        default=None,
+        description="Route-index paths whose rendered bytes differ from the onboarding census.",
+    )
 
 
 class MemoryInitResponse(FlexibleToolResponse):

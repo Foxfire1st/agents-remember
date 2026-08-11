@@ -435,7 +435,7 @@ class TerminalWebSocketTests(unittest.TestCase):
             doc_id="260628-L5",
         )
         self.host = _FakeTerminalHost(cwd=self.tmp)
-        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
+        self.catalog = TerminalCatalog(self.tmp / "logs/dashboard/terminal-sessions.json")
         self.app = create_app(
             _config(self.tmp),
             cadence=ProjectionCadence(interval=100),

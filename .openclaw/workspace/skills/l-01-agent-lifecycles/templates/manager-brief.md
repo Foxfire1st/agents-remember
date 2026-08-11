@@ -2,9 +2,10 @@
 
 The dispatch packet the orchestrator compiles for a manager taking one master. Like the worker
 brief, **this brief is the manager's entire session start** — it replaces the front half the
-orchestrator already ran. Spawn with `env={"AR_SPAWN_ROLE": "manager"}` and the **qualified** leaf
-key of the master's coordination leaf (`<repository>/<master>/<docId>`); together they claim the
-manager's `(leaf, role)` seat.
+orchestrator already ran. Dispatch it with
+`dispatch_agent(task_document_ref=<canonical master document>, role="manager", brief=<this
+complete brief>)`. The control plane claims the `(master document, manager)` seat and privately
+binds its current occupant.
 
 ---
 
@@ -30,22 +31,24 @@ master's leaf loop to the master-exit seam, then hand over.
 - Leaf worktrees base off your master branch (normal `worktree_start` per leaf).
 
 ## Dispatch defaults
-- Worker spawns: `templates/worker-brief.md`, `env={"AR_SPAWN_ROLE": "worker"}`, qualified leaf
-  keys; the environment role and qualified leaf together claim each worker's `(leaf, role)` seat;
-  knob overrides: <settings/orchestration notes or none>.
+- Worker dispatches: `templates/worker-brief.md`, with each canonical leaf document and role
+  `worker`; the control plane claims each `(leaf document, worker)` seat; knob overrides:
+  <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
-  builder code + reviewer verdict + curator memory pass — never before the curator pass exists.
+  builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
 - Quality altitude ladder (260731-EFA-L17): leaf closeout and leaf integration run the
   change-set-scoped contract (`agents_remember.code_quality.check --targeted`); the FULL wrapper
   runs exactly once per master inside `worktree_integrate` at master altitude, memory-capped
   (`orchestration.qualityGate.memoryCapBytes`). `memory_quality_check` stays a per-leaf closeout
   gate; a leaf closeout that skips its required checks is refused, not passed.
-- Curator spawns: `../templates/curator-brief.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per
-  leaf with the qualified leaf key, so the environment role and qualified leaf claim the
-  curator's `(leaf, role)` seat; dispatch only after builder code and the reviewer verdict are
-  available. The brief FEEDS the landed change set (leaf contract's base-to-head range) + the leaf
-  task doc + notes/ — the curator routes each to the right onboarding home (specific sidecar or
-  governing overview; L3 Operational-Notes last-resort only) and writes onboarding only.
+- Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf
+  document and role `curator`, so the plane claims the `(leaf document, curator)` seat; dispatch
+  only after builder code and the reviewer verdict are
+  available. The brief FEEDS the landed change set (leaf contract's base-to-head range), existing
+  onboarding/entity intent anchors, the leaf task doc, approved developer/design rulings, and
+  notes/. The curator performs the conservative three-way intent reconciliation, routes accepted
+  current truth to the right onboarding home (specific sidecar or governing overview;
+  L3 Operational-Notes last-resort only), and writes onboarding only.
 - Concurrency: <max parallel leaves or "sequential">.
 - Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
@@ -56,26 +59,25 @@ master's leaf loop to the master-exit seam, then hand over.
   that exact leaf. Retirement kills tmux but preserves reports and transcripts; missing-report
   seats remain live and are returned as deferred. `retirement.autoCloseCompletedSeats=false`
   restores the previous landed/archive behavior. Manager/orchestrator seats are excluded. Use
-  `session_retire` only for a stuck/abandoned worker/reviewer/curator seat of YOUR OWN master —
-  server policy refuses any other target.
+  `retire_child` only for a stuck/abandoned worker/reviewer/curator seat of YOUR OWN master,
+  addressed by canonical leaf document plus role; server policy refuses any other target.
 
 ## The exit
-- When all leaves have landed on your branch: spawn the master-exit reviewer
-  (`env={"AR_SPAWN_ROLE": "reviewer"}`, `roles/reviewer.md`) with the scope packet your role file
+- When all leaves have landed on your branch: dispatch the master-exit reviewer on its canonical
+  review document with role `reviewer` and `roles/reviewer.md`, using the scope packet your role file
   enumerates; then RAISE the gate without blocking —
-  `lifecycle_gate(kind="master-handover-approval", enclosure="<master task name>",
-  evidence_refs=[<verdict>], wait=false)` — the `enclosure` MUST carry the master's identity:
-  the EXACT master task name as the contracts carry it (the raise refuses without one) —
-  and post the master-handover packet **carrying the returned gateId**: the ORCHESTRATOR decides
-  the gate by that id. Under an all-human policy the raise blocks and the developer decides — do
-  not pass wait=false.
+  `lifecycle_gate(kind="master-handover-approval", evidence_refs=[<verdict>], wait=false)`.
+  The control plane derives the master document and privately records the gate. Post the
+  master-handover packet with the verdict and master document; the ORCHESTRATOR decides the one
+  matching open gate structurally. Under an all-human policy the raise blocks and the developer
+  decides — do not pass wait=false.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:
   `integration-approval`, `push-approval`, `cleanup-approval`.
 
 ## Reports
 - Your handover packet: `../templates/master-handover-packet.md`.
-- Leaf-review notes on your coordination leaf; decision-log entries for every delegated gate you
-  decide and every reopen.
+- Leaf-review notes on the relevant leaf document; decision-log entries for every delegated gate
+  you decide and every reopen.
 ```
 
 ---

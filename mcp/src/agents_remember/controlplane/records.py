@@ -22,7 +22,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.controlplane.durable_store import DurableRecord
-from agents_remember.models.gates import GateKind, GateState
+from agents_remember.models.structural.gates import GateKind, GateState
 
 GATE_RECORD_SCHEMA = "ar-gate-record/v1"
 # Through what surface the decision arrived -- kept separate from the actor

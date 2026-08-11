@@ -73,7 +73,7 @@ from agents_remember.models.application_requests import (
     GateDecisionRequest,
     LifecycleGateRequest,
 )
-from agents_remember.models.gates import (
+from agents_remember.models.structural.gates import (
     GateKind,
     coerce_gate_kind,
 )

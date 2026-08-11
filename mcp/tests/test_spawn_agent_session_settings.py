@@ -11,6 +11,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer import reset_ambient
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.terminal_catalog import (
@@ -25,6 +26,22 @@ from test_spawn_agent_session import (
     _write_leaf_task,
     call_spawn,
 )
+
+SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo-a", path="master/task.json")
+LEAF_REF = TaskDocumentRef(repository="repo-a", path="master/leaf-1.json")
+
+
+def _role_ref(kwargs: dict[str, object]) -> TaskDocumentRef | None:
+    env = kwargs.get("env")
+    role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
+    if role in {"architect", "orchestrator", "strategist", "designer", "system-specialist"}:
+        return SPRINT_REF
+    if role == "manager":
+        return MASTER_REF
+    if role in {"worker", "reviewer", "curator"}:
+        return LEAF_REF
+    return None
 
 
 class SettingsDefinedHarnessTests(unittest.TestCase):
@@ -67,6 +84,8 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        if "task_document_ref" not in base and (task_ref := _role_ref(base)) is not None:
+            base["task_document_ref"] = task_ref
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
@@ -174,7 +193,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             self.repo_root,
             {"harnesses": {"hermes": {"argv": ["hermes", "--local"]}}},
         )
-        payload = self._spawn(leaf_key="repo-a/master/leaf-1")
+        payload = self._spawn(task_document_ref=LEAF_REF)
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(_runner_config(self.host).argv, ("hermes", "--local"))
         # A leafless spawn resolves the GLOBAL layer only (no repo-local override).
@@ -232,6 +251,8 @@ class SpawnLevelResolutionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        if "task_document_ref" not in base and (task_ref := _role_ref(base)) is not None:
+            base["task_document_ref"] = task_ref
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
@@ -399,7 +420,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "reviewer"},
             level="master",
-            leaf_key="repo-a/master/leaf-1",
+            task_document_ref=LEAF_REF,
         )
         self.assertEqual(payload["status"], "spawned-unbriefed")
         # model: repo-local master override; effort: global master override; harness: flat default.

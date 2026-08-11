@@ -22,9 +22,10 @@ from agents_remember.controlplane.operator_inbox_transitions import RedeliveryFl
 from agents_remember.controlplane.signal_routing import (
     RoutedOwner,
     derive_signal_owner,
-    signal_leaf_key,
+    signal_task_document_ref,
 )
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -49,6 +50,7 @@ from agents_remember.serving.terminal_catalog import (
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -85,21 +87,23 @@ def _delivery_catalog(
 
 def _signal_route(
     catalog: TerminalCatalogPort | None,
+    topology: TaskDocumentTopology | None,
     *,
     sender_agent_id: str | None,
     message_kind: InboxMessageKind,
-) -> tuple[RoutedOwner, str | None]:
-    if catalog is None:
+) -> tuple[RoutedOwner, TaskDocumentRef | None]:
+    if catalog is None or topology is None:
         return RoutedOwner(), None
-    leaf_key = signal_leaf_key(catalog, sender_agent_id=sender_agent_id)
+    document = signal_task_document_ref(catalog, sender_agent_id=sender_agent_id)
     return (
         derive_signal_owner(
             catalog,
+            topology,
             sender_agent_id=sender_agent_id,
             message_kind=message_kind,
-            leaf_key=leaf_key,
+            task_document_ref=document,
         ),
-        leaf_key,
+        document,
     )
 
 
@@ -125,6 +129,7 @@ def _post_address(
         return address
     if message_kind == "decision-item":
         return InboxAddress(
+            task_document_ref=owner.task_document_ref,
             lifecycle_id=owner.lifecycle_id,
             agent_id=owner.agent_id,
             recipient_role=owner.role,
@@ -132,6 +137,7 @@ def _post_address(
     if not _is_owner_addressed(catalog, owner, address):
         return address
     return InboxAddress(
+        task_document_ref=owner.task_document_ref,
         lifecycle_id=owner.lifecycle_id,
         agent_id=owner.agent_id,
         recipient_role=owner.role,
@@ -141,6 +147,32 @@ def _post_address(
 _OWNER_ADDRESS_ROLES = frozenset({"manager", "orchestrator", "architect"})
 
 
+def _agent_address_is_owner(
+    catalog: TerminalCatalogPort,
+    owner: RoutedOwner,
+    agent_id: str,
+) -> bool:
+    target = catalog.get(agent_id)
+    if target is None:
+        # The addressed seat does not exist: the derived owner is the current qualified
+        # owner (the row would otherwise be born addressed to nobody).
+        return True
+    return target.binding_role == owner.role
+
+
+def _lifecycle_address_is_owner(
+    catalog: TerminalCatalogPort,
+    owner: RoutedOwner,
+    lifecycle_id: str,
+) -> bool:
+    seats = [
+        entry
+        for entry in catalog.list(include_terminated=True)
+        if entry.lifecycle_id == lifecycle_id
+    ]
+    return not seats or any(entry.binding_role == owner.role for entry in seats)
+
+
 def _is_owner_addressed(
     catalog: TerminalCatalogPort,
     owner: RoutedOwner,
@@ -148,23 +180,16 @@ def _is_owner_addressed(
 ) -> bool:
     """Whether ``address`` names an owner mailbox rather than an arbitrary peer seat."""
     if address.recipient_role is not None:
-        return address.recipient_role in _OWNER_ADDRESS_ROLES
+        if address.recipient_role not in _OWNER_ADDRESS_ROLES:
+            return False
+        return (
+            address.task_document_ref is None
+            or address.task_document_ref == owner.task_document_ref
+        )
     if address.agent_id is not None:
-        target = catalog.get(address.agent_id)
-        if target is None:
-            # The addressed seat does not exist: the derived owner is the current qualified
-            # owner (the row would otherwise be born addressed to nobody).
-            return True
-        return target.binding_role == owner.role
+        return _agent_address_is_owner(catalog, owner, address.agent_id)
     if address.lifecycle_id is not None:
-        seats = [
-            entry
-            for entry in catalog.list(include_terminated=True)
-            if entry.lifecycle_id == address.lifecycle_id
-        ]
-        if not seats:
-            return True
-        return any(entry.binding_role == owner.role for entry in seats)
+        return _lifecycle_address_is_owner(catalog, owner, address.lifecycle_id)
     return False
 
 
@@ -182,12 +207,12 @@ def _post_catalog(
 def _dispatch_entry_fields(
     target: TerminalCatalogEntry | None,
     *,
-    routed_leaf_key: str | None,
+    routed_task_document_ref: TaskDocumentRef | None,
     sender_agent_id: str | None,
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[TaskDocumentRef | None, str | None, str | None]:
     if target is None:
-        return routed_leaf_key, None, sender_agent_id
-    return target.binding_leaf_key, target.binding_role, target.id
+        return routed_task_document_ref, None, sender_agent_id
+    return target.binding_task_document_ref, target.binding_role, target.id
 
 
 def _persist_post(
@@ -238,14 +263,19 @@ def post_operator_inbox_entry(
     catalog = _post_catalog(context.config, context.delivery.catalog)
     host = context.delivery.host or TerminalHost()
     delivery = replace(context.delivery, catalog=catalog, host=host)
+    topology = (
+        TaskDocumentTopology(context.config.coordination_root)
+        if context.config is not None
+        else None
+    )
     dispatch_target = require_dispatch_target(
         message_kind=message.message_kind,
         agent_id=address.agent_id,
         delivery=delivery,
-        host=host,
     )
-    owner, routed_leaf_key = _signal_route(
+    owner, routed_task_document_ref = _signal_route(
         catalog,
+        topology,
         sender_agent_id=poster.sender_agent_id,
         message_kind=message.message_kind,
     )
@@ -255,9 +285,9 @@ def post_operator_inbox_entry(
             "operation": "operator_inbox_post",
             "status": "sprint-owner-required",
         }
-    leaf_key, seat_role, subject_agent_id = _dispatch_entry_fields(
+    task_document_ref, seat_role, subject_agent_id = _dispatch_entry_fields(
         dispatch_target,
-        routed_leaf_key=routed_leaf_key,
+        routed_task_document_ref=routed_task_document_ref,
         sender_agent_id=poster.sender_agent_id,
     )
     target = _post_address(catalog, owner, message_kind=message.message_kind, address=address)
@@ -265,7 +295,7 @@ def post_operator_inbox_entry(
         replace(
             message,
             subject=InboxSubject(
-                leaf_key=leaf_key,
+                task_document_ref=task_document_ref,
                 seat_role=seat_role,
                 agent_id=subject_agent_id,
             ),
@@ -276,6 +306,7 @@ def post_operator_inbox_entry(
             address=target,
             owner=InboxOwner(
                 role=owner.role,
+                task_document_ref=owner.task_document_ref,
                 agent_id=owner.agent_id,
                 lifecycle_id=owner.lifecycle_id,
             ),

@@ -17,8 +17,9 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxState,
     OperatorInboxVia,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
-OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v1"
+OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v2"
 
 OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS = frozenset(
     {"adapterDeliveryState", "adapterDeliveryDetail"}
@@ -38,10 +39,9 @@ def state_signal_landed(entry: OperatorInboxEntry) -> bool:
 
 @dataclass(frozen=True)
 class InboxAddress:
-    """The mailbox an inbox row is delivered to: a lifecycle, a specific agent, a role -- at
-    least one of the three, which is exactly what :func:`require_inbox_address` enforces. The
-    three are one address, never independently meaningful."""
+    """One structural mailbox plus its current private delivery correlations."""
 
+    task_document_ref: TaskDocumentRef | None = None
     lifecycle_id: str | None = None
     agent_id: str | None = None
     recipient_role: AgentRole | None = None
@@ -56,6 +56,7 @@ class InboxOwner:
     """
 
     role: AgentRole | None = None
+    task_document_ref: TaskDocumentRef | None = None
     agent_id: str | None = None
     lifecycle_id: str | None = None
 
@@ -75,11 +76,9 @@ class InboxRouting:
 
 @dataclass(frozen=True)
 class InboxSubject:
-    """What a row is about, as opposed to who it goes to: the leaf and the seat under
-    discussion and the agent being reported on. The agent-notifier coalesces re-fires and the
-    rebind machinery resolves the current owner on exactly this triple."""
+    """The document-owned seat a row concerns, plus private occupant correlation."""
 
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str | None = None
     agent_id: str | None = None
 
@@ -110,13 +109,21 @@ class InboxPoster:
 
 def require_inbox_address(
     *,
+    task_document_ref: TaskDocumentRef | None = None,
     lifecycle_id: str | None,
     agent_id: str | None,
     recipient_role: AgentRole | None = None,
 ) -> None:
     """Require at least one mailbox key before writing or polling inbox entries."""
-    if lifecycle_id is None and agent_id is None and recipient_role is None:
-        raise ValueError("operator inbox requires lifecycle_id, agent_id, or recipient_role")
+    if (
+        task_document_ref is None
+        and lifecycle_id is None
+        and agent_id is None
+        and recipient_role is None
+    ):
+        raise ValueError(
+            "operator inbox requires task_document_ref, lifecycle_id, agent_id, or recipient_role"
+        )
 
 
 class OperatorInboxCompatibleRecord(DurableRecord):
@@ -140,7 +147,7 @@ class OperatorInboxCompatibleRecord(DurableRecord):
 
 
 class OperatorInboxEntry(OperatorInboxCompatibleRecord):
-    """One append-only ``ar-operator-inbox-entry/v1`` snapshot."""
+    """One append-only ``ar-operator-inbox-entry/v2`` snapshot."""
 
     schema_version: str = Field(default=OPERATOR_INBOX_RECORD_SCHEMA, alias="schema")
     id: str
@@ -148,15 +155,15 @@ class OperatorInboxEntry(OperatorInboxCompatibleRecord):
     state: OperatorInboxState
     lifecycleId: str | None = None
     agentId: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
     senderAgentId: str | None = None
     senderRole: AgentRole | None = None
     recipientRole: AgentRole | None = None
     gateId: str | None = None
     messageKind: InboxMessageKind = "message"
     artifactPath: str | None = None
-    # Leaf-scoped agent-notifier/completion signals carry their durable routing subject so later
-    # redelivery/escalation can re-check the live leaf chain instead of trusting a stale address.
-    leafKey: str | None = None
+    # The durable structural subject survives occupant replacement. Exact ids are correlation only.
+    subjectTaskDocumentRef: TaskDocumentRef | None = None
     seatRole: str | None = None
     subjectAgentId: str | None = None
     ask: str
@@ -210,6 +217,7 @@ class OperatorInboxEntry(OperatorInboxCompatibleRecord):
     # architect) rather than the caller-supplied one; ``None`` when routing had nothing to derive
     # (e.g. a role-only mailbox with no catalog provenance).
     ownerRole: AgentRole | None = None
+    ownerTaskDocumentRef: TaskDocumentRef | None = None
     ownerAgentId: str | None = None
     ownerLifecycleId: str | None = None
 
@@ -246,6 +254,7 @@ def create_operator_inbox_entry(
     owner = routing.owner
     subject = message.subject
     require_inbox_address(
+        task_document_ref=address.task_document_ref,
         lifecycle_id=address.lifecycle_id,
         agent_id=address.agent_id,
         recipient_role=address.recipient_role,
@@ -256,13 +265,14 @@ def create_operator_inbox_entry(
         state="pending",
         lifecycleId=address.lifecycle_id,
         agentId=address.agent_id,
+        taskDocumentRef=address.task_document_ref,
         senderAgentId=poster.sender_agent_id,
         senderRole=poster.sender_role,
         recipientRole=address.recipient_role,
         gateId=message.gate_id,
         messageKind=message.message_kind,
         artifactPath=message.artifact_path,
-        leafKey=subject.leaf_key,
+        subjectTaskDocumentRef=subject.task_document_ref,
         seatRole=subject.seat_role,
         subjectAgentId=subject.agent_id,
         ask=message.ask,
@@ -271,6 +281,7 @@ def create_operator_inbox_entry(
         createdBy=poster.created_by,
         createdVia=poster.created_via,
         ownerRole=owner.role,
+        ownerTaskDocumentRef=owner.task_document_ref,
         ownerAgentId=owner.agent_id,
         ownerLifecycleId=owner.lifecycle_id,
     )

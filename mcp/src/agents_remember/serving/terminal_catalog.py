@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     DEFAULT_LIVENESS_HYSTERESIS,
     SeatTurnState,
@@ -22,7 +23,9 @@ from agents_remember.models.terminal_catalog import (
     TerminalCatalogLivenessConfig,
     TerminalLivenessEvidence,
 )
+from agents_remember.serving.response_contract import TerminalCatalogEntryWire
 from agents_remember.serving.terminal_catalog_lock import exclusive_terminal_catalog_lock
+from agents_remember.serving.terminal_catalog_migration import migrate_terminal_catalog_v1
 
 TERMINATED_RETENTION_SECONDS = 86400.0
 
@@ -69,23 +72,27 @@ class TerminalCatalog:
     def get(self, session_id: str) -> TerminalCatalogEntry | None:
         return next((entry for entry in self._read_snapshot() if entry.id == session_id), None)
 
-    def active_for_leaf(self, leaf_key: str, *, seat_role: str) -> TerminalCatalogEntry | None:
-        """The single RUNNING session of ``seat_role`` that owns ``leaf_key``, or ``None``.
+    def active_for_task(
+        self, task_document_ref: TaskDocumentRef, *, seat_role: str
+    ) -> TerminalCatalogEntry | None:
+        """The single RUNNING occupant of ``(task document, role)``, or ``None``.
 
-        Uniqueness is per (leaf, seat role): worker, reviewer, curator, manager, architect, generic
-        chat, and terminal bindings coexist. Gating on ``status == "running"`` means a completed or
-        terminated holder frees only its own role slot.
+        Worker/reviewer/curator coexist on a leaf; a manager occupies its master; sprint roles
+        coexist on the sprint. Gating on ``status == "running"`` means a completed or terminated
+        holder frees only its own structural role slot.
         """
-        return next(
-            (
-                entry
-                for entry in self.list()
-                if entry.leaf_key == leaf_key
-                and entry.status == "running"
-                and entry.binding_role == seat_role
-            ),
-            None,
-        )
+        occupants = [
+            entry
+            for entry in self.list()
+            if entry.task_document_ref == task_document_ref
+            and entry.status == "running"
+            and entry.binding_role == seat_role
+        ]
+        if len(occupants) > 1:
+            raise ValueError(
+                f"multiple running occupants claim {task_document_ref.key} as {seat_role}"
+            )
+        return occupants[0] if occupants else None
 
     def upsert(self, entry: TerminalCatalogEntry) -> None:
         with self._catalog_access():
@@ -368,21 +375,36 @@ class TerminalCatalog:
         raw = _load_catalog_json(self.path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return []
+        if set(raw) != {"schema", "sessions"}:
+            raise ValueError("terminal catalog envelope contains undeclared fields")
+        schema = raw.get("schema")
         sessions = raw.get("sessions", [])
         if not isinstance(sessions, list):
-            return []
+            raise ValueError("terminal catalog sessions must be a list")
         rows = [item for item in sessions if isinstance(item, dict)]
-        return [TerminalCatalogEntry.from_json(item) for item in rows]
+        if len(rows) != len(sessions):
+            raise ValueError("terminal catalog sessions must contain objects only")
+        if schema == "ar-dashboard-terminal-sessions/v1":
+            rows = migrate_terminal_catalog_v1(self.path.parent.parent.parent, rows)
+        elif schema != "ar-dashboard-terminal-sessions/v2":
+            raise ValueError(f"unsupported terminal catalog schema: {schema!r}")
+        validated = [
+            TerminalCatalogEntryWire.model_validate(row).model_dump(
+                by_alias=True, exclude_unset=True
+            )
+            for row in rows
+        ]
+        return [TerminalCatalogEntry.from_json(item) for item in validated]
 
     def _write_disk(self, entries: list[TerminalCatalogEntry]) -> None:
         # The unique-temp rule this method used to spell out itself — a shared fixed-name temp let
         # concurrent writers, even two request threads in one process, interleave their bytes into a
         # torn file — is now the package-wide rule in kernel.atomic_write, which is where the rest of
         # the tree learns it too. The worst case here is still a lost update, never corruption.
-        payload = {
-            "schema": "ar-dashboard-terminal-sessions/v1",
-            "sessions": [entry.to_json() for entry in sorted(entries, key=lambda e: e.created_at)],
-        }
+        rows = [entry.to_json() for entry in sorted(entries, key=lambda e: e.created_at)]
+        for row in rows:
+            TerminalCatalogEntryWire.model_validate(row)
+        payload = {"schema": "ar-dashboard-terminal-sessions/v2", "sessions": rows}
         atomic_write_text(self.path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
@@ -410,19 +432,8 @@ def _index_of(entries: list[TerminalCatalogEntry], session_id: str) -> int | Non
 
 
 def _load_catalog_json(text: str) -> object:
-    """Parse the catalog JSON, self-healing from a torn write instead of 500-ing the whole dashboard.
-
-    A legacy fixed-temp write (or two dashboards on one coordination root) could leave a valid object
-    followed by ``Extra data`` -- a partial duplicate fragment from an interleaved write. Recover the first
-    complete object (the real catalog; the trailing fragment is the torn tail). Unparseable content degrades
-    to an empty catalog so a corrupt file is treated as "no sessions" and the next write overwrites it clean.
-    """
+    """Parse the catalog exactly; corruption must fail before a later write can erase evidence."""
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    try:
-        obj, _ = json.JSONDecoder().raw_decode(text.lstrip())
-    except (json.JSONDecodeError, ValueError):
-        return {}
-    return obj
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"terminal catalog is not valid JSON: {exc}") from exc

@@ -1,7 +1,8 @@
 # Lifecycle — System Specialist
 
-> One provider-degradation investigation, one report before any fix. The system specialist is a
-> backend operations seat spawned by the orchestrator after a `degradation-alert`; it does not
+> One provider-degradation investigation, one report before any fix. The system specialist is an
+> optional sprint-bound backend operations seat dispatched by the orchestrator after a
+> `degradation-alert`; it does not
 > replace the orchestrator's portfolio attention.
 
 ## What This Seat Is
@@ -11,6 +12,10 @@ current-state files, provider logs, Docker/container state through the existing 
 the durable degradation event that caused the alert. This iteration is provider-only. Sentry or a
 future system monitor may replace or feed the detector later, but the response protocol remains:
 detect -> report -> explicit orchestrator order -> fix or stop providers.
+
+The seat binds to `(sprint document, system-specialist)` so Operations can create or switch its
+chat without inventing a leaf. `message_parent` always resolves the current sprint orchestrator;
+replacing either occupant does not change the model-facing address.
 
 This seat is **investigate-first**. It writes a durable report under the active master's
 `notes/reports/` folder (or the orchestrator-designated reports folder when there is no active
@@ -81,7 +86,10 @@ The orchestrator owns the final decision: fixable-in-session -> order a targeted
 
 ## Comms
 
-- **Inbox** — receive the orchestrator order, return report/fix completion or escalation.
+- **Structural parent message** (`message_parent`) — ask the current sprint orchestrator for
+  clarification or report an operational blocker without knowing its runtime occupant.
+- **Completion truth** — the report/fix artifact plus terminal/finalizer state is the completion
+  fact; do not author a parallel completion row.
 - **Escalation** — system-specialist -> orchestrator. Never go straight to the architect or
   developer.
 
@@ -95,7 +103,7 @@ The orchestrator owns the final decision: fixable-in-session -> order a targeted
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | provider diagnostics + native reads + inbox | provider_status · provider_diagnostics · provider_watchers when explicitly ordered · logs/metrics reads · inbox |
+| tools   | provider diagnostics + native reads + structural messaging | provider_status · provider_diagnostics · provider_watchers when explicitly ordered · logs/metrics reads · `message_parent` |
 
 Settings.json `orchestration.roles.system-specialist` overrides these, and
 `orchestration.rolesPerLevel.<level>.system-specialist` overrides per dispatch level (role-file

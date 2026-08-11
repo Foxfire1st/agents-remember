@@ -302,6 +302,9 @@ class CleanupChildEdgeTests(unittest.TestCase):
             memory_worktree=memory_worktree,
             ledger_path=memory_worktree / "memory.md",
         )
+        reports = contract.worktree_group / "reports"
+        reports.mkdir()
+        (reports / "curator-memory-quality.md").write_text("temporary\n", encoding="utf-8")
         write_contract(contract.contract_path, contract)
         task_doc_path, _task_markdown = write_task_doc(
             contract.task_root,
@@ -346,8 +349,13 @@ class CleanupChildEdgeTests(unittest.TestCase):
                 )
             )
         branches = result.payload["branches"]  # type: ignore[index]
+        directories = result.payload["directories"]  # type: ignore[index]
 
         self.assertEqual(result.returncode, 0)
+        assert isinstance(directories, dict)
+        assert isinstance(directories["reports"], dict)
+        self.assertTrue(directories["reports"]["removed"])
+        self.assertFalse(reports.exists())
         assert isinstance(branches, dict)
         self.assertEqual(sorted(branches.keys()), ["code", "memory", "memory_integration"])
         self.assertEqual(branches["memory_integration"]["reason"], "already-absent")
@@ -439,9 +447,12 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         code_worktree = worktree_group / "code"
         memory_worktree = worktree_group / "memory"
         provider_runtime = worktree_group / "provider-runtime"
+        reports = worktree_group / "reports"
         code_worktree.mkdir(parents=True)
         memory_worktree.mkdir()
         provider_runtime.mkdir()
+        reports.mkdir()
+        (reports / "curator-memory-quality.md").write_text("temporary\n", encoding="utf-8")
         teardown.return_value = {
             "state": "would-teardown",
             "providerRuntime": {
@@ -467,6 +478,7 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.payload["state"], "would-cleanup")  # type: ignore[index]
         self.assertIn("Cleanup would reclaim", result.payload["summary"])  # type: ignore[index]
+        self.assertTrue(directories["reports"]["would_remove"])  # type: ignore[index]
         self.assertTrue(directories["worktree_group"]["would_remove"])  # type: ignore[index]
 
 

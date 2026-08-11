@@ -65,6 +65,7 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.memory import baseline as memory_baseline
 from agents_remember.memory.carryover import _validate_entity_fingerprints
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.reducer import _paused_updates
 from agents_remember.serving.projections.projection_store import ProviderStateRefresher
 
@@ -281,6 +282,7 @@ class InboxRenewalTests(unittest.TestCase):
         self.store = OperatorInboxStore(Path(self._tmp.name))
 
     def seed(self) -> OperatorInboxEntry:
+        leaf_ref = TaskDocumentRef(repository="agents-remember", path="master/260731-EFA-L2.json")
         entry = OperatorInboxEntry(
             id="entry-1",
             ts="2026-07-31T10:00:00Z",
@@ -291,7 +293,7 @@ class InboxRenewalTests(unittest.TestCase):
             createdBy="model",
             createdVia="cli",
             agentId="agent-1",
-            leafKey="260731-EFA-L2",
+            subjectTaskDocumentRef=leaf_ref,
             seatRole="worker",
             subjectAgentId="agent-2",
         )
@@ -310,7 +312,10 @@ class InboxRenewalTests(unittest.TestCase):
         self.assertEqual(renewed.id, seeded.id)
         self.assertEqual(renewed.ts, "2026-07-31T11:00:00Z")
         self.assertEqual(renewed.response, "green")
-        self.assertEqual(renewed.leafKey, "260731-EFA-L2")
+        self.assertEqual(
+            renewed.subjectTaskDocumentRef,
+            TaskDocumentRef(repository="agents-remember", path="master/260731-EFA-L2.json"),
+        )
         self.assertEqual(renewed.seatRole, "worker")
         self.assertEqual(renewed.subjectAgentId, "agent-2")
         self.assertEqual(renewed.state, "pending")
@@ -323,13 +328,21 @@ class InboxRenewalTests(unittest.TestCase):
             "entry-1",
             InboxRenewal(
                 response="amber",
-                subject=InboxSubject(leaf_key="260731-EFA-L3", seat_role="reviewer"),
+                subject=InboxSubject(
+                    task_document_ref=TaskDocumentRef(
+                        repository="agents-remember", path="master/260731-EFA-L3.json"
+                    ),
+                    seat_role="reviewer",
+                ),
             ),
             now="2026-07-31T11:00:00Z",
         )
 
         self.assertEqual(renewed.response, "amber")
-        self.assertEqual(renewed.leafKey, "260731-EFA-L3")
+        self.assertEqual(
+            renewed.subjectTaskDocumentRef,
+            TaskDocumentRef(repository="agents-remember", path="master/260731-EFA-L3.json"),
+        )
         self.assertEqual(renewed.seatRole, "reviewer")
         self.assertEqual(renewed.subjectAgentId, "agent-2")
 
@@ -407,7 +420,9 @@ class OpenTerminalRefusalTests(unittest.TestCase):
             harness="claude",
             kind="harness",
             session_id="sess-1",
-            leaf_key="260731-EFA-L2",
+            task_document_ref=TaskDocumentRef(
+                repository="agents-remember", path="master/260731-EFA-L2.json"
+            ),
         )
 
     def test_a_bad_kind_is_reported_as_bad_kind(self) -> None:

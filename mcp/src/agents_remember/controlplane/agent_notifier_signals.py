@@ -21,11 +21,12 @@ from agents_remember.controlplane.operator_inbox_records import AgentRole, Inbox
 from agents_remember.kernel.primitives.inbox_backoff import (
     require_redelivery_floor_seconds,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 # The schema string and log filename are retained during the rename window (durable rows in
 # existing deployments); the Python identifiers are the new names. Removal rides the schema
 # migration that owns the cooldown log.
-AGENT_NOTIFIER_SIGNAL_SCHEMA = "ar-supervisor-signal/v1"
+AGENT_NOTIFIER_SIGNAL_SCHEMA = "ar-agent-notifier-signal/v2"
 AgentNotifierSignalState = Literal["sent"]
 
 
@@ -39,7 +40,7 @@ class AgentNotifierSignalRecord(DurableRecord):
     targetAgentId: str | None = None
     targetLifecycleId: str | None = None
     targetRole: AgentRole | None = None
-    leafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
     seatRole: str | None = None
     findingKind: str
     detail: str
@@ -55,7 +56,7 @@ class AgentNotifierSignalTarget:
     agent_id: str | None = None
     lifecycle_id: str | None = None
     role: AgentRole | None = None
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str | None = None
 
 
@@ -128,7 +129,7 @@ class AgentNotifierSignalCooldownStore:
             and record.targetAgentId == target.agent_id
             and record.targetLifecycleId == target.lifecycle_id
             and record.targetRole == target.role
-            and record.leafKey == target.leaf_key
+            and record.taskDocumentRef == target.task_document_ref
             and record.seatRole == target.seat_role
             and record.findingKind == signal.finding_kind
             and record.detail == signal.detail

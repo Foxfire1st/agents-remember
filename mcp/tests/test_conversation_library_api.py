@@ -595,7 +595,16 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
                 self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open",
-                body={**payload, "launchContext": {"leafKey": "other"}},
+                body={
+                    **payload,
+                    "launchContext": {
+                        "taskDocumentRef": {
+                            "repository": "repo",
+                            "path": "master/other.json",
+                        },
+                        "seatRole": "worker",
+                    },
+                },
             )
             assert conflict[0] == 409
             assert conflict[1]["status"] == "request-conflict"  # type: ignore[index]

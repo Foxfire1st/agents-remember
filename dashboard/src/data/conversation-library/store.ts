@@ -17,6 +17,7 @@ import {
   openReconcile,
   openStatus,
   type ListQuery,
+  type ConversationLaunchContext,
   type OpenResult,
 } from "./client";
 import type {
@@ -231,7 +232,7 @@ export async function beginOpen(
   conversationKey: LibraryConversationKey,
   requestId: string,
   expectedIdentityDigest: string,
-  extra: { cwd?: string; launchContext?: { leafKey?: string; seatRole?: string } } = {},
+  extra: { cwd?: string; launchContext?: ConversationLaunchContext } = {},
   deps: LibraryDeps = {},
 ): Promise<void> {
   const store = conversationLibraryStore.getState();

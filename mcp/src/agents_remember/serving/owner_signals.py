@@ -20,6 +20,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_transitions import InboxRenewal, RedeliveryFloor
 from agents_remember.controlplane.signal_routing import RoutedOwner
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving._agent_notifier_evaluation import _seat_liveness_ask_identity
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext
@@ -38,14 +39,14 @@ class OwnerSignal:
     """One owner-addressed signal: what is being said, and about which seat.
 
     The message and its subject are inseparable here -- coalescing looks up an existing row by
-    (ask, kind, leaf, role), and renewal rewrites the subject from the same value, so a message
+    (ask, kind, task document, role), and renewal rewrites the subject from the same value, so a message
     carrying someone else's subject silently renews the wrong row.
     """
 
     message_kind: InboxMessageKind
     ask: str
     response: str
-    leaf_key: str | None = None
+    task_document_ref: TaskDocumentRef | None = None
     seat_role: str | None = None
     subject_agent_id: str | None = None
 
@@ -66,7 +67,7 @@ def _find_coalescible(
     *,
     ask: str,
     message_kind: InboxMessageKind,
-    leaf_key: str | None,
+    task_document_ref: TaskDocumentRef | None,
     seat_role: str | None,
 ) -> OperatorInboxEntry | None:
     """The ruled coalescing lookup (developer, 2026-07-09): an agent-notifier-authored condition that
@@ -83,7 +84,7 @@ def _find_coalescible(
             # The ask prefix was renamed too; both prefixes are one signal identity, so a
             # new-format re-fire renews a legacy-format pending row (one row per root cause).
             and _seat_liveness_ask_identity(row.ask) == _seat_liveness_ask_identity(ask)
-            and row.leafKey == leaf_key
+            and row.subjectTaskDocumentRef == task_document_ref
             and row.seatRole == seat_role
         ):
             return row
@@ -107,13 +108,15 @@ def _post_owner_signal(
     now = options.now
     entries = sweep.inbox_current if sweep is not None else ctx.inbox_store.current()
     subject = InboxSubject(
-        leaf_key=signal.leaf_key, seat_role=signal.seat_role, agent_id=signal.subject_agent_id
+        task_document_ref=signal.task_document_ref,
+        seat_role=signal.seat_role,
+        agent_id=signal.subject_agent_id,
     )
     existing = _find_coalescible(
         entries,
         ask=signal.ask,
         message_kind=signal.message_kind,
-        leaf_key=signal.leaf_key,
+        task_document_ref=signal.task_document_ref,
         seat_role=signal.seat_role,
     )
     if existing is not None:
@@ -124,7 +127,10 @@ def _post_owner_signal(
                 response=signal.response,
                 subject=subject,
                 readdress_to=InboxOwner(
-                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+                    role=owner.role,
+                    task_document_ref=owner.task_document_ref,
+                    agent_id=owner.agent_id,
+                    lifecycle_id=owner.lifecycle_id,
                 ),
             ),
             now=now.isoformat(),
@@ -142,12 +148,16 @@ def _post_owner_signal(
             now=now.isoformat(),
             routing=InboxRouting(
                 address=InboxAddress(
+                    task_document_ref=owner.task_document_ref,
                     lifecycle_id=owner.lifecycle_id,
                     agent_id=owner.agent_id,
                     recipient_role=owner.role,
                 ),
                 owner=InboxOwner(
-                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+                    role=owner.role,
+                    task_document_ref=owner.task_document_ref,
+                    agent_id=owner.agent_id,
+                    lifecycle_id=owner.lifecycle_id,
                 ),
             ),
             poster=InboxPoster(

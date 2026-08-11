@@ -21,9 +21,9 @@ The receiver always onboards from this packet, never from a prior conversation.
 | ------------- | ------------------------------------------------- |
 | use           | role-takeover | worker-respawn | master-handover   |
 | seat / role   | designer | orchestrator | manager | worker | reviewer |
-| from          | <handing-over agent/lifecycle id> | (developer)   |
-| to            | <successor profile: harness/model/effort>         |
-| leaf / master | <task_doc path this seat owns>                    |
+| from seat     | <task_doc path + role> | developer                |
+| to seat       | <task_doc path + role; profile is settings-owned> |
+| task document | <canonical sprint / master / leaf task_doc path>  |
 | written       | <YYYY-MM-DDTHH:MM>                                 |
 
 ## Why This Handover

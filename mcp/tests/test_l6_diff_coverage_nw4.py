@@ -282,7 +282,7 @@ class TestGatePayloadAdaptersNw4:
                 cast(McpRuntimeConfig, SimpleNamespace()),
                 cast(Any, SimpleNamespace()),
             )
-        assert result["tool"] == "lifecycle_gate"
+        assert result["tool"] == "lifecycle_gate_internal"
         assert result["payload"] == {"ok": True}
         raised.assert_called_once()
 
@@ -304,7 +304,7 @@ class TestGatePayloadAdaptersNw4:
                 expected_gate_id="G1",
                 evidence_refs=[{"ref": "x"}],
             )
-        assert result["tool"] == "gate_decide"
+        assert result["tool"] == "gate_decide_internal"
         assert result["payload"] == {"ok": True}
         assert decided.call_args.kwargs["lifecycle_id"] == "L1"
         assert decided.call_args.kwargs["verdict"] == "approve"

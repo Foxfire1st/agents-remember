@@ -27,7 +27,7 @@ work, and it never absorbs curator/onboarding-writer work.
 ## The Worker Loop
 
 ```
-brief -> orient -> build code -> checks green -> turn report -> curator memory pass by separate seat
+brief -> orient -> build code -> checks green -> turn report -> curator coherence pass by separate seat
                         |
                         +-- blocked or plan delta beyond blank-filling -> escalate to the owning seat
 ```
@@ -61,7 +61,8 @@ says otherwise. You edit nothing outside your named surfaces.
 - Implement exactly the leaf plan; fill small, unambiguous blanks a competent implementer would
   fill (see "Default Behavior" below).
 - Produce the builder input the downstream curator needs: changed paths, code-diff summary, tests,
-  and any route/onboarding observations that would help the memory pass. The curator, not the
+  and any route/onboarding observations that would help the coherence pass. Mark observations as
+  evidence or candidates rather than declaring them current truth. The curator, not the
   worker, writes onboarding in the official manager -> builder -> reviewer -> curator closeout
   chain.
 - **Never `git commit`.** Leave all changes uncommitted in both worktrees — the owning seat commits
@@ -95,8 +96,9 @@ artifact; ending your turn once the report is written is safe, not a risk you ha
 - **Read-only AR retrieval:** `read_ar_files`, `grepai_search`, `cgc_*`, `context_packet`.
 - **Shell** for the prescribed checks (use the interpreter paths the brief names — do not assume a
   `python` shim exists).
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) for receiving context and raising
-  escalations, when the brief wires it.
+- **Structural parent message** (`message_parent`) for a clarification or escalation. Initial
+  context arrives through the plane-owned dispatch brief; completion is relayed from terminal/
+  finalizer truth after the durable turn report exists, never from a model-authored completion post.
 
 Everything else — `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_*`,
 `route_index_refresh` — is the owning seat's machinery, not yours. A worker that never touches

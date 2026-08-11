@@ -28,6 +28,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.models.conversations.control_wire import SubmissionReceipt
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import agent_notifier as agent_notifier_module
 from agents_remember.serving._agent_notifier_evaluation import PERSISTENT_FAILURE_ATTEMPTS
@@ -43,36 +44,144 @@ from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 from test_agent_notifier import NOW, _entry, _fake_paster, _FakeHost
+
+SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo-a", path="260707_master/task.json")
+LEAF_1_REF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-1.json")
+LEAF_9_REF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-9.json")
+
+
+def _task_doc(**values: object) -> TaskDocument:
+    return TaskDocument.model_validate(
+        {
+            "id": values.pop("id"),
+            "slug": values.pop("slug"),
+            "title": values.pop("title"),
+            "kind": values.pop("kind"),
+            "repo": "repo-a",
+            "createdAt": "2026-07-07T00:00",
+            **values,
+        }
+    )
+
+
+def _write_topology(root: Path) -> TaskDocumentTopology:
+    """Create one sprint/master and enough real leaf documents for every ladder fixture."""
+    leaf_names = tuple(f"leaf-{index}" for index in range(60))
+    task_root = root / "tasks" / "repo-a"
+    write_task_doc(
+        task_root / "sprint",
+        _task_doc(
+            id="SPRINT",
+            slug="sprint",
+            title="Sprint",
+            kind="master",
+            orchestrates=["260707_master"],
+        ),
+    )
+    write_task_doc(
+        task_root / "260707_master",
+        _task_doc(
+            id="MASTER",
+            slug="260707_master",
+            title="Master",
+            kind="master",
+            subTasks=[
+                {
+                    "number": leaf,
+                    "name": leaf,
+                    "file": f"{leaf}.md",
+                    "status": "inProgress",
+                }
+                for leaf in leaf_names
+            ],
+        ),
+    )
+    for leaf in leaf_names:
+        write_task_doc(
+            task_root / "260707_master",
+            _task_doc(
+                id=leaf,
+                slug=leaf,
+                title=leaf,
+                kind="subTask",
+                master="task.md",
+            ),
+        )
+    return TaskDocumentTopology(root)
+
+
+def _leaf_ref(index: int) -> TaskDocumentRef:
+    return TaskDocumentRef(repository="repo-a", path=f"260707_master/leaf-{index}.json")
 
 
 class DeadUpstreamPredicateTests(unittest.TestCase):
     def test_worker_with_dead_manager_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(replace(_entry("manager-1"), status="terminated", spawn_role="manager"))
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(
-                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+                replace(
+                    _entry("orchestrator-1", task_document_ref=SPRINT_REF),
+                    spawn_role="orchestrator",
+                )
             )
-            findings = evaluate_dead_upstream_findings(catalog)
+            catalog.upsert(
+                replace(
+                    _entry("manager-1", task_document_ref=MASTER_REF),
+                    status="terminated",
+                    spawn_role="manager",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("worker-1", task_document_ref=LEAF_1_REF),
+                    spawn_role="worker",
+                    spawned_by_session="manager-1",
+                )
+            )
+            findings = evaluate_dead_upstream_findings(catalog, topology)
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].kind, "dead-upstream")
             self.assertEqual(findings[0].session_id, "worker-1")
 
     def test_live_owner_does_not_fire(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(
-                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+                replace(
+                    _entry("orchestrator-1", task_document_ref=SPRINT_REF),
+                    spawn_role="orchestrator",
+                )
             )
-            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
+            catalog.upsert(
+                replace(
+                    _entry("manager-1", task_document_ref=MASTER_REF),
+                    spawn_role="manager",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("worker-1", task_document_ref=LEAF_1_REF),
+                    spawn_role="worker",
+                    spawned_by_session="manager-1",
+                )
+            )
+            self.assertEqual(evaluate_dead_upstream_findings(catalog, topology), [])
 
     def test_no_provenance_at_all_does_not_fire(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            root = Path(tmp)
+            topology = _write_topology(root)
+            catalog = TerminalCatalog(root / "catalog.json")
             catalog.upsert(replace(_entry("worker-1"), spawn_role="worker"))
-            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
+            self.assertEqual(evaluate_dead_upstream_findings(catalog, topology), [])
 
 
 class InactivityChainProgressTests(unittest.TestCase):
@@ -81,17 +190,17 @@ class InactivityChainProgressTests(unittest.TestCase):
     def test_inactivity_chain_progress_suppresses_legacy_and_current_ask_formats(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            topology = _write_topology(root)
             catalog = TerminalCatalog(root / "catalog.json")
-            leaf_key = "repo-a/260707_master/leaf-9"
             catalog.upsert(
                 replace(
-                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    _entry("manager-current", task_document_ref=MASTER_REF),
                     spawn_role="manager",
                 )
             )
             catalog.upsert(
                 replace(
-                    _entry("worker-1", leaf_key=leaf_key),
+                    _entry("worker-1", task_document_ref=LEAF_9_REF),
                     spawn_role="worker",
                     spawned_by_session="manager-current",
                 )
@@ -101,7 +210,7 @@ class InactivityChainProgressTests(unittest.TestCase):
                     _entry("reviewer-1", status="landed"),
                     spawn_role="reviewer",
                     spawned_by_session="manager-current",
-                    replacement_for_leaf=leaf_key,
+                    replacement_for_task_document_ref=LEAF_9_REF,
                     landed_at=(NOW - timedelta(minutes=1)).isoformat(),
                 )
             )
@@ -112,7 +221,11 @@ class InactivityChainProgressTests(unittest.TestCase):
                         ask=ask,
                         response="worker-1 inactive",
                         message_kind="escalation",
-                        subject=InboxSubject(leaf_key=leaf_key, agent_id="worker-1"),
+                        subject=InboxSubject(
+                            task_document_ref=LEAF_9_REF,
+                            seat_role="worker",
+                            agent_id="worker-1",
+                        ),
                     ),
                     entry_id=entry_id,
                     now=(NOW - timedelta(minutes=10)).isoformat(),
@@ -136,8 +249,8 @@ class InactivityChainProgressTests(unittest.TestCase):
                 ask="Agent notifier observed seat-liveness: turn-state-stale",
                 created_by="agent-notifier",
             )
-            self.assertTrue(_inactivity_signal_chain_progressed(catalog, legacy))
-            self.assertTrue(_inactivity_signal_chain_progressed(catalog, current))
+            self.assertTrue(_inactivity_signal_chain_progressed(catalog, topology, legacy))
+            self.assertTrue(_inactivity_signal_chain_progressed(catalog, topology, current))
 
 
 class LadderWalkIntegrationTests(unittest.TestCase):
@@ -148,6 +261,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.coordination_root = root / "ar-coordination"
+        _write_topology(self.coordination_root)
         observer_root = self.coordination_root / "logs" / "observer"
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
@@ -176,7 +290,9 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         return {event.kind for event in self.event_store.read(None)}
 
     def test_delivered_dispatch_never_rebinds(self) -> None:
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         self.catalog.upsert(
             replace(
                 _entry("worker-1"),
@@ -265,7 +381,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(
-                _entry("manager-1"),
+                _entry("manager-1", task_document_ref=MASTER_REF),
                 status="terminated",
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
                 spawn_role="manager",
@@ -273,20 +389,29 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                _entry("worker-1", task_document_ref=LEAF_1_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                _entry("manager-2", task_document_ref=MASTER_REF),
                 spawn_role="manager",
             )
         )
         self.inbox_store.append(
             create_operator_inbox_entry(
-                InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+                InboxMessage(
+                    ask="ask",
+                    response="resp",
+                    message_kind="escalation",
+                    subject=InboxSubject(
+                        task_document_ref=LEAF_1_REF,
+                        seat_role="worker",
+                        agent_id="worker-1",
+                    ),
+                ),
                 entry_id="e1",
                 now=(NOW - timedelta(minutes=5)).isoformat(),
                 routing=InboxRouting(
@@ -300,7 +425,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                     sender_agent_id="worker-1",
                     sender_role="worker",
                 ),
-            ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+            )
         )
         duplicate = AgentNotifierFinding(
             kind="rebind-due",
@@ -318,7 +443,12 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.assertEqual(result.actions[1].outcome, "skipped")
 
     def test_dead_manager_row_rebinds_to_replacement_within_grace(self) -> None:
-        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(
+                _entry("orchestrator-1", task_document_ref=SPRINT_REF),
+                spawn_role="orchestrator",
+            )
+        )
         self.catalog.upsert(
             replace(
                 _entry("manager-1"),
@@ -326,24 +456,33 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                task_document_ref=MASTER_REF,
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                _entry("worker-1", task_document_ref=LEAF_1_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                _entry("manager-2", task_document_ref=MASTER_REF),
                 spawn_role="manager",
             )
         )
         entry = create_operator_inbox_entry(
-            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+            InboxMessage(
+                ask="ask",
+                response="resp",
+                message_kind="escalation",
+                subject=InboxSubject(
+                    task_document_ref=LEAF_1_REF,
+                    seat_role="worker",
+                    agent_id="worker-1",
+                ),
+            ),
             entry_id="e1",
             now=(NOW - timedelta(minutes=5)).isoformat(),
             routing=InboxRouting(
@@ -357,7 +496,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 sender_agent_id="worker-1",
                 sender_role="worker",
             ),
-        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        )
         self.inbox_store.append(entry)
 
         run_agent_notifier_sweep(self._ctx(), now=NOW)
@@ -374,7 +513,12 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.assertEqual(rebind_events[0].data["toAgentId"], "manager-2")
 
     def test_dead_manager_without_replacement_expires_to_architect_mailbox(self) -> None:
-        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(
+                _entry("orchestrator-1", task_document_ref=SPRINT_REF),
+                spawn_role="orchestrator",
+            )
+        )
         self.catalog.upsert(
             replace(
                 _entry("manager-1"),
@@ -382,18 +526,27 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                task_document_ref=MASTER_REF,
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                _entry("worker-1", task_document_ref=LEAF_1_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
         )
         entry = create_operator_inbox_entry(
-            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+            InboxMessage(
+                ask="ask",
+                response="resp",
+                message_kind="escalation",
+                subject=InboxSubject(
+                    task_document_ref=LEAF_1_REF,
+                    seat_role="worker",
+                    agent_id="worker-1",
+                ),
+            ),
             entry_id="e1",
             now=(NOW - timedelta(minutes=10)).isoformat(),
             routing=InboxRouting(
@@ -407,7 +560,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 sender_agent_id="worker-1",
                 sender_role="worker",
             ),
-        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        )
         self.inbox_store.append(entry)
 
         result = run_agent_notifier_sweep(self._ctx(), now=NOW)
@@ -547,7 +700,14 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             self.inbox_store.append(
                 create_operator_inbox_entry(
                     InboxMessage(
-                        ask=f"turn report {index}", response="resp", message_kind="turn-report"
+                        ask=f"turn report {index}",
+                        response="resp",
+                        message_kind="turn-report",
+                        subject=InboxSubject(
+                            task_document_ref=_leaf_ref(index),
+                            seat_role="worker",
+                            agent_id=f"dead-seat-{index}",
+                        ),
                     ),
                     entry_id=f"root-{index}",
                     now=NOW.isoformat(),
@@ -589,35 +749,38 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         # the divergent pre-fix shape produced THOUSANDS of lines here.
         self.assertLessEqual(len(lines), seeded * 9)
 
-    def test_dead_upstream_signals_the_current_manager(self) -> None:
-        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+    def test_manager_replacement_keeps_worker_structurally_connected(self) -> None:
         self.catalog.upsert(
             replace(
-                _entry("manager-1"),
-                status="terminated",
-                spawn_role="manager",
-                spawned_by_session="orchestrator-1",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
+                _entry("orchestrator-1", task_document_ref=SPRINT_REF),
+                spawn_role="orchestrator",
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                _entry("manager-1", task_document_ref=MASTER_REF),
+                status="terminated",
+                spawn_role="manager",
+                spawned_by_session="orchestrator-1",
+            )
+        )
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1", task_document_ref=LEAF_1_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                _entry("manager-2", task_document_ref=MASTER_REF),
                 spawn_role="manager",
             )
         )
         ctx = self._ctx()
         result = run_agent_notifier_sweep(ctx, now=NOW)
         dead_upstream_findings = [f for f in result.findings if f.kind == "dead-upstream"]
-        self.assertEqual(len(dead_upstream_findings), 1)
-        self.assertEqual(dead_upstream_findings[0].session_id, "worker-1")
+        self.assertEqual(dead_upstream_findings, [])
         events = [
             event
             for event in self.event_store.read(None)
@@ -628,9 +791,8 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             for event in self.event_store.read(None)
             if event.kind == "orchestration.supervisor.dead-upstream"
         ]
-        self.assertEqual(len(events), 1)
-        self.assertEqual(len(legacy_events), 1)
-        self.assertEqual(events[0].data["managerAgentId"], "manager-2")
+        self.assertEqual(events, [])
+        self.assertEqual(legacy_events, [])
 
 
 class Cs6SweepScalingTests(unittest.TestCase):
@@ -642,6 +804,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.coordination_root = root / "ar-coordination"
+        _write_topology(self.coordination_root)
         observer_root = self.coordination_root / "logs" / "observer"
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
@@ -678,13 +841,15 @@ class Cs6SweepScalingTests(unittest.TestCase):
         return counter
 
     def _seed_stale_workers(self, count: int) -> None:
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("manager-1", task_document_ref=MASTER_REF), spawn_role="manager")
+        )
         for index in range(count):
             self.catalog.upsert(
                 replace(
-                    _entry(
-                        f"worker-{index}", leaf_key=f"repo/260707_master/leaf-{index}"
-                    ).with_turn_state("stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()),
+                    _entry(f"worker-{index}", task_document_ref=_leaf_ref(index)).with_turn_state(
+                        "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
+                    ),
                     spawn_role="worker",
                     spawned_by_session="manager-1",
                 )
@@ -740,7 +905,9 @@ class Cs6SweepScalingTests(unittest.TestCase):
                         kind="verdict-by",
                         source_id=f"seat-{index}",
                         subject=ExpectationSubject(
-                            agent_id="worker-1", leaf_key="repo/260707_master/leaf-1"
+                            agent_id="worker-1",
+                            task_document_ref=LEAF_1_REF,
+                            seat_role="worker",
                         ),
                     ),
                     row_id=f"exp-{index}",
@@ -770,7 +937,16 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 for index in range(pending_count):
                     self.inbox_store.append(
                         create_operator_inbox_entry(
-                            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+                            InboxMessage(
+                                ask="ask",
+                                response="resp",
+                                message_kind="escalation",
+                                subject=InboxSubject(
+                                    task_document_ref=_leaf_ref(index),
+                                    seat_role="worker",
+                                    agent_id=f"worker-{index}",
+                                ),
+                            ),
                             entry_id=f"esc-{index}",
                             now=(NOW - timedelta(minutes=10)).isoformat(),
                             routing=InboxRouting(

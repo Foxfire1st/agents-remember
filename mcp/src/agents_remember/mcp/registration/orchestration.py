@@ -1,149 +1,68 @@
-"""Cross-agent messaging tools: the operator inbox and the manager nudge."""
+"""Structural parent/child messaging tools."""
 
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.application_requests import (
-    AgentRole,
-    InboxMessageKind,
-    NudgeReason,
-    OperatorInboxPostRequest,
-    OrchestrationNudgeRequest,
+from agents_remember.models.structural.agent import (
+    AgentMessageKind,
+    StructuralMessageRequest,
+    StructuralRole,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
-from ..tools.operator_inbox import (
-    operator_inbox_consume_payload,
-    operator_inbox_poll_payload,
-    operator_inbox_supersede_payload,
-    registered_operator_inbox_post_payload,
-)
-from ..tools.orchestration import (
-    registered_orchestration_nudge_payload,
-)
-
-
-def _register_operator_inbox_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    @server.tool()
-    def operator_inbox_post(
-        ask: str,
-        response: str,
-        lifecycle_id: str | None = None,
-        agent_id: str | None = None,
-        gate_id: str | None = None,
-        *,
-        sender_agent_id: str | None = None,
-        sender_role: AgentRole | None = None,
-        recipient_role: AgentRole | None = None,
-        message_kind: InboxMessageKind = "message",
-        artifact_path: str | None = None,
-        deliver_to_hosted: bool = True,
-    ) -> dict[str, Any]:
-        """Queue an operator response for an external chat to poll. Supply lifecycle_id
-        and/or agent_id as the mailbox key. Agent-to-agent messages can include sender /
-        recipient role metadata; hosted targets are push-delivered through the terminal paste seam
-        while the durable inbox row remains dashboard-visible. Over MCP this route is attributed to
-        the model via cli; trusted dashboard code can call the payload builder directly with
-        developer/dashboard attribution."""
-        return registered_operator_inbox_post_payload(
-            config,
-            OperatorInboxPostRequest(
-                ask=ask,
-                response=response,
-                lifecycle_id=lifecycle_id,
-                agent_id=agent_id,
-                gate_id=gate_id,
-                sender_agent_id=sender_agent_id,
-                sender_role=sender_role,
-                recipient_role=recipient_role,
-                message_kind=message_kind,
-                artifact_path=artifact_path,
-                created_by="model",
-                created_via="cli",
-                deliver_to_hosted=deliver_to_hosted,
-            ),
-        )
-
-    @server.tool()
-    def operator_inbox_poll(
-        lifecycle_id: str | None = None,
-        agent_id: str | None = None,
-        recipient_role: AgentRole | None = None,
-        include_terminal: bool = False,
-    ) -> dict[str, Any]:
-        """List external-chat inbox entries for a lifecycle_id, agent_id, and/or role mailbox
-        key. Pending rows are always listed; ``include_terminal=true`` additionally lists the
-        terminal markers (landed/superseded/unresolved/expired) still inside their retention
-        window (N11 terminal inspectability)."""
-        return operator_inbox_poll_payload(
-            config,
-            lifecycle_id=lifecycle_id,
-            agent_id=agent_id,
-            recipient_role=recipient_role,
-            include_terminal=include_terminal,
-        )
-
-    @server.tool()
-    def operator_inbox_consume(entry_id: str) -> dict[str, Any]:
-        """Optionally attribute an external-chat inbox entry to the consuming model (N16).
-        This is an attribution marker only: nothing mechanical -- retry, expectation,
-        escalation, or terminality -- hangs off it, and the entry's state is unchanged."""
-        return operator_inbox_consume_payload(
-            config,
-            entry_id=entry_id,
-            consumed_by="model",
-            consumed_via="cli",
-        )
-
-    @server.tool()
-    def operator_inbox_supersede(
-        entry_id: str,
-        reason: str,
-        superseded_by: str = "model",
-    ) -> dict[str, Any]:
-        """Explicitly supersede one pending external-chat inbox entry (R11): an overtaken
-        command becomes terminal ``superseded`` without a false ack, is skipped by every
-        retry/evaluation path, and stays inspectable for the marker-retention window.
-        Supersession is always explicit -- never inferred from artifacts, branches, or task
-        state."""
-        return operator_inbox_supersede_payload(
-            config,
-            entry_id=entry_id,
-            reason=reason,
-            superseded_by=superseded_by,
-        )
-
-
-def _register_manager_nudge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    @server.tool()
-    def orchestration_nudge_manager(
-        reason: NudgeReason,
-        subject: str,
-        manager_agent_id: str | None = None,
-        manager_lifecycle_id: str | None = None,
-        subject_agent_id: str | None = None,
-        *,
-        subject_lifecycle_id: str | None = None,
-        artifact_path: str | None = None,
-        rate_limit_seconds: int = 900,
-    ) -> dict[str, Any]:
-        """Rate-limit, log, and push a manager nudge for inactivity or a missing turn report."""
-        return registered_orchestration_nudge_payload(
-            config,
-            OrchestrationNudgeRequest(
-                reason=reason,
-                subject=subject,
-                manager_agent_id=manager_agent_id,
-                manager_lifecycle_id=manager_lifecycle_id,
-                subject_agent_id=subject_agent_id,
-                subject_lifecycle_id=subject_lifecycle_id,
-                artifact_path=artifact_path,
-                rate_limit_seconds=rate_limit_seconds,
-            ),
-        )
+from ..tools.structural_agent import message_child_payload, message_parent_payload
 
 
 def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    _register_operator_inbox_tools(server, config)
-    _register_manager_nudge_tools(server, config)
+    """Register durable messages whose current recipient is resolved by the plane."""
+
+    @server.tool()
+    def message_parent(
+        ask: str,
+        response: str,
+        message_kind: AgentMessageKind = "message",
+        artifact_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist and deliver one whole message to this seat's current structural parent.
+
+        Replacement is transparent: the canonical task hierarchy and role determine the current
+        recipient at post and redelivery time. Runtime, lifecycle, inbox-row, and adapter ids are
+        neither inputs nor outputs. Dispatch briefs and terminal state signals are plane-owned.
+        """
+        return message_parent_payload(
+            config,
+            StructuralMessageRequest(
+                ask=ask,
+                response=response,
+                message_kind=message_kind,
+                artifact_path=artifact_path,
+            ),
+        )
+
+    @server.tool()
+    def message_child(
+        task_document_ref: TaskDocumentRef,
+        role: StructuralRole,
+        ask: str,
+        response: str,
+        message_kind: AgentMessageKind = "message",
+        artifact_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist and deliver one whole message to an authorized direct child seat.
+
+        The task document and role are the stable work address. The current runtime occupant is
+        selected privately and re-resolved after replacement.
+        """
+        return message_child_payload(
+            config,
+            StructuralMessageRequest(
+                ask=ask,
+                response=response,
+                task_document_ref=task_document_ref,
+                role=role,
+                message_kind=message_kind,
+                artifact_path=artifact_path,
+            ),
+        )

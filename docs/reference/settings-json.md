@@ -330,9 +330,10 @@ Read cadence above).
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
 `system-specialist`, `reviewer`).
 Precedence: role-file defaults < global settings < repo-local settings. These
-settings are the sole developer-controlled spend surface for ordinary spawned
-seats; `spawn_agent_session` callers declare role and level, not
-`harness`/`model`/`effort` or direct launch/session spend controls. The
+settings are the sole developer-controlled spend surface for ordinary dispatched
+seats. Agent callers submit a canonical child task document and role to the structural
+dispatcher; the plane derives level and resolves the settings-owned launch selection. Agents do
+not submit `harness`/`model`/`effort` or direct launch/session spend controls. The
 knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
 with every parameter, vocabulary, and refusal is
 **`docs/reference/harnesses.md`**):
@@ -357,9 +358,10 @@ with every parameter, vocabulary, and refusal is
    with an explicitly unproven outcome rather than entering an impossible proof retry loop.
    Session-command application by itself does not prove brief delivery.
 
-Hosted role dispatch uses the exact id through three states: `spawn_agent_session` returns
-`spawned-unbriefed`; `hosted_session_readiness` alone advances the exact seat to harness-ready;
-one durable exact-agent `dispatch-brief` starts the briefed-by deadline row. Spawned-only and
+Inside the private control plane, hosted role dispatch uses an exact runtime correlation through
+three states: create returns `spawned-unbriefed`; readiness advances that occupant to
+harness-ready; one durable exact-pinned `dispatch-brief` starts the briefed-by deadline row. This
+correlation is never returned by `dispatch_agent`. Spawned-only and
 not-ready seats are not active work. Briefed requires both `deliveryState=delivered` and
 `deliveryDetail=harness-log-confirmed`; failure leaves the original row pending without duplicate
 brief or respawn.
@@ -374,9 +376,9 @@ reported as catalog-validated native flag evidence because stream-json init has 
 the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
 `portfolio` (the `loops.perLevel` vocabulary), each holding the same
 knob-override shape. A level override deep-merges over the flat
-`orchestration.roles` default at leaf-key granularity (harness inherited
-unless overridden; arrays replace). The dispatcher declares its level via
-`spawn_agent_session(level=...)`, default `leaf`. Full spend resolution chain:
+`orchestration.roles` default at field granularity (harness inherited unless overridden; arrays
+replace). The structural dispatcher derives `leaf`, `master`, or `portfolio` from the child role
+and its canonical document altitude. Full spend resolution chain:
 repo-local level override > global level override > repo-local role default >
 global role default > detection-gated default. The resolved level rides spawn
 provenance (`spawnLevel`/`spawnLevelSource`). Legacy caller-supplied
@@ -454,12 +456,12 @@ itself is proven healthy; the gate treats a killed run as a failure, never a ski
 `maxParallelMasters`, `maxParallelLeaves`, `maxSubAgents` (positive integers;
 omitted means uncapped). The caps are doctrine input for the spawning seats.
 
-`orchestration.spawn.harness` names the default harness `spawn_agent_session`
-uses when no role/level knob supplies one. Resolution order at the spawn seam:
+`orchestration.spawn.harness` names the default harness the private launch seam uses when no
+role/level knob supplies one. Resolution order at that seam:
 role knobs (level-merged) > repo-local settings > global settings >
 detection-gated default (the first
-effective-registry harness found on PATH; the repo-local layer is selected by
-the qualified leaf key's repository segment). Values are validated against
+effective-registry harness found on PATH; the repo-local layer is selected by the canonical task
+document's repository). Values are validated against
 the effective harness ids (builtin + `orchestration.harnesses`) and gated by
 detection — a settings value can never inject a command through a reference;
 argv is definable only in the explicit `orchestration.harnesses` family.

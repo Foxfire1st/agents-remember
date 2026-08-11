@@ -645,6 +645,7 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn("config=dashboard/tsconfig.json", line)
         self.assertRegex(line, r"units=3 projects; [1-9][0-9]* TypeScript inputs")
 
+    @unittest.skipUnless(shutil.which("node"), "installed Node.js runtime is unavailable")
     def test_dashboard_lint_matches_live_eslint_machine_result_set(self) -> None:
         dashboard = REPOSITORY_ROOT / "dashboard"
         completed = subprocess.run(
@@ -713,6 +714,7 @@ class CallerProvenanceTests(unittest.TestCase):
                 self.assertRegex(block, r"result: [a-z-]+ PASS")
                 self.assertRegex(block, r"result: [a-z-]+ FAIL")
 
+    @unittest.skipUnless(shutil.which("node"), "installed Node.js runtime is unavailable")
     def test_every_dashboard_ci_rail_uses_the_shared_provenance_path(self) -> None:
         workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
             encoding="utf-8"

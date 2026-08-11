@@ -15,7 +15,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 from agents_remember.controlplane.operator_inbox_transitions import ExpiryOptions
 from agents_remember.controlplane.signal_routing import (
     derive_architect_owner,
-    derive_leaf_manager_owner,
+    derive_manager_owner,
     derive_row_owner,
     derive_signal_owner,
 )
@@ -52,6 +52,7 @@ from agents_remember.serving.seat_turn_truth import (
     record_state_signal_emitted,
 )
 from agents_remember.serving.state_signals import (
+    NonReactionRuntime,
     compound_idle_response,
     compound_idle_sets,
     compound_idle_signature,
@@ -60,6 +61,7 @@ from agents_remember.serving.state_signals import (
     non_reaction_response,
     state_signal_response,
 )
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 # The one event-rename seam for the compatibility window (260713-TES-L1): every agent-notifier
 # event is emitted under BOTH the current and the legacy name so observer-river consumers and
@@ -185,13 +187,19 @@ def _rebind_due(
     entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
         return AgentNotifierActionResult("rebind", finding, "skipped", "entry not pending")
-    owner = derive_row_owner(ctx.catalog, entry)
+    topology = TaskDocumentTopology(ctx.coordination_root)
+    owner = derive_row_owner(ctx.catalog, topology, entry)
     if owner.agent_id is None or owner.agent_id == entry.agentId:
         return AgentNotifierActionResult("rebind", finding, "skipped", "no replacement owner")
     rebound, _ = inbox_transitions.rebind_entry(
         ctx.inbox_store,
         entry.id,
-        InboxOwner(role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id),
+        InboxOwner(
+            role=owner.role,
+            task_document_ref=owner.task_document_ref,
+            agent_id=owner.agent_id,
+            lifecycle_id=owner.lifecycle_id,
+        ),
         now=now.isoformat(),
         current=sweep.inbox_current,
     )
@@ -204,7 +212,9 @@ def _rebind_due(
             "fromAgentId": entry.agentId,
             "toAgentId": owner.agent_id,
             "toRole": owner.role,
-            "leafKey": rebound.leafKey,
+            "taskDocumentRef": (
+                rebound.taskDocumentRef.model_dump() if rebound.taskDocumentRef else None
+            ),
         },
     )
     return AgentNotifierActionResult("rebind", finding, "rebound", owner.agent_id)
@@ -227,10 +237,16 @@ def _rebind_expired(
     entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
         return AgentNotifierActionResult("expire", finding, "skipped", "entry not pending")
-    owner = derive_row_owner(ctx.catalog, entry)
+    topology = TaskDocumentTopology(ctx.coordination_root)
+    owner = derive_row_owner(ctx.catalog, topology, entry)
     if owner.agent_id is not None and owner.agent_id != entry.agentId:
         return _rebind_due(ctx, finding, now=now, sweep=sweep)
-    mailbox = derive_architect_owner(ctx.catalog, leaf_key=entry.leafKey)
+    subject_document = entry.subjectTaskDocumentRef or entry.taskDocumentRef
+    if subject_document is None:
+        return AgentNotifierActionResult(
+            "expire", finding, "skipped", "row has no structural task address"
+        )
+    mailbox = derive_architect_owner(ctx.catalog, topology, task_document_ref=subject_document)
     expired, _ = inbox_transitions.mark_expired(
         ctx.inbox_store,
         entry.id,
@@ -238,7 +254,10 @@ def _rebind_expired(
         options=ExpiryOptions(
             reason="rebind-grace-expired",
             readdress_to=InboxOwner(
-                role=mailbox.role, agent_id=mailbox.agent_id, lifecycle_id=mailbox.lifecycle_id
+                role=mailbox.role,
+                task_document_ref=mailbox.task_document_ref,
+                agent_id=mailbox.agent_id,
+                lifecycle_id=mailbox.lifecycle_id,
             ),
         ),
     )
@@ -295,9 +314,10 @@ def _signal_emit(
 ) -> AgentNotifierActionResult:
     owner = derive_signal_owner(
         ctx.catalog,
+        TaskDocumentTopology(ctx.coordination_root),
         sender_agent_id=finding.session_id,
         message_kind="escalation",
-        leaf_key=finding.leaf_key,
+        task_document_ref=finding.task_document_ref,
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("signal-emit", finding, "skipped", "no routable owner")
@@ -306,7 +326,7 @@ def _signal_emit(
             agent_id=owner.agent_id,
             lifecycle_id=owner.lifecycle_id,
             role=owner.role,
-            leaf_key=finding.leaf_key,
+            task_document_ref=finding.task_document_ref,
             seat_role=finding.seat_role,
         ),
         finding_kind=finding.kind,
@@ -322,7 +342,10 @@ def _signal_emit(
             "signal-emit", finding, "cooldown", "signal cooldown active"
         )
     ask = f"Agent notifier observed {finding.kind}: {finding.detail}"
-    response = f"session {finding.session_id or 'unknown'} (leaf {finding.leaf_key or 'unknown'})"
+    response = (
+        f"seat {finding.task_document_ref.key if finding.task_document_ref else 'unknown'} "
+        f"as {finding.seat_role or 'unknown'}"
+    )
     delivery_state = _post_owner_signal(
         ctx,
         owner,
@@ -330,7 +353,7 @@ def _signal_emit(
             message_kind="escalation",
             ask=ask,
             response=response,
-            leaf_key=finding.leaf_key,
+            task_document_ref=finding.task_document_ref,
             seat_role=finding.seat_role,
             subject_agent_id=finding.session_id,
         ),
@@ -342,7 +365,7 @@ def _signal_emit(
         targetAgentId=owner.agent_id,
         targetLifecycleId=owner.lifecycle_id,
         targetRole=owner.role,
-        leafKey=finding.leaf_key,
+        taskDocumentRef=finding.task_document_ref,
         seatRole=finding.seat_role,
         findingKind=finding.kind,
         detail=finding.detail,
@@ -357,7 +380,9 @@ def _signal_emit(
             "predicateKind": finding.kind,
             "detail": finding.detail,
             "sessionId": finding.session_id,
-            "leafKey": finding.leaf_key,
+            "taskDocumentRef": (
+                finding.task_document_ref.model_dump() if finding.task_document_ref else None
+            ),
             "seatRole": finding.seat_role,
             "ownerRole": owner.role,
             "deliveryState": delivery_state,
@@ -381,8 +406,12 @@ def _signal_dead_upstream(  # pragma: no cover
     chain surfaces through the rebind machinery to the scoped architect mailbox
     (mailbox-not-rung).
     """
-    owner = derive_leaf_manager_owner(
-        ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+    if finding.task_document_ref is None:
+        return AgentNotifierActionResult("signal-manager", finding, "skipped", "no task document")
+    owner = derive_manager_owner(
+        ctx.catalog,
+        TaskDocumentTopology(ctx.coordination_root),
+        task_document_ref=finding.task_document_ref,
     )
     if owner.agent_id is None and owner.role is None:
         return AgentNotifierActionResult("signal-manager", finding, "skipped", "no manager address")
@@ -391,7 +420,7 @@ def _signal_dead_upstream(  # pragma: no cover
         "current manager action is required. The seat continues its own brief and never absorbs "
         "the dead owner's role."
     )
-    response = f"leaf {finding.leaf_key or 'unknown'}"
+    response = f"task {finding.task_document_ref.key}"
     delivery_state = _post_owner_signal(
         ctx,
         owner,
@@ -399,7 +428,7 @@ def _signal_dead_upstream(  # pragma: no cover
             message_kind="escalation",
             ask=ask,
             response=response,
-            leaf_key=finding.leaf_key,
+            task_document_ref=finding.task_document_ref,
             seat_role=finding.seat_role,
             subject_agent_id=finding.session_id,
         ),
@@ -410,7 +439,7 @@ def _signal_dead_upstream(  # pragma: no cover
         "orchestration.agent-notifier.dead-upstream",
         {
             "sessionId": finding.session_id,
-            "leafKey": finding.leaf_key,
+            "taskDocumentRef": finding.task_document_ref.model_dump(),
             "seatRole": finding.seat_role,
             "managerRole": owner.role,
             "managerAgentId": owner.agent_id,
@@ -435,14 +464,17 @@ def _emit_state_signal(  # pragma: no cover
     """
     if finding.session_id is None or finding.source_id is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no seat row")
+    topology = TaskDocumentTopology(ctx.coordination_root)
     current = current_state_signal_finding(
-        ctx.catalog, session_id=finding.session_id, source_id=finding.source_id
+        ctx.catalog, topology, session_id=finding.session_id, source_id=finding.source_id
     )
     if current is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no longer due")
     entry, current_finding = current
-    owner = derive_leaf_manager_owner(
-        ctx.catalog, sender_agent_id=current_finding.session_id, leaf_key=current_finding.leaf_key
+    if current_finding.task_document_ref is None:
+        return AgentNotifierActionResult("state-signal", finding, "skipped", "no task document")
+    owner = derive_manager_owner(
+        ctx.catalog, topology, task_document_ref=current_finding.task_document_ref
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no routable owner")
@@ -456,7 +488,7 @@ def _emit_state_signal(  # pragma: no cover
                 f"({entry.terminal_evidence_id})"
             ),
             response=state_signal_response(entry),
-            leaf_key=current_finding.leaf_key,
+            task_document_ref=current_finding.task_document_ref,
             seat_role=current_finding.seat_role,
             subject_agent_id=current_finding.session_id,
         ),
@@ -469,7 +501,7 @@ def _emit_state_signal(  # pragma: no cover
         "orchestration.agent-notifier.state-signal",
         {
             "sessionId": current_finding.session_id,
-            "leafKey": current_finding.leaf_key,
+            "taskDocumentRef": current_finding.task_document_ref.model_dump(),
             "terminalOutcome": entry.terminal_outcome,
             "terminalEvidenceId": entry.terminal_evidence_id,
             "ownerRole": owner.role,
@@ -502,13 +534,19 @@ def _emit_compound_idle(
     entry = ctx.catalog.get(finding.session_id)
     if entry is None:
         return AgentNotifierActionResult("compound-idle", finding, "skipped", "no seat row")
-    members = compound_idle_sets(ctx.catalog).get(entry.id)
+    topology = TaskDocumentTopology(ctx.coordination_root)
+    members = compound_idle_sets(ctx.catalog, topology).get(entry.id)
     if members is None:
         return AgentNotifierActionResult("compound-idle", finding, "skipped", "no longer idle")
     signature = compound_idle_signature(members)
     if entry.compound_idle_emitted_for == signature:
         return AgentNotifierActionResult("compound-idle", finding, "skipped", "already emitted")
-    owner = derive_signal_owner(ctx.catalog, sender_agent_id=entry.id, message_kind="state-signal")
+    owner = derive_signal_owner(
+        ctx.catalog,
+        topology,
+        sender_agent_id=entry.id,
+        message_kind="state-signal",
+    )
     if owner.agent_id is None and owner.lifecycle_id is None:
         return AgentNotifierActionResult("compound-idle", finding, "skipped", "no routable owner")
     delivery_state = _post_owner_signal(
@@ -518,7 +556,7 @@ def _emit_compound_idle(
             message_kind="state-signal",
             ask=f"Agent notifier observed state-signal: compound-idle ({signature})",
             response=compound_idle_response(members),
-            leaf_key=finding.leaf_key,
+            task_document_ref=finding.task_document_ref,
             seat_role=finding.seat_role,
             subject_agent_id=entry.id,
         ),
@@ -530,7 +568,9 @@ def _emit_compound_idle(
         "orchestration.agent-notifier.state-signal",
         {
             "sessionId": entry.id,
-            "leafKey": finding.leaf_key,
+            "taskDocumentRef": (
+                finding.task_document_ref.model_dump() if finding.task_document_ref else None
+            ),
             "terminalOutcome": "compound-idle",
             "episode": signature,
             "ownerRole": owner.role,
@@ -551,9 +591,9 @@ def _emit_non_reaction(  # pragma: no cover
     """Relay the non-reaction residue fact to the seat's owner, once per landed-row episode."""
     if finding.session_id is None or finding.source_id is None:
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "no seat row")
+    topology = TaskDocumentTopology(ctx.coordination_root)
     current = current_non_reaction_finding(
-        ctx.catalog,
-        ctx.inbox_store,
+        NonReactionRuntime(ctx.catalog, topology, ctx.inbox_store),
         finding,
         now=now,
     )
@@ -562,17 +602,22 @@ def _emit_non_reaction(  # pragma: no cover
     entry, row, current_finding = current
     if entry.binding_role == "manager":
         owner = derive_signal_owner(
-            ctx.catalog, sender_agent_id=finding.session_id, message_kind="state-signal"
+            ctx.catalog,
+            topology,
+            sender_agent_id=finding.session_id,
+            message_kind="state-signal",
         )
         if owner.agent_id is None and owner.lifecycle_id is None:
             return AgentNotifierActionResult(
                 "non-reaction", finding, "skipped", "no routable owner"
             )
     else:
-        owner = derive_leaf_manager_owner(
+        if current_finding.task_document_ref is None:
+            return AgentNotifierActionResult("non-reaction", finding, "skipped", "no task document")
+        owner = derive_manager_owner(
             ctx.catalog,
-            sender_agent_id=current_finding.session_id,
-            leaf_key=current_finding.leaf_key,
+            topology,
+            task_document_ref=current_finding.task_document_ref,
         )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "no routable owner")
@@ -583,7 +628,7 @@ def _emit_non_reaction(  # pragma: no cover
             message_kind="state-signal",
             ask="Agent notifier observed state-signal: non-reaction",
             response=non_reaction_response(entry, row),
-            leaf_key=current_finding.leaf_key,
+            task_document_ref=current_finding.task_document_ref,
             seat_role=current_finding.seat_role,
             subject_agent_id=current_finding.session_id,
         ),
@@ -595,7 +640,11 @@ def _emit_non_reaction(  # pragma: no cover
         "orchestration.agent-notifier.state-signal",
         {
             "sessionId": current_finding.session_id,
-            "leafKey": current_finding.leaf_key,
+            "taskDocumentRef": (
+                current_finding.task_document_ref.model_dump()
+                if current_finding.task_document_ref
+                else None
+            ),
             "terminalOutcome": "non-reaction",
             "landedRowId": finding.source_id,
             "ownerRole": owner.role,

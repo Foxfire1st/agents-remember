@@ -11,9 +11,9 @@ parameterize).
 
 ## What A Harness Is
 
-A **harness** is a TUI coding agent the framework can spawn into a hosted
-tmux session — via the dashboard's launch buttons or the agent-facing
-`spawn_agent_session` MCP tool (one shared opener; no parallel spawn path).
+A **harness** is a TUI coding agent the framework can launch into a hosted
+tmux session — via the dashboard's launch buttons or the agent-facing structural
+`dispatch_agent` tool (one plane-owned opener; no parallel agent launch path).
 Each harness is described by an entry with:
 
 | Field | Meaning |
@@ -87,8 +87,8 @@ post-cutover validation:
 2. Restart or reload every connected harness/client process that owns an
    Agents Remember MCP server subprocess. Each Claude, Codex, Pi, or other MCP
    client has its own in-memory `OperatorInboxEntry` and catalog reader; leaving
-   even one pre-cutover process alive can make `operator_inbox_post`, poll, or
-   consume fail against rows written by the new daemon.
+   even one pre-cutover process alive can make its private inbox reader or writer fail against
+   rows written by the new daemon.
 3. End and recreate each bridge-backed hosted session that must be validated.
    Its per-session `harness_control_runner` and vendor adapter are separate
    long-lived Python processes and do not hot-reload when only the dashboard
@@ -135,9 +135,10 @@ dispatch, naming the known set and pointing here — never a crash.
 
 Role knobs live in `orchestration.roles.<role>` (flat defaults) and
 `orchestration.rolesPerLevel.<level>.<role>` (per-level overrides). For ordinary
-agent-driven spawns, these settings are the sole developer-controlled spend
-surface: `spawn_agent_session` callers declare `env.AR_SPAWN_ROLE` and `level`,
-not `harness`/`model`/`effort` or direct launch/session spend controls. Three
+agent-driven dispatches, these settings are the sole developer-controlled spend
+surface. Callers name only a canonical child task document and role; the plane derives role/level
+launch state and never accepts caller `harness`/`model`/`effort` or direct launch/session spend
+controls. Three
 settings layers have distinct validation postures:
 
 ### Layer 1 — validated enum knobs
@@ -177,9 +178,10 @@ config) refuses instead of creating two authorities. Example: `["--dangerously-s
   post-readiness dispatch-brief exactly once (session modes the model interprets, e.g. a prompt
   keyword like `ultracode`). Never validated; recorded in spawn provenance.
 
-Dispatch order is explicit: **spawn (launch argv → settings session commands) →
-`hosted_session_readiness` on the exact returned id → one durable exact-agent `dispatch-brief`
-(keywords first)**. Spawn success is `spawned-unbriefed`; a spawned-only or not-ready seat is not
+The private dispatch order is explicit: **launch (argv → settings session commands) → readiness
+on the plane-owned occupant → one durable exact-pinned `dispatch-brief` (keywords first)**.
+`dispatch_agent` exposes only the structural seat and delivery state. Launch success is
+`spawned-unbriefed`; a launched-only or not-ready seat is not
 active work. Brief delivery is accepted only when the durable row reports
 `deliveryState=delivered` and `deliveryDetail=harness-log-confirmed`. A failed attempt leaves that
 same row pending for recovery; it does not create a duplicate brief or replacement session.
@@ -201,11 +203,10 @@ makes that expressible (ruling 2026-07-07T08:15):
 }
 ```
 
-`spawn_agent_session(level=...)` declares the dispatch level (`leaf` |
-`master` | `portfolio`, default `leaf`); the dispatcher knows its level — a
-manager dispatching leaf seats passes `leaf`, the master-seam reviewer
-`master`, portfolio/end-to-end seats `portfolio`. The level override
-deep-merges over the flat default at leaf-key granularity (unset fields
+The structural dispatcher derives dispatch level (`leaf` | `master` | `portfolio`) from the
+child role and canonical document altitude: leaf worker/reviewer/curator seats use `leaf`, a
+manager uses `master`, and sprint roles use `portfolio`. The level override
+deep-merges over the flat default at field granularity (unset fields
 inherit; lists replace). Full spend resolution chain:
 
 **repo-local level override > global level override > repo-local role default >
@@ -239,7 +240,7 @@ payload).
 
 A harness is launchable only when its `command` resolves on `PATH`
 (`shutil.which`). `GET /api/harnesses` reports the effective set with
-per-harness detection; `spawn_agent_session` harness resolution order is role
+per-harness detection; private launch resolution order is role
 knobs (level-merged) > `orchestration.spawn.harness` preference > the first
 detected effective-registry harness.
 
@@ -254,7 +255,7 @@ detected effective-registry harness.
 | `launch-selection-invalid` | role-configured native launch omitted model or effort | the exact missing field; refused before tmux creation |
 | `spend-override-unsupported` | ordinary caller supplied removed spend fields (`harness`, `model`, `effort`, launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` / `OPENAI_BASE_URL`) | the removed fields and the settings families that own them |
 | `level-invalid` | dispatch level outside `leaf|master|portfolio` | the value and the valid set |
-| `leaf-taken` | the target leaf already has a running same-role session | the owning session (server-arbitrated, never overridden) |
+| `seat-taken` | the target task document already has a running same-role occupant | structural refusal (the private occupant remains server-owned) |
 
 Unknown, unselectable, non-launch-settable, or conflicting native selections fail at the hosted
 runner launch boundary after the catalog row/tmux exists but before the configured real vendor
@@ -296,8 +297,8 @@ Teach it in the GLOBAL agentic settings
 }
 ```
 
-Now `spawn_agent_session(env={"AR_SPAWN_ROLE": "worker"})` launches
-`hermes --tui --model h-1 --reasoning high` (knobs also riding the env), and
+Now `dispatch_agent(task_document_ref=<leaf>, role="worker", brief=...)` privately launches
+`hermes --tui --model h-1 --reasoning high`, and
 `effort: "turbo"` refuses naming `[low, high]`. Had you declared NO
 `effortFlag`/vocabulary, the effort knob itself would refuse with guidance —
 declare the mapping or carry a deliberate raw argv through settings-owned

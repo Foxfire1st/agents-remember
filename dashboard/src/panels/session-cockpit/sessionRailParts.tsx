@@ -8,13 +8,13 @@ import {
   type AttentionRollup,
   type RailMasterSection as RailMasterRow,
   type RailModel,
+  type RailSprintSection,
   type SpawnTreeRow,
 } from '../../data/railModel';
 import { turnHintWord, type PtyHarvest } from '../../data/ptyHarvest';
 import { sessionPendingInteractionPayload, type OpenSession } from '../../data/sessions';
 import { hasUnackedSetAttention } from '../../data/setChips';
 import { seatVisualState, type SeatVisualState } from '../../data/stateGrammar';
-import { leafIdFromKey } from '../../data/taskIdentity';
 import type { GateNode } from '../../types/projection';
 import { terminateConfirmCopy } from './lifecycleCopy';
 import {
@@ -55,6 +55,10 @@ export type BulkTarget = { scope: 'sprint' } | { scope: 'master'; key: string };
 
 export interface RailRowProps {
   session: OpenSession;
+  displayLabel?: string;
+  gateLeafKey?: string;
+  masterAttention?: { glyph: string; count: number; kind: 'needsInput' | 'failed' } | null;
+  masterKey?: string;
   dormant?: boolean;
   focusedSessionId: string | null;
   heldGates: ReadonlyMap<string, GateNode>;
@@ -82,13 +86,14 @@ function railTooltipFor(session: OpenSession, harvest: PtyHarvest | undefined): 
     harvest?.turnHint ? `pty hint: ${turnHintWord(harvest.turnHint)}` : null,
   ].filter((part): part is string => part !== null);
   return (
-    railRowTooltip(session, session.leafKey ? leafIdFromKey(session.leafKey) : undefined) +
+    railRowTooltip(session, session.taskDocumentRef?.path) +
     (hintParts.length > 0 ? ` · ${hintParts.join(' · ')}` : '')
   );
 }
 
 function RailRowLabelGroup({
   session,
+  displayLabel,
   visual,
   code,
   gate,
@@ -98,8 +103,11 @@ function RailRowLabelGroup({
   showChip,
   chipTone,
   promptTitled,
+  masterAttention,
+  masterKey,
 }: {
   session: OpenSession;
+  displayLabel: string;
   visual: SeatVisualState;
   code: string | undefined;
   gate: GateNode | undefined;
@@ -109,6 +117,8 @@ function RailRowLabelGroup({
   showChip: boolean;
   chipTone: 'alarm' | 'warn' | 'muted';
   promptTitled: string | undefined;
+  masterAttention?: RailRowProps['masterAttention'];
+  masterKey?: string;
 }) {
   return (
     <div className={rowLabelGroup}>
@@ -129,7 +139,10 @@ function RailRowLabelGroup({
           {code}
         </span>
       ) : null}
-      <span className={rowTitle}>{session.label}</span>
+      <span className={rowTitle}>{displayLabel}</span>
+      {masterKey ? (
+        <MasterAttentionBadge badge={masterAttention ?? null} masterKey={masterKey} />
+      ) : null}
       <AttentionMarkers
         session={session}
         gate={gate}
@@ -279,6 +292,7 @@ function RailRowActions({
 
 function railRowDerived(
   session: OpenSession,
+  gateLeafKey: string | undefined,
   heldGates: ReadonlyMap<string, GateNode>,
   endFailure: RailRowProps['endFailure'],
   focusedSessionId: string | null,
@@ -286,7 +300,7 @@ function railRowDerived(
 ) {
   const visual = seatVisualState(session);
   const code = roleCode(session);
-  const gate = session.leafKey ? heldGates.get(session.leafKey) : undefined;
+  const gate = gateLeafKey ? heldGates.get(gateLeafKey) : undefined;
   const payload = sessionPendingInteractionPayload(session);
   const prompt = interactionPromptPreview(payload);
   // The preview names WHO asks when it is a multiplexed sub-agent approval —
@@ -315,6 +329,10 @@ function railRowDerived(
 
 export function RailRow({
   session,
+  displayLabel = session.label,
+  gateLeafKey,
+  masterAttention,
+  masterKey,
   dormant = false,
   focusedSessionId,
   heldGates,
@@ -330,6 +348,7 @@ export function RailRow({
 }: RailRowProps) {
   const derived = railRowDerived(
     session,
+    gateLeafKey,
     heldGates,
     endFailure,
     focusedSessionId,
@@ -363,6 +382,7 @@ export function RailRow({
     >
       <RailRowLabelGroup
         session={session}
+        displayLabel={displayLabel}
         visual={visual}
         code={code}
         gate={gate}
@@ -372,6 +392,8 @@ export function RailRow({
         showChip={showChip}
         chipTone={chipTone}
         promptTitled={promptTitled}
+        masterAttention={masterAttention}
+        masterKey={masterKey}
       />
       <RailRowActions
         session={session}
@@ -444,44 +466,29 @@ export function BulkConfirm({
 function RailMasterHead({
   master,
   badge,
-  armed,
-  onArmBulk,
-  onConfirmBulk,
-  onCancelBulk,
+  rowProps,
 }: {
   master: RailMasterRow;
   badge: { glyph: string; count: number; kind: 'needsInput' | 'failed' } | null;
-  armed: boolean;
-  onArmBulk: (target: BulkTarget) => void;
-  onConfirmBulk: (target: BulkTarget) => void;
-  onCancelBulk: () => void;
+  rowProps: Omit<RailRowProps, 'session' | 'dormant'>;
 }) {
+  if (master.manager) {
+    return (
+      <RailRow
+        session={master.manager}
+        displayLabel={`${master.label} · ${master.manager.label}`}
+        masterAttention={badge}
+        masterKey={master.key}
+        {...rowProps}
+      />
+    );
+  }
   return (
     <div className={masterHead}>
       <span className={masterName} title={master.label}>
         {master.label}
       </span>
       <MasterAttentionBadge badge={badge} masterKey={master.key} />
-      {master.completed.length > 0 ? (
-        armed ? (
-          <BulkConfirm
-            target={{ scope: 'master', key: master.key }}
-            doomed={master.completed}
-            onConfirm={onConfirmBulk}
-            onCancel={onCancelBulk}
-          />
-        ) : (
-          <button
-            type="button"
-            className={bulkButton}
-            onClick={() => onArmBulk({ scope: 'master', key: master.key })}
-            title={master.completed.map((session) => session.label).join(', ')}
-            data-testid={`rail-bulk-master-${master.key}`}
-          >
-            ✕ end {master.completed.length} done
-          </button>
-        )
-      ) : null}
     </div>
   );
 }
@@ -489,26 +496,31 @@ function RailMasterHead({
 function RailMasterBody({
   master,
   doneOpen,
+  armed,
   rowProps,
   onToggleDone,
+  onArmBulk,
+  onConfirmBulk,
+  onCancelBulk,
 }: {
   master: RailMasterRow;
   doneOpen: boolean;
+  armed: boolean;
   rowProps: Omit<RailRowProps, 'session' | 'dormant'>;
   onToggleDone: (key: string) => void;
+  onArmBulk: (target: BulkTarget) => void;
+  onConfirmBulk: (target: BulkTarget) => void;
+  onCancelBulk: () => void;
 }) {
   return (
     <div className={masterBody}>
-      {master.commandSeats.map((manager) => (
-        <RailRow key={manager.id} session={manager} {...rowProps} />
-      ))}
       {master.clusters.map((cluster) => (
         <div key={cluster.key} className={leafGroup} data-testid={`rail-cluster-${cluster.key}`}>
           <span className={leafCaption} title={cluster.label}>
             <span aria-hidden="true">└</span> {cluster.label}
           </span>
           {cluster.seats.map((seat) => (
-            <RailRow key={seat.id} session={seat} {...rowProps} />
+            <RailRow key={seat.id} session={seat} gateLeafKey={cluster.gateLeafKey} {...rowProps} />
           ))}
         </div>
       ))}
@@ -523,6 +535,24 @@ function RailMasterBody({
           >
             {doneOpen ? '▾' : '▸'} completed · {master.completed.length}
           </button>
+          {armed ? (
+            <BulkConfirm
+              target={{ scope: 'master', key: master.key }}
+              doomed={master.completed}
+              onConfirm={onConfirmBulk}
+              onCancel={onCancelBulk}
+            />
+          ) : (
+            <button
+              type="button"
+              className={bulkButton}
+              onClick={() => onArmBulk({ scope: 'master', key: master.key })}
+              title={master.completed.map((session) => session.label).join(', ')}
+              data-testid={`rail-bulk-master-${master.key}`}
+            >
+              ✕ end {master.completed.length} done
+            </button>
+          )}
         </div>
       ) : null}
       {doneOpen
@@ -560,19 +590,16 @@ export function RailMasterBlock({
   const armed = armedBulk?.scope === 'master' && armedBulk.key === master.key;
   return (
     <section key={master.key} className={masterBox} data-testid={`rail-master-${master.key}`}>
-      <RailMasterHead
-        master={master}
-        badge={badge}
-        armed={armed}
-        onArmBulk={onArmBulk}
-        onConfirmBulk={onConfirmBulk}
-        onCancelBulk={onCancelBulk}
-      />
+      <RailMasterHead master={master} badge={badge} rowProps={rowProps} />
       <RailMasterBody
         master={master}
         doneOpen={doneOpen}
+        armed={armed}
         rowProps={rowProps}
         onToggleDone={onToggleDone}
+        onArmBulk={onArmBulk}
+        onConfirmBulk={onConfirmBulk}
+        onCancelBulk={onCancelBulk}
       />
     </section>
   );
@@ -644,6 +671,59 @@ export function AttentionStrip({
   );
 }
 
+function RailSummary({ model }: { model: RailModel }) {
+  const masterCount = model.sprints.reduce(
+    (sum, sprint) => sum + sprint.masters.length,
+    model.masters.length,
+  );
+  if (model.sprints.length === 0 && masterCount === 0) return null;
+  return (
+    <span className={sprintRow} data-testid="rail-sprint-row">
+      {model.sprints.length > 0 ? `${model.sprints.length} sprint · ` : ''}
+      {masterCount} master{masterCount === 1 ? '' : 's'}
+    </span>
+  );
+}
+
+function CompletedBulkControl({
+  completedTotal,
+  armedBulk,
+  allLanded,
+  onArmSprint,
+  onConfirmBulk,
+  onCancelBulk,
+}: {
+  completedTotal: number;
+  armedBulk: BulkTarget | null;
+  allLanded: OpenSession[];
+  onArmSprint: () => void;
+  onConfirmBulk: (target: BulkTarget) => void;
+  onCancelBulk: () => void;
+}) {
+  if (completedTotal === 0) return null;
+  if (armedBulk?.scope === 'sprint') {
+    return (
+      <BulkConfirm
+        target={{ scope: 'sprint' }}
+        doomed={allLanded}
+        onConfirm={onConfirmBulk}
+        onCancel={onCancelBulk}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={bulkButton}
+      onClick={onArmSprint}
+      title={allLanded.map((session) => session.label).join(', ')}
+      data-testid="rail-bulk-sprint"
+    >
+      ✕ end {completedTotal} completed
+    </button>
+  );
+}
+
 export function RailTop({
   model,
   armedBulk,
@@ -665,32 +745,15 @@ export function RailTop({
 }) {
   return (
     <div className={railTop}>
-      {model.masters.length > 0 ? (
-        <span className={sprintRow} data-testid="rail-sprint-row">
-          sprint · {model.masters.length} master
-          {model.masters.length === 1 ? '' : 's'}
-        </span>
-      ) : null}
-      {model.completedTotal > 0 ? (
-        armedBulk?.scope === 'sprint' ? (
-          <BulkConfirm
-            target={{ scope: 'sprint' }}
-            doomed={allLanded}
-            onConfirm={onConfirmBulk}
-            onCancel={onCancelBulk}
-          />
-        ) : (
-          <button
-            type="button"
-            className={bulkButton}
-            onClick={onArmSprint}
-            title={allLanded.map((session) => session.label).join(', ')}
-            data-testid="rail-bulk-sprint"
-          >
-            ✕ end {model.completedTotal} completed
-          </button>
-        )
-      ) : null}
+      <RailSummary model={model} />
+      <CompletedBulkControl
+        completedTotal={model.completedTotal}
+        armedBulk={armedBulk}
+        allLanded={allLanded}
+        onArmSprint={onArmSprint}
+        onConfirmBulk={onConfirmBulk}
+        onCancelBulk={onCancelBulk}
+      />
       <button
         type="button"
         className={treeToggleButton}
@@ -752,6 +815,57 @@ function RailTreeRows({
   );
 }
 
+function RailSprintBlock({
+  sprint,
+  rollup,
+  openDoneFolders,
+  armedBulk,
+  rowProps,
+  onToggleDone,
+  onArmBulk,
+  onConfirmBulk,
+  onCancelBulk,
+}: {
+  sprint: RailSprintSection;
+  rollup: AttentionRollup;
+  openDoneFolders: Record<string, boolean>;
+  armedBulk: BulkTarget | null;
+  rowProps: Omit<RailRowProps, 'session' | 'dormant'>;
+  onToggleDone: (key: string) => void;
+  onArmBulk: (target: BulkTarget) => void;
+  onConfirmBulk: (target: BulkTarget) => void;
+  onCancelBulk: () => void;
+}) {
+  return (
+    <section className={groupBox} data-testid={`rail-sprint-${sprint.key}`}>
+      <div className={masterHead}>
+        <span className={masterName} title={sprint.label}>
+          {sprint.label}
+        </span>
+      </div>
+      <div className={groupRows}>
+        {sprint.seats.map((session) => (
+          <RailRow key={session.id} session={session} {...rowProps} />
+        ))}
+        {sprint.masters.map((master) => (
+          <RailMasterBlock
+            key={master.key}
+            master={master}
+            rollup={rollup}
+            openDoneFolders={openDoneFolders}
+            armedBulk={armedBulk}
+            rowProps={rowProps}
+            onToggleDone={onToggleDone}
+            onArmBulk={onArmBulk}
+            onConfirmBulk={onConfirmBulk}
+            onCancelBulk={onCancelBulk}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function RailHierarchy({
   model,
   rollup,
@@ -775,8 +889,19 @@ function RailHierarchy({
 }) {
   return (
     <>
-      {model.spine.map((session) => (
-        <RailRow key={session.id} session={session} {...rowProps} />
+      {model.sprints.map((sprint) => (
+        <RailSprintBlock
+          key={sprint.key}
+          sprint={sprint}
+          rollup={rollup}
+          openDoneFolders={openDoneFolders}
+          armedBulk={armedBulk}
+          rowProps={rowProps}
+          onToggleDone={onToggleDone}
+          onArmBulk={onArmBulk}
+          onConfirmBulk={onConfirmBulk}
+          onCancelBulk={onCancelBulk}
+        />
       ))}
       {model.masters.map((master) => (
         <RailMasterBlock

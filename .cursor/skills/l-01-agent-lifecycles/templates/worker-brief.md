@@ -6,9 +6,9 @@ checkpoint, reframe, plan). Compile it fresh per leaf from this shape; the prove
 absorbed a series of real dispatch frictions (route-index leaks, attestation format, provider-stack
 keying, missing `python` shim), so deviate knowingly or not at all.
 
-Spawn with `env={"AR_SPAWN_ROLE": "worker"}` and the **qualified** leaf key
-`<repository>/<master>/<docId>`; together they claim the worker's `(leaf, role)` seat while the
-session-start router and dashboard leaf rail engage.
+Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="worker",
+brief=<this complete brief>)`. The control plane claims the `(leaf document, worker)` seat and
+privately binds its current occupant; the brief never carries a runtime address.
 
 ---
 
@@ -20,13 +20,13 @@ ROLE BRIEF — worker
 You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
 `skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. Execute the leaf
 code completely, write your builder turn report, then stop. Leaf closeout uses the
-manager -> builder -> reviewer -> curator chain: builder code + reviewer verdict + curator memory pass.
+manager -> builder -> reviewer -> curator chain: builder code + reviewer verdict + curator coherence pass.
 
 ## Worktrees (your code write area + memory context)
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`)
 - Memory: `<memory-worktree-path>` (read/context for changed-path notes; the curator writes onboarding)
 - Plus your turn report at the path below. Nothing else. NEVER `git commit` — the owning seat
-  closes out after reviewing your report, the reviewer verdict, and the curator memory pass.
+  closes out after reviewing your report, the reviewer verdict, and the curator coherence pass.
 
 ## Tool surface
 - Native file tools inside the two worktrees; shell for the checks below.
@@ -60,9 +60,10 @@ verdict finding, not a style note.
 - `git diff --check` in both worktrees.
 
 ## Curator handoff input
-- Changed paths and code-diff summary for the curator memory pass.
+- Changed paths and code-diff summary for the curator coherence pass.
 - Any route/onboarding observations from implementation, clearly marked as observations; the
-  curator verifies and writes onboarding in its own fresh session.
+  curator reconciles them with existing and ruled intent before writing onboarding in its own
+  fresh session. Do not present a forward-looking idea or local inference as accepted current truth.
 - Pin idiom for any metadata note the curator needs: "Verification metadata pinned until closeout
   stamps the <leaf-id> commit."
 

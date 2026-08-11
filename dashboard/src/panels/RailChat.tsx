@@ -1,6 +1,6 @@
-import { lazy, memo, Suspense, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from 'react';
 
-import { css } from "../../styled-system/css";
+import { css } from '../../styled-system/css';
 import {
   attachSeatRole,
   createSession,
@@ -13,23 +13,26 @@ import {
   useSessions,
   type OpenSession,
   type SessionRole,
-} from "../data/sessions";
-import { submitSessionText, waitForSubmissionReady } from "../data/submitClient";
+} from '../data/sessions';
+import { submitSessionText, waitForSubmissionReady } from '../data/submitClient';
 import {
-  attachSessionToLeaf,
+  attachSessionToTask,
   fetchHarnesses,
   terminateTerminalSession,
   type HarnessInfo,
-} from "../data/terminal";
+} from '../data/terminal';
 import {
   buildTaskTree,
   leafIdFromKey,
   qualifiedLeafKey,
+  sameTaskDocumentRef,
+  taskDocumentRefForDoc,
   type TaskTreeNode,
-} from "../data/taskIdentity";
-import type { EngineProcessNode, TaskDocNode, TaskStepNode } from "../types/projection";
-import { LeafAttachPicker } from "./LeafAttachPicker";
-import { SessionComposer } from "./SessionComposer";
+} from '../data/taskIdentity';
+import type { EngineProcessNode, TaskDocNode, TaskStepNode } from '../types/projection';
+import type { TaskDocumentRef } from '../types/terminalCatalog';
+import { LeafAttachPicker } from './LeafAttachPicker';
+import { SessionComposer } from './SessionComposer';
 
 // The single-instance right-rail chat viewer: the rail toggles between the
 // Event River and THIS surface. It is anchored on the durable QUALIFIED LEAF ID (`leafKey`), not the
@@ -44,160 +47,207 @@ import { SessionComposer } from "./SessionComposer";
 // `SessionComposer` + the shared connection registry as the Chats cockpit (one xterm/WebSocket per
 // session); both surfaces resolve the same catalog identity.
 
-const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: module.Terminal })));
+const Terminal = lazy(() => import('./Terminal').then((module) => ({ default: module.Terminal })));
+
+const SPRINT_ROLE_ORDER = [
+  'architect',
+  'orchestrator',
+  'strategist',
+  'designer',
+  'system-specialist',
+] as const;
+const LEAF_ROLE_ORDER = ['worker', 'reviewer', 'curator'] as const;
+type SprintRole = (typeof SPRINT_ROLE_ORDER)[number];
+
+const ROLE_LABELS: Record<SprintRole, string> = {
+  architect: 'Architect',
+  orchestrator: 'Orchestrator',
+  strategist: 'Strategist',
+  designer: 'Designer',
+  'system-specialist': 'System Specialist',
+};
 
 const wrap = css({
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minHeight: "0",
-  minWidth: "0",
-  gap: "0.4rem",
+  display: 'flex',
+  flexDirection: 'column',
+  flex: '1',
+  minHeight: '0',
+  minWidth: '0',
+  gap: '0.4rem',
 });
 const heading = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "0.4rem",
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.4rem',
   flexShrink: 0,
-  minWidth: "0",
-  fontSize: "0.7rem",
-  letterSpacing: "0.06em",
-  color: "muted",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  minWidth: '0',
+  fontSize: '0.7rem',
+  letterSpacing: '0.06em',
+  color: 'muted',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 });
 const terminalArea = css({
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minWidth: "0",
-  minHeight: "0",
-  gap: "0.4rem",
+  display: 'flex',
+  flexDirection: 'column',
+  flex: '1',
+  minWidth: '0',
+  minHeight: '0',
+  gap: '0.4rem',
 });
 // One split pane (chat or terminal): a header row + the terminal + its composer, stacked and sharing
 // the available height with the other pane (each `flex:1`) so two panes split the rail vertically.
 const pane = css({
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minWidth: "0",
-  minHeight: "0",
-  gap: "0.3rem",
+  display: 'flex',
+  flexDirection: 'column',
+  flex: '1',
+  minWidth: '0',
+  minHeight: '0',
+  gap: '0.3rem',
 });
 const paneHeader = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "0.4rem",
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.4rem',
   flexShrink: 0,
-  minWidth: "0",
+  minWidth: '0',
 });
 const paneTitle = css({
-  flex: "1",
-  minWidth: "0",
-  fontSize: "0.68rem",
-  letterSpacing: "0.05em",
-  color: "muted",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  flex: '1',
+  minWidth: '0',
+  fontSize: '0.68rem',
+  letterSpacing: '0.05em',
+  color: 'muted',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 });
 const terminalLayer = css({
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minWidth: "0",
-  minHeight: "0",
+  display: 'flex',
+  flexDirection: 'column',
+  flex: '1',
+  minWidth: '0',
+  minHeight: '0',
 });
 const empty = css({
-  display: "flex",
-  flex: "1",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  textAlign: "center",
-  gap: "0.6rem",
-  color: "muted",
-  fontSize: "0.78rem",
-  paddingInline: "0.6rem",
+  display: 'flex',
+  flex: '1',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  textAlign: 'center',
+  gap: '0.6rem',
+  color: 'muted',
+  fontSize: '0.78rem',
+  paddingInline: '0.6rem',
 });
 const startRow = css({
-  display: "flex",
-  flexWrap: "wrap",
-  justifyContent: "center",
-  gap: "0.4rem",
+  display: 'flex',
+  flexWrap: 'nowrap',
+  minWidth: '0',
+  overflowX: 'auto',
+  gap: '0.4rem',
 });
 // A thin affordance bar for the missing slot (start a chat / open a terminal / attach to a leaf) when the
 // other slot already shows a pane, so the split can be completed without leaving the rail.
 const slotBar = css({
-  display: "flex",
+  display: 'flex',
   flexShrink: 0,
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "0.4rem",
+  flexWrap: 'nowrap',
+  minWidth: '0',
+  overflow: 'hidden',
+  alignItems: 'center',
+  gap: '0.4rem',
 });
 const startButton = css({
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.3rem",
-  font: "inherit",
-  fontSize: "0.72rem",
-  letterSpacing: "0.04em",
-  paddingInline: "0.6rem",
-  paddingBlock: "0.22rem",
-  borderRadius: "2px",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "amber",
-  color: "amber",
-  background: "transparent",
-  cursor: "pointer",
-  _hover: { background: "rgba(232, 193, 112, 0.1)" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.3rem',
+  font: 'inherit',
+  fontSize: '0.72rem',
+  letterSpacing: '0.04em',
+  paddingInline: '0.6rem',
+  paddingBlock: '0.22rem',
+  borderRadius: '2px',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'amber',
+  color: 'amber',
+  background: 'transparent',
+  cursor: 'pointer',
+  flex: 'none',
+  whiteSpace: 'nowrap',
+  _hover: { background: 'rgba(232, 193, 112, 0.1)' },
+  _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '1px' },
+});
+const roleSwitcher = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.3rem',
+  minWidth: '0',
+  overflowX: 'auto',
+  flexShrink: 0,
+});
+const roleButton = css({
+  font: 'inherit',
+  fontSize: '0.64rem',
+  color: 'muted',
+  background: 'transparent',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  borderRadius: '2px',
+  paddingInline: '0.35rem',
+  flex: 'none',
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
+  "&[data-selected='true']": { color: 'amber', borderColor: 'amber' },
+  _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '1px' },
 });
 const attachError = css({
-  fontSize: "0.68rem",
-  color: "alarm",
-  paddingInline: "0.2rem",
+  fontSize: '0.68rem',
+  color: 'alarm',
+  paddingInline: '0.2rem',
   flexShrink: 0,
 });
 const contextNote = css({
-  fontSize: "0.68rem",
-  color: "amber",
-  paddingInline: "0.2rem",
+  fontSize: '0.68rem',
+  color: 'amber',
+  paddingInline: '0.2rem',
   flexShrink: 0,
 });
 const terminateButton = css({
   flexShrink: 0,
-  font: "inherit",
-  fontSize: "0.62rem",
-  letterSpacing: "0.04em",
-  color: "alarm",
-  background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.35rem",
-  paddingBlock: "0.05rem",
-  cursor: "pointer",
-  _hover: { borderColor: "alarm" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  font: 'inherit',
+  fontSize: '0.62rem',
+  letterSpacing: '0.04em',
+  color: 'alarm',
+  background: 'transparent',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  borderRadius: '2px',
+  paddingInline: '0.35rem',
+  paddingBlock: '0.05rem',
+  cursor: 'pointer',
+  _hover: { borderColor: 'alarm' },
+  _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '1px' },
 });
 
 function isRunning(session: OpenSession): boolean {
-  return (session.status ?? "running") === "running";
+  return (session.status ?? 'running') === 'running';
 }
 
 function stepLines(step: TaskStepNode): string[] {
-  const disposition = step.disposition ? ` -- SKIPPED: ${step.disposition.reason}` : "";
+  const disposition = step.disposition ? ` -- SKIPPED: ${step.disposition.reason}` : '';
   return [
-    `- [${step.status}] ${step.id ? `${step.id} -- ` : ""}${step.title}${disposition}`,
+    `- [${step.status}] ${step.id ? `${step.id} -- ` : ''}${step.title}${disposition}`,
     ...step.substeps.map((substep) => {
       const childDisposition = substep.disposition
         ? ` -- SKIPPED: ${substep.disposition.reason}`
-        : "";
-      return `  - [${substep.status}] ${substep.id ? `${substep.id} -- ` : ""}${substep.title}${childDisposition}`;
+        : '';
+      return `  - [${substep.status}] ${substep.id ? `${substep.id} -- ` : ''}${substep.title}${childDisposition}`;
     }),
   ];
 }
@@ -228,27 +278,27 @@ function buildLeafContextPackage({
   if (!doc) return null;
   const process = findLeafProcess(leafKey, doc, engineProcesses);
   const lines = [
-    "Leaf context",
-    "",
+    'Leaf context',
+    '',
     `Task: ${doc.id} -- ${doc.title}`,
     `Status: ${doc.status}`,
     `Leaf key: ${leafKey}`,
     `Task document: ${doc.docPath}`,
     ...leafContextOptionalLines(doc, process),
-    "",
-    "Objective",
+    '',
+    'Objective',
     leafContextObjective(doc),
-    "",
-    "Requirements",
+    '',
+    'Requirements',
     ...leafContextBullets(doc.requirements),
-    "",
-    "Top-level steps",
+    '',
+    'Top-level steps',
     ...leafContextStepLines(doc.steps),
-    "",
-    "Instruction",
-    "Attach yourself to this lifecycle/leaf before working. Use this task document as the scope anchor.",
+    '',
+    'Instruction',
+    'Attach yourself to this lifecycle/leaf before working. Use this task document as the scope anchor.',
   ];
-  return lines.filter((line): line is string => line !== null).join("\n");
+  return lines.filter((line): line is string => line !== null).join('\n');
 }
 
 function leafContextOptionalLines(
@@ -264,36 +314,102 @@ function leafContextOptionalLines(
 }
 
 function leafContextObjective(doc: TaskDocNode): string {
-  return doc.objective || "(none projected)";
+  return doc.objective || '(none projected)';
 }
 
 function leafContextBullets(items: readonly string[]): string[] {
-  return items.length > 0 ? items.map((item) => `- ${item}`) : ["- (none projected)"];
+  return items.length > 0 ? items.map((item) => `- ${item}`) : ['- (none projected)'];
 }
 
-function leafContextStepLines(steps: TaskDocNode["steps"]): string[] {
-  return steps.length > 0 ? steps.flatMap(stepLines) : ["- (none projected)"];
+function leafContextStepLines(steps: TaskDocNode['steps']): string[] {
+  return steps.length > 0 ? steps.flatMap(stepLines) : ['- (none projected)'];
+}
+
+function taskDocumentForRef(
+  ref: TaskDocumentRef | undefined,
+  taskDocuments: TaskDocNode[],
+): TaskDocNode | undefined {
+  return ref
+    ? taskDocuments.find((doc) => sameTaskDocumentRef(taskDocumentRefForDoc(doc), ref))
+    : undefined;
+}
+
+function taskAltitude(doc: TaskDocNode | undefined): 'sprint' | 'master' | 'leaf' | undefined {
+  if (!doc) return undefined;
+  if (doc.kind !== 'master') return 'leaf';
+  return doc.orchestrates.length > 0 ? 'sprint' : 'master';
+}
+
+function workingLeafSeat(left: OpenSession, right: OpenSession): number {
+  const working = (session: OpenSession) =>
+    session.liveTurnWorking ||
+    session.turnState === 'working' ||
+    session.controlActivity === 'running';
+  const activeDelta = Number(working(right)) - Number(working(left));
+  if (activeDelta !== 0) return activeDelta;
+  return (
+    LEAF_ROLE_ORDER.indexOf(sessionSeatRole(left) as (typeof LEAF_ROLE_ORDER)[number]) -
+      LEAF_ROLE_ORDER.indexOf(sessionSeatRole(right) as (typeof LEAF_ROLE_ORDER)[number]) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function useRailChatSessions(
-  leafKey: string | undefined,
+  taskDocumentRef: TaskDocumentRef | undefined,
+  taskDocuments: TaskDocNode[],
+  selectedSprintRole: SprintRole | undefined,
 ): {
   sessions: OpenSession[];
   chatSession: OpenSession | undefined;
   terminalSession: OpenSession | undefined;
   freeChat: OpenSession | undefined;
   mountedSessionIds: Set<string>;
+  altitude: 'sprint' | 'master' | 'leaf' | undefined;
+  sprintSeats: OpenSession[];
+  missingSprintRoles: SprintRole[];
 } {
   const sessions = useSessions((state) => state.sessions);
+  const doc = taskDocumentForRef(taskDocumentRef, taskDocuments);
+  const altitude = taskAltitude(doc);
+  const bound = sessions.filter(
+    (session) =>
+      isRunning(session) && sameTaskDocumentRef(session.taskDocumentRef, taskDocumentRef),
+  );
+  const sprintSeats =
+    altitude === 'sprint'
+      ? bound
+          .filter((session) => SPRINT_ROLE_ORDER.includes(sessionSeatRole(session) as SprintRole))
+          .sort(
+            (left, right) =>
+              SPRINT_ROLE_ORDER.indexOf(sessionSeatRole(left) as SprintRole) -
+              SPRINT_ROLE_ORDER.indexOf(sessionSeatRole(right) as SprintRole),
+          )
+      : [];
+  const missingSprintRoles = SPRINT_ROLE_ORDER.filter(
+    (role) => !sprintSeats.some((session) => sessionSeatRole(session) === role),
+  );
+  const taskChat =
+    altitude === 'sprint'
+      ? (sprintSeats.find((session) => sessionSeatRole(session) === selectedSprintRole) ??
+        sprintSeats[0])
+      : altitude === 'master'
+        ? bound.find((session) => sessionSeatRole(session) === 'manager')
+        : altitude === 'leaf'
+          ? [...bound]
+              .filter((session) =>
+                LEAF_ROLE_ORDER.includes(
+                  sessionSeatRole(session) as (typeof LEAF_ROLE_ORDER)[number],
+                ),
+              )
+              .sort(workingLeafSeat)[0]
+          : undefined;
   const matches = (session: OpenSession, role: SessionRole): boolean =>
-    isRunning(session) &&
-    sessionRole(session) === role &&
-    (leafKey ? session.leafKey === leafKey : !session.leafKey);
+    isRunning(session) && sessionRole(session) === role && !session.taskDocumentRef;
   const currentSession = (role: SessionRole): OpenSession | undefined =>
     [...sessions].reverse().find((session) => matches(session, role));
-  const chatSession = currentSession("chat");
-  const terminalSession = currentSession("terminal");
-  const freeChat = chatSession && !chatSession.leafKey ? chatSession : undefined;
+  const chatSession = taskDocumentRef ? taskChat : currentSession('chat');
+  const terminalSession = taskDocumentRef ? undefined : currentSession('terminal');
+  const freeChat = chatSession && !chatSession.taskDocumentRef ? chatSession : undefined;
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     setMountedSessionIds((current) => {
@@ -305,18 +421,28 @@ function useRailChatSessions(
       return next;
     });
   }, [chatSession, terminalSession, sessions]);
-  return { sessions, chatSession, terminalSession, freeChat, mountedSessionIds };
+  return {
+    sessions,
+    chatSession,
+    terminalSession,
+    freeChat,
+    mountedSessionIds,
+    altitude,
+    sprintSeats,
+    missingSprintRoles,
+  };
 }
 
 function useRailChatSubmissions(
   leafKey: string | undefined,
+  taskDocumentRef: TaskDocumentRef | undefined,
   selectedLifecycleId: string | undefined,
   taskDocuments: TaskDocNode[],
   engineProcesses: EngineProcessNode[],
 ): {
   leafContextNote: string | null;
   sessionOpenError: string | null;
-  startChat: (harness: HarnessInfo) => void;
+  startChat: (harness: HarnessInfo, role?: string) => void;
   openTerminal: () => void;
   deliverLeafContext: (sessionId: string, lk: string) => Promise<void>;
 } {
@@ -328,36 +454,37 @@ function useRailChatSubmissions(
     if (!packet) return;
     const gate = await waitForSubmissionReady(sessionId);
     if (!gate.ready) {
-      setLeafContextNote(gate.reason ?? "context submit is unavailable");
+      setLeafContextNote(gate.reason ?? 'context submit is unavailable');
       return;
     }
     const outcome = await submitSessionText(sessionId, packet, {
-      source: "leaf-context",
+      source: 'leaf-context',
       clearDraftOnAccept: false,
     });
-    if (outcome.status === "blocked") {
+    if (outcome.status === 'blocked') {
       setLeafContextNote(outcome.reason);
       return;
     }
-    if (outcome.status === "empty") return;
+    if (outcome.status === 'empty') return;
     const { record } = outcome;
-    if (record.phase === "accepted") setLeafContextNote("leaf context accepted");
-    else if (record.phase === "queued") setLeafContextNote("leaf context queued · yours");
+    if (record.phase === 'accepted') setLeafContextNote('leaf context accepted');
+    else if (record.phase === 'queued') setLeafContextNote('leaf context queued · yours');
     else {
       setLeafContextNote(record.detail ?? `leaf context submit ${record.phase}`);
     }
   };
-  const startChat = (harness: HarnessInfo) => {
+  const startChat = (harness: HarnessInfo, role?: string) => {
     void (async () => {
       setSessionOpenError(null);
       const result = await createSession(
         harness.name,
-        "harness",
+        'harness',
         harness.id,
         selectedLifecycleId,
-        leafKey,
+        taskDocumentRef,
+        role,
       );
-      if (result.outcome === "failed") {
+      if (result.outcome === 'failed') {
         setSessionOpenError(terminalOpenFailureMessage(result));
         return;
       }
@@ -368,13 +495,13 @@ function useRailChatSubmissions(
     void (async () => {
       setSessionOpenError(null);
       const result = await createSession(
-        "Terminal",
-        "terminal",
+        'Terminal',
+        'terminal',
         undefined,
         selectedLifecycleId,
-        leafKey,
+        taskDocumentRef,
       );
-      if (result.outcome === "failed") {
+      if (result.outcome === 'failed') {
         setSessionOpenError(terminalOpenFailureMessage(result));
       }
     })();
@@ -394,49 +521,40 @@ function useRailChatAttach(
   const leafTree = buildTaskTree(taskDocuments);
   const attachChatToLeaf = async (sessionId: string, lk: string, seatRole: string) => {
     if (!lk) return;
+    const doc = taskDocuments.find((candidate) => qualifiedLeafKey(candidate) === lk);
+    const taskDocumentRef = doc ? taskDocumentRefForDoc(doc) : undefined;
+    if (!taskDocumentRef) {
+      setLeafAttachError('leaf has no canonical task-document reference');
+      return;
+    }
     const current = sessionStore.getState().sessions.find((session) => session.id === sessionId);
-    if (current?.leafKey === lk) return;
+    if (sameTaskDocumentRef(current?.taskDocumentRef, taskDocumentRef)) return;
     setLeafAttachError(null);
-    const result = await attachSessionToLeaf(sessionId, lk, seatRole);
-    if (result === "ok") {
-      sessionStore.getState().applyLeafAssignment(sessionId, lk, seatRole);
-      notifySessionCatalogChanged("leaf", sessionId);
+    const result = await attachSessionToTask(sessionId, taskDocumentRef, seatRole);
+    if (result === 'ok') {
+      sessionStore.getState().applyTaskAssignment(sessionId, taskDocumentRef, seatRole);
+      notifySessionCatalogChanged('task', sessionId);
       await onAttached(sessionId, lk);
-    } else if (result === "leaf-taken") {
-      setLeafAttachError(`leaf already has a ${seatRole} seat`);
+    } else if (result === 'seat-taken') {
+      setLeafAttachError(`task document already has a ${seatRole} seat`);
     } else {
-      setLeafAttachError("could not attach to leaf");
+      setLeafAttachError('could not attach to leaf');
     }
   };
   return { leafAttachError, leafTree, attachChatToLeaf };
 }
 
-function RailChatImpl({
-  leafKey,
-  selectedLifecycleId,
-  taskDocuments = [],
-  engineProcesses = [],
-  contextMaster,
-}: {
+interface RailChatProps {
   leafKey?: string;
+  taskDocumentRef?: TaskDocumentRef;
   selectedLifecycleId?: string;
   taskDocuments?: TaskDocNode[];
   engineProcesses?: EngineProcessNode[];
   contextMaster?: string;
-}) {
-  const { sessions, chatSession, terminalSession, freeChat, mountedSessionIds } =
-    useRailChatSessions(leafKey);
-  const { leafContextNote, sessionOpenError, startChat, openTerminal, deliverLeafContext } =
-    useRailChatSubmissions(leafKey, selectedLifecycleId, taskDocuments, engineProcesses);
-  const { leafAttachError, leafTree, attachChatToLeaf } = useRailChatAttach(
-    taskDocuments,
-    (sessionId, lk) => deliverLeafContext(sessionId, lk),
-  );
-  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+}
 
-  // Detection-driven: the server reports which supported harnesses are installed; "start chat" offers
-  // one button per detected harness (Claude Code / Codex / Pi.dev). `[]` (no backend) leaves only the
-  // "open terminal" affordance — the same posture as the Chats cockpit.
+function useDetectedHarnesses(): HarnessInfo[] {
+  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   useEffect(() => {
     let active = true;
     void fetchHarnesses().then((list) => {
@@ -446,18 +564,76 @@ function RailChatImpl({
       active = false;
     };
   }, []);
+  return harnesses.filter((harness) => harness.detected);
+}
 
-  const detected = harnesses.filter((harness) => harness.detected);
-  const terminate = async (id: string) => {
-    if (await terminateTerminalSession(id)) {
-      sessionStore.getState().setStatus(id, "terminated");
-      sessionStore.getState().close(id);
-      notifySessionCatalogChanged("terminate", id);
-    }
+function sprintRoleStarter(
+  detected: HarnessInfo[],
+  selectRole: (role: SprintRole) => void,
+  startChat: (harness: HarnessInfo, role?: string) => void,
+): (role: SprintRole) => void {
+  return (role) => {
+    const harness = detected[0];
+    if (!harness) return;
+    selectRole(role);
+    startChat(harness, role);
   };
+}
+
+async function terminateRailSession(id: string): Promise<void> {
+  if (!(await terminateTerminalSession(id))) return;
+  sessionStore.getState().setStatus(id, 'terminated');
+  sessionStore.getState().close(id);
+  notifySessionCatalogChanged('terminate', id);
+}
+
+function RailChatImpl({
+  leafKey,
+  taskDocumentRef,
+  selectedLifecycleId,
+  taskDocuments = [],
+  engineProcesses = [],
+  contextMaster,
+}: RailChatProps) {
+  const [selectedSprintRole, setSelectedSprintRole] = useState<SprintRole | undefined>();
+  useEffect(
+    () => setSelectedSprintRole(undefined),
+    [taskDocumentRef?.repository, taskDocumentRef?.path],
+  );
+  const {
+    sessions,
+    chatSession,
+    terminalSession,
+    freeChat,
+    mountedSessionIds,
+    altitude,
+    sprintSeats,
+    missingSprintRoles,
+  } = useRailChatSessions(taskDocumentRef, taskDocuments, selectedSprintRole);
+  const { leafContextNote, sessionOpenError, startChat, openTerminal, deliverLeafContext } =
+    useRailChatSubmissions(
+      leafKey,
+      taskDocumentRef,
+      selectedLifecycleId,
+      taskDocuments,
+      engineProcesses,
+    );
+  const { leafAttachError, leafTree, attachChatToLeaf } = useRailChatAttach(
+    taskDocuments,
+    (sessionId, lk) => deliverLeafContext(sessionId, lk),
+  );
+  const detected = useDetectedHarnesses();
+  const startSprintRole = sprintRoleStarter(detected, setSelectedSprintRole, startChat);
   return (
     <RailChatBody
       leafKey={leafKey}
+      taskDocumentRef={taskDocumentRef}
+      altitude={altitude}
+      sprintSeats={sprintSeats}
+      missingSprintRoles={missingSprintRoles}
+      selectedSprintRole={
+        (chatSession ? sessionSeatRole(chatSession) : selectedSprintRole) as SprintRole | undefined
+      }
       contextMaster={contextMaster}
       sessions={sessions}
       chatSession={chatSession}
@@ -470,15 +646,48 @@ function RailChatImpl({
       leafAttachError={leafAttachError}
       leafTree={leafTree}
       onStartChat={startChat}
+      onSelectSprintRole={setSelectedSprintRole}
+      onStartSprintRole={startSprintRole}
       onOpenTerminal={openTerminal}
-      onTerminate={terminate}
+      onTerminate={terminateRailSession}
       onAttach={attachChatToLeaf}
     />
   );
 }
 
+interface RailChatBodyProps {
+  leafKey: string | undefined;
+  taskDocumentRef: TaskDocumentRef | undefined;
+  altitude: 'sprint' | 'master' | 'leaf' | undefined;
+  sprintSeats: OpenSession[];
+  missingSprintRoles: SprintRole[];
+  selectedSprintRole: SprintRole | undefined;
+  contextMaster: string | undefined;
+  sessions: OpenSession[];
+  chatSession: OpenSession | undefined;
+  terminalSession: OpenSession | undefined;
+  freeChat: OpenSession | undefined;
+  mountedSessionIds: Set<string>;
+  detected: HarnessInfo[];
+  leafContextNote: string | null;
+  sessionOpenError: string | null;
+  leafAttachError: string | null;
+  leafTree: TaskTreeNode[];
+  onStartChat: (harness: HarnessInfo, role?: string) => void;
+  onSelectSprintRole: (role: SprintRole) => void;
+  onStartSprintRole: (role: SprintRole) => void;
+  onOpenTerminal: () => void;
+  onTerminate: (id: string) => void;
+  onAttach: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
+}
+
 function RailChatBody({
   leafKey,
+  taskDocumentRef,
+  altitude,
+  sprintSeats,
+  missingSprintRoles,
+  selectedSprintRole,
   contextMaster,
   sessions,
   chatSession,
@@ -491,38 +700,35 @@ function RailChatBody({
   leafAttachError,
   leafTree,
   onStartChat,
+  onSelectSprintRole,
+  onStartSprintRole,
   onOpenTerminal,
   onTerminate,
   onAttach,
-}: {
-  leafKey: string | undefined;
-  contextMaster: string | undefined;
-  sessions: OpenSession[];
-  chatSession: OpenSession | undefined;
-  terminalSession: OpenSession | undefined;
-  freeChat: OpenSession | undefined;
-  mountedSessionIds: Set<string>;
-  detected: HarnessInfo[];
-  leafContextNote: string | null;
-  sessionOpenError: string | null;
-  leafAttachError: string | null;
-  leafTree: TaskTreeNode[];
-  onStartChat: (harness: HarnessInfo) => void;
-  onOpenTerminal: () => void;
-  onTerminate: (id: string) => void;
-  onAttach: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
-}) {
+}: RailChatBodyProps) {
   return (
     <section className={wrap} data-testid="rail-chat">
       <RailChatNotes
         leafKey={leafKey}
+        taskDocumentRef={taskDocumentRef}
         leafContextNote={leafContextNote}
         sessionOpenError={sessionOpenError}
       />
+      {altitude === 'sprint' ? (
+        <SprintRoleControls
+          existing={sprintSeats}
+          missing={missingSprintRoles}
+          selected={selectedSprintRole}
+          canCreate={detected.length > 0}
+          onSelect={onSelectSprintRole}
+          onCreate={onStartSprintRole}
+        />
+      ) : null}
       <div className={terminalArea}>
         {!chatSession && !terminalSession ? (
           <RailChatEmpty
-            leafKey={leafKey}
+            taskDocumentRef={taskDocumentRef}
+            altitude={altitude}
             detected={detected}
             onStartChat={onStartChat}
             onOpenTerminal={onOpenTerminal}
@@ -539,7 +745,7 @@ function RailChatBody({
             contextMaster={contextMaster}
             leafAttachError={leafAttachError}
             onStartChat={onStartChat}
-            onOpenTerminal={onOpenTerminal}
+            onOpenTerminal={taskDocumentRef ? undefined : onOpenTerminal}
             onTerminate={onTerminate}
             onAttach={onAttach}
           />
@@ -551,17 +757,23 @@ function RailChatBody({
 
 function RailChatNotes({
   leafKey,
+  taskDocumentRef,
   leafContextNote,
   sessionOpenError,
 }: {
   leafKey: string | undefined;
+  taskDocumentRef: TaskDocumentRef | undefined;
   leafContextNote: string | null;
   sessionOpenError: string | null;
 }) {
   return (
     <>
       <header className={heading} data-testid="rail-chat-heading">
-        {leafKey ? `Chat · ${leafIdFromKey(leafKey)}` : "Chat"}
+        {leafKey
+          ? `Chat · ${leafIdFromKey(leafKey)}`
+          : taskDocumentRef
+            ? `Chat · ${taskDocumentRef.path.split('/').at(-2) ?? taskDocumentRef.path}`
+            : 'Chat'}
       </header>
       {leafContextNote ? (
         <span className={contextNote} data-testid="rail-leaf-context-note" role="status">
@@ -574,6 +786,55 @@ function RailChatNotes({
         </span>
       ) : null}
     </>
+  );
+}
+
+function SprintRoleControls({
+  existing,
+  missing,
+  selected,
+  canCreate,
+  onSelect,
+  onCreate,
+}: {
+  existing: OpenSession[];
+  missing: SprintRole[];
+  selected: SprintRole | undefined;
+  canCreate: boolean;
+  onSelect: (role: SprintRole) => void;
+  onCreate: (role: SprintRole) => void;
+}) {
+  return (
+    <div className={roleSwitcher} data-testid="rail-sprint-role-controls">
+      {existing.map((session) => {
+        const role = sessionSeatRole(session) as SprintRole;
+        return (
+          <button
+            key={role}
+            type="button"
+            className={roleButton}
+            data-selected={selected === role ? 'true' : undefined}
+            title={`${ROLE_LABELS[role]} · ${session.label}`}
+            onClick={() => onSelect(role)}
+          >
+            {ROLE_LABELS[role]}
+          </button>
+        );
+      })}
+      {missing.map((role) => (
+        <button
+          key={role}
+          type="button"
+          className={roleButton}
+          disabled={!canCreate}
+          title={canCreate ? `Create ${ROLE_LABELS[role]} chat` : 'No agent harness detected'}
+          onClick={() => onCreate(role)}
+          data-testid={`rail-create-sprint-role-${role}`}
+        >
+          + {ROLE_LABELS[role]}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -601,14 +862,14 @@ function RailChatOccupied({
   leafTree: TaskTreeNode[];
   contextMaster: string | undefined;
   leafAttachError: string | null;
-  onStartChat: (harness: HarnessInfo) => void;
-  onOpenTerminal: () => void;
+  onStartChat: (harness: HarnessInfo, role?: string) => void;
+  onOpenTerminal: (() => void) | undefined;
   onTerminate: (id: string) => void;
   onAttach: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
 }) {
   return (
     <>
-      {chatSession && leafTree.length > 0 ? (
+      {freeChat && chatSession && leafTree.length > 0 ? (
         <AttachRow
           chatSession={chatSession}
           freeChat={freeChat}
@@ -637,25 +898,35 @@ function RailChatOccupied({
 }
 
 function RailChatEmpty({
-  leafKey,
+  taskDocumentRef,
+  altitude,
   detected,
   onStartChat,
   onOpenTerminal,
 }: {
-  leafKey: string | undefined;
+  taskDocumentRef: TaskDocumentRef | undefined;
+  altitude: 'sprint' | 'master' | 'leaf' | undefined;
   detected: HarnessInfo[];
-  onStartChat: (harness: HarnessInfo) => void;
+  onStartChat: (harness: HarnessInfo, role?: string) => void;
   onOpenTerminal: () => void;
 }) {
   return (
     <div className={empty} data-testid="rail-chat-empty">
       <span>
-        {leafKey
-          ? "No chat is attached to this leaf yet."
-          : "Start a chat anywhere — attach it to a leaf any time."}
+        {altitude === 'sprint'
+          ? 'No sprint role chat exists yet.'
+          : altitude === 'master'
+            ? 'No manager chat occupies this master yet.'
+            : altitude === 'leaf'
+              ? 'No worker, reviewer, or curator chat occupies this leaf yet.'
+              : 'Start a chat anywhere — attach it to a task any time.'}
       </span>
-      <StartChatAffordance detected={detected} onStartChat={onStartChat} />
-      <TerminalAffordance onOpen={onOpenTerminal} />
+      {!taskDocumentRef ? (
+        <>
+          <StartChatAffordance detected={detected} onStartChat={onStartChat} />
+          <TerminalAffordance onOpen={onOpenTerminal} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -671,8 +942,8 @@ function RailChatSlots({
   chatSession: OpenSession | undefined;
   terminalSession: OpenSession | undefined;
   detected: HarnessInfo[];
-  onStartChat: (harness: HarnessInfo) => void;
-  onOpenTerminal: () => void;
+  onStartChat: (harness: HarnessInfo, role?: string) => void;
+  onOpenTerminal: (() => void) | undefined;
   onTerminate: (id: string) => void;
 }) {
   return (
@@ -686,11 +957,11 @@ function RailChatSlots({
       )}
       {terminalSession ? (
         <Pane paneRole="terminal" session={terminalSession} onTerminate={onTerminate} />
-      ) : (
+      ) : onOpenTerminal ? (
         <div className={slotBar}>
           <TerminalAffordance onOpen={onOpenTerminal} />
         </div>
-      )}
+      ) : null}
     </>
   );
 }
@@ -700,7 +971,7 @@ function StartChatAffordance({
   onStartChat,
 }: {
   detected: HarnessInfo[];
-  onStartChat: (harness: HarnessInfo) => void;
+  onStartChat: (harness: HarnessInfo, role?: string) => void;
 }) {
   if (detected.length === 0) {
     return <span data-testid="rail-no-harness">No agent detected on PATH.</span>;
@@ -724,12 +995,7 @@ function StartChatAffordance({
 
 function TerminalAffordance({ onOpen }: { onOpen: () => void }) {
   return (
-    <button
-      type="button"
-      className={startButton}
-      onClick={onOpen}
-      data-testid="rail-open-terminal"
-    >
+    <button type="button" className={startButton} onClick={onOpen} data-testid="rail-open-terminal">
       ＋ Terminal
     </button>
   );
@@ -758,7 +1024,7 @@ function AttachRow({
         contextMaster={contextMaster}
         onPick={(lk, seatRole) => void onAttach(chatSession.id, lk, seatRole)}
         testId="rail-attach-leaf-picker"
-        label={chatSession.leafKey ? "Move leaf" : "Attach to leaf"}
+        label={chatSession.taskDocumentRef ? 'Move task' : 'Attach to task'}
         align="right"
         seatRole={attachSeatRole(chatSession)}
       />
@@ -794,7 +1060,7 @@ function KeepAlivePanes({
       {keepAlive.map((session) => (
         <div
           key={session.id}
-          style={{ display: "none" }}
+          style={{ display: 'none' }}
           aria-hidden
           data-testid={`rail-chat-keepalive-${session.id}`}
         >

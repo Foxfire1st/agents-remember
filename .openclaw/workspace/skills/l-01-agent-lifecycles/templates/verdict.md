@@ -32,7 +32,7 @@ adaptation of the master-exit shape (see Loop-Review Adaptation below).
 | --------------- | -------------------------------------------------- |
 | seam            | master-exit                                        |
 | scope           | <master integration branch ref>                    |
-| reviewer        | <this reviewer's agent/lifecycle id>               |
+| reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <master task_doc + leaf task docs>                 |
 | recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
 | decider         | orchestrator (delegated `master-handover-approval`; serious issues escalate → developer) |
@@ -84,7 +84,7 @@ reviewer does not.
 | --------------- | -------------------------------------------------- |
 | seam            | super-exit                                         |
 | scope           | <super integration branch ref>                     |
-| reviewer        | <this reviewer's agent/lifecycle id>               |
+| reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <portfolio task docs + master task docs>           |
 | recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
 | decider         | developer (human review concentrates at the super gate) |

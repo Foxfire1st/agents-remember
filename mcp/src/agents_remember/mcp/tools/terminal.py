@@ -13,30 +13,31 @@ from agents_remember.application.terminal_tools import (
     SpawnedBy,
     SpawnOverrides,
     SpawnSeat,
-    attach_terminal_session_to_leaf_tool,
+    attach_terminal_session_to_task_tool,
     session_rename_tool,
     session_retire_tool,
     spawn_agent_session_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 from .base import _tool_payload
 
 
-def attach_terminal_session_to_leaf_payload(
+def attach_terminal_session_to_task_payload(
     config: McpRuntimeConfig,
     *,
     session_id: str,
-    leaf_key: str,
+    task_document_ref: TaskDocumentRef,
     role: str | None = None,
     host: Any = None,
 ) -> dict[str, Any]:
     return _tool_payload(
-        "attach_terminal_session_to_leaf",
-        attach_terminal_session_to_leaf_tool(
+        "attach_terminal_session_to_task",
+        attach_terminal_session_to_task_tool(
             config,
             session_id=session_id,
-            leaf_key=leaf_key,
+            task_document_ref=task_document_ref,
             role=role,
             host=host,
         ),

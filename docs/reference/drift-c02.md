@@ -6,11 +6,25 @@
 
 For file-level sidecar onboarding, the `c-02-memory-quality-control` skill reads verification metadata and compares the source file against the recorded commit through `HEAD`, including staged or unstaged local changes.
 
-It writes temporary drift reports under the resolved coordination root:
+The task-start `drift_check` writes its temporary drift report under the resolved coordination
+root:
 
 ```text
 ar-coordination/temp/drift-reports/<repo>/
 ```
+
+The curator uses the full contract-scoped `memory_quality_check` instead. That call atomically
+replaces one combined worklist at:
+
+```text
+<worktree-enclosure>/reports/curator-memory-quality.md
+```
+
+The worklist includes repairable quality findings, missing onboarding, stale route indexes,
+source-change reconciliation candidates, closeout-owned provenance, and noteworthy report-only
+evidence. The curator runs it at intake and after repairs until `curatorActionableCount=0` and
+`checklistStatus=ready-for-closeout`. It is operational state outside both Git worktrees, and
+cleanup or abandon removes `reports/` with the enclosure.
 
 ## Common Classifications
 

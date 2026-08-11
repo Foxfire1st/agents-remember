@@ -100,7 +100,7 @@ const SERIES_MASTER = seriesNode({
   title: "My Series",
   objective: "Series objective text",
   seriesTokenTotal: 1500,
-  docPath: "/t/series/task.json",
+  docPath: "/tasks/repo-a/series/task.json",
   subTasks: [
     {
       number: "1",
@@ -144,7 +144,7 @@ export function seedSeries(
     kind: "subTask",
     title: "First slice",
     objective: "Slice objective text",
-    docPath: "/t/series/01_first.json",
+    docPath: "/tasks/repo-a/series/01_first.json",
     stepsTotal: 1,
     steps: [{ id: "S1", title: "do the thing", status: "pending", substeps: [] }],
     ...options.sliceDoc,

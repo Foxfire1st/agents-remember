@@ -6,9 +6,11 @@ from agents_remember.controlplane.interaction_retention import INBOX_PENDING_TTL
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.signal_routing import (
+    TaskHierarchy,
     derive_row_owner,
+    derive_signal_owner,
     is_seat_dead,
-    leaf_chain_has_progress,
+    task_chain_has_progress,
 )
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
@@ -23,6 +25,7 @@ from agents_remember.serving.state_signals import (
     state_signal_held_on_boundary,
 )
 from agents_remember.serving.terminal_paste import capture_pane as default_capture_pane
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 PERSISTENT_FAILURE_ATTEMPTS = 5
 """Attempt count past which a live-but-silent row resolves terminal ``unresolved`` (N3)."""
@@ -58,7 +61,7 @@ def evaluate_pane_findings(
                 kind="pane-signal",
                 detail=classification.signal,
                 session_id=entry.id,
-                leaf_key=entry.leaf_key,
+                task_document_ref=entry.binding_task_document_ref,
                 seat_role=entry.binding_role,
             )
         )
@@ -87,7 +90,7 @@ def evaluate_inbox_findings(  # pragma: no cover
             kind="inbox-redeliverable",
             detail=entry.messageKind,
             session_id=entry.agentId,
-            leaf_key=entry.leafKey,
+            task_document_ref=entry.taskDocumentRef,
             seat_role=entry.seatRole,
             source_id=entry.id,
         )
@@ -127,6 +130,7 @@ def _row_dead_since(
 
 def evaluate_rebind_findings(
     catalog: TerminalCatalogPort,
+    topology: TaskHierarchy,
     *,
     current: dict[str, OperatorInboxEntry] | None = None,
     now: datetime,
@@ -145,14 +149,14 @@ def evaluate_rebind_findings(
             continue
         if not is_seat_dead(catalog, row.agentId):
             continue
-        owner = derive_row_owner(catalog, row)
+        owner = derive_row_owner(catalog, topology, row)
         if owner.agent_id is not None and owner.agent_id != row.agentId:
             findings.append(
                 AgentNotifierFinding(
                     kind="rebind-due",
                     detail="replacement-owner",
                     session_id=row.agentId,
-                    leaf_key=row.leafKey,
+                    task_document_ref=row.taskDocumentRef,
                     seat_role=row.seatRole,
                     source_id=row.id,
                 )
@@ -165,7 +169,7 @@ def evaluate_rebind_findings(
                     kind="rebind-expired",
                     detail="rebind-grace-expired",
                     session_id=row.agentId,
-                    leaf_key=row.leafKey,
+                    task_document_ref=row.taskDocumentRef,
                     seat_role=row.seatRole,
                     source_id=row.id,
                 )
@@ -191,7 +195,7 @@ def evaluate_pending_expiry_findings(
                     kind="inbox-ttl-expired",
                     detail="pending-ttl-expired",
                     session_id=row.agentId,
-                    leaf_key=row.leafKey,
+                    task_document_ref=row.taskDocumentRef,
                     seat_role=row.seatRole,
                     source_id=row.id,
                 )
@@ -208,17 +212,20 @@ def _age_seconds(iso_text: str, now: datetime) -> float | None:  # pragma: no co
 
 
 def _inactivity_signal_chain_progressed(
-    catalog: TerminalCatalogPort, entry: OperatorInboxEntry
+    catalog: TerminalCatalogPort,
+    topology: TaskHierarchy,
+    entry: OperatorInboxEntry,
 ) -> bool:
     """Whether real leaf-chain progress invalidated one agent-notifier inactivity root cause."""
     return bool(
         # Both values are the same relay-authored inactivity row until the rename window closes.
         entry.createdBy in {"supervisor", "agent-notifier"}
         and entry.ask.startswith(SEAT_LIVENESS_ASK_PREFIXES)
-        and entry.leafKey is not None
-        and leaf_chain_has_progress(
+        and entry.subjectTaskDocumentRef is not None
+        and task_chain_has_progress(
             catalog,
-            leaf_key=entry.leafKey,
+            topology,
+            task_document_ref=entry.subjectTaskDocumentRef,
             subject_agent_id=entry.subjectAgentId,
             since=entry.createdAt,
         )
@@ -241,6 +248,7 @@ def _seat_liveness_ask_identity(ask: str) -> str:
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:223).
 def _stale_turn_state_due(  # pragma: no cover
     catalog: TerminalCatalogPort,
+    topology: TaskHierarchy,
     entry: TerminalCatalogEntry,
     *,
     now: datetime,
@@ -251,18 +259,23 @@ def _stale_turn_state_due(  # pragma: no cover
     age = _age_seconds(entry.turn_state_changed_at, now)
     if age is None or age < stale_seconds:
         return False
-    if entry.leaf_key is None:
+    if entry.binding_task_document_ref is None:
         return True
-    return not leaf_chain_has_progress(
+    return not task_chain_has_progress(
         catalog,
-        leaf_key=entry.leaf_key,
+        topology,
+        task_document_ref=entry.binding_task_document_ref,
         subject_agent_id=entry.id,
         since=entry.turn_state_changed_at,
     )
 
 
 def evaluate_seat_liveness_findings(
-    catalog: TerminalCatalogPort, *, now: datetime, stale_seconds: float
+    catalog: TerminalCatalogPort,
+    topology: TaskHierarchy,
+    *,
+    now: datetime,
+    stale_seconds: float,
 ) -> list[AgentNotifierFinding]:
     """R2e: the L5 hysteresis + L8 turn-state join, with graceful degradation.
 
@@ -277,14 +290,16 @@ def evaluate_seat_liveness_findings(
         if entry.kind != "harness" or entry.status != "running":
             continue
         if entry.turn_state is not None and entry.turn_state_changed_at is not None:
-            if not _stale_turn_state_due(catalog, entry, now=now, stale_seconds=stale_seconds):
+            if not _stale_turn_state_due(
+                catalog, topology, entry, now=now, stale_seconds=stale_seconds
+            ):
                 continue
             findings.append(
                 AgentNotifierFinding(
                     kind="seat-liveness",
                     detail="turn-state-stale",
                     session_id=entry.id,
-                    leaf_key=entry.leaf_key,
+                    task_document_ref=entry.binding_task_document_ref,
                     seat_role=entry.binding_role,
                 )
             )
@@ -294,33 +309,37 @@ def evaluate_seat_liveness_findings(
                     kind="seat-liveness",
                     detail="liveness-degraded",
                     session_id=entry.id,
-                    leaf_key=entry.leaf_key,
+                    task_document_ref=entry.binding_task_document_ref,
                     seat_role=entry.binding_role,
                 )
             )
     return findings
 
 
-def evaluate_dead_upstream_findings(catalog: TerminalCatalogPort) -> list[AgentNotifierFinding]:
-    """R4 (P-6 made mechanical): every live spawned worker/manager seat whose OWN direct owner is
-    dead, per catalog spawn provenance. Doctrine: the seat never absorbs its dead owner's role --
-    it continues its own brief; this predicate is what tells its grandparent to look."""
+def evaluate_dead_upstream_findings(
+    catalog: TerminalCatalogPort, topology: TaskHierarchy
+) -> list[AgentNotifierFinding]:
+    """Every live subordinate whose task-structural parent seat has no live occupant."""
     findings: list[AgentNotifierFinding] = []
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
             continue
-        if entry.binding_role not in ("worker", "manager"):
+        if entry.binding_role not in ("worker", "reviewer", "curator", "manager"):
             continue
-        if entry.spawned_by_session is None:
-            continue  # no recorded provenance at all is a legacy/unrouted row, not a dead owner
-        if not is_seat_dead(catalog, entry.spawned_by_session):
+        owner = derive_signal_owner(
+            catalog,
+            topology,
+            sender_agent_id=entry.id,
+            message_kind="state-signal",
+        )
+        if owner.task_document_ref is None or owner.agent_id is not None:
             continue
         findings.append(
             AgentNotifierFinding(
                 kind="dead-upstream",
-                detail="owner-dead",
+                detail="structural-owner-missing",
                 session_id=entry.id,
-                leaf_key=entry.leaf_key,
+                task_document_ref=entry.binding_task_document_ref,
                 seat_role=entry.binding_role,
             )
         )
@@ -339,6 +358,7 @@ def evaluate_predicates(  # pragma: no cover
     owner-visible deadline surface only.
     """
     findings: list[AgentNotifierFinding] = []
+    topology = TaskDocumentTopology(ctx.coordination_root)
     inbox_current = sweep.inbox_current if sweep is not None else None
     if sweep is None:
         findings += evaluate_inbox_findings(
@@ -352,7 +372,7 @@ def evaluate_predicates(  # pragma: no cover
         budgeted = [
             entry
             for entry in sweep.redeliverable_entries
-            if not _inactivity_signal_chain_progressed(ctx.catalog, entry)
+            if not _inactivity_signal_chain_progressed(ctx.catalog, topology, entry)
             and not state_signal_held_on_boundary(ctx.catalog, entry)
             and not _row_target_dead(ctx.catalog, entry)
         ][: sweep.redeliver_budget]
@@ -361,21 +381,21 @@ def evaluate_predicates(  # pragma: no cover
                 kind="inbox-redeliverable",
                 detail=entry.messageKind,
                 session_id=entry.agentId,
-                leaf_key=None,
+                task_document_ref=entry.taskDocumentRef,
                 source_id=entry.id,
             )
             for entry in budgeted
         ]
     owner_signal_findings = evaluate_seat_liveness_findings(
-        ctx.catalog, now=now, stale_seconds=ctx.stale_seat_seconds
-    ) + evaluate_dead_upstream_findings(ctx.catalog)
+        ctx.catalog, topology, now=now, stale_seconds=ctx.stale_seat_seconds
+    ) + evaluate_dead_upstream_findings(ctx.catalog, topology)
     findings += owner_signal_findings[: max(1, ctx.escalation_budget)]
     entries = inbox_current if inbox_current is not None else ctx.inbox_store.current()
-    findings += evaluate_rebind_findings(ctx.catalog, current=entries, now=now)
+    findings += evaluate_rebind_findings(ctx.catalog, topology, current=entries, now=now)
     findings += evaluate_pending_expiry_findings(entries, now=now)
-    findings += evaluate_state_signal_findings(ctx.catalog)
-    findings += evaluate_compound_idle_findings(ctx.catalog)
-    findings += evaluate_non_reaction_findings(ctx.catalog, ctx.inbox_store, now=now)
+    findings += evaluate_state_signal_findings(ctx.catalog, topology)
+    findings += evaluate_compound_idle_findings(ctx.catalog, topology)
+    findings += evaluate_non_reaction_findings(ctx.catalog, topology, ctx.inbox_store, now=now)
     findings += evaluate_boundary_drain_findings(
         ctx.catalog,
         sweep.inbox_current if sweep is not None else {},

@@ -149,139 +149,128 @@ class RegistrationWiringTests1(RegistrationWiringTests):
             {"dry_run": False, "overwrite": False, "archive_existing": False},
         )
 
-    def test_attach_terminal_session_forwards_the_seat_role(self) -> None:
+    def test_dispatch_agent_forwards_only_work_identity_and_brief(self) -> None:
+        task_ref = {"repository": "repo-a", "path": "master/leaf-2.json"}
         recorder = self.invoke(
-            "attach_terminal_session_to_leaf",
-            "agents_remember.mcp.registration.sessions.attach_terminal_session_to_leaf_payload",
-            {"session_id": "sess-1", "leaf_key": "260731-EFA-L2", "role": "worker"},
-        )
-
-        self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(
-            recorder.kwargs,
-            {"session_id": "sess-1", "leaf_key": "260731-EFA-L2", "role": "worker"},
-        )
-
-    def test_spawn_agent_session_splits_its_arguments_into_the_three_declared_groups(
-        self,
-    ) -> None:
-        """The seat the caller declares, the spend controls it is no longer allowed to
-        declare, and who spawned it -- each argument lands in exactly one of the three."""
-        recorder = self.invoke(
-            "spawn_agent_session",
-            "agents_remember.mcp.registration.sessions.spawn_agent_session_payload",
+            "dispatch_agent",
+            "agents_remember.mcp.registration.sessions.dispatch_agent_payload",
             {
-                "leaf_key": "260731-EFA-L2",
-                "replacement_for_leaf": "260731-EFA-L1",
-                "level": "master",
-                "label": "seam reviewer",
-                "env": {"AR_SPAWN_ROLE": "reviewer"},
-                "kind": "chat",
-                "context": "legacy brief",
-                "submit": True,
-                "harness": "claude",
-                "model": "opus",
-                "effort": "high",
-                "launch_args": ["--flag"],
-                "prompt_keywords": ["kw"],
-                "session_commands": ["cmd"],
-                "spawned_by_session": "sess-parent",
-                "spawned_by_lifecycle": "life-parent",
+                "task_document_ref": task_ref,
+                "role": "reviewer",
+                "brief": "Review the implementation.",
+                "label": "L2 reviewer",
             },
         )
 
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.task_document_ref.model_dump(), task_ref)
+        self.assertEqual(
+            [request.role, request.brief, request.label],
+            ["reviewer", "Review the implementation.", "L2 reviewer"],
+        )
+        self.assertEqual(recorder.kwargs, {})
+
+    def test_retire_child_forwards_structural_child_address(self) -> None:
+        task_ref = {"repository": "repo-a", "path": "master/leaf-2.json"}
+        recorder = self.invoke(
+            "retire_child",
+            "agents_remember.mcp.registration.sessions.retire_child_payload",
+            {"task_document_ref": task_ref, "role": "worker"},
+        )
+
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.task_document_ref.model_dump(), task_ref)
+        self.assertEqual(request.role, "worker")
+        self.assertEqual(request.reason, "delegated seat retired")
+        self.assertEqual(recorder.kwargs, {})
+
+    def test_rename_child_forwards_structural_child_address(self) -> None:
+        task_ref = {"repository": "repo-a", "path": "master/leaf-2.json"}
+        recorder = self.invoke(
+            "rename_child",
+            "agents_remember.mcp.registration.sessions.rename_child_payload",
+            {"task_document_ref": task_ref, "role": "curator", "label": "Memory pass"},
+        )
+
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.task_document_ref.model_dump(), task_ref)
+        self.assertEqual(request.role, "curator")
+        self.assertEqual(request.label, "Memory pass")
+        self.assertEqual(recorder.kwargs, {})
+
+    def test_rename_self_needs_only_display_text(self) -> None:
+        recorder = self.invoke(
+            "rename_self",
+            "agents_remember.mcp.registration.sessions.rename_self_payload",
+            {"label": "Current manager"},
+        )
+
         self.assertEqual(recorder.args, (self.config,))
-        seat = recorder.kwargs["seat"]
-        self.assertEqual(seat.kind, "chat")
-        self.assertEqual(seat.leaf_key, "260731-EFA-L2")
-        self.assertEqual(seat.replacement_for_leaf, "260731-EFA-L1")
-        self.assertEqual(seat.level, "master")
-        self.assertEqual(seat.label, "seam reviewer")
-        self.assertEqual(seat.env, {"AR_SPAWN_ROLE": "reviewer"})
+        self.assertEqual(recorder.kwargs, {"label": "Current manager"})
 
-        retired = recorder.kwargs["retired"]
-        self.assertEqual(retired.context, "legacy brief")
-        self.assertIs(retired.submit, True)
-        self.assertEqual(retired.harness, "claude")
-        self.assertEqual(retired.model, "opus")
-        self.assertEqual(retired.effort, "high")
-        self.assertEqual(retired.launch_args, ["--flag"])
-        self.assertEqual(retired.prompt_keywords, ["kw"])
-        self.assertEqual(retired.session_commands, ["cmd"])
-
-        spawned_by = recorder.kwargs["spawned_by"]
-        self.assertEqual(spawned_by.session_id, "sess-parent")
-        self.assertEqual(spawned_by.lifecycle_id, "life-parent")
-
-    def test_spawn_agent_session_defaults_to_a_harness_seat_with_no_retired_inputs(
-        self,
-    ) -> None:
-        """An ordinary caller declares a seat and nothing else; every retired spend control
-        must arrive unset so the refusal path is never triggered by the wiring itself."""
+    def test_message_parent_needs_no_recipient_address(self) -> None:
         recorder = self.invoke(
-            "spawn_agent_session",
-            "agents_remember.mcp.registration.sessions.spawn_agent_session_payload",
-            {"leaf_key": "260731-EFA-L2"},
-        )
-
-        self.assertEqual(recorder.kwargs["seat"].kind, "harness")
-        retired = recorder.kwargs["retired"]
-        self.assertEqual(retired.context, None)
-        self.assertIs(retired.submit, False)
-        self.assertEqual(
-            [retired.harness, retired.model, retired.effort],
-            [None, None, None],
-        )
-        self.assertEqual(
-            [retired.launch_args, retired.prompt_keywords, retired.session_commands],
-            [None, None, None],
-        )
-
-    def test_hosted_session_readiness_does_not_wait_unless_asked(self) -> None:
-        recorder = self.invoke(
-            "hosted_session_readiness",
-            "agents_remember.mcp.registration.sessions.hosted_session_readiness_payload",
-            {"session_id": "sess-1"},
-        )
-
-        self.assertEqual(recorder.kwargs, {"session_id": "sess-1", "wait_seconds": 0.0})
-
-    def test_hosted_session_readiness_forwards_the_callers_finite_wait(self) -> None:
-        recorder = self.invoke(
-            "hosted_session_readiness",
-            "agents_remember.mcp.registration.sessions.hosted_session_readiness_payload",
-            {"session_id": "sess-1", "wait_seconds": 12.5},
-        )
-
-        self.assertEqual(recorder.kwargs["wait_seconds"], 12.5)
-
-    def test_session_retire_carries_the_retiring_seats_own_id_and_a_reason(self) -> None:
-        """Authority is checked against ``actor_session_id``, so the tool must keep the two
-        session ids distinct rather than collapsing them."""
-        recorder = self.invoke(
-            "session_retire",
-            "agents_remember.mcp.registration.sessions.session_retire_payload",
-            {"actor_session_id": "sess-manager", "session_id": "sess-worker"},
-        )
-
-        self.assertEqual(
-            recorder.kwargs,
+            "message_parent",
+            "agents_remember.mcp.registration.orchestration.message_parent_payload",
             {
-                "actor_session_id": "sess-manager",
-                "session_id": "sess-worker",
-                "reason": "manual retire",
+                "ask": "Review the completed work.",
+                "response": "The turn report is durable.",
+                "message_kind": "turn-report",
+                "artifact_path": "reports/worker.md",
             },
         )
 
-    def test_session_rename_passes_only_identity_text(self) -> None:
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(
+            [request.ask, request.response, request.message_kind, request.artifact_path],
+            [
+                "Review the completed work.",
+                "The turn report is durable.",
+                "turn-report",
+                "reports/worker.md",
+            ],
+        )
+        self.assertIsNone(request.task_document_ref)
+        self.assertIsNone(request.role)
+        self.assertEqual(recorder.kwargs, {})
+
+    def test_message_child_uses_document_and_role_not_an_occupant_id(self) -> None:
+        task_ref = {"repository": "repo-a", "path": "master/leaf-2.json"}
         recorder = self.invoke(
-            "session_rename",
-            "agents_remember.mcp.registration.sessions.session_rename_payload",
-            {"session_id": "sess-1", "label": "renamed seat"},
+            "message_child",
+            "agents_remember.mcp.registration.orchestration.message_child_payload",
+            {
+                "task_document_ref": task_ref,
+                "role": "reviewer",
+                "ask": "Check the revised change.",
+                "response": "Focus on replacement routing.",
+            },
         )
 
-        self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(recorder.kwargs, {"session_id": "sess-1", "label": "renamed seat"})
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.task_document_ref.model_dump(), task_ref)
+        self.assertEqual(
+            [
+                request.role,
+                request.ask,
+                request.response,
+                request.message_kind,
+                request.artifact_path,
+            ],
+            [
+                "reviewer",
+                "Check the revised change.",
+                "Focus on replacement routing.",
+                "message",
+                None,
+            ],
+        )
+        self.assertEqual(recorder.kwargs, {})
 
     def test_drift_check_defaults_to_fifty_findings(self) -> None:
         recorder = self.invoke(

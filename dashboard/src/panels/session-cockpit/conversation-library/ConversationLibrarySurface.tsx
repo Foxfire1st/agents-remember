@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import { css } from "../../../../styled-system/css";
 import { harnessLabel } from "../../../data/conversation/format";
 import type { HarnessId } from "../../../data/conversation/types";
+import type { ConversationLaunchContext } from "../../../data/conversation-library/client";
 import {
   loadLibraryList,
   loadLibraryPreview,
@@ -89,7 +90,7 @@ export function ConversationLibrarySurface({
 }: {
   harnessId: HarnessId;
   cwd?: string;
-  launchContext?: { leafKey?: string; seatRole?: string };
+  launchContext?: ConversationLaunchContext;
   onOpened: (arSessionId: string) => void;
   onBack: () => void;
   deps?: LibraryDeps;
@@ -204,7 +205,7 @@ function LibraryColumns({
 }: {
   harnessId: HarnessId;
   cwd?: string;
-  launchContext?: { leafKey?: string; seatRole?: string };
+  launchContext?: ConversationLaunchContext;
   listView: {
     rows: readonly ConversationLibraryRow[];
     nextCursor: LibraryListCursor | null;

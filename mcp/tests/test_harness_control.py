@@ -348,7 +348,6 @@ def _catalog_entry(identity: ControlIdentity) -> TerminalCatalogEntry:
         created_at=identity.created_at,
         last_attached_at=identity.created_at,
         status="running",
-        leaf_key=None,
     )
 
 

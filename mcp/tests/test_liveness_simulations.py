@@ -36,9 +36,11 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxMessage,
     InboxPoster,
     InboxRouting,
+    InboxSubject,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -58,17 +60,36 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
 )
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
+from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)
+SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
+MASTER_REF = TaskDocumentRef(repository="repo-a", path="260707_master/task.json")
+LEAF_1_REF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-1.json")
+LEAF_2_REF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-2.json")
+LEAF_9_REF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-9.json")
 
 
-def _entry(session_id: str, *, leaf_key: str | None = None) -> TerminalCatalogEntry:
+def _entry(
+    session_id: str, *, task_document_ref: TaskDocumentRef | None = None
+) -> TerminalCatalogEntry:
     """A running harness seat. Vary anything else with ``replace(...)`` on the frozen row.
 
     ``TerminalCatalogEntry`` already carries every knob these scenarios need, so the builder
     only supplies what makes a seat a seat here (its id and the leaf it holds) rather than
     re-declaring the row's fields as parameters that drift from it.
     """
+    role: str | None = None
+    if session_id.startswith("orchestrator"):
+        role, task_document_ref = "orchestrator", task_document_ref or SPRINT_REF
+    elif session_id.startswith("manager"):
+        role, task_document_ref = "manager", task_document_ref or MASTER_REF
+    elif session_id.startswith("worker"):
+        role = "worker"
+        task_document_ref = task_document_ref or (
+            LEAF_2_REF if session_id.endswith("-2") else LEAF_1_REF
+        )
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Chat {session_id}",
@@ -81,7 +102,8 @@ def _entry(session_id: str, *, leaf_key: str | None = None) -> TerminalCatalogEn
         created_at="2026-07-08T00:00:00+00:00",
         last_attached_at="2026-07-08T00:00:00+00:00",
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
+        seat_role=role,
     )
 
 
@@ -145,6 +167,58 @@ class _LivenessSimulationCase(unittest.TestCase):
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(self.observer_root)
         self.event_store = EventStore(self.observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(self.observer_root)
+        task_root = self.coordination_root / "tasks" / "repo-a"
+        write_task_doc(
+            task_root / "sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "SPRINT",
+                    "slug": "sprint",
+                    "title": "Sprint",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-07T00:00",
+                    "orchestrates": ["260707_master"],
+                }
+            ),
+        )
+        write_task_doc(
+            task_root / "260707_master",
+            TaskDocument.model_validate(
+                {
+                    "id": "MASTER",
+                    "slug": "260707_master",
+                    "title": "Master",
+                    "kind": "master",
+                    "repo": "repo-a",
+                    "createdAt": "2026-07-07T00:00",
+                    "subTasks": [
+                        {
+                            "number": f"leaf-{index}",
+                            "name": f"Leaf {index}",
+                            "file": f"leaf-{index}.md",
+                            "status": "inProgress",
+                        }
+                        for index in (1, 2, 9)
+                    ],
+                }
+            ),
+        )
+        for index in (1, 2, 9):
+            write_task_doc(
+                task_root / "260707_master",
+                TaskDocument.model_validate(
+                    {
+                        "id": f"LEAF-{index}",
+                        "slug": f"leaf-{index}",
+                        "title": f"Leaf {index}",
+                        "kind": "subTask",
+                        "repo": "repo-a",
+                        "createdAt": "2026-07-07T00:00",
+                        "master": "task.md",
+                    }
+                ),
+            )
 
     def _ctx(
         self,
@@ -196,7 +270,7 @@ class NeverAckedSeatTests(_LivenessSimulationCase):
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-9"),
+                _entry("worker-1", task_document_ref=LEAF_9_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
@@ -288,7 +362,12 @@ class DeadSeatStormTests(_LivenessSimulationCase):
                 entry_id=f"storm-{index}",
                 now=NOW.isoformat(),
                 routing=InboxRouting(
-                    address=InboxAddress(lifecycle_id=None, agent_id=f"dead-seat-{index}")
+                    address=InboxAddress(
+                        task_document_ref=LEAF_1_REF,
+                        lifecycle_id=None,
+                        agent_id=f"dead-seat-{index}",
+                        recipient_role="worker",
+                    )
                 ),
                 poster=InboxPoster(created_by="manager", created_via="cli"),
             ).model_copy(
@@ -384,8 +463,7 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
 
 
 class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
-    """Scenario 5 (N14): replacement mid-flight -- rows rebind to the current manager and
-    orphaned workers surface to it as dead-upstream, without any new post."""
+    """Scenario 5 (N14): replacement mid-flight preserves the master-owned manager seat."""
 
     def test_dead_manager_rows_rebind_and_orphans_signal_the_current_manager(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
@@ -396,19 +474,18 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
                 terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
-                leaf_key="repo-a/260707_master/old-manager-anchor",
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                _entry("worker-1", task_document_ref=LEAF_1_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
         )
         self.catalog.upsert(
             replace(
-                _entry("worker-2", leaf_key="repo-a/260707_master/leaf-2"),
+                _entry("worker-2", task_document_ref=LEAF_2_REF),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
@@ -416,17 +493,29 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
         # The replacement manager appears before the grace window expires.
         self.catalog.upsert(
             replace(
-                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                _entry("manager-2", task_document_ref=MASTER_REF),
                 spawn_role="manager",
             )
         )
         entry = create_operator_inbox_entry(
-            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+            InboxMessage(
+                ask="ask",
+                response="resp",
+                message_kind="escalation",
+                subject=InboxSubject(
+                    task_document_ref=LEAF_1_REF,
+                    seat_role="worker",
+                    agent_id="worker-1",
+                ),
+            ),
             entry_id="e1",
             now=(NOW - timedelta(minutes=5)).isoformat(),
             routing=InboxRouting(
                 address=InboxAddress(
-                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                    task_document_ref=MASTER_REF,
+                    lifecycle_id=None,
+                    agent_id="manager-1",
+                    recipient_role="manager",
                 )
             ),
             poster=InboxPoster(
@@ -435,7 +524,7 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
                 sender_agent_id="worker-1",
                 sender_role="worker",
             ),
-        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        )
         self.inbox_store.append(entry)
 
         ctx = self._ctx()
@@ -458,38 +547,19 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
         self.assertEqual(len(rebound_events), 1)
         self.assertEqual(rebound_events[0].data["toAgentId"], "manager-2")
 
-        # Tick 2: the SAME catalog shows both workers' owner as dead, so the dead-upstream
-        # predicate fires for each and signals the current manager -- the orphaned workers are
-        # never silently stranded, and they never absorb the manager's role.
-        before_ids = {
-            event.id
-            for event in self.event_store.read(None)
-            if event.kind
-            in (
-                "orchestration.agent-notifier.dead-upstream",
-                "orchestration.supervisor.dead-upstream",
-            )
-        }
+        # Tick 2: both workers still resolve through leaf -> master to the replacement manager.
+        # Stale spawn provenance cannot manufacture a dead-upstream alert.
         result = run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
         dead_upstream = [f for f in result.findings if f.kind == "dead-upstream"]
-        session_ids = sorted(f.session_id for f in dead_upstream if f.session_id is not None)
-        self.assertEqual(session_ids, ["worker-1", "worker-2"])
-        manager_events = [
-            e
-            for e in self.event_store.read(None)
-            if e.kind == "orchestration.agent-notifier.dead-upstream" and e.id not in before_ids
-        ]
-        legacy_manager_events = [
-            e
-            for e in self.event_store.read(None)
-            if e.kind == "orchestration.supervisor.dead-upstream" and e.id not in before_ids
-        ]
-        self.assertEqual(len(manager_events), 2)
-        self.assertEqual(len(legacy_manager_events), 2)
-        self.assertTrue(all(e.data["managerAgentId"] == "manager-2" for e in manager_events))
+        self.assertEqual(dead_upstream, [])
+        self.assertFalse(
+            any(
+                e.kind == "orchestration.agent-notifier.dead-upstream"
+                for e in self.event_store.read(None)
+            )
+        )
 
-        # The orphaned workers are still running, untouched -- doctrine: never auto re-parented,
-        # never absorbing the dead manager's role.
+        # The workers stay running and do not absorb the manager role.
         worker1 = self.catalog.get("worker-1")
         worker2 = self.catalog.get("worker-2")
         assert worker1 is not None and worker2 is not None
@@ -633,7 +703,12 @@ class FalseDeadSeatHysteresisTests(_LivenessSimulationCase):
                     "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 )
             )
-            findings = evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0)
+            findings = evaluate_seat_liveness_findings(
+                catalog,
+                TaskDocumentTopology(self.coordination_root),
+                now=NOW,
+                stale_seconds=60.0,
+            )
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].detail, "turn-state-stale")
 

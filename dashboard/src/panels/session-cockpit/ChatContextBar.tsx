@@ -9,8 +9,13 @@ import {
   terminalOpenFailureMessage,
   type OpenSession,
 } from "../../data/sessions";
-import { buildTaskTree } from "../../data/taskIdentity";
-import { attachSessionToLeaf } from "../../data/terminal";
+import {
+  buildTaskTree,
+  qualifiedLeafKey,
+  sameTaskDocumentRef,
+  taskDocumentRefForDoc,
+} from "../../data/taskIdentity";
+import { attachSessionToTask } from "../../data/terminal";
 import type { TaskDocNode } from "../../types/projection";
 import { LeafAttachPicker } from "../LeafAttachPicker";
 
@@ -138,9 +143,9 @@ function focusedSessionRunning(focused: OpenSession | undefined): boolean {
 }
 
 function attachLeafError(result: string, seatRole: string): string {
-  return result === "leaf-taken"
-    ? `leaf already has a ${seatRole} seat`
-    : "could not attach to leaf";
+  return result === "seat-taken"
+    ? `task document already has a ${seatRole} seat`
+    : "could not attach to task document";
 }
 
 function historyEnabled(focused: OpenSession | undefined, running: boolean): boolean {
@@ -178,12 +183,19 @@ export function ChatSessionActions({
   const running = focusedSessionRunning(focused);
 
   const attachLeaf = async (leafKey: string, seatRole: string) => {
-    if (!focused || !running || !leafKey || focused.leafKey === leafKey) return;
+    const doc = taskDocuments.find((candidate) => qualifiedLeafKey(candidate) === leafKey);
+    const taskDocumentRef = doc ? taskDocumentRefForDoc(doc) : undefined;
+    if (
+      !focused ||
+      !running ||
+      !taskDocumentRef ||
+      sameTaskDocumentRef(focused.taskDocumentRef, taskDocumentRef)
+    ) return;
     setLeafAttachError(null);
-    const result = await attachSessionToLeaf(focused.id, leafKey, seatRole);
+    const result = await attachSessionToTask(focused.id, taskDocumentRef, seatRole);
     if (result === "ok") {
-      sessionStore.getState().applyLeafAssignment(focused.id, leafKey, seatRole);
-      notifySessionCatalogChanged("leaf", focused.id);
+      sessionStore.getState().applyTaskAssignment(focused.id, taskDocumentRef, seatRole);
+      notifySessionCatalogChanged("task", focused.id);
       return;
     }
     setLeafAttachError(attachLeafError(result, seatRole));
@@ -213,7 +225,7 @@ export function ChatSessionActions({
           contextMaster={pickerContextMaster}
           onPick={(leafKey, seatRole) => void attachLeaf(leafKey, seatRole)}
           testId="chats-attach-leaf-picker"
-          label={focused.leafKey ? "Move leaf" : "Attach to leaf"}
+          label={focused.taskDocumentRef ? "Move task" : "Attach to task"}
           align="right"
           seatRole={attachSeatRole(focused)}
           roleOptions={focused.kind === "terminal" ? ["terminal"] : undefined}

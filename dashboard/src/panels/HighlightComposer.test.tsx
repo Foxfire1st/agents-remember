@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSelectionCapture } from "../data/selection";
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { createSession, sessionStore } from "../data/sessions";
+import { dashboardStore } from "../data/store";
 import {
   keepWaitingForSubmit,
   retryRouteFailure,
@@ -16,6 +17,7 @@ import {
   type SubmitRecord,
 } from "../data/submitMachine";
 import { fetchHarnesses } from "../data/terminal";
+import { SERVED, taskDoc } from "../test/fixtures/wire";
 import { HighlightComposer } from "./HighlightComposer";
 
 vi.mock("../data/selection", () => ({ useSelectionCapture: vi.fn() }));
@@ -43,6 +45,7 @@ const SELECTION = {
   rect: { left: 10, top: 10, width: 40, height: 14 } as DOMRect,
 };
 const clear = vi.fn();
+const LEAF_TASK = { repository: "repo", path: "master/L8.json" };
 const HARNESSES = [
   { id: "claude", name: "Claude Code", detected: true },
   { id: "codex", name: "Codex", detected: true },
@@ -113,6 +116,17 @@ beforeEach(() => {
   );
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
   sessionCockpitStore.setState({ focusedSessionId: null });
+  dashboardStore.setState({
+    analytics: {
+      ...SERVED.analytics,
+      taskDocuments: [taskDoc({
+        repository: "repo",
+        id: "L8",
+        kind: "subTask",
+        docPath: "/coordination/tasks/repo/master/L8.json",
+      })],
+    },
+  });
 });
 
 afterEach(() => {
@@ -388,7 +402,7 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
         id: "leaf-chat",
         label: "Claude Code 1",
         kind: "harness",
-        leafKey,
+        taskDocumentRef: LEAF_TASK,
         status: "running",
         controlState: "ready",
       },
@@ -430,7 +444,7 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
         id: "leaf-chat",
         label: "Claude Code 1",
         kind: "harness",
-        leafKey,
+        taskDocumentRef: LEAF_TASK,
         status: "running",
         controlState: "ready",
       },

@@ -25,8 +25,8 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
-from agents_remember.mcp.tools.leaf_ref import leaf_ref_refusal_payload
 from agents_remember.models.application_requests import OrchestrationNudgeRequest
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -111,7 +111,7 @@ class TestOperatorInboxPostsAndDispatch:
             mark_met=lambda row_id, now: None,
         )
         target = SimpleNamespace(
-            binding_leaf_key=None,
+            binding_task_document_ref=TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
             label="curator",
             spawn_role="curator",
             kind="harness",
@@ -173,17 +173,3 @@ class TestNudgeManager:
                 cast(OrchestrationNudgeRequest, request),
             )
         assert result["ok"] is True
-
-
-class TestLeafRefRefusal:
-    def test_payload_kinds(self) -> None:
-        error = SimpleNamespace(status="leaf-ref-not-found")
-        error.__str__ = lambda self: "detail"  # type: ignore[attr-defined]
-        payload = leaf_ref_refusal_payload(
-            "spawn_agent_session", "L1", cast(Any, error), kind="harness"
-        )
-        assert payload["kind"] == "harness"
-        payload = leaf_ref_refusal_payload(
-            "spawn_agent_session", "L1", cast(Any, error), kind="other"
-        )
-        assert payload.get("kind") is None

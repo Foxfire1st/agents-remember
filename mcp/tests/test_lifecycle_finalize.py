@@ -434,7 +434,7 @@ class LifecycleFinalizeTests(unittest.TestCase):
         )
         for final_args in cases:
             with (
-                self.subTest(args=final_args),
+                self.subTest(task_doc_path=str(final_args.task_doc_path)),
                 patch(
                     "agents_remember.worktrees.modules.finalize._run_or_verify_cleanup"
                 ) as cleanup,

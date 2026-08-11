@@ -1,4 +1,4 @@
-"""Regression coverage for sprint-local named role seats."""
+"""Sprint/master/leaf structural seat hierarchy regression coverage (EFA-L19)."""
 
 from __future__ import annotations
 
@@ -6,326 +6,218 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agents_remember.application.terminal_tools import _open_terminal_refusal
-from agents_remember.controlplane.operator_inbox_records import (
-    InboxAddress,
-    InboxMessage,
-    InboxPoster,
-    InboxRouting,
-    create_operator_inbox_entry,
-)
-from agents_remember.controlplane.signal_routing import (
-    RoutedOwner,
-    derive_architect_owner,
-    derive_row_owner,
-)
-from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.serving.sprint_role_binding import (
-    SprintOpenBindingRequest,
-    sprint_binding_for_attachment,
-    sprint_binding_for_reopen,
-    sprint_binding_for_spawn,
-    sprint_binding_from_leaf,
-)
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_opener import OpenTerminalResult
-from test_spawn_agent_session import _config, _detected, _FakeHost, _write_leaf_task, call_spawn
+from agents_remember.controlplane.signal_routing import RoutedOwner, derive_architect_owner
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving.structural_seats import StructuralSeatError, StructuralSeatResolver
+from agents_remember.serving.terminal_catalog import TerminalCatalog
+from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 STAMP = "2026-08-10T00:00:00+00:00"
 
 
-class SprintLocalRoleSeatTests(unittest.TestCase):
+def _ref(repo: str, path: str) -> TaskDocumentRef:
+    return TaskDocumentRef(repository=repo, path=path)
+
+
+SPRINT_A = _ref("repo-a", "sprint-a/task.json")
+MASTER_A = _ref("repo-a", "master-a/task.json")
+LEAF_A = _ref("repo-a", "master-a/leaf-a.json")
+SPRINT_B = _ref("repo-b", "sprint-b/task.json")
+MASTER_B = _ref("repo-b", "master-b/task.json")
+LEAF_B = _ref("repo-b", "master-b/leaf-b.json")
+
+
+def _task_doc(repo: str, **values: object) -> TaskDocument:
+    return TaskDocument.model_validate(
+        {
+            "id": values.pop("id"),
+            "slug": values.pop("slug"),
+            "title": values.pop("title"),
+            "kind": values.pop("kind"),
+            "repo": repo,
+            "createdAt": "2026-08-10T00:00",
+            **values,
+        }
+    )
+
+
+def _write_repo_topology(root: Path, *, repo: str, sprint: str, master: str, leaf: str) -> None:
+    task_root = root / "tasks" / repo
+    write_task_doc(
+        task_root / sprint,
+        _task_doc(
+            repo,
+            id=sprint,
+            slug=sprint,
+            title=sprint,
+            kind="master",
+            orchestrates=[master],
+        ),
+    )
+    write_task_doc(
+        task_root / master,
+        _task_doc(
+            repo,
+            id=master,
+            slug=master,
+            title=master,
+            kind="master",
+            subTasks=[
+                {
+                    "number": leaf,
+                    "name": leaf,
+                    "file": f"{leaf}.md",
+                    "status": "inProgress",
+                }
+            ],
+        ),
+    )
+    write_task_doc(
+        task_root / master,
+        _task_doc(
+            repo,
+            id=leaf,
+            slug=leaf,
+            title=leaf,
+            kind="subTask",
+            master="task.md",
+        ),
+    )
+
+
+def _seat(
+    session_id: str,
+    document: TaskDocumentRef,
+    role: str,
+    *,
+    status: str = "running",
+    replacement_for: TaskDocumentRef | None = None,
+) -> TerminalCatalogEntry:
+    return TerminalCatalogEntry(
+        id=session_id,
+        label=session_id,
+        kind="harness",
+        harness="claude",
+        lifecycle_id=None,
+        cwd=Path("/workspace"),
+        tmux_name=f"ar-{session_id}",
+        command=("claude",),
+        created_at=STAMP,
+        last_attached_at=STAMP,
+        status=status,  # type: ignore[arg-type]
+        task_document_ref=document,
+        seat_role=role,
+        spawn_role=role,
+        replacement_for_task_document_ref=replacement_for,
+    )
+
+
+class StructuralRoleSeatTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-        _write_leaf_task(self.root, repo="repo-a", master="sprint-a")
-        _write_leaf_task(self.root, repo="repo-b", master="sprint-b")
-        self.config = _config(self.root)
-        self.host = _FakeHost()
-        self.catalog = TerminalCatalog(self.root / "logs" / "dashboard" / "terminal-sessions.json")
-        settings_path = agentic_settings_path(self.root)
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(
-            '{"orchestration":{"roles":{"architect":{"harness":"claude","model":"claude-fable-5","effort":"max"},"orchestrator":{"harness":"claude","model":"claude-fable-5","effort":"max"},"manager":{"harness":"claude","model":"claude-fable-5","effort":"max"}}}}',
-            encoding="utf-8",
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        _write_repo_topology(
+            self.root,
+            repo="repo-a",
+            sprint="sprint-a",
+            master="master-a",
+            leaf="leaf-a",
         )
+        _write_repo_topology(
+            self.root,
+            repo="repo-b",
+            sprint="sprint-b",
+            master="master-b",
+            leaf="leaf-b",
+        )
+        self.catalog = TerminalCatalog(self.root / "terminal-sessions.json")
+        self.topology = TaskDocumentTopology(self.root)
+        self.resolver = StructuralSeatResolver(self.catalog, self.topology)
 
-    def _spawn(self, session_id: str, *, role: str, **kwargs: object) -> dict[str, object]:
-        return call_spawn(
-            self.config,
-            session_id=session_id,
-            host=self.host,
-            which=_detected,
-            env={"AR_SPAWN_ROLE": role},
-            **kwargs,
-        )
+    def test_sprint_roles_share_document_but_remain_distinct_role_seats(self) -> None:
+        for role in ("architect", "orchestrator", "strategist", "designer", "system-specialist"):
+            self.catalog.upsert(_seat(role, SPRINT_A, role))
 
-    def test_two_live_sprints_keep_named_seats_and_custody_separate(self) -> None:
-        architect_a = self._spawn(
-            "architect-a", role="architect", leaf_key="repo-a/sprint-a/leaf-1"
-        )
-        architect_b = self._spawn(
-            "architect-b", role="architect", leaf_key="repo-b/sprint-b/leaf-1"
-        )
-        orchestrator_a = self._spawn(
-            "orchestrator-a",
-            role="orchestrator",
-            spawned_by_session="architect-a",
-        )
-        orchestrator_b = self._spawn(
-            "orchestrator-b",
-            role="orchestrator",
-            spawned_by_session="architect-b",
-        )
-
-        for payload, repo, sprint in (
-            (architect_a, "repo-a", "sprint-a"),
-            (architect_b, "repo-b", "sprint-b"),
-            (orchestrator_a, "repo-a", "sprint-a"),
-            (orchestrator_b, "repo-b", "sprint-b"),
-        ):
-            self.assertEqual(payload["status"], "spawned-unbriefed")
-            self.assertEqual(payload["spawnRepo"], repo)
-            self.assertEqual(payload["spawnSprint"], sprint)
-
-        self.assertEqual(
-            derive_architect_owner(self.catalog, leaf_key="repo-a/sprint-a/leaf-1"),
-            RoutedOwner(role="architect", agent_id="architect-a"),
-        )
-        self.assertEqual(
-            derive_architect_owner(self.catalog, leaf_key="repo-b/sprint-b/leaf-1"),
-            RoutedOwner(role="architect", agent_id="architect-b"),
-        )
-
-    def test_named_roles_require_or_inherit_a_sprint_binding(self) -> None:
-        for role in ("architect", "orchestrator", "manager"):
+        for role in ("architect", "orchestrator", "strategist", "designer", "system-specialist"):
             with self.subTest(role=role):
-                payload = self._spawn(f"unbound-{role}", role=role)
-                self.assertEqual(payload["status"], "sprint-binding-required")
-        self.assertEqual(self.host.ensured, [])
+                self.assertEqual(self.resolver.current(SPRINT_A, role).id, role)
 
-        missing_parent = self._spawn(
-            "missing-parent-manager", role="manager", spawned_by_session="missing-parent"
-        )
-        self.assertEqual(missing_parent["status"], "sprint-binding-required")
-        self.assertEqual(self.host.ensured, [])
-
-        self._spawn("architect-a", role="architect", leaf_key="repo-a/sprint-a/leaf-1")
-        manager = self._spawn("manager-a", role="manager", spawned_by_session="architect-a")
-        self.assertEqual(manager["spawnRepo"], "repo-a")
-        self.assertEqual(manager["spawnSprint"], "sprint-a")
-
-        conflict = self._spawn(
-            "manager-b",
-            role="manager",
-            spawned_by_session="architect-a",
-            leaf_key="repo-b/sprint-b/leaf-1",
-        )
-        self.assertEqual(conflict["status"], "sprint-binding-conflict")
-
-    def test_invalid_leaf_key_cannot_supply_a_sprint_binding(self) -> None:
-        self.assertIsNone(sprint_binding_from_leaf("repo-a/sprint-a"))
-
-    def test_policy_refuses_partial_unknown_and_conflicting_scope_inputs(self) -> None:
-        unbound = TerminalCatalogEntry(
-            id="legacy",
-            label="Legacy",
-            kind="harness",
-            harness="claude",
-            lifecycle_id=None,
-            cwd=Path("/workspace"),
-            tmux_name="ar-legacy",
-            command=("claude",),
-            created_at=STAMP,
-            last_attached_at=STAMP,
-            status="running",
-            spawn_role="architect",
-        )
-        bound = unbound.with_leaf_binding(
-            "repo-a/sprint-a/leaf-1", "architect", spawn_repo="repo-a", spawn_sprint="sprint-a"
-        )
-        self.assertEqual(
-            sprint_binding_for_spawn(
-                "manager",
-                leaf_key=None,
-                replacement_for_leaf=None,
-                parent=unbound,
-                parent_session_id="legacy",
-            )[1],
-            "sprint-binding-required",
-        )
-        self.assertEqual(
-            sprint_binding_for_attachment("architect", leaf_key="not-qualified", entry=unbound)[1],
-            "sprint-binding-required",
-        )
-        self.assertEqual(
-            sprint_binding_for_attachment(
-                "architect", leaf_key="repo-a/sprint-a/leaf-2", entry=bound
-            )[0],
-            sprint_binding_from_leaf("repo-a/sprint-a/leaf-2"),
-        )
-        self.assertEqual(
-            sprint_binding_for_attachment(
-                "architect", leaf_key="repo-b/sprint-b/leaf-2", entry=bound
-            )[1],
-            "sprint-binding-conflict",
-        )
-        self.assertEqual(
-            sprint_binding_for_reopen(
-                SprintOpenBindingRequest("architect", None, None, None, None, "repo-a", None)
-            )[1],
-            "sprint-binding-required",
-        )
-        self.assertEqual(
-            sprint_binding_for_reopen(
-                SprintOpenBindingRequest(
-                    "architect", "repo-b/sprint-b/leaf", None, bound, None, "repo-a", "sprint-a"
-                )
-            )[1],
-            "sprint-binding-conflict",
-        )
-        self.assertEqual(
-            sprint_binding_for_reopen(
-                SprintOpenBindingRequest("architect", None, None, bound, None, None, None)
-            )[0],
-            sprint_binding_from_leaf("repo-a/sprint-a/leaf-1"),
-        )
-        refusal = _open_terminal_refusal(
-            OpenTerminalResult(status="sprint-binding-required"),
-            harness="claude",
-            kind="harness",
-            session_id="architect-a",
-            leaf_key=None,
-        )
-        assert refusal is not None
-        self.assertEqual(refusal["status"], "sprint-binding-required")
-        self.assertEqual(
-            sprint_binding_for_reopen(
-                SprintOpenBindingRequest(
-                    "architect", "repo-b/sprint-b/leaf", None, bound, None, None, None
-                )
-            )[1],
-            "sprint-binding-conflict",
-        )
-
-    def test_spawn_scope_is_write_once_across_a_respawn(self) -> None:
-        self._spawn("architect-a", role="architect", leaf_key="repo-a/sprint-a/leaf-1")
-        self.host.known.remove("ar-architect-a")
-
-        reopened = self._spawn("architect-a", role="architect", leaf_key="repo-b/sprint-b/leaf-1")
-        row = self.catalog.get("architect-a")
-        assert row is not None
-        self.assertEqual(reopened["status"], "sprint-binding-conflict")
-        self.assertEqual((row.spawn_repo, row.spawn_sprint), ("repo-a", "sprint-a"))
-
-    def test_scope_binding_routes_a_leafless_architect_without_global_fallback(self) -> None:
-        self.catalog.upsert(
-            TerminalCatalogEntry(
-                id="architect-a",
-                label="Architect A",
-                kind="harness",
-                harness="claude",
-                lifecycle_id=None,
-                cwd=Path("/workspace"),
-                tmux_name="ar-architect-a",
-                command=("claude",),
-                created_at=STAMP,
-                last_attached_at=STAMP,
-                status="running",
-                spawn_role="architect",
-                seat_role="architect",
-                spawn_repo="repo-a",
-                spawn_sprint="sprint-a",
-            )
-        )
-        self.catalog.upsert(
-            TerminalCatalogEntry(
-                id="architect-b",
-                label="Architect B",
-                kind="harness",
-                harness="claude",
-                lifecycle_id=None,
-                cwd=Path("/workspace"),
-                tmux_name="ar-architect-b",
-                command=("claude",),
-                created_at=STAMP,
-                last_attached_at=STAMP,
-                status="running",
-                spawn_role="architect",
-                seat_role="architect",
-                spawn_repo="repo-b",
-                spawn_sprint="sprint-b",
-            )
-        )
+    def test_same_role_on_different_sprints_never_crosses_repository_scope(self) -> None:
+        self.catalog.upsert(_seat("architect-a", SPRINT_A, "architect"))
+        self.catalog.upsert(_seat("architect-b", SPRINT_B, "architect"))
 
         self.assertEqual(
-            derive_architect_owner(self.catalog, leaf_key="repo-a/sprint-a/leaf-1"),
-            RoutedOwner(role="architect", agent_id="architect-a"),
+            derive_architect_owner(self.catalog, self.topology, task_document_ref=LEAF_A),
+            RoutedOwner(
+                role="architect",
+                task_document_ref=SPRINT_A,
+                agent_id="architect-a",
+            ),
         )
         self.assertEqual(
-            derive_architect_owner(self.catalog, leaf_key="repo-b/sprint-b/leaf-1"),
-            RoutedOwner(role="architect", agent_id="architect-b"),
+            derive_architect_owner(self.catalog, self.topology, task_document_ref=LEAF_B),
+            RoutedOwner(
+                role="architect",
+                task_document_ref=SPRINT_B,
+                agent_id="architect-b",
+            ),
         )
 
-    def test_rebind_resolves_only_the_orchestrator_in_the_row_sprint(self) -> None:
-        self._spawn("architect-a", role="architect", leaf_key="repo-a/sprint-a/leaf-1")
-        self._spawn("architect-b", role="architect", leaf_key="repo-b/sprint-b/leaf-1")
-        self._spawn("orchestrator-a", role="orchestrator", spawned_by_session="architect-a")
-        self._spawn("orchestrator-b", role="orchestrator", spawned_by_session="architect-b")
-        self.catalog.upsert(
-            TerminalCatalogEntry(
-                id="orchestrator-old",
-                label="Old orchestrator",
-                kind="harness",
-                harness="claude",
-                lifecycle_id=None,
-                cwd=Path("/workspace"),
-                tmux_name="ar-orchestrator-old",
-                command=("claude",),
-                created_at=STAMP,
-                last_attached_at=STAMP,
-                status="terminated",
-                spawn_role="orchestrator",
-                seat_role="orchestrator",
-                spawn_repo="repo-a",
-                spawn_sprint="sprint-a",
-            )
-        )
-        self.catalog.upsert(
-            TerminalCatalogEntry(
-                id="manager-old",
-                label="Old manager",
-                kind="harness",
-                harness="claude",
-                lifecycle_id=None,
-                cwd=Path("/workspace"),
-                tmux_name="ar-manager-old",
-                command=("claude",),
-                created_at=STAMP,
-                last_attached_at=STAMP,
-                status="terminated",
-                leaf_key="repo-a/sprint-a/leaf-1",
-                spawn_role="manager",
-                seat_role="manager",
-                spawned_by_session="orchestrator-old",
-            )
-        )
-        row = create_operator_inbox_entry(
-            InboxMessage(ask="ask", response="response", message_kind="escalation"),
-            entry_id="entry-1",
-            now=STAMP,
-            routing=InboxRouting(address=InboxAddress(agent_id="manager-old")),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(
-            update={
-                "leafKey": "repo-a/sprint-a/leaf-1",
-                "seatRole": "manager",
-                "subjectAgentId": "manager-old",
-            }
-        )
+    def test_architect_children_are_only_its_sprint_coordination_roles(self) -> None:
+        architect = _seat("architect", SPRINT_A, "architect")
+        for role in ("orchestrator", "strategist", "designer"):
+            with self.subTest(role=role):
+                self.resolver.authorize_child(architect, document=SPRINT_A, role=role)
+        for document, role in ((SPRINT_A, "system-specialist"), (MASTER_A, "manager")):
+            with (
+                self.subTest(refused_role=role),
+                self.assertRaisesRegex(StructuralSeatError, "architect children"),
+            ):
+                self.resolver.authorize_child(architect, document=document, role=role)
 
-        self.assertEqual(
-            derive_row_owner(self.catalog, row),
-            RoutedOwner(role="orchestrator", agent_id="orchestrator-a"),
+    def test_orchestrator_owns_sprint_specialist_and_one_manager_per_direct_master(self) -> None:
+        orchestrator = _seat("orchestrator", SPRINT_A, "orchestrator")
+        self.resolver.authorize_child(
+            orchestrator,
+            document=SPRINT_A,
+            role="system-specialist",
         )
+        self.resolver.authorize_child(orchestrator, document=MASTER_A, role="manager")
+        with self.assertRaisesRegex(StructuralSeatError, "direct masters"):
+            self.resolver.authorize_child(orchestrator, document=MASTER_B, role="manager")
+
+    def test_manager_owns_only_leaf_roles_inside_its_master(self) -> None:
+        manager = _seat("manager", MASTER_A, "manager")
+        for role in ("worker", "reviewer", "curator"):
+            with self.subTest(role=role):
+                self.resolver.authorize_child(manager, document=LEAF_A, role=role)
+        with self.assertRaisesRegex(StructuralSeatError, "outside the manager"):
+            self.resolver.authorize_child(manager, document=LEAF_B, role="worker")
+
+    def test_replacement_changes_only_the_current_occupant(self) -> None:
+        self.catalog.upsert(_seat("old", MASTER_A, "manager", status="terminated"))
+        self.catalog.upsert(_seat("new", MASTER_A, "manager"))
+
+        current = self.resolver.current(MASTER_A, "manager")
+
+        self.assertEqual(current.id, "new")
+        self.assertEqual(current.task_document_ref, MASTER_A)
+        self.assertEqual(current.binding_role, "manager")
+
+    def test_duplicate_current_occupants_fail_closed(self) -> None:
+        self.catalog.upsert(_seat("one", SPRINT_A, "orchestrator"))
+        self.catalog.upsert(_seat("two", SPRINT_A, "orchestrator"))
+
+        with self.assertRaisesRegex(StructuralSeatError, "multiple running occupants"):
+            self.resolver.current(SPRINT_A, "orchestrator")
+
+    def test_role_altitude_mismatch_fails_before_any_occupant_lookup(self) -> None:
+        with self.assertRaisesRegex(StructuralSeatError, "requires a sprint document"):
+            self.resolver.current(LEAF_A, "architect")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

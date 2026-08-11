@@ -87,6 +87,13 @@ gate. A leaf closeout that tries to skip its required checks — a changed produ
 derived test subset, a failed targeted run, or a missing wrapper — is refused loudly, never passed
 silently.
 
+Every completed strict wrapper invocation atomically replaces the enclosure-owned
+`reports/test-results.md` with its full output, including pytest. Passing closeout and integration
+payloads expose that path as `reportPath`; a failing gate writes it before refusing and includes the
+path in the refusal. The previous completed report remains until the next run completes, so an
+interrupted retry cannot erase the last usable evidence. Do not copy these operational reports into
+the code or memory worktree: cleanup and abandon remove the enclosure's whole `reports/` directory.
+
 The wrapper runs its cheap deterministic rails before pytest. When pytest itself passed but a
 coverage-derived rail refused, a retry may consume the wrapper's content-addressed proof: an
 exact tree skips pytest, while a test-only change reruns only the changed test modules after

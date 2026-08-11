@@ -69,7 +69,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("architect");
     expect(getByText(/sprint-local owner, drawing board, decision relay/)).not.toBeNull();
     expect(getByText(/backend decision-item → present ONE item, record the durable ruling/)).not.toBeNull();
-    expect(getByText(/roles expand horizontally into new chats/)).not.toBeNull();
+    expect(getByText(/roles expand into task-document-owned chats/)).not.toBeNull();
   });
 
   it("encodes the agreed orchestration invariants on the drawn models", () => {
@@ -78,7 +78,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     expect(getByText(/reshape master boundaries — NEVER interleave dispatch/)).not.toBeNull();
     expect(getByText(/creates a BRANCH off main, nothing more/)).not.toBeNull();
     expect(
-      getByText(/the BACKEND ORCHESTRATOR decides by the packet-carried gateId \(own ambient identity/),
+      getByText(/the BACKEND ORCHESTRATOR resolves one gate by canonical master document \+ kind/),
     ).not.toBeNull();
     // The escalation ladder lives on the comms drawing; the spirit test is limited to bird's-eye seats.
     fireEvent.click(getByTestId("flow-nav-comms"));
@@ -88,12 +88,12 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     fireEvent.click(getByTestId("flow-nav-manager"));
     expect(getByText(/managers don't reshape plans \(no bird's-eye\)/)).not.toBeNull();
     expect(getByText(/task_reopen the SAME leaf, reshape — never a redo sibling/)).not.toBeNull();
-    // The ruled seam channel: non-blocking raise addressed by enclosure, the gateId rides the packet.
+    // The ruled seam channel: non-blocking raise and structural master-document decision.
     expect(
-      getByText(/enclosure="<master task name>" — the exact address integration enforcement matches the gate by/),
+      getByText(/the ambient master seat supplies the structural address/),
     ).not.toBeNull();
     expect(
-      getByText(/the returned gateId rides the packet via inbox \+ push · the BACKEND ORCHESTRATOR decides the gate by that id/),
+      getByText(/the BACKEND ORCHESTRATOR decides by canonical master document \+ gate kind/),
     ).not.toBeNull();
   });
 
@@ -107,12 +107,12 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     ).not.toBeNull();
   });
 
-  it("draws the strategist as the mandatory spawn-first sprint planner", () => {
+  it("draws the strategist as the optional spawn-first sprint planner", () => {
     const { getByTestId, getByText } = render(<FlowTab initialModel="strategist" />);
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("strategist");
     expect(getByText(/the sprint planner, spawn-first/)).not.toBeNull();
-    expect(getByText(/the mandatory pre-run gate — no orchestration task, no orchestrated run/)).not.toBeNull();
-    expect(getByText(/even a single master gets the pass — impact must be understood; its leaves may still shuffle/)).not.toBeNull();
+    expect(getByText(/the optional portfolio pass — approved explicitly, never auto-run/)).not.toBeNull();
+    expect(getByText(/when approved, even a single master gets the full method/)).not.toBeNull();
     expect(
       getByText(/4 doctrine edges, cited — an uncited edge is refutable by default · 5 blast-radius register \(low\/med\/high — feeds the loop-tier scoring\)/),
     ).not.toBeNull();
@@ -149,17 +149,17 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
     ).not.toBeNull();
     fireEvent.click(getByTestId("flow-nav-orchestrator"));
     expect(
-      getByText(/STRATEGIST pre-run — spawn-first, MANDATORY before any orchestrated run → the ORCHESTRATION TASK = sprint plan \+ scope/),
+      getByText(/optional STRATEGIST pass — architect proposes it; if approved, its orchestration task becomes sprint plan \+ scope/),
     ).not.toBeNull();
     expect(
       getByText(/visible-behavior-first in a REVIEWABLE ENVIRONMENT \(the dashboard\) with demo notes \(what changed visibly\), code second/),
     ).not.toBeNull();
   });
 
-  it("draws the designer as the hat the architect pulls", () => {
+  it("draws the designer as an optional sprint role", () => {
     const { getByTestId, getByText } = render(<FlowTab initialModel="designer" />);
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("designer");
-    expect(getByText(/the hat the architect pulls/)).not.toBeNull();
+    expect(getByText(/optional sprint design seat/)).not.toBeNull();
     expect(getByText(/BACKEND ORCHESTRATOR adversarially reviews the design/)).not.toBeNull();
     expect(getByText(/ask — never fill silently/)).not.toBeNull();
   });

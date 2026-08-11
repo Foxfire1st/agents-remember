@@ -45,6 +45,26 @@ from agents_remember.application.worktree_services import (
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolate_xdist_worker_cache(
+    tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str,
+) -> Iterator[None]:
+    """Keep process-global application caches private to each xdist worker."""
+    if worker_id == "master":
+        yield
+        return
+    previous = os.environ.get("XDG_CACHE_HOME")
+    os.environ["XDG_CACHE_HOME"] = str(tmp_path_factory.getbasetemp() / "xdg-cache")
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("XDG_CACHE_HOME", None)
+        else:
+            os.environ["XDG_CACHE_HOME"] = previous
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _bind_worktree_services_for_session() -> Iterator[None]:
     """Bind the worktree services for class-level setup that runs outside test scope."""
     bind_worktree_services(build_default_worktree_services())

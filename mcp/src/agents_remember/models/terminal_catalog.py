@@ -17,6 +17,7 @@ from agents_remember.models.conversations.control_wire import (
     ActivityState,
     ControlState,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 TerminalSessionKind = Literal["terminal", "harness"]
 
@@ -31,9 +32,8 @@ TerminalLivenessEvidence = Literal["tmux-command-failed", "pane-gone"]
 SeatTurnState = Literal["working", "turn-ended", "awaiting-input", "stale"]
 TerminalOutcome = Literal["completed", "interrupted", "failed", "unknown"]
 InterruptOrigin = Literal["developer", "unknown"]
-# The leaf-uniqueness role: a plain shell (``kind == "terminal"``) is a TERMINAL; any agent harness
-# is a CHAT. Uniqueness is per (leaf, role) -- at most one running chat AND one running terminal per
-# leaf -- so an agent chat and a scratch terminal can share a leaf without colliding (L5 fix 2).
+# The structural-seat role fallback: a plain shell (``kind == "terminal"``) is a TERMINAL; any
+# otherwise-unclassified harness is a CHAT. Named role seats persist their actual role.
 
 TerminalSessionRole = Literal["chat", "terminal"]
 
@@ -80,22 +80,18 @@ class TerminalCatalogEntry:
     last_attached_at: str
     status: TerminalSessionStatus
     terminated_at: str | None = None
-    # The durable leaf-identity key (qualified leaf id ``repo/master/leaf-id``), opaque to the
-    # backend: the catalog is the leaf->chat registry. Written only when set (like ``harness`` /
-    # ``lifecycleId`` / ``terminatedAt``) so legacy rows with no ``leafKey`` read back as ``None``
-    # -- no schema bump, migration-safe. A chat claims a leaf at open/attach, enclosure-independent.
-    leaf_key: str | None = None
-    # The role occupying ``leaf_key``. Unlike ``spawn_role`` (immutable origin provenance), this is
-    # binding state: hand-opened sessions gain it through attach, and moving a session updates the
-    # leaf + role atomically. Legacy rows migrate from spawnRole, otherwise chat (terminal rows keep
-    # their distinct terminal slot).
+    # The real JSON-primary task document this seat occupies. The stable work identity is this
+    # reference plus ``seat_role``; runtime ids are only the current occupant's correlation data.
+    task_document_ref: TaskDocumentRef | None = None
+    # The role occupying ``task_document_ref``. Unlike ``spawn_role`` (immutable origin provenance),
+    # this is current binding state: moving/replacing an occupant updates document + role atomically.
     seat_role: str | None = None
-    # Explicit manager-declared leaf linkage for an unbound replacement seat. Unlike ``cwd`` (the
-    # fleet-wide workspace root), this value varies per leaf and can safely credit chain progress.
-    replacement_for_leaf: str | None = None
+    # A replacement may declare the structural seat it will occupy while the incumbent still owns
+    # the live slot. This is the same document identity, never a second address namespace.
+    replacement_for_task_document_ref: TaskDocumentRef | None = None
     # Spawned-by provenance (L2 agent dispatch): the spawning session id + lifecycle id when this row
     # was created by the ``spawn_agent_session`` tool (an orchestrator spawning a manager, a manager
-    # spawning a worker). Same migration-safe pattern as ``leaf_key`` -- written only when set, so a
+    # spawning a worker). Written only when set, so a
     # hand-opened or dashboard-opened row reads both back as ``None``. The dashboard reads these to
     # render the orchestration tree (spawner -> spawned edges) once that surface lands.
     spawned_by_session: str | None = None
@@ -117,9 +113,6 @@ class TerminalCatalogEntry:
     # resolution input (260703-L16, ruling 2026-07-07T08:15). Written-only-when-set.
     spawn_level: str | None = None
     spawn_level_source: str | None = None
-    # Immutable repository+sprint scope for named orchestration seats.
-    spawn_repo: str | None = None
-    spawn_sprint: str | None = None
     # Settings-resolved knobs are pinned on harness argv/session commands. Acceptance provenance is
     # the unique id-bearing input and the harness-owned JSONL file that recorded it.
     resolved_model: str | None = None
@@ -204,13 +197,15 @@ class TerminalCatalogEntry:
             last_attached_at=str(data["lastAttachedAt"]),
             status=_status(data.get("status")),
             terminated_at=_optional_str(data, "terminatedAt"),
-            leaf_key=_optional_str(data, "leafKey"),
+            task_document_ref=_optional_task_document_ref(data, "taskDocumentRef"),
             seat_role=migrated_seat_role(
                 persisted=_optional_str(data, "seatRole"),
                 spawn_role=spawn_role,
                 kind=kind,
             ),
-            replacement_for_leaf=_optional_str(data, "replacementForLeaf"),
+            replacement_for_task_document_ref=_optional_task_document_ref(
+                data, "replacementForTaskDocumentRef"
+            ),
             spawned_by_session=_optional_str(data, "spawnedBySession"),
             spawned_by_lifecycle=_optional_str(data, "spawnedByLifecycle"),
             spawn_role=spawn_role,
@@ -219,8 +214,6 @@ class TerminalCatalogEntry:
             session_commands=_string_tuple(data.get("sessionCommands")),
             spawn_level=_optional_str(data, "spawnLevel"),
             spawn_level_source=_optional_str(data, "spawnLevelSource"),
-            spawn_repo=_optional_str(data, "spawnRepo"),
-            spawn_sprint=_optional_str(data, "spawnSprint"),
             resolved_model=_optional_str(data, "resolvedModel"),
             resolved_effort=_optional_str(data, "resolvedEffort"),
             session_log_entry_id=_optional_str(data, "sessionLogEntryId"),
@@ -288,7 +281,7 @@ class TerminalCatalogEntry:
                     "harness": self.harness,
                     "lifecycleId": self.lifecycle_id,
                     "terminatedAt": self.terminated_at,
-                    "leafKey": self.leaf_key,
+                    "taskDocumentRef": _optional_task_document_ref_json(self.task_document_ref),
                 }
             )
         )
@@ -296,7 +289,9 @@ class TerminalCatalogEntry:
         data.update(
             _present_fields(
                 {
-                    "replacementForLeaf": self.replacement_for_leaf,
+                    "replacementForTaskDocumentRef": _optional_task_document_ref_json(
+                        self.replacement_for_task_document_ref
+                    ),
                     "spawnedBySession": self.spawned_by_session,
                     "spawnedByLifecycle": self.spawned_by_lifecycle,
                     "spawnRole": self.spawn_role,
@@ -305,8 +300,6 @@ class TerminalCatalogEntry:
                     "sessionCommands": _optional_list(self.session_commands),
                     "spawnLevel": self.spawn_level,
                     "spawnLevelSource": self.spawn_level_source,
-                    "spawnRepo": self.spawn_repo,
-                    "spawnSprint": self.spawn_sprint,
                     "resolvedModel": self.resolved_model,
                     "resolvedEffort": self.resolved_effort,
                     "sessionLogEntryId": self.session_log_entry_id,
@@ -356,7 +349,7 @@ class TerminalCatalogEntry:
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
-        # ``replace`` preserves every other field (incl. leaf_key + spawned-by provenance) so a new
+        # ``replace`` preserves every other field (incl. task binding + spawn provenance) so a new
         # column never silently drops on a re-attach.
         return replace(
             self,
@@ -379,22 +372,17 @@ class TerminalCatalogEntry:
             terminated_at=at if status == "terminated" else self.terminated_at,
         )
 
-    def with_leaf_binding(
+    def with_task_binding(
         self,
-        leaf_key: str,
+        task_document_ref: TaskDocumentRef,
         seat_role: str,
-        *,
-        spawn_repo: str | None = None,
-        spawn_sprint: str | None = None,
     ) -> TerminalCatalogEntry:
-        """A copy moved to one ``(leaf_key, seat_role)`` binding in a single catalog write."""
+        """A copy moved to one ``(task document, role)`` binding in one catalog write."""
 
         return replace(
             self,
-            leaf_key=leaf_key,
+            task_document_ref=task_document_ref,
             seat_role=seat_role,
-            spawn_repo=self.spawn_repo or spawn_repo,
-            spawn_sprint=self.spawn_sprint or spawn_sprint,
         )
 
     def with_retirement(
@@ -545,18 +533,10 @@ class TerminalCatalogEntry:
         )
 
     @property
-    def binding_leaf_key(self) -> str | None:
-        """The leaf this seat works for, including an unbound replacement's declared target."""
+    def binding_task_document_ref(self) -> TaskDocumentRef | None:
+        """The task document this occupant works for, including a staged replacement."""
 
-        return self.leaf_key or self.replacement_for_leaf
-
-    @property
-    def sprint_key(self) -> str | None:
-        """The immutable named-seat scope, if this row was spawned with one."""
-
-        if self.spawn_repo is None or self.spawn_sprint is None:
-            return None
-        return f"{self.spawn_repo}/{self.spawn_sprint}"
+        return self.task_document_ref or self.replacement_for_task_document_ref
 
 
 def _string_tuple(raw: object) -> tuple[str, ...] | None:
@@ -569,6 +549,15 @@ def _string_tuple(raw: object) -> tuple[str, ...] | None:
 def _optional_str(data: dict[str, object], key: str) -> str | None:
     raw = data.get(key)
     return str(raw) if raw is not None else None
+
+
+def _optional_task_document_ref(data: dict[str, object], key: str) -> TaskDocumentRef | None:
+    raw = data.get(key)
+    return TaskDocumentRef.model_validate(raw) if raw is not None else None
+
+
+def _optional_task_document_ref_json(raw: TaskDocumentRef | None) -> dict[str, str] | None:
+    return raw.model_dump() if raw is not None else None
 
 
 def _optional_path(data: dict[str, object], key: str) -> Path | None:

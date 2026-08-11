@@ -35,6 +35,9 @@ from agents_remember.serving.agent_notifier_heartbeat import (
     AgentNotifierHeartbeatPayload,
     heartbeat_age_seconds,
 )
+from agents_remember.serving.control_plane_identity_migration import (
+    migrate_control_plane_identity_logs,
+)
 from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
 from agents_remember.serving.heap_diag import (
     heap_diag_loop,
@@ -177,6 +180,11 @@ def _serving_lifespan(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        await asyncio.to_thread(
+            migrate_control_plane_identity_logs,
+            runtime.config.coordination_root,
+            include_agent_notifier_signals=True,
+        )
         # Compact once before accepting clients, then keep compacting on a slow live
         # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
         # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.

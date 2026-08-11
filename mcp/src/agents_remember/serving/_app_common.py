@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel, Field
 
 from agents_remember.models.application_requests import AgentRole, InboxMessageKind
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -27,7 +27,6 @@ from agents_remember.serving.agent_notifier_heartbeat import (
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
 from agents_remember.serving.served_state import served_state_tail
@@ -40,7 +39,6 @@ from agents_remember.serving.terminal_liveness import (
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.serving.terminal_pty import TerminalSession
-from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
 # The serving app's shared logger, named after the public module so existing
 # ``assertLogs("agents_remember.serving.app", ...)`` tests keep matching.
@@ -281,15 +279,14 @@ class TerminalOpenRequest(BaseModel):
     effort: str | None = None
     label: str | None = None
     lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
-    # The durable leaf-identity key the chat claims at open (qualified leaf id ``repo/master/leaf-id``).
-    # Opaque to the backend; persisted on the catalog entry, uniqueness-checked before the spawn.
-    leaf_key: str | None = Field(default=None, alias="leafKey")
+    task_document_ref: TaskDocumentRef | None = Field(default=None, alias="taskDocumentRef")
+    role: str | None = None
 
 
-class TerminalAttachLeafRequest(BaseModel):
-    """Body of ``POST /api/terminal/{session}/attach-leaf``: claim a leaf for an existing session."""
+class TerminalAttachTaskRequest(BaseModel):
+    """Trusted dashboard administration: bind an existing session to a document+role seat."""
 
-    leaf_key: str = Field(alias="leafKey")
+    task_document_ref: TaskDocumentRef = Field(alias="taskDocumentRef")
     role: str | None = None
 
 
@@ -347,19 +344,6 @@ class OperatorInboxPostRequest(BaseModel):
 
 def _catalog_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
     return entry.to_json()
-
-
-def _resolve_request_leaf_key(config: McpRuntimeConfig, leaf_key: str | None) -> str | None:
-    if leaf_key is None:
-        return None
-    return resolve_catalog_leaf_key(config, leaf_key)
-
-
-def _leaf_ref_response(error: LeafRefResolutionError, leaf_key: str) -> JSONResponse:
-    return JSONResponse(
-        content={"status": error.status, "leafKey": leaf_key, "detail": str(error)},
-        status_code=400,
-    )
 
 
 def _attach_terminal_session(

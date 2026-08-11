@@ -13,10 +13,11 @@ from agents_remember.kernel.git_facts import git_facts_to_packet, read_git_facts
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.models.context_packet import BranchFreshness as WireBranchFreshness
 from agents_remember.models.context_packet import MemorySummary, RepoSummary
-from agents_remember.models.terminal import (
-    SessionRenameResponse,
-    SessionRetireResponse,
-    SpawnAgentSessionResponse,
+from agents_remember.models.structural.agent import (
+    DispatchAgentResponse,
+    RenameChildResponse,
+    RenameSelfResponse,
+    RetireChildResponse,
 )
 from agents_remember.worktrees.modules.guidance import recovery_guidance
 from agents_remember.worktrees.modules.leaf_ref_start import invalid_contract_request_result
@@ -32,11 +33,8 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from test_wire_vocabulary_exhaustiveness import (
-    SESSION_BASE,
     _accepts,
-    _advertised_statuses,
     _contract,
-    _model_vocabulary,
     _module_tree,
     worktree_summary_accepts,
 )
@@ -64,29 +62,40 @@ class AdvertisedVocabularyTests(unittest.TestCase):
             with self.subTest(workflowKind=kind):
                 self.assertTrue(worktree_summary_accepts("workflowKind", kind))
 
-    def test_every_status_the_session_tools_roster_validates(self) -> None:
-        """A session tool's docstring IS its published contract; it must not over-promise.
+    def test_agent_session_tools_are_structural_and_exact_id_tools_are_absent(self) -> None:
+        """The agent roster exposes document+role intent, never occupant-id administration."""
 
-        `session_retire` and `session_rename` roster every status they can return, so the
-        docstring and the response enum are asserted equal. `spawn_agent_session` rosters ten
-        of its thirteen plus one named inline, and the difference is pinned rather than
-        tolerated silently: the two leaf-ref refusals are producible and undocumented.
-        """
-        for tool, model in (
-            ("session_retire", SessionRetireResponse),
-            ("session_rename", SessionRenameResponse),
+        declared = {
+            node.name
+            for node in ast.walk(_module_tree("mcp/registration/sessions.py"))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertTrue(
+            {"dispatch_agent", "retire_child", "rename_child", "rename_self"} <= declared
+        )
+        self.assertEqual(
+            declared & {"spawn_agent_session", "session_retire", "session_rename"}, set()
+        )
+
+        forbidden = {
+            "sessionId",
+            "session_id",
+            "agentId",
+            "agent_id",
+            "lifecycleId",
+            "lifecycle_id",
+            "gateId",
+            "gate_id",
+        }
+        for model in (
+            DispatchAgentResponse,
+            RetireChildResponse,
+            RenameChildResponse,
+            RenameSelfResponse,
         ):
-            with self.subTest(tool=tool):
-                self.assertEqual(_advertised_statuses(tool), _model_vocabulary(model))
-
-        advertised = _advertised_statuses("spawn_agent_session")
-        vocabulary = _model_vocabulary(SpawnAgentSessionResponse)
-        self.assertNotIn("dispatch-brief", advertised)  # a message kind, not a status
-        self.assertIn("leaf-taken", advertised)  # named inline, not in the closing roster
-        self.assertEqual(vocabulary - advertised, {"leaf-ref-not-found", "leaf-ref-ambiguous"})
-        for status in sorted(advertised):
-            with self.subTest(status=status):
-                self.assertTrue(_accepts(SpawnAgentSessionResponse, SESSION_BASE, "status", status))
+            with self.subTest(model=model.__name__):
+                fields = {field.alias or name for name, field in model.model_fields.items()}
+                self.assertEqual(fields & forbidden, set())
 
     def test_every_memory_mode_the_contract_accepts_validates_on_both_fields(self) -> None:
         """One packet reports the mode twice; both copies must accept the same set."""

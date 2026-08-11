@@ -63,7 +63,6 @@ function useLaunchFlowForm(open: boolean, prefill: LaunchPrefill | undefined) {
   const [harnessId, setHarnessId] = useState<string | null>(null);
   const [selection, setSelection] = useState<LaunchSelectionState>(EMPTY_SELECTION);
   const [label, setLabel] = useState("");
-  const [leafKey, setLeafKey] = useState("");
   const [posting, setPosting] = useState(false);
   const [outcome, setOutcome] = useState<OpenOutcome | null>(null);
   const [unknownId, setUnknownId] = useState<string | null>(null);
@@ -75,7 +74,6 @@ function useLaunchFlowForm(open: boolean, prefill: LaunchPrefill | undefined) {
     setHarnessId(prefill?.harness ?? null);
     setSelection(EMPTY_SELECTION);
     setLabel("");
-    setLeafKey("");
     setPosting(false);
     setOutcome(null);
     setUnknownId(null);
@@ -92,8 +90,6 @@ function useLaunchFlowForm(open: boolean, prefill: LaunchPrefill | undefined) {
     setSelection,
     label,
     setLabel,
-    leafKey,
-    setLeafKey,
     posting,
     setPosting,
     outcome,
@@ -161,14 +157,12 @@ function openOptions(
   harnessId: string,
   selection: LaunchSelectionState,
   label: string,
-  leafKey: string,
   lifecycleId: string | undefined,
 ) {
   return {
     harness: harnessId,
     selection,
     ...(label.trim() ? { label: label.trim() } : {}),
-    ...(leafKey.trim() ? { leafKey: leafKey.trim() } : {}),
     ...(lifecycleId ? { lifecycleId } : {}),
   };
 }
@@ -209,7 +203,6 @@ function useLaunchSubmit({
   harnessId,
   selection,
   label,
-  leafKey,
   lifecycleId,
   mintSessionId,
   setPosting,
@@ -222,7 +215,6 @@ function useLaunchSubmit({
   harnessId: string | null;
   selection: LaunchSelectionState;
   label: string;
-  leafKey: string;
   lifecycleId: string | undefined;
   mintSessionId: () => string;
   setPosting: (value: boolean) => void;
@@ -241,7 +233,7 @@ function useLaunchSubmit({
     setOutcome(null);
     const result = await openHostedSession(
       sessionId,
-      openOptions(harnessId, selection, label, leafKey, lifecycleId),
+      openOptions(harnessId, selection, label, lifecycleId),
     );
     if (!catalogAuthorityIsCurrent(launchAuthority)) return;
     setPosting(false);
@@ -318,7 +310,7 @@ function buildLaunchHandlers(
   onClose: () => void,
 ): Omit<
   LaunchFlowDialogProps,
-  | "catalog" | "harnessId" | "entry" | "selection" | "label" | "leafKey" | "outcome"
+  | "catalog" | "harnessId" | "entry" | "selection" | "label" | "outcome"
   | "posting" | "unknownId" | "readyToLaunch" | "attempted" | "launchBlockReason"
 > {
   return {
@@ -351,7 +343,6 @@ function buildLaunchHandlers(
       }
     },
     setLabel: form.setLabel,
-    setLeafKey: form.setLeafKey,
     onLaunch: () => void launch(),
     onDismiss: dismiss,
     onOutcomeFocus: onFocusSession,
@@ -398,7 +389,7 @@ export function LaunchFlow({
     form.setUnknownId(null);
     onClose();
   };
-  const launch = useLaunchSubmit({ readyToLaunch, harnessId: form.harnessId, selection: form.selection, label: form.label, leafKey: form.leafKey, lifecycleId, mintSessionId, setPosting: form.setPosting, setOutcome: form.setOutcome, setUnknownId: form.setUnknownId, onFocusSession, onClose });
+  const launch = useLaunchSubmit({ readyToLaunch, harnessId: form.harnessId, selection: form.selection, label: form.label, lifecycleId, mintSessionId, setPosting: form.setPosting, setOutcome: form.setOutcome, setUnknownId: form.setUnknownId, onFocusSession, onClose });
   const handlers = buildLaunchHandlers(form, snapshot, retryHarnessCatalog, launch, dismiss, onFocusSession, onClose);
 
   if (!open) return null;
@@ -410,7 +401,6 @@ export function LaunchFlow({
       entry={entry}
       selection={form.selection}
       label={form.label}
-      leafKey={form.leafKey}
       outcome={form.outcome}
       posting={form.posting}
       unknownId={form.unknownId}

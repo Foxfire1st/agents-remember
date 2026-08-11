@@ -22,8 +22,12 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RetirementSettings
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+
+LEAF_REF = TaskDocumentRef(repository="repo", path="master-a/leaf-1.json")
 
 
 def _entry(session_id: str, *, role: str) -> TerminalCatalogEntry:
@@ -39,7 +43,7 @@ def _entry(session_id: str, *, role: str) -> TerminalCatalogEntry:
         created_at="2026-07-07T00:00:00+00:00",
         last_attached_at="2026-07-07T00:00:00+00:00",
         status="running",
-        leaf_key="repo/master-a/leaf-1",
+        task_document_ref=LEAF_REF,
         spawn_role=role,
     )
 
@@ -51,6 +55,20 @@ class CompletionCleanupContainmentTests(unittest.TestCase):
         self.contract_path = self.root / "enclosures" / "contract.md"
         self.contract_path.parent.mkdir(parents=True, exist_ok=True)
         self.contract_path.write_text("placeholder", encoding="utf-8")
+        write_task_doc(
+            self.root / "tasks" / "repo" / "master-a",
+            TaskDocument.model_validate(
+                {
+                    "id": "leaf-1",
+                    "slug": "leaf-1",
+                    "title": "Leaf",
+                    "kind": "subTask",
+                    "repo": "repo",
+                    "createdAt": "2026-07-07T00:00",
+                    "master": "task.md",
+                }
+            ),
+        )
         self.contract = WorktreeContract(
             task_id="leaf-1",
             task_name="Leaf",
@@ -92,7 +110,8 @@ class CompletionCleanupContainmentTests(unittest.TestCase):
                     response=f"Completed by {session_id}",
                     message_kind="turn-report",
                     subject=InboxSubject(
-                        leaf_key="repo/master-a/leaf-1",
+                        task_document_ref=LEAF_REF,
+                        seat_role="worker",
                         agent_id=session_id,
                     ),
                 ),
@@ -161,7 +180,7 @@ class CompletionCleanupContainmentTests(unittest.TestCase):
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.contract),
             mock.patch.object(
                 completion_cleanup,
-                "land_seats_for_leaf",
+                "land_seats_for_task",
                 side_effect=RuntimeError("unexpected failure"),
             ),
         ):

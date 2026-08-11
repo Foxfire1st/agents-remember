@@ -109,7 +109,7 @@ developer which route they intend.
 
 In dashboard-owned sessions, this seat remains the architect for its lifetime. A pasted role brief
 for another role is refused and escalated through the inbox instead of being absorbed. Roles expand
-horizontally into new chats (`spawn_agent_session` with the target role) — a role seat is never a
+horizontally into new chats (`dispatch_agent` with the sprint document and target role) — a role seat is never a
 native sub-agent of this one. Native sub-agents drill vertically inside this seat only when it
 builds solo under the worker discipline below; once orchestration runs, analysis goes to spawned
 role seats like everything else. Sessions not owned by the dashboard follow their
@@ -120,13 +120,12 @@ not allowed in spawned role seats.
 
 ## Hosted Role Dispatch
 
-Every horizontal expansion from this seat follows the shared three-state protocol in `../SKILL.md`:
-`spawn_agent_session(context omitted, submit=false)` must return `spawned-unbriefed`; then
-`hosted_session_readiness` must return `status=ready` for the exact returned session id; only then
-post one exact-agent durable `dispatch-brief`. A spawned-only or not-ready orchestrator is not
-active work. Count it briefed only from `deliveryState=delivered` plus
-`adapterDeliveryState=accepted|queued`; a failed delivery stays pending on the same row and session,
-never a duplicate brief or automatic respawn.
+Every horizontal expansion from this seat follows the structural transaction in `../SKILL.md`:
+call `dispatch_agent` with this sprint's canonical task document, the target role, and one complete
+brief. The architect creates the sprint orchestrator and, when approved, strategist or separate
+designer seats. The control plane owns readiness, private occupant identity, and exact initial
+brief pinning. `dispatched` and `dispatch-queued` are both durable outcomes; never request an id,
+poll readiness, duplicate a queued brief, or respawn merely because delivery is pending.
 
 ## Design And Drawing Board
 
@@ -158,8 +157,8 @@ seat is the inspection surface of last resort, and custody is its duty:
 
 1. **Land and take custody.** Every inbox row addressed to this seat or the `architect` role —
    escalations, nudges, turn-reports, completed-master notices — lands at your turn boundary
-   (the system acks; `operator_inbox_consume` is an optional attribution marker). Custody means
-   *a responsible seat holds this now*, not resolution.
+   and the system records adapter acceptance. Custody means *a responsible seat holds this now*,
+   not resolution; the model neither consumes nor acknowledges a transport row.
 2. **Fold, do not forward.** Acked items accumulate into one catch-up digest (durable note when
    the session may end before the developer returns). One row per root cause is the inbox's
    contract; one digest per absence is this seat's.
@@ -278,6 +277,6 @@ developer or the configured distinct decider; the architect does not approve its
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · inbox · gates for developer hand-offs · `spawn_agent_session` |
+| tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · `message_parent`/`message_child` · gates for developer hand-offs · `dispatch_agent` |
 
 Settings.json `orchestration.roles.architect` overrides these, and `orchestration.rolesPerLevel.<level>.architect` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

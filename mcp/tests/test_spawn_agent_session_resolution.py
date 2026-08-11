@@ -10,6 +10,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -81,10 +82,12 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "codex")
 
-    def test_repo_local_settings_override_global_via_the_qualified_leaf_key(self) -> None:
+    def test_repo_local_settings_override_global_via_the_task_document_ref(self) -> None:
         self._write_settings(self.coordination_root, "codex")
         self._write_settings(self.repo_root, "pi")
-        payload = self._spawn(leaf_key="repo-a/master/leaf-1")
+        payload = self._spawn(
+            task_document_ref=TaskDocumentRef(repository="repo-a", path="master/leaf-1.json")
+        )
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "pi")
 
@@ -97,7 +100,10 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
     def test_legacy_harness_argument_is_refused_instead_of_beating_settings(self) -> None:
         self._write_settings(self.coordination_root, "codex")
         self._write_settings(self.repo_root, "pi")
-        payload = self._spawn(harness="claude", leaf_key="repo-a/master/leaf-1")
+        payload = self._spawn(
+            harness="claude",
+            task_document_ref=TaskDocumentRef(repository="repo-a", path="master/leaf-1.json"),
+        )
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "spend-override-unsupported")
         self.assertIn("harness", payload["detail"])
@@ -126,7 +132,9 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
 
     def test_unconfigured_leaf_repo_segment_resolves_globally(self) -> None:
         self._write_settings(self.coordination_root, "codex")
-        payload = self._spawn(leaf_key="not-a-repo/master/leaf-9")
+        payload = self._spawn(
+            task_document_ref=TaskDocumentRef(repository="not-a-repo", path="master/leaf-9.json")
+        )
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "codex")
 

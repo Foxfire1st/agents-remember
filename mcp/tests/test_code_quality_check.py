@@ -141,7 +141,7 @@ class CodeQualityCheckTests(unittest.TestCase):
 
         for gate_file in gate_files:
             content = gate_file.read_text(encoding="utf-8")
-            with self.subTest(gate_file=gate_file):
+            with self.subTest(gate_file=gate_file.as_posix()):
                 self.assertIn("agents_remember.code_quality.check", content)
                 self.assertNotIn("fail-on-crap-threshold", content)
 
