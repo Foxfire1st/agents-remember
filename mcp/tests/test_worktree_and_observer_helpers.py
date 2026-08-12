@@ -32,7 +32,10 @@ from agents_remember.serving.projections.snapshots import (
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import delete_branch_if_merged
+from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
+    classify_route_overview_updates,
+    refresh_route_overview_metadata_for_context,
     route_overview_metadata_refresh_plan_for_context,
 )
 from agents_remember.worktrees.modules.start_contract import _parent_series_contract
@@ -523,6 +526,179 @@ class RouteOverviewMetadataRefreshPlanTests(unittest.TestCase):
             self.assertEqual(plan["required"], [])
             self.assertEqual(
                 plan["missing_metadata"], ["src/app/overview.md", "src/lib/overview.md"]
+            )
+
+    def test_task_edited_overview_is_required_when_source_change_predates_leaf_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_tree = Path(tmp) / "memory"
+            init_repo(memory_tree)
+            onboarding_root = memory_tree / "onboarding"
+            overview = _write_overview(
+                onboarding_root / "src" / "app" / "overview.md", self.ROUTE_ROWS
+            )
+            git(memory_tree, "add", "onboarding/src/app/overview.md")
+            git(memory_tree, "commit", "-m", "Record route baseline")
+            verified = git(memory_tree, "rev-parse", "HEAD")
+            overview.write_text(
+                overview.read_text(encoding="utf-8")
+                + "\n## Current contract\n\nThe route now resolves installed identity.\n"
+                + "\n## Update History\n\n"
+                + "- 2026-08-12 — Reviewed the installed-identity route.\n",
+                encoding="utf-8",
+            )
+
+            plan = route_overview_metadata_refresh_plan_for_context(
+                SimpleNamespace(onboarding_root=onboarding_root),
+                ["docs/unrelated.md"],
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            self.assertEqual(plan["missing_metadata"], [])
+            self.assertEqual(
+                plan["required"],
+                [{"source_route": "src/app", "onboarding_file": overview.as_posix()}],
+            )
+
+            refreshed = refresh_route_overview_metadata_for_context(
+                SimpleNamespace(onboarding_root=onboarding_root),
+                VerifiedChange(
+                    commit="f" * 40,
+                    commit_date="2026-08-12T22:30:00+02:00",
+                    changed_paths=["docs/unrelated.md"],
+                ),
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            self.assertEqual(refreshed, plan["required"])
+            refreshed_text = overview.read_text(encoding="utf-8")
+            self.assertIn("| lastVerifiedCommitHash | `" + "f" * 40 + "` |", refreshed_text)
+            self.assertIn("| lastVerifiedCommitDate | 2026-08-12T22:30:00+02:00", refreshed_text)
+
+    def test_external_overview_uses_source_evidence_without_memory_revision_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_tree = root / "memory"
+            init_repo(memory_tree)
+            verified = git(memory_tree, "rev-parse", "HEAD")
+            onboarding_root = root / "external" / "onboarding"
+            overview = _write_overview(
+                onboarding_root / "src" / "app" / "overview.md", self.ROUTE_ROWS
+            )
+            context = SimpleNamespace(onboarding_root=onboarding_root)
+
+            plan = route_overview_metadata_refresh_plan_for_context(
+                context,
+                ["src/app/feature.py"],
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            self.assertEqual(
+                plan["required"],
+                [{"source_route": "src/app", "onboarding_file": overview.as_posix()}],
+            )
+            self.assertEqual(
+                classify_route_overview_updates(
+                    context,
+                    plan,
+                    ["src/app/feature.py"],
+                    memory_tree=memory_tree,
+                    memory_verified_commit=verified,
+                ),
+                {
+                    "stale": [],
+                    "untraced": [],
+                    "attested_no_impact": [],
+                    "stamped_without_body_review": [],
+                },
+            )
+
+    def test_task_edited_overview_still_refuses_a_metadata_only_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_tree = Path(tmp) / "memory"
+            init_repo(memory_tree)
+            onboarding_root = memory_tree / "onboarding"
+            overview = _write_overview(
+                onboarding_root / "src" / "app" / "overview.md", self.ROUTE_ROWS
+            )
+            git(memory_tree, "add", "onboarding/src/app/overview.md")
+            git(memory_tree, "commit", "-m", "Record route baseline")
+            verified = git(memory_tree, "rev-parse", "HEAD")
+            overview.write_text(
+                overview.read_text(encoding="utf-8").replace(
+                    "2026-05-09T00:00:00+00:00", "2026-08-12T00:00:00+00:00"
+                ),
+                encoding="utf-8",
+            )
+            context = SimpleNamespace(onboarding_root=onboarding_root)
+            plan = route_overview_metadata_refresh_plan_for_context(
+                context,
+                ["docs/unrelated.md"],
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            classification = classify_route_overview_updates(
+                context,
+                plan,
+                ["docs/unrelated.md"],
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            self.assertEqual(classification["stale"], ["src/app"])
+            self.assertEqual(classification["untraced"], [])
+
+    def test_task_edited_overview_accepts_generated_citation_coordinates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_tree = Path(tmp) / "memory"
+            init_repo(memory_tree)
+            onboarding_root = memory_tree / "onboarding"
+            overview = _write_overview(
+                onboarding_root / "src" / "app" / "overview.md", self.ROUTE_ROWS
+            )
+            overview.write_text(
+                overview.read_text(encoding="utf-8")
+                + "\n## References\n\n"
+                + "| Claim | Anchor | Source |\n| --- | --- | --- |\n"
+                + "| Identity is resolved centrally. | `resolve_identity` | src/app/id.py:10-12 |\n",
+                encoding="utf-8",
+            )
+            git(memory_tree, "add", "onboarding/src/app/overview.md")
+            git(memory_tree, "commit", "-m", "Record route baseline")
+            verified = git(memory_tree, "rev-parse", "HEAD")
+            overview.write_text(
+                overview.read_text(encoding="utf-8").replace(
+                    "src/app/id.py:10-12", "src/app/id.py:30-33"
+                ),
+                encoding="utf-8",
+            )
+            context = SimpleNamespace(onboarding_root=onboarding_root)
+            plan = route_overview_metadata_refresh_plan_for_context(
+                context,
+                ["docs/unrelated.md"],
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            classification = classify_route_overview_updates(
+                context,
+                plan,
+                ["docs/unrelated.md"],
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+            )
+
+            self.assertEqual(
+                classification,
+                {
+                    "stale": [],
+                    "untraced": [],
+                    "attested_no_impact": [],
+                    "stamped_without_body_review": [],
+                },
             )
 
 

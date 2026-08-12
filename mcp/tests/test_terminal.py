@@ -447,7 +447,8 @@ class TerminalHostRegistryTests(unittest.TestCase):
             "lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",), name="custom")
         )
         self.assertEqual(session.tmux_name, "custom")
-        self.assertEqual(self.spawner.calls[0][6], "custom")
+        argv = self.spawner.calls[0]
+        self.assertEqual(argv[argv.index("-s") + 1], "custom")
 
     def test_has_session_uses_tmux_probe(self) -> None:
         self.existing_tmux.add("ar-lc1")

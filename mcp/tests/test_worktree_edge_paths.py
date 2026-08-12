@@ -707,9 +707,10 @@ class OverviewRevisionTests(unittest.TestCase):
         )
 
         assert revision is not None
-        body_changed, added_history = revision
+        body_changed, added_history, citation_only = revision
         self.assertIs(body_changed, True)
         self.assertEqual(added_history, [])
+        self.assertIs(citation_only, False)
 
     def test_an_unclassifiable_overview_falls_out_of_the_bucket_assignment(self) -> None:
         """``_route_overview_bucket`` must drop what ``_overview_revision`` cannot speak
@@ -723,7 +724,7 @@ class OverviewRevisionTests(unittest.TestCase):
             memory_root=self.memory_root,
             baseline_ref=self.baseline,
             changed_memory=set(),
-            domain_evident=True,
+            evidence="source",
         )
 
         self.assertIsNone(bucket)

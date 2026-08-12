@@ -303,7 +303,9 @@ class ClaudeStreamJsonAdapterTests2(unittest.IsolatedAsyncioTestCase):
         adapter = _adapter(
             transport,
             correlations=["expired-correlation", "retry-correlation"],
-            limits=ClaudeAdapterLimits(acceptance_timeout_seconds=0.005),
+            # Keep the production 30-second bound compressed while leaving enough event-loop
+            # budget for the fake reader to consume replay + result under a loaded xdist worker.
+            limits=ClaudeAdapterLimits(acceptance_timeout_seconds=0.05),
         )
         await adapter.start(_launch())
         try:

@@ -59,7 +59,7 @@ class OnboardingRefreshPlan(TypedDict):
 
 
 class RouteOverviewRefreshPlan(TypedDict):
-    """Route-overview verification-metadata refresh plan."""
+    """Route-overview refresh plan for source-matched and task-edited routes."""
 
     required: list[dict[str, str]]
     missing_metadata: list[str]

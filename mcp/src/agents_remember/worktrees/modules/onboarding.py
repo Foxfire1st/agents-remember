@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
@@ -11,6 +11,7 @@ from agents_remember.kernel.onboarding_doc import (
     ROUTE_OVERVIEW_DOC_TYPES,
     has_no_impact_marker,
     markdown_table_cells,
+    meaningful_body,
     meaningful_body_changed,
     new_history_lines,
     normalize_route,
@@ -122,10 +123,26 @@ def normalized_table_cell(cell: str) -> str:
 
 
 def route_overview_metadata_refresh_plan_for_context(
-    context, changed_paths: list[str]
+    context,
+    changed_paths: list[str],
+    *,
+    memory_tree: Path | None = None,
+    memory_verified_commit: str = "",
 ) -> RouteOverviewRefreshPlan:
+    """Plan verification stamps for source-matched and task-edited route overviews.
+
+    A curator can repair a route whose source drift predates the leaf's current code
+    range (for example after a source-branch sync).  Such an overview is still part of
+    this closeout transaction even though none of ``changed_paths`` falls below its
+    route.  Include every route overview changed since the task's verified memory
+    baseline so the body gate can validate it and closeout can stamp it atomically.
+    """
     required: list[dict[str, str]] = []
     missing_metadata: list[str] = []
+    tree = Path(memory_tree).resolve() if memory_tree is not None else None
+    changed_memory = (
+        _changed_memory_paths(tree, memory_verified_commit) if tree is not None else set()
+    )
     for overview_path in sorted(context.onboarding_root.rglob("overview.md")):
         if not filesystem.is_file(overview_path):
             continue
@@ -133,7 +150,15 @@ def route_overview_metadata_refresh_plan_for_context(
         if metadata.get("doc_type", "").strip("`") not in ROUTE_OVERVIEW_DOC_TYPES:
             continue
         source_route = normalize_route(metadata.get("sourceRoute", "."))
-        if not route_contains_changed_path(source_route, changed_paths):
+        changed_in_memory = False
+        if tree is not None:
+            try:
+                changed_in_memory = (
+                    overview_path.resolve().relative_to(tree).as_posix() in changed_memory
+                )
+            except ValueError:
+                changed_in_memory = False
+        if not route_contains_changed_path(source_route, changed_paths) and not changed_in_memory:
             continue
         rel_path = overview_path.relative_to(context.onboarding_root).as_posix()
         if "lastVerifiedCommitHash" not in metadata or "lastVerifiedCommitDate" not in metadata:
@@ -202,14 +227,32 @@ def classify_route_overview_updates(
         for route in (_nearest_governing_route(path, routes) for path in changed_paths)
         if route is not None
     }
+    changed_overviews: set[Path] = set()
+    for item in required:
+        overview_path = Path(item["onboarding_file"]).resolve()
+        try:
+            relative = overview_path.relative_to(memory_root).as_posix()
+        except ValueError:
+            continue
+        if relative in changed_memory:
+            changed_overviews.add(overview_path)
     for item in required:
         route = normalize_route(item["source_route"])
+        overview_path = Path(item["onboarding_file"]).resolve()
+        source_domain_evident = route in domain_routes
+        evidence: Literal["ancestor", "source", "task-edited"] = (
+            "source"
+            if source_domain_evident
+            else "task-edited"
+            if overview_path in changed_overviews
+            else "ancestor"
+        )
         bucket = _route_overview_bucket(
-            Path(item["onboarding_file"]).resolve(),
+            overview_path,
             memory_root=memory_root,
             baseline_ref=baseline_ref,
             changed_memory=changed_memory,
-            domain_evident=route in domain_routes,
+            evidence=evidence,
         )
         if bucket is not None:
             classification[bucket].append(route)
@@ -222,8 +265,8 @@ def _overview_revision(
     memory_root: Path,
     baseline_ref: str,
     changed_memory: set[str],
-) -> tuple[bool, list[str]] | None:
-    """``(body meaningfully changed, history lines added)`` against the baseline revision.
+) -> tuple[bool, list[str], bool] | None:
+    """Body change, added history, and citation-only status against the baseline.
 
     ``None`` when the overview is outside the memory tree or absent from the baseline —
     neither is a stale-overview signal, so those overviews drop out of the classification.
@@ -237,14 +280,59 @@ def _overview_revision(
         return None
     current = filesystem.read_text(overview_path, encoding="utf-8")
     body_changed = relative in changed_memory and meaningful_body_changed(baseline_text, current)
-    return body_changed, new_history_lines(baseline_text, current)
+    return (
+        body_changed,
+        new_history_lines(baseline_text, current),
+        body_changed and _citation_coordinates_only_changed(baseline_text, current),
+    )
 
 
-def _governing_overview_bucket(body_changed: bool, added_history: list[str]) -> str | None:
+def _citation_coordinates_only_changed(old_text: str, new_text: str) -> bool:
+    """True when meaningful route prose is unchanged apart from citation line ranges.
+
+    The sanctioned citation fixer moves only the final source-range cell of reference
+    table rows.  Those generated coordinates do not need an Update History entry, but
+    they do need the document's verification stamp to advance with the code snapshot.
+    Normalising only complete ``path:line[-line]`` cells keeps substantive prose, claim,
+    anchor, path, and table-shape changes visible to the body gate.
+    """
+
+    def normalized(text: str) -> str:
+        lines: list[str] = []
+        for line in meaningful_body(text).splitlines():
+            cells = markdown_table_cells(line) if line.strip().startswith("|") else []
+            if not cells:
+                lines.append(line)
+                continue
+            references: list[str] = []
+            for reference in cells[-1].split(";"):
+                value = reference.strip()
+                matched = re.fullmatch(r"(.+):\d+(?:-\d+)?", value)
+                prefix = matched.group(1) if matched is not None else ""
+                references.append(
+                    f"{prefix}:<lines>"
+                    if matched is not None and ("/" in prefix or "." in prefix)
+                    else value
+                )
+            lines.append("\x1f".join([*cells[:-1], "; ".join(references)]))
+        return "\n".join(lines)
+
+    return normalized(old_text) == normalized(new_text)
+
+
+def _governing_overview_bucket(
+    body_changed: bool,
+    added_history: list[str],
+    *,
+    allow_citation_only: bool,
+    citation_only: bool,
+) -> str | None:
     """The gating bucket for a nearest-governor overview; ``None`` once it is properly updated."""
     if body_changed and added_history:
         return None
     if body_changed:
+        if allow_citation_only and citation_only:
+            return None
         return "untraced"
     if added_history and has_no_impact_marker(added_history):
         return "attested_no_impact"
@@ -257,13 +345,14 @@ def _route_overview_bucket(
     memory_root: Path,
     baseline_ref: str,
     changed_memory: set[str],
-    domain_evident: bool,
+    evidence: Literal["ancestor", "source", "task-edited"],
 ) -> str | None:
     """Which classification bucket one matched route overview falls in, if any.
 
-    Only a nearest governor (``domain_evident``) is classified like a sidecar; an
+    A source-matched or task-edited overview is classified like a sidecar; an
     overview matched merely as an ancestor is reported when its body went unreviewed
-    and never gates.
+    and never gates. Task-edited citation-coordinate regeneration is accepted without
+    an invented history entry; substantive task edits are not.
     """
     revision = _overview_revision(
         overview_path,
@@ -273,10 +362,15 @@ def _route_overview_bucket(
     )
     if revision is None:
         return None
-    body_changed, added_history = revision
-    if not domain_evident:
+    body_changed, added_history, citation_only = revision
+    if evidence == "ancestor":
         return None if body_changed else "stamped_without_body_review"
-    return _governing_overview_bucket(body_changed, added_history)
+    return _governing_overview_bucket(
+        body_changed,
+        added_history,
+        allow_citation_only=evidence == "task-edited",
+        citation_only=citation_only,
+    )
 
 
 def require_updated_route_overview_content(
@@ -338,7 +432,12 @@ def validate_route_overview_refresh_plan_for_context(
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
 ) -> RouteOverviewRefreshPlan:
-    plan = route_overview_metadata_refresh_plan_for_context(context, changed_paths)
+    plan = route_overview_metadata_refresh_plan_for_context(
+        context,
+        changed_paths,
+        memory_tree=memory_tree,
+        memory_verified_commit=memory_verified_commit,
+    )
     missing_metadata = plan["missing_metadata"]
     if missing_metadata:
         raise RuntimeError(
@@ -575,7 +674,10 @@ def route_overview_metadata_refresh_plan(
     contract: WorktreeContract, changed_paths: list[str]
 ) -> RouteOverviewRefreshPlan:
     return route_overview_metadata_refresh_plan_for_context(
-        contract_context(contract), changed_paths
+        contract_context(contract),
+        changed_paths,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
     )
 
 

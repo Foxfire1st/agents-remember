@@ -176,6 +176,17 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         self.assertFalse(escaped.parent.exists())
         self.assertFalse(escaped.with_name(f"{escaped.name}.lock").exists())
 
+    def test_enclosure_report_write_is_allowed_without_opening_coordination_escape(self) -> None:
+        checkout, source = self._checkout()
+        self._undeclared_checkout(source)
+        report = checkout.parent / "reports" / "closeout-operation.json"
+
+        with exclusive_access(report, OPERATOR_INBOX_OWNERSHIP):
+            rewrite_lines(report, ['{"status":"running"}'], OPERATOR_INBOX_OWNERSHIP)
+
+        self.assertEqual(report.read_text(encoding="utf-8"), '{"status":"running"}\n')
+        self.assertFalse((checkout.parent / "operator-inbox.jsonl").exists())
+
     def test_rewrite_guard_refuses_a_manually_constructed_live_target(self) -> None:
         _checkout, source = self._checkout()
         self._undeclared_checkout(source)

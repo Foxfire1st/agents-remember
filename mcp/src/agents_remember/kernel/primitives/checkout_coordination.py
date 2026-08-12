@@ -50,6 +50,11 @@ class CheckoutLocation:
     def synthetic_config_path(self) -> Path:
         return self.worktree_group / "provider-runtime" / "dev-mcp-settings.json"
 
+    @property
+    def reports_root(self) -> Path:
+        """Task-local operational artifacts, outside coordination authority state."""
+        return self.worktree_group / "reports"
+
 
 def declare_execution_mode(mode: ExecutionMode) -> None:
     """Declare a trusted daemon or explicit test process before config loading."""
@@ -115,14 +120,26 @@ def checkout_cli_location() -> CheckoutLocation | None:
 
 
 def require_durable_write_target(target: Path) -> None:
-    """Refuse a checkout CLI durable write outside its disposable coordinator."""
+    """Refuse checkout writes outside its disposable coordinator or task reports.
+
+    ``reports/`` is the enclosure-local operation/test artifact boundary.  It is
+    deliberately not a coordination root and contains no inbox, gate, lifecycle,
+    or observer authority rows.  Detached operations loaded from unpublished code
+    may therefore advance their one self-overwriting report there without gaining
+    write access to the live coordinator.
+    """
     location = checkout_cli_location()
     if location is None:
         return
     resolved_target = target.resolve()
     coordination_root = location.coordination_root.resolve()
-    if not resolved_target.is_relative_to(coordination_root):
+    reports_root = location.reports_root.resolve()
+    if not (
+        resolved_target.is_relative_to(coordination_root)
+        or resolved_target.is_relative_to(reports_root)
+    ):
         raise CheckoutCoordinationError(
-            "unpublished checkout code may write durable rows only inside its leaf-local "
-            f"coordination root ({coordination_root}); refused target: {resolved_target}"
+            "unpublished checkout code may write coordination rows only inside its leaf-local "
+            f"coordination root ({coordination_root}) and operational artifacts only inside "
+            f"its enclosure reports root ({reports_root}); refused target: {resolved_target}"
         )
