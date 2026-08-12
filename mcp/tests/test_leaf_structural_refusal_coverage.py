@@ -441,7 +441,7 @@ def test_terminal_tool_task_document_and_open_refusals(tmp_path: Path) -> None:
 
     result = SimpleNamespace(status="task-binding-required", detail=None)
     assert (
-        terminal_tools._open_terminal_refusal(
+        terminal_tools.open_terminal_refusal(
             result,
             harness="codex",
             kind="harness",
@@ -452,7 +452,7 @@ def test_terminal_tool_task_document_and_open_refusals(tmp_path: Path) -> None:
     )
     result.status = "task-binding-invalid"
     assert (
-        terminal_tools._open_terminal_refusal(
+        terminal_tools.open_terminal_refusal(
             result,
             harness="codex",
             kind="harness",
@@ -781,11 +781,13 @@ def test_terminal_binding_conflicts_reap_dead_occupants_and_keep_live_ones(tmp_p
         catalog=SimpleNamespace(path=tmp_path / "logs" / "dashboard" / "terminal-sessions.json")
     )
     provenance = SimpleNamespace(task_document_ref=None, replacement_for_task_document_ref=None)
-    assert opener._task_binding_refusal(runtime, provenance, "worker") == "task-binding-required"
+    refusal = opener._task_binding_refusal(runtime, provenance, "worker")
+    assert refusal is not None and refusal.status == "task-binding-required"
     assert opener._task_binding_refusal(runtime, provenance, "terminal") is None
     provenance.task_document_ref = leaf
     provenance.replacement_for_task_document_ref = leaf
-    assert opener._task_binding_refusal(runtime, provenance, "worker") == "task-binding-invalid"
+    refusal = opener._task_binding_refusal(runtime, provenance, "worker")
+    assert refusal is not None and refusal.status == "task-binding-invalid"
 
 
 def test_task_topology_resolve_enumeration_and_id_ambiguity(tmp_path: Path) -> None:

@@ -43,6 +43,43 @@ NextTool = Literal[
     "memory_carryover_apply",
     "worktree_cleanup",
 ]
+SourceLineageState = Literal["current", "blocked", "unavailable"]
+SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
+SourceLineageRelation = Literal["super-to-master", "master-to-leaf"]
+SourceLineageSide = Literal["code", "memory"]
+
+
+class SourceLineageEdge(StrictResponseModel):
+    """One plane-resolved ancestry edge; agents never supply or retain commit ids."""
+
+    relation: SourceLineageRelation
+    side: SourceLineageSide
+    state: SourceLineageEdgeState
+    sourceBranch: str
+    descendantBranch: str
+    ahead: int | None = None
+    behind: int | None = None
+    contractPath: str
+    syncContractPath: str
+    detail: str | None = None
+
+
+class SourceLineageRecovery(StrictResponseModel):
+    """One ordered recovery derived from task identity, not model-carried Git state."""
+
+    tool: Literal["worktree_sync"] = "worktree_sync"
+    contractPath: str
+    args: dict[str, object]
+
+
+class SourceLineageProjection(StrictResponseModel):
+    """Transitive super -> master -> leaf lineage projected into status and refusals."""
+
+    state: SourceLineageState
+    summary: str
+    edges: list[SourceLineageEdge]
+    recoveries: list[SourceLineageRecovery]
+
 
 # Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
 # is what these were, and the copies had drifted apart in six places at once: `chat-task`
@@ -96,6 +133,7 @@ class WorktreeSummary(StrictResponseModel):
     unknownContractCells: list[str] | None = None
     error: str | None = None
     lifecycleOperation: LifecycleOperationProjection | None = None
+    sourceLineage: SourceLineageProjection | None = None
 
 
 class WorktreeCommandResponse(FlexibleToolResponse):
@@ -119,6 +157,7 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
     lifecycleOperation: LifecycleOperationProjection | None = None
+    source_lineage: SourceLineageProjection | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):

@@ -318,6 +318,19 @@ def _open_terminal_refusal_response(
             content={"status": result.status, "detail": "named role scope is required"},
             status_code=400,
         )
+    if result.status in {"source-lineage-stale", "source-lineage-unavailable"}:
+        return JSONResponse(
+            content={
+                "status": result.status,
+                "detail": result.detail,
+                "sourceLineage": (
+                    result.source_lineage.model_dump()
+                    if result.source_lineage is not None
+                    else None
+                ),
+            },
+            status_code=409,
+        )
     if result.status == "seat-taken":
         return JSONResponse(
             content={
@@ -376,6 +389,21 @@ def _attach_task_response(
                 "detail": "task document is missing/invalid or role does not match its altitude",
             },
             status_code=400,
+        )
+    if result.status in {"source-lineage-stale", "source-lineage-unavailable"}:
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": result.status,
+                "taskDocumentRef": request.task_document_ref.model_dump(),
+                "detail": result.detail,
+                "sourceLineage": (
+                    result.source_lineage.model_dump()
+                    if result.source_lineage is not None
+                    else None
+                ),
+            },
+            status_code=409,
         )
     return JSONResponse(
         content={

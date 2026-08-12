@@ -209,6 +209,7 @@ export interface EngineProcessNode {
   seedFallback: boolean;
   setupState?: string;
   sourceFiles: string[];
+  sourceLineage?: SourceLineageProjection;
   summary: string;
   taskId: string;
   taskName: string;
@@ -437,6 +438,32 @@ export interface SidecarStaleNode {
   lastVerifiedDate: string;
   onboardingFile: string;
   repository: string;
+}
+
+export interface SourceLineageEdge {
+  ahead?: number;
+  behind?: number;
+  contractPath: string;
+  descendantBranch: string;
+  detail?: string;
+  relation: "super-to-master" | "master-to-leaf";
+  side: "code" | "memory";
+  sourceBranch: string;
+  state: "current" | "behind" | "diverged" | "unavailable";
+  syncContractPath: string;
+}
+
+export interface SourceLineageProjection {
+  edges: SourceLineageEdge[];
+  recoveries: SourceLineageRecovery[];
+  state: "current" | "blocked" | "unavailable";
+  summary: string;
+}
+
+export interface SourceLineageRecovery {
+  args: Record<string, unknown>;
+  contractPath: string;
+  tool: "worktree_sync";
 }
 
 export interface TaskCodeExampleNode {

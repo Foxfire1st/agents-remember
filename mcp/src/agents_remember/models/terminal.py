@@ -6,6 +6,7 @@ from typing import Literal, get_args
 
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.worktree import SourceLineageProjection
 
 # These three vocabularies are declared here rather than beside the payload builders that write
 # them, and the direction is deliberate: `application.terminal_tools` imports them, not the reverse.
@@ -26,6 +27,8 @@ TaskAssignmentStatus = Literal[
     "task-document-not-found",
     "task-document-invalid",
     "task-document-repo-mismatch",
+    "source-lineage-stale",
+    "source-lineage-unavailable",
 ]
 
 
@@ -42,6 +45,7 @@ class AttachTerminalSessionToTaskResponse(ToolResponse):
     seatRole: str | None = None
     previousSeatRole: str | None = None
     detail: str | None = None
+    sourceLineage: SourceLineageProjection | None = None
 
 
 SpawnAgentSessionStatus = Literal[
@@ -73,6 +77,8 @@ SpawnAgentSessionStatus = Literal[
     "task-document-invalid",
     "task-document-repo-mismatch",
     "bad-kind",
+    "source-lineage-stale",
+    "source-lineage-unavailable",
 ]
 
 # The runtime half of each alias, derived from it rather than retyped beside it, so a member can
@@ -125,6 +131,7 @@ class SpawnAgentSessionResponse(ToolResponse):
     controlEndpoint: str | None = None
     controlProtocol: str | None = None
     detail: str | None = None
+    sourceLineage: SourceLineageProjection | None = None
 
 
 HostedSessionReadinessStatus = Literal[

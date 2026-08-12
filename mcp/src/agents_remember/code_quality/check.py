@@ -82,6 +82,7 @@ RADON_REPORT_NOTE = (
     "report only: radon exits 0 whatever it finds, so nothing below can fail the gate"
 )
 QUALITY_PROGRESS_REPORT_ENV = "AR_QUALITY_PROGRESS_REPORT"
+QUALITY_TEMP_ROOT = Path("/tmp/arq")
 
 
 @dataclass(frozen=True)
@@ -987,19 +988,12 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    configured_progress = args.progress_report
-    if configured_progress is None and (
-        progress_env := os.environ.get(QUALITY_PROGRESS_REPORT_ENV)
-    ):
-        configured_progress = Path(progress_env)
-    temp_root = (
-        configured_progress.parent / "tmp"
-        if configured_progress is not None
-        else Path("/tmp") / "agents-remember-quality"
-    )
-    native_environment = native_subprocess_environment(os.environ, temp_root=temp_root)
+    native_environment = native_subprocess_environment(os.environ, temp_root=QUALITY_TEMP_ROOT)
     os.environ.clear()
     os.environ.update(native_environment)
+    # ``tempfile`` caches its chosen directory process-wide. Reset it after sanitising the
+    # environment so a module imported before ``main`` cannot preserve a Windows/long-path root.
+    tempfile.tempdir = QUALITY_TEMP_ROOT.as_posix()
     if args.memory_cap_bytes is not None and args.memory_cap_bytes <= 0:
         print_line(
             "--memory-cap-bytes must be a positive integer "

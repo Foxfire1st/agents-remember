@@ -131,6 +131,30 @@ function seedParallelLeafRoom() {
   });
 }
 
+function seedSourceLineageRoom() {
+  const fixture = GALLERY.find((entry) => entry.name === "engine-bootstrap");
+  if (!fixture) throw new Error("fixture not found: engine-bootstrap");
+  const process = fixture.projection.analytics.engineProcesses[0];
+  if (!process) throw new Error("engine-bootstrap fixture missing process");
+  dashboardStore.getState().applySnapshot({
+    ...fixture.projection,
+    analytics: {
+      ...fixture.projection.analytics,
+      engineProcesses: [
+        {
+          ...process,
+          sourceLineage: {
+            state: "blocked",
+            summary: "master code is behind the super-integration branch",
+            edges: [],
+            recoveries: [],
+          },
+        },
+      ],
+    },
+  });
+}
+
 // Freeze motion so the phase-activity flag (not the pulse) is what's asserted.
 beforeEach(() => {
   document.documentElement.dataset.effects = "off";
@@ -158,6 +182,17 @@ describe("EngineRoom lifecycle phase motion (5f S5, T12–T18)", () => {
     const { getByTestId } = render(<EngineRoom />);
     expect(getByTestId("engine-gate-responder").textContent).toContain("Respond");
     expect(getByTestId("enclosure-canvas").getAttribute("data-gate-kind")).toBe("cleanup-approval");
+  });
+
+  it("renders task-resolved source lineage before an agent reads from the enclosure", () => {
+    seedSourceLineageRoom();
+    const { getByText } = render(<EngineRoom />);
+
+    const label = getByText("Source lineage");
+    expect(label.parentElement?.textContent).toContain("blocked");
+    expect(label.parentElement?.getAttribute("title")).toBe(
+      "master code is behind the super-integration branch",
+    );
   });
 
   it("aggregates same-state official CGC engines into one strip chip", () => {

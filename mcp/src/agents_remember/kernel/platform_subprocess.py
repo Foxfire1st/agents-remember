@@ -60,7 +60,7 @@ def native_subprocess_environment(
 def native_path_environment(
     base: Mapping[str, str], *, platform: str | None = None
 ) -> dict[str, str]:
-    """Remove Windows interop entries from PATH without choosing a scratch directory."""
+    """Build a native PATH, including the stable POSIX user-local executable directory."""
     current_platform = platform or os.name
     env = dict(base)
     if current_platform == "nt":
@@ -70,6 +70,15 @@ def native_path_environment(
         for entry in env.get("PATH", "").split(os.pathsep)
         if entry and windows_interop_reason(entry, platform=current_platform) is None
     ]
+    home = env.get("HOME")
+    user_bin = Path(home) / ".local" / "bin" if home else None
+    if (
+        user_bin is not None
+        and user_bin.is_dir()
+        and windows_interop_reason(user_bin, platform=current_platform) is None
+        and user_bin.as_posix() not in path_entries
+    ):
+        path_entries.insert(0, user_bin.as_posix())
     if not path_entries:
         raise RuntimeError(
             "quality runner has no native POSIX PATH entries after rejecting Windows interop paths"

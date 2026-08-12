@@ -31,6 +31,7 @@ from agents_remember.observer import observer_root, reset_ambient
 from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.tasks import TaskDocument, write_task_doc
 from test_spawn_agent_session import _FakeHost, _FakePaster, call_spawn
+from test_worktree_support import write_current_task_lineage
 
 
 def _config(root: Path) -> McpRuntimeConfig:
@@ -90,6 +91,9 @@ class SpawnExpectationRowTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.config = _config(self.tmp)
         _write_leaf_task(self.tmp)
+        write_current_task_lineage(
+            self.tmp, repo_name="repo", master_name="master", leaf_id="leaf-1"
+        )
         self.host = _FakeHost()
         reset_ambient()
 

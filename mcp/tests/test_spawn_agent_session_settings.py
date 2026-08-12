@@ -26,6 +26,7 @@ from test_spawn_agent_session import (
     _write_leaf_task,
     call_spawn,
 )
+from test_worktree_support import write_current_task_lineage
 
 SPRINT_REF = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
 MASTER_REF = TaskDocumentRef(repository="repo-a", path="master/task.json")
@@ -56,6 +57,9 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
         self.repo_root = self.tmp / "workspace" / "repo-a"
         self.repo_root.mkdir(parents=True)
         _write_leaf_task(self.coordination_root, repo="repo-a")
+        write_current_task_lineage(
+            self.coordination_root, repo_name="repo-a", master_name="master", leaf_id="leaf-1"
+        )
         self.config = McpRuntimeConfig(
             config_path=self.tmp / "settings.json",
             coordination_root=self.coordination_root,
@@ -224,6 +228,9 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.repo_root = self.tmp / "workspace" / "repo-a"
         self.repo_root.mkdir(parents=True)
         _write_leaf_task(self.coordination_root, repo="repo-a")
+        write_current_task_lineage(
+            self.coordination_root, repo_name="repo-a", master_name="master", leaf_id="leaf-1"
+        )
         self.config = McpRuntimeConfig(
             config_path=self.tmp / "settings.json",
             coordination_root=self.coordination_root,

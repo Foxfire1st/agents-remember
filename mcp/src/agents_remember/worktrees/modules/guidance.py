@@ -7,10 +7,15 @@ from typing import Any, Literal, NotRequired, TypedDict
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
-from agents_remember.models.worktree import NextOperation, NextTool, WorktreePhase
+from agents_remember.models.worktree import (
+    NextOperation,
+    NextTool,
+    WorktreePhase,
+)
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.services import worktree_services
+from agents_remember.worktrees.source_lineage import source_lineage_for_contract
 from agents_remember.worktrees.worktree_contract import (
     CleanupStatus,
     CloseoutStatus,
@@ -35,6 +40,7 @@ RecoveryOperation = Literal[
     "choose_provider_setup_recovery",
     "choose_stale_base_recovery",
     "choose_memory_sync_recovery",
+    "sync_source_lineage",
 ]
 RecoveryTool = Literal["worktree_start", "worktree_sync", "worktree_closeout_apply"]
 
@@ -103,6 +109,7 @@ class WorktreeStatusFacts(TypedDict):
     unknown_contract_cells: NotRequired[list[str]]
     providers: NotRequired[dict[str, Any]]
     freshness: NotRequired[dict[str, object]]
+    source_lineage: NotRequired[dict[str, object]]
     landing: NotRequired[list[dict[str, object]]]
 
 
@@ -413,6 +420,9 @@ def _status_payload_with_landing(
     freshness = base_freshness(contract)
     if freshness is not None:
         facts["freshness"] = freshness
+    source_lineage = source_lineage_for_contract(contract)
+    if source_lineage is not None:
+        facts["source_lineage"] = source_lineage.model_dump(by_alias=True)
     if landing is not None:
         facts["landing"] = landing
     # Merged rather than `.update`d so the checker sees the result as one payload: the

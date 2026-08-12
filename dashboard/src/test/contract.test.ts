@@ -229,6 +229,8 @@ const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, "project
   "projection.analytics.driftSnapshots[].counts": "drift categories come from the drift report",
   "projection.analytics.setupSummaries[].resultCounts": "result buckets come from the setup action",
   "projection.analytics.engineProcesses[].retryArgs": "the retry call's own kwargs",
+  "projection.analytics.engineProcesses[].sourceLineage.recoveries[].args":
+    "the contract-addressed worktree_sync call's own kwargs",
   "projection.enclosures[].lifecycleOperation.result":
     "the lifecycle operation result is the underlying closeout or integration payload",
 };
@@ -285,6 +287,23 @@ const VOCABULARIES: Record<
   "projection.analytics.engineProcesses[].memoryWorktree.factState": PROCESS_FACT_STATES,
   "projection.analytics.engineProcesses[].providers[].factState": PROCESS_FACT_STATES,
   "projection.analytics.engineProcesses[].landing[].factState": PROCESS_FACT_STATES,
+  "projection.analytics.engineProcesses[].sourceLineage.state": [
+    "current",
+    "blocked",
+    "unavailable",
+  ],
+  "projection.analytics.engineProcesses[].sourceLineage.edges[].state": [
+    "current",
+    "behind",
+    "diverged",
+    "unavailable",
+  ],
+  "projection.analytics.engineProcesses[].sourceLineage.edges[].side": ["code", "memory"],
+  "projection.analytics.engineProcesses[].sourceLineage.edges[].relation": [
+    "super-to-master",
+    "master-to-leaf",
+  ],
+  "projection.analytics.engineProcesses[].sourceLineage.recoveries[].tool": ["worktree_sync"],
   "projection.analytics.taskDocuments[].steps[].disposition.kind": ["intentionalSkip"],
   "projection.analytics.taskDocuments[].steps[].disposition.recordedVia": [
     "task_doc.skip_step",

@@ -55,6 +55,7 @@ from agents_remember.tasks import (
     TaskDocument,
     write_task_doc,
 )
+from test_worktree_support import git, write_current_task_lineage
 
 # The source root of the agents_remember package this test process imported -- what the opener
 # seeds onto every harness-runner spawn's PYTHONPATH.
@@ -296,6 +297,12 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.config = _config(self.tmp)
         _write_leaf_task(self.tmp)
+        self.repo = write_current_task_lineage(
+            self.tmp,
+            repo_name="repo",
+            master_name="master",
+            leaf_id="leaf-1",
+        )
         self.catalog = TerminalCatalog(self.tmp / "logs" / "dashboard" / "terminal-sessions.json")
         self.host = _FakeHost()
         reset_ambient()
@@ -391,6 +398,41 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "task-document-not-found")
         self.assertIn("does not exist", payload["detail"])
+        self.assertEqual(self.host.ensured, [])
+        self.assertIsNone(self.catalog.get("worker-1"))
+
+    def test_stale_super_refuses_a_worker_before_host_creation(self) -> None:
+        path = agentic_settings_path(self.tmp)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "orchestration": {
+                        "roles": {
+                            "worker": {
+                                "harness": "claude",
+                                "model": "claude-fable-5",
+                                "effort": "max",
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        marker = self.repo / "super-moved.txt"
+        marker.write_text("new super\n", encoding="utf-8")
+        git(self.repo, "add", marker.name)
+        git(self.repo, "commit", "-m", "move super")
+
+        payload = self._spawn(
+            task_document_ref=LEAF_REF,
+            env={"AR_SPAWN_ROLE": "worker"},
+        )
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "source-lineage-stale")
+        self.assertEqual(payload["sourceLineage"]["state"], "blocked")
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("worker-1"))
 
@@ -508,6 +550,12 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.config = _config(self.tmp)
         _write_leaf_task(self.tmp)
+        write_current_task_lineage(
+            self.tmp,
+            repo_name="repo",
+            master_name="master",
+            leaf_id="leaf-1",
+        )
         self.catalog = TerminalCatalog(self.tmp / "logs" / "dashboard" / "terminal-sessions.json")
         self.host = _FakeHost()
         reset_ambient()

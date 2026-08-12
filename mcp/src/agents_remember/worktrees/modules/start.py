@@ -42,6 +42,12 @@ from agents_remember.worktrees.modules.start_contract import (
     memory_base_for_source,
 )
 from agents_remember.worktrees.services import ProviderSetupRequestSpec, worktree_services
+from agents_remember.worktrees.source_lineage import (
+    lineage_block_payload,
+    lineage_refusal,
+    parent_source_lineage,
+    source_lineage_for_contract,
+)
 from agents_remember.worktrees.start_progress import (
     StartBeat,
     StartingEnclosure,
@@ -103,6 +109,18 @@ def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    lineage = source_lineage_for_contract(contract)
+    if lineage_refusal(lineage) is not None:
+        assert lineage is not None
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                **lineage_block_payload(lineage),
+                "summary": "Attach refused before stale task context was resumed: "
+                + lineage.summary,
+            },
+        )
     return WorktreeCommandResult(
         0, {"state": "attached", "attached": True, **status_payload(contract)}
     )
@@ -480,6 +498,11 @@ def _existing_contract_result(
     existing = load_contract(contract.contract_path)
     if existing.cleanup in ("abandoned", "reopened"):
         return None
+    lineage = source_lineage_for_contract(existing)
+    refusal = lineage_refusal(lineage)
+    if refusal is not None:
+        assert lineage is not None
+        return WorktreeCommandResult(2, lineage_block_payload(lineage))
     if args.retry_provider_setup:
         return _retry_provider_setup_result(context, existing, args)
     return WorktreeCommandResult(
@@ -495,6 +518,21 @@ def _preflighted_contract(
     A fast-forward recovery may move the source branches mid-preflight, so the contract
     is rebuilt on that path and the caller works from the returned one.
     """
+    lineage = parent_source_lineage(contract)
+    refusal = lineage_refusal(lineage)
+    if refusal is not None:
+        assert lineage is not None
+        block = lineage_block_payload(lineage)
+        _record_start_block(
+            context,
+            contract,
+            args,
+            StartBeat(
+                phase="source-lineage-blocked",
+                blocked_reason=str(block.get("summary", "")),
+            ),
+        )
+        return WorktreeCommandResult(2, block)
     stale_base_block = _stale_base_preflight(context, contract, args)
     if stale_base_block is not None:
         _record_start_block(

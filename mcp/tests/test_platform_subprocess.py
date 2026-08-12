@@ -95,6 +95,21 @@ def test_native_path_environment_refuses_an_all_windows_path() -> None:
         )
 
 
+def test_native_path_environment_adds_the_posix_user_local_bin(tmp_path: Path) -> None:
+    user_bin = tmp_path / ".local" / "bin"
+    user_bin.mkdir(parents=True)
+    node = user_bin / "node"
+    node.write_text("#!/bin/sh\n", encoding="utf-8")
+    node.chmod(0o755)
+
+    environment = native_path_environment(
+        {"HOME": tmp_path.as_posix(), "PATH": "/usr/bin"}, platform="posix"
+    )
+
+    assert environment["PATH"] == os.pathsep.join([user_bin.as_posix(), "/usr/bin"])
+    assert resolve_native_executable("node", environment, platform="posix") == node.as_posix()
+
+
 def test_native_executable_resolution_covers_direct_missing_and_incompatible(
     tmp_path: Path,
 ) -> None:

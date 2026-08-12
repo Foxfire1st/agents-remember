@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.projection import (
     CommitRefNode,
     EnclosureNode,
@@ -111,6 +112,7 @@ def build_engine_processes(
 # The pre-contract start phases (§5.4) -> the process-map phase vocabulary.
 _START_PHASE: dict[str, str] = {
     "stale-base-blocked": "preflight",
+    "source-lineage-blocked": "preflight",
     "memory-blocked": "memory-compatibility",
     "provider-blocked": "provider-setup",
     "preflight": "preflight",
@@ -233,6 +235,7 @@ def _engine_process(
     group_full = str(cp.get("worktree_group", ""))
     group_key = group_full.rsplit("/", 1)[-1]
     memory_mode = str(cp.get("memory_mode", ""))
+    source_lineage = _source_lineage(status.get("source_lineage"))
 
     freshness = _as_dict(status.get("freshness"))
     behind_official = freshness.get("state") == "behind-official"
@@ -280,6 +283,7 @@ def _engine_process(
         memorySource=memory.source,
         memoryWorktree=memory.worktree,
         ledgerPath=memory.ledger_path,
+        sourceLineage=source_lineage,
         ledgerRows=fact.ledger_rows,
         ledgerRowCount=fact.ledger_row_count,
         humanReviewStatus=str(cp.get("human_review_status", "")),
@@ -695,6 +699,14 @@ def _source_files(  # pragma: no cover
 
 def _as_dict(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _source_lineage(value: object) -> SourceLineageProjection | None:
+    if isinstance(value, SourceLineageProjection):
+        return value
+    if not isinstance(value, dict):
+        return None
+    return SourceLineageProjection.model_validate(value)
 
 
 def _str_or_none(value: object) -> str | None:

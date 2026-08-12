@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -126,10 +127,11 @@ class SnapshotReuseTests(IndexCase):
         paths.readiness.write_bytes(b"x" * (source_index_state.MAX_READINESS_BYTES + 1))
         self.frozen_refusal_without_discovery(snapshot)
         paths.readiness.write_text(original, encoding="utf-8")
-        with sqlite3.connect(paths.database) as connection:
+        with closing(sqlite3.connect(paths.database)) as connection:
             connection.execute(
                 "UPDATE metadata SET value = ? WHERE key = 'application_sha256'", ("bad",)
             )
+            connection.commit()
         self.frozen_refusal_without_discovery(snapshot)
 
     def test_old_readiness_cannot_bless_a_replaced_database(self) -> None:

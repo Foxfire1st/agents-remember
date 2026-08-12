@@ -38,6 +38,7 @@ from agents_remember.models.terminal_catalog import (
     TerminalSessionKind,
     migrated_seat_role,
 )
+from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
@@ -67,6 +68,7 @@ from agents_remember.serving.terminal_task_assignment import (
 )
 from agents_remember.serving.terminal_tmux import tmux_session_name
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.worktrees.source_lineage import lineage_refusal, source_lineage_for_task
 
 OpenTerminalStatus = Literal[
     "opened",
@@ -75,6 +77,8 @@ OpenTerminalStatus = Literal[
     "bad-kind",
     "task-binding-required",
     "task-binding-invalid",
+    "source-lineage-stale",
+    "source-lineage-unavailable",
 ]
 
 
@@ -222,6 +226,7 @@ class OpenTerminalResult:
     seat_role: str | None = None
     owner_session_id: str | None = None
     detail: str | None = None
+    source_lineage: SourceLineageProjection | None = None
 
 
 def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
@@ -643,7 +648,7 @@ def _open_terminal_transaction(
     )
     binding_refusal = _task_binding_refusal(runtime, provenance, seat_role)
     if binding_refusal is not None:
-        return OpenTerminalResult(status=binding_refusal)
+        return binding_refusal
     owner = _binding_conflict_owner(
         runtime,
         provenance,
@@ -697,26 +702,37 @@ def _task_binding_refusal(
     runtime: HostedSessionRuntime,
     provenance: SpawnProvenance,
     seat_role: str,
-) -> Literal["task-binding-required", "task-binding-invalid"] | None:
+) -> OpenTerminalResult | None:
     """Validate one role against the real task document before any host side effect."""
 
     if (
         provenance.task_document_ref is not None
         and provenance.replacement_for_task_document_ref is not None
     ):
-        return "task-binding-invalid"
+        return OpenTerminalResult(status="task-binding-invalid")
     ref = provenance.task_document_ref or provenance.replacement_for_task_document_ref
     structural_role = seat_role not in {"chat", "terminal"}
     if ref is None:
-        return "task-binding-required" if structural_role else None
+        return OpenTerminalResult(status="task-binding-required") if structural_role else None
     topology = TaskDocumentTopology(runtime.catalog.path.parent.parent.parent)
     try:
         topology.resolve(ref)
         if structural_role:
             topology.validate_role(ref, seat_role)
     except TaskDocumentRefError:
-        return "task-binding-invalid"
-    return None
+        return OpenTerminalResult(status="task-binding-invalid")
+    if not structural_role:
+        return None
+    lineage = source_lineage_for_task(topology.coordination_root, ref)
+    refusal = lineage_refusal(lineage)
+    if refusal is None:
+        return None
+    status, detail = refusal
+    return OpenTerminalResult(
+        status=status,
+        detail=detail,
+        source_lineage=lineage,
+    )
 
 
 def open_terminal_session(

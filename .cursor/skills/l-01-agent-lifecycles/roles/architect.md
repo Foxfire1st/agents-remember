@@ -127,6 +127,13 @@ designer seats. The control plane owns readiness, private occupant identity, and
 brief pinning. `dispatched` and `dispatch-queued` are both durable outcomes; never request an id,
 poll readiness, duplicate a queued brief, or respawn merely because delivery is pending.
 
+When a thematic master is resumed or reopened after other masters have landed, expect its branch
+and external-memory branch to be behind the sprint's super integration lines. That is a normal
+rebase-like condition, not a reason to create a new “part 2” master. Manager dispatch fails closed
+before process creation and reports the owning master contract; route that contract-addressed sync
+through the backend and retry the same canonical master seat. Do not turn commit ancestry into
+architect or agent memory—the plane derives it from task structure.
+
 ## Design And Drawing Board
 
 When the developer is still shaping the work, the architect wears `roles/designer.md` inline:

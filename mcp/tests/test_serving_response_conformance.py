@@ -418,7 +418,32 @@ def _seed_changeset(tmp: Path, code: Path) -> None:
     base = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=code, check=True, capture_output=True, text=True
     ).stdout.strip()
+    _git(code, "branch", "master", "main")
+    _git(code, "branch", "work", "master")
     (code / "f.py").write_text("one\ntwo\n", encoding="utf-8")
+    task_root = tmp / "tasks" / "R" / "t"
+    series_path = task_root / "series-contract.md"
+    write_contract(
+        series_path,
+        WorktreeContract(
+            task_id="T",
+            task_name="t",
+            repo_name="R",
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=tmp,
+            task_root=task_root,
+            contract_path=series_path,
+            task_artifact=task_root / "task.md",
+            worktree_group=task_root / "enclosures",
+            code_repo_path=code,
+            code_source_branch="main",
+            code_work_branch="master",
+            code_base_commit=base,
+            code_worktree=code,
+            kind="series",
+        ),
+    )
     contract_path = tmp / "tasks" / "R" / "t" / "enclosures" / "leaf-1" / "series-contract.md"
     contract_path.parent.mkdir(parents=True, exist_ok=True)
     write_contract(
@@ -430,18 +455,19 @@ def _seed_changeset(tmp: Path, code: Path) -> None:
             workflow_kind="light-task",
             memory_mode="disabled",
             coordination_root=tmp,
-            task_root=tmp / "tasks" / "R" / "t",
+            task_root=task_root,
             contract_path=contract_path,
             task_artifact=tmp / "tasks" / "R" / "t" / "task.md",
             worktree_group=contract_path.parent,
             code_repo_path=code,
-            code_source_branch="main",
+            code_source_branch="master",
             code_work_branch="work",
             code_base_commit=base,
             code_worktree=code,
             kind="leaf",
             leaf_id="leaf-1",
             parent_task_name="t",
+            parent_contract_path=series_path,
         ),
     )
 

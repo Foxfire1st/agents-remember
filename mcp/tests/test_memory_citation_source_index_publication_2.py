@@ -4,6 +4,7 @@ import os
 import sqlite3
 import struct
 import zlib
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -82,8 +83,9 @@ class PublicationAndBoundsTests2(IndexCase):
         }
         for name, (statement, parameters) in corruptions.items():
             with self.subTest(name=name):
-                with sqlite3.connect(paths.database) as connection:
+                with closing(sqlite3.connect(paths.database)) as connection:
                     connection.execute(statement, parameters)
+                    connection.commit()
                 result = self.build()
                 self.assertTrue(result["ok"])
                 self.assertEqual(result["sourceIndex"]["state"], "built")
@@ -91,7 +93,7 @@ class PublicationAndBoundsTests2(IndexCase):
                 self.assertEqual(warm["sourceIndex"]["state"], "warm")
 
         with self.subTest(name="quote-search-valid-delete"):
-            with sqlite3.connect(paths.database) as connection:
+            with closing(sqlite3.connect(paths.database)) as connection:
                 stream_id, raw_text = connection.execute(
                     "SELECT stream_id, text FROM quote_streams ORDER BY stream_id LIMIT 1"
                 ).fetchone()
@@ -100,16 +102,18 @@ class PublicationAndBoundsTests2(IndexCase):
                     "INSERT INTO quote_search(quote_search, rowid, text) VALUES ('delete', ?, ?)",
                     (stream_id, text),
                 )
+                connection.commit()
             result = self.build()
             self.assertEqual(result["sourceIndex"]["state"], "built")
 
         with self.subTest(name="matching-anchor-and-posting-valid-delete"):
-            with sqlite3.connect(paths.database) as connection:
+            with closing(sqlite3.connect(paths.database)) as connection:
                 (key,) = connection.execute(
                     "SELECT anchor_key FROM direct_postings ORDER BY anchor_key LIMIT 1"
                 ).fetchone()
                 connection.execute("DELETE FROM direct_postings WHERE anchor_key = ?", (key,))
                 connection.execute("DELETE FROM anchor_names WHERE anchor_key = ?", (key,))
+                connection.commit()
             result = self.build()
             self.assertEqual(result["sourceIndex"]["state"], "built")
 

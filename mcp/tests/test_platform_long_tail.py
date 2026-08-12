@@ -36,11 +36,8 @@ from agents_remember.application.orchestration_tools import (
     NudgeTarget,
     orchestration_nudge_manager_tool,
 )
-from agents_remember.application.terminal_tools import (
-    OpenTerminalResult,
-    _open_terminal_refusal,
-    _requested_harness,
-)
+from agents_remember.application.terminal_spawn_results import open_terminal_refusal
+from agents_remember.application.terminal_tools import _requested_harness
 from agents_remember.benchmarks.runner_modules import execution as benchmark_execution
 from agents_remember.benchmarks.runner_modules import mcp_registration as benchmark_mcp
 from agents_remember.cli import dashboard as dashboard_cli
@@ -68,6 +65,7 @@ from agents_remember.memory.carryover import _validate_entity_fingerprints
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.reducer import _paused_updates
 from agents_remember.serving.projections.projection_store import ProviderStateRefresher
+from agents_remember.serving.terminal_opener import OpenTerminalResult
 
 
 class DecisionRoleTests(unittest.TestCase):
@@ -415,7 +413,7 @@ class OpenTerminalRefusalTests(unittest.TestCase):
     """Terminal-open outcomes translated into the spawn tool's public statuses."""
 
     def refuse(self, status: Any, detail: str = "detail text") -> dict[str, Any] | None:
-        return _open_terminal_refusal(
+        return open_terminal_refusal(
             OpenTerminalResult(status=status, detail=detail),
             harness="claude",
             kind="harness",

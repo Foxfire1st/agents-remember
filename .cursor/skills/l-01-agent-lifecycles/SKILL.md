@@ -289,10 +289,20 @@ Every role that dispatches another hosted role calls `dispatch_agent` once with 
 task document, role, and complete brief. The control plane performs the internal transaction:
 
 1. authorize the direct-child relationship from the caller's ambient document+role seat;
-2. create and bind the child using settings-owned launch knobs;
-3. prove readiness privately;
-4. persist exactly one internally exact-pinned initial dispatch brief before delivery;
-5. return only structural status (`dispatched` or `dispatch-queued`) and delivery state.
+2. resolve source lineage from that canonical task document before process creation: a manager
+   requires the master to contain its super; a worker/reviewer/curator requires both super → master
+   and master → leaf, for code and external memory when enabled;
+3. create and bind the child using settings-owned launch knobs only when every applicable edge is
+   current;
+4. prove readiness privately;
+5. persist exactly one internally exact-pinned initial dispatch brief before delivery;
+6. return only structural status (`dispatched` or `dispatch-queued`) and delivery state.
+
+A `source-lineage-stale` or `source-lineage-unavailable` result means no child process was created.
+Use its ordered, contract-addressed `worktree_sync` recovery, then dispatch the same document+role
+again. Never ask for branch commit ids or occupant ids: task identity is the input and the control
+plane owns the Git proof. This early refusal prevents a fresh seat from reading stale code or stale
+onboarding before anyone notices the master or leaf fell behind its parent.
 
 The model never receives the spawned occupant's runtime id and never calls readiness, exact inbox,
 attach, or raw retire operations. A queued brief is already durable and follows the ordinary

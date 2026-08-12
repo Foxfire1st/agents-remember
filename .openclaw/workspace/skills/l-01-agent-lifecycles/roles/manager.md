@@ -79,7 +79,11 @@ dependency-blocked items are future queue; unclear fit escalates one rung instea
 ### 1 — Seat & intake
 
 Take the canonical master document; Operations resolves its current manager chat from that
-document, so the developer can walk in any time. Read the master + leaf docs; order the leaves.
+document, so the developer can walk in any time. The control plane admitted this seat only after
+proving the master contains the current super integration line for code and external memory. If
+that proof fails, no manager process is created; the orchestrator receives a contract-addressed
+`source-lineage-*` refusal and syncs the master before retrying this same seat. Read the master +
+leaf docs only after that boundary; order the leaves.
 
 ### Provider Degradation Alert
 
@@ -111,7 +115,10 @@ stops belong to the orchestrator via the system-specialist protocol.
 - `dispatch_agent(task_document_ref=<leaf document>, role="worker", brief=...)` — a **fresh
   document-bound worker seat**. Compile the complete brief from `../templates/worker-brief.md`;
   the control plane claims `(leaf document, worker)` and the worker edits inside the leaf
-  worktrees the brief names.
+  worktrees the brief names. Before creating the worker, it re-proves super → master and master →
+  leaf ancestry for code and external memory. A lineage refusal creates no child and mutates no
+  seat; run the ordered `worktree_sync` recovery carried by the result, then retry the same leaf
+  dispatch. Never request or pass branch commit ids.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
   **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep evaluates each expected
   artifact at every hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays

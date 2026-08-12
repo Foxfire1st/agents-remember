@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.seat_binding import attach_seat_role
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.worktrees.source_lineage import lineage_refusal, source_lineage_for_task
 
 TaskAssignmentStatus = Literal[
     "attached",
@@ -16,6 +18,8 @@ TaskAssignmentStatus = Literal[
     "unknown-session",
     "role-required",
     "task-binding-invalid",
+    "source-lineage-stale",
+    "source-lineage-unavailable",
 ]
 
 
@@ -44,6 +48,8 @@ class TaskAssignmentResult:
     role: str | None = None
     seat_role: str | None = None
     previous_seat_role: str | None = None
+    detail: str | None = None
+    source_lineage: SourceLineageProjection | None = None
 
 
 def task_binding_conflict_owner(
@@ -137,6 +143,21 @@ def assign_terminal_session_to_task(
             role=entry.role,
             seat_role=seat_role,
             previous_seat_role=entry.binding_role,
+        )
+    lineage = source_lineage_for_task(runtime.topology.coordination_root, task_document_ref)
+    refusal = lineage_refusal(lineage)
+    if refusal is not None:
+        status, detail = refusal
+        return TaskAssignmentResult(
+            status=status,
+            session_id=session_id,
+            task_document_ref=task_document_ref,
+            previous_task_document_ref=entry.task_document_ref,
+            role=entry.role,
+            seat_role=seat_role,
+            previous_seat_role=entry.binding_role,
+            detail=detail,
+            source_lineage=lineage,
         )
     owner = task_binding_conflict_owner(
         runtime.catalog,

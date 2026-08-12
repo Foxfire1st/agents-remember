@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.lifecycle_state import (
     LIVE_STATES,
     LifecycleVocabularyError,
@@ -869,6 +870,7 @@ class EngineProcessNode(BaseModel):
     memorySource: CommitRefNode | None = None
     memoryWorktree: CommitRefNode | None = None
     ledgerPath: str | None = None
+    sourceLineage: SourceLineageProjection | None = None
     # The memory.md ledger window for the WORKTREE coupler popover (5h): newest ``LEDGER_WINDOW`` rows
     # mapping this worktree's code<->memory commits, plus the total count for the "+N more" footer.
     ledgerRows: list[LedgerRefNode] = Field(default_factory=list)

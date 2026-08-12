@@ -207,7 +207,7 @@ class CodeQualityGateTests(unittest.TestCase):
             self.assertIn("second completed run", report_text)
             self.assertEqual(
                 sorted(path.name for path in report.parent.iterdir()),
-                ["test-results.md", "tmp"],
+                ["test-results.md"],
             )
 
     def test_interrupted_gate_keeps_the_previous_completed_test_report(self) -> None:
@@ -643,7 +643,8 @@ class CodeQualityGateTests(unittest.TestCase):
             self.assertIn("PATH", env)
             temp_names = ("TMPDIR", "TMP", "TEMP")
             expected_temp = {"nt": {name: os.environ.get(name) for name in temp_names}}.get(
-                os.name, {name: (reports_root / "tmp").as_posix() for name in temp_names}
+                os.name,
+                {name: code_quality_gate.QUALITY_TEMP_ROOT.as_posix() for name in temp_names},
             )
             self.assertEqual({name: env.get(name) for name in temp_names}, expected_temp)
 

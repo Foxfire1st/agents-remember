@@ -239,6 +239,7 @@ class StartOrderingTests(unittest.TestCase):
             with (
                 mock.patch.object(worktree_start, "resolve_context", return_value=context),
                 mock.patch.object(worktree_start, "build_start_contract", return_value=contract),
+                mock.patch.object(worktree_start, "parent_source_lineage", return_value=None),
                 mock.patch.object(worktree_start, "ensure_worktree", return_value="created"),
                 mock.patch.object(
                     worktree_start,

@@ -255,9 +255,7 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
-
-    def tearDown(self) -> None:
-        self._dir.cleanup()
+        self.addCleanup(self._dir.cleanup)
 
     async def _run_projector(self, projector: Projector) -> asyncio.Task[None]:
         task = asyncio.create_task(projector.run())

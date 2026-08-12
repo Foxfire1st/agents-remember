@@ -90,7 +90,7 @@ class CodeQualityCheckTests(unittest.TestCase):
             ):
                 self.assertEqual(check.main([]), 0)
 
-            self.assertEqual(native.call_args.kwargs["temp_root"], report.parent / "tmp")
+            self.assertEqual(native.call_args.kwargs["temp_root"], check.QUALITY_TEMP_ROOT)
 
     def test_main_without_a_report_uses_the_native_default_temp_root(self) -> None:
         with (
@@ -105,7 +105,7 @@ class CodeQualityCheckTests(unittest.TestCase):
         ):
             self.assertEqual(check.main([]), 0)
 
-        self.assertEqual(native.call_args.kwargs["temp_root"], Path("/tmp/agents-remember-quality"))
+        self.assertEqual(native.call_args.kwargs["temp_root"], check.QUALITY_TEMP_ROOT)
 
     def test_targeted_config_keeps_the_repository_file_size_arm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

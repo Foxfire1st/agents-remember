@@ -67,15 +67,15 @@ The intended order is:
 1. run the `c-08-ar-coordination-context-resolver` skill for the target repository
 2. run the `c-02-memory-quality-control` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
 3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
-4. decide whether the work is a `w-02-light-task-workflow` light task — possibly a THIN one for single-session work; chat never builds — a master + light sub-task series, or external workflow
+4. place every build in a leaf under a master, even when the leaf is tiny and one owner wears the
+   backend hats; “short root” changes orchestration depth, not the task topology
 5. read the repository's `system/git-workflow.md` and identify the parent branch
-   edge. For a standalone task, the leaf worktree branches from the approved
-   source branch. For a master series, the master owns a root `series-contract.md`
+   edge. The master owns a root `series-contract.md`
    and a pushable integration branch first; each leaf enclosure branches from that
    integration branch and integrates back into it. For a nested master, create
    the child integration branch from the parent integration branch.
 6. choose or review the task slug and workflow variables
-7. establish the applicable worktree-start authority: for standalone/new work, hand off the
+7. establish the applicable worktree-start authority: for a new master/leaf plan, hand off the
    **Worktree Intent Gate** for explicit developer approval; for subordinate leaves/edges inside an
    accepted orchestrated series, record the accepted-series authority and continue without a new
    developer hand-off
@@ -130,11 +130,29 @@ is model-attributed and never counts as approval; once the developer has approve
 sends `lifecycle_resume()` to clear the block, then calls `worktree_start`. A chat "approved" does not
 propagate itself.
 
-For `w-02-light-task-workflow` light tasks, the durable artifact shape is `<task-root>/<task-slug>/task.md`. A standalone worktree-backed task stores its leaf enclosure at `<task-folder>/enclosures/<leaf-id>/series-contract.md`. A master series additionally stores its integration contract at `<master-task-folder>/series-contract.md`.
+For `w-02-light-task-workflow` task documents, the durable master artifact shape is
+`<task-root>/<task-slug>/task.md`. Each build leaf stores its enclosure at
+`<master-task-folder>/enclosures/<leaf-id>/series-contract.md`; the master stores its integration
+contract at `<master-task-folder>/series-contract.md`.
 
 ## Start / Attach / Status
 
 The `worktree_start` MCP tool resolves `c-08-ar-coordination-context-resolver` context, creates or loads the leaf `series-contract.md`, prepares the code worktree first, and then prepares external-memory state when enabled. If the task root is a master and no root series contract exists yet, start first creates the master integration branch and root `series-contract.md`, then starts the leaf from that integration branch. External-memory start refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and the ledger must be committed first so the new worktree starts from an auditable memory baseline.
+
+Before start, attach, reopen, task-bound terminal assignment, or hosted role spawn can expose a
+checkout to an agent, the control plane resolves **transitive source lineage from task identity**.
+A master must contain its super integration branch; a leaf must contain its master, whose branch
+must in turn contain super. The same edges are required for external memory. Missing contracts,
+missing/mismatched branches, and incomparable Git histories are `source-lineage-unavailable`;
+behind or diverged descendants are `source-lineage-stale`. Both fail closed before session/process
+creation or lifecycle mutation. The projection names relations, branches, ahead/behind counts, and
+ordered `worktree_sync` contract paths, but never asks an agent to retain a commit id.
+
+This is distinct from remote stale-base policy. `stale_base_choice="proceed-stale"` can override a
+remote-tracking freshness choice, but never structural super → master → leaf ancestry. Resuming a
+thematic master after other masters landed is expected to surface this gate—sync that existing
+master rather than splitting follow-up work into artificial new masters. `worktree_status` and the
+Engine Room expose `sourceLineage` so the reason and recovery remain visible.
 
 Start runs a **stale-base preflight** (GitHub #54) before any worktree exists:
 when the code or memory source branch is `behind` or `diverged` from its remote
@@ -317,8 +335,8 @@ then proceeds as usual, including closeout → integrate → finalize.
    closeout authority gate.
 6. The `c-09-git-worktree-manager` skill must not create closeout commits outside the `c-12-closeout` skill's code-memory-ledger sequence.
 7. The `c-09-git-worktree-manager` skill must not call `worktree_start` until
-   the applicable authority has been recorded: developer-approved Worktree Intent Gate for
-   standalone/new work, or accepted-series authority for subordinate orchestrated work.
+   the applicable authority has been recorded: developer-approved Worktree Intent Gate for a new
+   master/leaf plan, or accepted-series authority for subordinate orchestrated work.
 8. The `c-09-git-worktree-manager` skill must not move source branches during integration until
    replay/preflight has produced fast-forwardable code and memory commits and applicable
    integration authority exists.

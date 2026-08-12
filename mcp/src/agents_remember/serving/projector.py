@@ -184,8 +184,7 @@ class Projector:
         server still starts and serves ``503`` from ``/api/state`` until a tick succeeds.
         """
         try:
-            first = await asyncio.to_thread(
-                self._tick_sync,
+            first = await self._tick(
                 self._now(),
                 ProjectionRefresh.full() if self._input_state is not None else None,
             )
@@ -230,7 +229,7 @@ class Projector:
                     else:
                         refresh = ProjectionRefresh.full()
                 try:
-                    current = await asyncio.to_thread(self._tick_sync, self._now(), refresh)
+                    current = await self._tick(self._now(), refresh)
                 except Exception:
                     logger.exception("projection tick failed; retrying next interval")
                     continue
@@ -239,6 +238,26 @@ class Projector:
         finally:
             await _shutdown_task(watch_task, "change watcher")
             await _shutdown_task(landing_task, "landing refresher")
+
+    async def _tick(
+        self, moment: datetime, refresh: ProjectionRefresh | None
+    ) -> WorkspaceProjection:
+        """Run one thread tick without letting task cancellation orphan its filesystem work.
+
+        Cancelling ``asyncio.to_thread`` only cancels the asyncio future; Python cannot stop the
+        worker thread. Shield the future and, on shutdown, drain the real tick before returning
+        cancellation to the serving lifespan. This keeps temp-worktree cleanup from racing a late
+        atomic projection write while preserving cancellation as the caller-visible outcome.
+        """
+        tick = asyncio.create_task(asyncio.to_thread(self._tick_sync, moment, refresh))
+        try:
+            return await asyncio.shield(tick)
+        except asyncio.CancelledError:
+            try:
+                await tick
+            except Exception:
+                logger.exception("projection tick failed while projector shutdown drained it")
+            raise
 
     def _on_watch_task_done(self, task: asyncio.Task[None]) -> None:
         """R7 fail-open: a finished watcher task degrades pacing to the fixed interval."""

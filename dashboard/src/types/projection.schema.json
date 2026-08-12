@@ -1151,6 +1151,17 @@
           "title": "Sourcefiles",
           "type": "array"
         },
+        "sourceLineage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceLineageProjection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "summary": {
           "default": "",
           "title": "Summary",
@@ -2417,6 +2428,169 @@
         "lastVerifiedDate"
       ],
       "title": "SidecarStaleNode",
+      "type": "object"
+    },
+    "SourceLineageEdge": {
+      "additionalProperties": false,
+      "description": "One plane-resolved ancestry edge; agents never supply or retain commit ids.",
+      "properties": {
+        "ahead": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ahead"
+        },
+        "behind": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Behind"
+        },
+        "contractPath": {
+          "title": "Contractpath",
+          "type": "string"
+        },
+        "descendantBranch": {
+          "title": "Descendantbranch",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "relation": {
+          "enum": [
+            "super-to-master",
+            "master-to-leaf"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "code",
+            "memory"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "sourceBranch": {
+          "title": "Sourcebranch",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "current",
+            "behind",
+            "diverged",
+            "unavailable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "syncContractPath": {
+          "title": "Synccontractpath",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation",
+        "side",
+        "state",
+        "sourceBranch",
+        "descendantBranch",
+        "contractPath",
+        "syncContractPath"
+      ],
+      "title": "SourceLineageEdge",
+      "type": "object"
+    },
+    "SourceLineageProjection": {
+      "additionalProperties": false,
+      "description": "Transitive super -> master -> leaf lineage projected into status and refusals.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/SourceLineageEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "recoveries": {
+          "items": {
+            "$ref": "#/$defs/SourceLineageRecovery"
+          },
+          "title": "Recoveries",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "current",
+            "blocked",
+            "unavailable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "summary",
+        "edges",
+        "recoveries"
+      ],
+      "title": "SourceLineageProjection",
+      "type": "object"
+    },
+    "SourceLineageRecovery": {
+      "additionalProperties": false,
+      "description": "One ordered recovery derived from task identity, not model-carried Git state.",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "contractPath": {
+          "title": "Contractpath",
+          "type": "string"
+        },
+        "tool": {
+          "const": "worktree_sync",
+          "default": "worktree_sync",
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contractPath",
+        "args"
+      ],
+      "title": "SourceLineageRecovery",
       "type": "object"
     },
     "TaskCodeExampleNode": {

@@ -240,7 +240,7 @@ class WorktreeSupport1(WorktreeSupportTests):
             )
             self.assertIn("ar/15_leaf", git(code_repo, "branch", "--list", "ar/15_leaf"))
 
-    def test_light_task_start_defaults_to_doc_id_leaf(self) -> None:
+    def test_standalone_light_task_is_refused_without_a_master_lineage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             code_repo = workspace / "repo-a"
@@ -279,10 +279,10 @@ class WorktreeSupport1(WorktreeSupportTests):
                 )
             )
 
-            self.assertEqual(result.returncode, 0)
-            contract = load_contract(leaf_enclosure_path(task_root, "260707-T1"))
-            self.assertEqual((contract.kind, contract.leaf_id), ("leaf", "260707-T1"))
-            self.assertEqual(result.payload["leaf_id"], "260707-T1")
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.payload["state"], "blocked")
+            self.assertIn("source_lineage", result.payload)
+            self.assertFalse(leaf_enclosure_path(task_root, "260707-T1").exists())
 
     def test_light_task_start_rejects_wrong_default_ref_with_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

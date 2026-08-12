@@ -223,7 +223,7 @@ def _attribute_attach(
     raising ``SaveGateRequired`` when ``on_unsaved`` was not supplied, so unsaved
     work is never dropped silently (the read-only attach already returned).
     """
-    if amb is None:
+    if amb is None or result.get("state") != "attached":
         return
     lifecycle_id = result.get("lifecycle_id")
     enclosure = result.get("enclosure_path") or result.get("contract_path")

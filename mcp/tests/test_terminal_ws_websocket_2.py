@@ -7,11 +7,53 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from fastapi.testclient import TestClient
 from test_terminal_ws import TerminalWebSocketTests, _catalog_entry, _which
+from test_worktree_support import git
 
 
 class TerminalWebSocketTests2(TerminalWebSocketTests):
     LEAF_REF = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
     LEAF_BODY = LEAF_REF.model_dump()
+
+    def _move_super(self) -> None:
+        repo = self.tmp / "fixture-repositories" / "repo"
+        marker = repo / "super-moved.txt"
+        marker.write_text("new super\n", encoding="utf-8")
+        git(repo, "add", marker.name)
+        git(repo, "commit", "-m", "move super")
+
+    def test_post_open_409_when_source_lineage_is_stale(self) -> None:
+        self._move_super()
+
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/stale",
+                json={
+                    "kind": "harness",
+                    "harness": "claude",
+                    "role": "worker",
+                    "taskDocumentRef": self.LEAF_BODY,
+                },
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "source-lineage-stale")
+        self.assertEqual(response.json()["sourceLineage"]["state"], "blocked")
+        self.assertEqual(self.host.ensured, [])
+
+    def test_attach_task_409_when_source_lineage_is_stale(self) -> None:
+        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
+        self._move_super()
+
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/live/attach-task",
+                json={"taskDocumentRef": self.LEAF_BODY},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "source-lineage-stale")
+        self.assertEqual(response.json()["sourceLineage"]["state"], "blocked")
+        self.assertIsNone(self.catalog.get("live").task_document_ref)  # type: ignore[union-attr]
 
     def test_post_open_409_when_seat_taken_by_other_running_session(self) -> None:
         with TestClient(self.app) as client:

@@ -32,6 +32,7 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     default_contract,
+    default_series_contract,
     load_contract,
     write_contract,
 )
@@ -83,6 +84,51 @@ def init_repo(repo: Path, branch: str = "main") -> str:  # pragma: no cover
     git(repo, "add", "README.md")
     git(repo, "commit", "-m", "Initial commit")
     return git(repo, "rev-parse", "HEAD")
+
+
+def write_current_task_lineage(
+    coordination_root: Path,
+    *,
+    repo_name: str,
+    master_name: str,
+    leaf_id: str,
+) -> Path:
+    """Create a current super -> master -> leaf contract chain for structural tests."""
+    repo = coordination_root / "fixture-repositories" / repo_name
+    base = init_repo(repo, "main")
+    master_branch = f"ar/{master_name}"
+    leaf_branch = f"ar/{leaf_id}"
+    git(repo, "branch", master_branch, "main")
+    git(repo, "branch", leaf_branch, master_branch)
+    task = ContractTask(
+        name=master_name,
+        repo_name=repo_name,
+        coordination_root=coordination_root,
+        workflow_kind="light-task",
+        memory_mode="disabled",
+    )
+    master = default_series_contract(
+        task,
+        code=RepoBranchPlan(
+            repo_path=repo,
+            source_branch="main",
+            work_branch=master_branch,
+            base_commit=base,
+        ),
+    )
+    write_contract(master.contract_path, master)
+    leaf = default_contract(
+        task,
+        leaf=LeafIdentity(worktree_name=leaf_id, leaf_id=leaf_id),
+        code=RepoBranchPlan(
+            repo_path=repo,
+            source_branch=master_branch,
+            work_branch=leaf_branch,
+            base_commit=base,
+        ),
+    )
+    write_contract(leaf.contract_path, leaf)
+    return repo
 
 
 def write_file_onboarding(

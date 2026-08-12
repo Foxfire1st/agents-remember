@@ -65,6 +65,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
 )
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from test_worktree_support import write_current_task_lineage
 
 FRESH_GATE_TS = "2999-01-01T10:00:00+00:00"
 
@@ -432,6 +433,9 @@ class AttachTaskRoleTests(_AppFixture):
     def setUp(self) -> None:
         super().setUp()
         _write_leaf_task(self.tmp, repo="repo", master="master", doc_id="leaf-1")
+        write_current_task_lineage(
+            self.tmp, repo_name="repo", master_name="master", leaf_id="leaf-1"
+        )
 
     def test_a_hand_opened_harness_without_a_role_is_refused_and_stays_unbound(self) -> None:
         # No spawn_role (it was not dispatched) and no persisted seat role: guessing "chat" here is

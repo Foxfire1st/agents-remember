@@ -377,6 +377,53 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertTrue(stopped.is_set())
 
+    async def test_cancelled_run_drains_inflight_thread_tick_before_returning(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=0))
+
+        def blocking_tick(*_args: object) -> WorkspaceProjection:
+            started.set()
+            release.wait(1)
+            finished.set()
+            return _projection()
+
+        with mock.patch.object(projector, "_tick_sync", side_effect=blocking_tick):
+            task = asyncio.create_task(projector.run())
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertTrue(finished.is_set())
+
+    async def test_cancelled_run_logs_inflight_tick_failure_while_draining(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=0))
+
+        def failing_tick(*_args: object) -> WorkspaceProjection:
+            started.set()
+            release.wait(1)
+            raise RuntimeError("late tick failure")
+
+        with (
+            mock.patch.object(projector, "_tick_sync", side_effect=failing_tick),
+            self.assertLogs("agents_remember.serving.projector", level="ERROR") as logs,
+        ):
+            task = asyncio.create_task(projector.run())
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            task.cancel()
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertTrue(any("projector shutdown drained it" in message for message in logs.output))
+
 
 class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:

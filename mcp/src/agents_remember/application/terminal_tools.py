@@ -67,7 +67,6 @@ from agents_remember.serving.terminal_catalog import (
 )
 from agents_remember.serving.terminal_opener import (
     ControlRunnerRequest,
-    OpenTerminalResult,
     SpawnKnobs,
     SpawnProvenance,
     TerminalLaunchRequest,
@@ -80,6 +79,8 @@ from agents_remember.serving.terminal_task_assignment import (
     assign_terminal_session_to_task,
 )
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+
+from .terminal_spawn_results import open_terminal_refusal, spawn_refusal
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -211,8 +212,9 @@ def attach_terminal_session_to_task_tool(
             "detail": (
                 "role does not match the referenced task document's structural altitude"
                 if result.status == "task-binding-invalid"
-                else None
+                else result.detail
             ),
+            "sourceLineage": result.source_lineage,
         },
     )
 
@@ -289,14 +291,14 @@ def _requested_harness(
     """The caller named a harness: it must be a known id AND installed."""
     found = find_harness(harness, registry=registry)
     if found is None:
-        return None, _spawn_refusal(
+        return None, spawn_refusal(
             "harness-unknown",
             harness,
             "harness",
             detail=unknown_harness_detail(harness, registry=registry),
         )
     if not is_detected(found, which=which):
-        return None, _spawn_refusal(
+        return None, spawn_refusal(
             "harness-not-detected",
             harness,
             "harness",
@@ -313,7 +315,7 @@ def _preferred_harness(
     assert found is not None  # the loader validates against the effective ids
     if not is_detected(found, which=which):
         source = ", ".join(str(path) for path in settings.sources)
-        return None, _spawn_refusal(
+        return None, spawn_refusal(
             "harness-not-detected",
             preferred,
             "harness",
@@ -333,7 +335,7 @@ def _first_detected_harness(
         if is_detected(candidate, which=which):
             return candidate, None
     ids = ", ".join(candidate.id for candidate in registry)
-    return None, _spawn_refusal(
+    return None, spawn_refusal(
         "harness-not-detected",
         None,
         "harness",
@@ -388,7 +390,7 @@ def _resolve_harness_dispatch(
     spawn_level_source = "explicit" if level is not None else "default"
     if spawn_level not in _SPAWN_LEVELS:
         valid = ", ".join(_SPAWN_LEVELS)
-        return None, _spawn_refusal(
+        return None, spawn_refusal(
             "level-invalid",
             None,
             "harness",
@@ -429,7 +431,7 @@ def _resolve_harness_dispatch(
                 workspace=config.workspace_root,
             )
         except HarnessControlError as exc:
-            return None, _spawn_refusal(
+            return None, spawn_refusal(
                 "launch-selection-invalid",
                 found.id,
                 "harness",
@@ -478,7 +480,7 @@ def _knob_refusal(
     )
     for status, detail in checks:
         if detail is not None:
-            return _spawn_refusal(status, found.id, "harness", detail=detail)
+            return spawn_refusal(status, found.id, "harness", detail=detail)
     return None
 
 
@@ -597,7 +599,7 @@ def _caller_spend_override_refusal(
         "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, task_document_ref, label, env, and "
         "provenance only, with context omitted and submit=false."
     )
-    return _spawn_refusal(
+    return spawn_refusal(
         "spend-override-unsupported",
         retired.harness,
         seat.kind,
@@ -619,7 +621,7 @@ def _brief_delivery_separate_refusal(
         "message_kind='dispatch-brief', and deliver_to_hosted=true; treat the seat as briefed only "
         "when deliveryState='delivered' and adapterDeliveryState is accepted or queued."
     )
-    return _spawn_refusal("brief-delivery-separate", None, kind, detail=detail)
+    return spawn_refusal("brief-delivery-separate", None, kind, detail=detail)
 
 
 @dataclass(frozen=True)
@@ -670,43 +672,6 @@ def _resolve_spawn_documents(
         config, replacement_for_task_document_ref, kind=kind
     )
     return resolved_document, resolved_replacement, refusal
-
-
-def _open_terminal_refusal(
-    result: OpenTerminalResult,
-    *,
-    harness: str | None,
-    kind: str,
-    session_id: str,
-    task_document_ref: TaskDocumentRef | None,
-) -> dict[str, Any] | None:
-    """Translate a non-opened terminal outcome into its public refusal payload."""
-    if result.status == "bad-kind":
-        return _spawn_refusal("bad-kind", harness, kind, detail=result.detail)
-    if result.status == "launch-conflict":
-        return _spawn_refusal("launch-selection-invalid", harness, kind, detail=result.detail)
-    if result.status == "task-binding-required":
-        return _spawn_refusal("task-binding-required", harness, kind)
-    if result.status == "task-binding-invalid":
-        return _spawn_refusal("task-binding-invalid", harness, kind)
-    if result.status == "seat-taken":
-        return _result(
-            "spawn_agent_session",
-            {
-                "ok": False,
-                "operation": "spawn_agent_session",
-                "status": "seat-taken",
-                "session": session_id,
-                "harness": harness,
-                "kind": result.kind,
-                "taskDocumentRef": (
-                    task_document_ref.model_dump() if task_document_ref is not None else None
-                ),
-                "seatRole": result.seat_role,
-                "ownerSession": result.owner_session_id,
-            },
-        )
-    return None
 
 
 @dataclass(frozen=True)
@@ -885,7 +850,7 @@ def spawn_agent_session_tool(
         ),
     )
 
-    open_refusal = _open_terminal_refusal(
+    open_refusal = open_terminal_refusal(
         result,
         harness=plan.harness,
         kind=seat.kind,
@@ -941,34 +906,6 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "controlEndpoint": str(entry.control_endpoint) if entry.control_endpoint else None,
         "controlProtocol": entry.control_protocol,
     }
-
-
-def _spawn_refusal(
-    status: SpawnAgentSessionStatus,
-    harness: str | None,
-    kind: str,
-    *,
-    detail: str | None = None,
-) -> dict[str, Any]:
-    """A pre-spawn refusal payload (unknown/undetected harness or bad kind) -- nothing was spawned.
-
-    ``status`` is the wire alias `SpawnAgentSessionResponse` validates against, so every refusal
-    in this module is checked here rather than at ``model_validate``: this payload is an untyped
-    dict all the way to the MCP handler, and a status the response model does not know becomes a
-    pydantic ValidationError on a path with no ``except`` for one.
-    """
-    return _result(
-        "spawn_agent_session",
-        {
-            "ok": False,
-            "operation": "spawn_agent_session",
-            "status": status,
-            "session": "",
-            "harness": harness,
-            "kind": kind if kind in ("harness", "terminal") else None,
-            "detail": detail,
-        },
-    )
 
 
 # ``SessionRetireResponse.ok`` by its own documented rule, in one place: the two idempotent

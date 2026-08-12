@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
-from agents_remember.models.worktree import WorktreeSummary
+from agents_remember.models.worktree import SourceLineageProjection, WorktreeSummary
 from agents_remember.worktrees import git_worktree_manager
 from agents_remember.worktrees.lifecycle_operations import latest_operation_projection
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
@@ -83,6 +83,7 @@ def _summary_from_status_payload(
     ``nextRequiredArgs`` means what an empty list meant: the next call needs nothing beyond
     ``nextArgs``. ``ContractBoundaryTests`` pins it so it cannot move again unannounced.
     """
+    source_lineage = payload.get("source_lineage")
     return WorktreeSummary(
         state="active",
         taskId=payload["task_id"],
@@ -113,4 +114,9 @@ def _summary_from_status_payload(
         nextRequiredArgs=payload.get("nextRequiredArgs"),
         unknownContractCells=payload.get("unknown_contract_cells"),
         lifecycleOperation=lifecycle_operation,
+        sourceLineage=(
+            SourceLineageProjection.model_validate(source_lineage)
+            if source_lineage is not None
+            else None
+        ),
     )

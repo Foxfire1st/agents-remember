@@ -42,6 +42,7 @@ from agents_remember.serving.terminal_opener import (
     open_terminal_session,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
+from test_worktree_support import write_current_task_lineage
 
 # The source root of the agents_remember package this test process imported (``.../mcp/src``) --
 # what the opener must seed onto the runner spawn's PYTHONPATH.
@@ -218,6 +219,9 @@ class OpenTerminalSessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         _write_task_tree(self.tmp)
+        write_current_task_lineage(
+            self.tmp, repo_name="repo", master_name="master", leaf_id="leaf-1"
+        )
         self.catalog = TerminalCatalog(self.tmp / "logs/dashboard/terminal-sessions.json")
         self.host = _FakeHost()
 

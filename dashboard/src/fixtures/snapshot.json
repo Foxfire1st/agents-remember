@@ -621,6 +621,64 @@
         "heartbeatAgeSeconds": 4.0,
         "seedFallback": false,
         "retryArgs": { "group": "sim-group" },
+        "sourceLineage": {
+          "state": "blocked",
+          "summary": "the leaf is not current with its master and super",
+          "edges": [
+            {
+              "relation": "super-to-master",
+              "side": "code",
+              "state": "current",
+              "sourceBranch": "ar/super-integration",
+              "descendantBranch": "ar/enforcement-master",
+              "contractPath": "/tasks/enforcement/series-contract.md",
+              "syncContractPath": "/tasks/enforcement/series-contract.md",
+              "ahead": 2,
+              "behind": 0
+            },
+            {
+              "relation": "super-to-master",
+              "side": "memory",
+              "state": "behind",
+              "sourceBranch": "ar/super-integration",
+              "descendantBranch": "ar/enforcement-master",
+              "contractPath": "/tasks/enforcement/series-contract.md",
+              "syncContractPath": "/tasks/enforcement/series-contract.md",
+              "ahead": 0,
+              "behind": 1,
+              "detail": "master memory is behind super"
+            },
+            {
+              "relation": "master-to-leaf",
+              "side": "code",
+              "state": "diverged",
+              "sourceBranch": "ar/enforcement-master",
+              "descendantBranch": "ar/enforcement-leaf",
+              "contractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md",
+              "syncContractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md",
+              "ahead": 1,
+              "behind": 2,
+              "detail": "leaf code diverged from master"
+            },
+            {
+              "relation": "master-to-leaf",
+              "side": "memory",
+              "state": "unavailable",
+              "sourceBranch": "ar/enforcement-master",
+              "descendantBranch": "ar/enforcement-leaf",
+              "contractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md",
+              "syncContractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md",
+              "detail": "memory worktree is not available"
+            }
+          ],
+          "recoveries": [
+            {
+              "tool": "worktree_sync",
+              "contractPath": "/tasks/enforcement/series-contract.md",
+              "args": { "contract_path": "/tasks/enforcement/series-contract.md" }
+            }
+          ]
+        },
         "providers": [
           { "id": "codegraphcontext-code", "role": "code", "runtimeState": "nominal", "factState": "observed" }
         ],
@@ -682,6 +740,12 @@
         "completedPhases": [],
         "failedPhases": [],
         "seedFallback": true,
+        "sourceLineage": {
+          "state": "unavailable",
+          "summary": "the master contract is not resolvable",
+          "edges": [],
+          "recoveries": []
+        },
         "providers": [{ "id": "grepai-memory", "role": "memory", "runtimeState": "missing", "factState": "planned" }],
         "edges": [],
         "landing": [],
@@ -712,6 +776,12 @@
         "completedPhases": [],
         "failedPhases": [],
         "seedFallback": false,
+        "sourceLineage": {
+          "state": "current",
+          "summary": "master and leaf are current with their sources",
+          "edges": [],
+          "recoveries": []
+        },
         "providers": [],
         "edges": [],
         "landing": [],

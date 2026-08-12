@@ -28,8 +28,10 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.worktrees import leaf_refs
 from agents_remember.worktrees.modules import cleanup as cleanup_module
+from agents_remember.worktrees.modules import guidance as guidance_module
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import onboarding as onboarding_module
 from agents_remember.worktrees.modules import start as start_module
@@ -89,6 +91,29 @@ def contract_for(root: Path, *, memory_mode: str = "disabled", code_repo: Path |
             base_commit="abc123",
         ),
         memory=RepoBranchPlan(repo_path=None, source_branch="", work_branch="", base_commit=""),  # type: ignore[arg-type]
+    )
+
+
+def stale_source_lineage(contract_path: Path) -> SourceLineageProjection:
+    return SourceLineageProjection.model_validate(
+        {
+            "state": "blocked",
+            "summary": "master is behind super",
+            "edges": [
+                {
+                    "relation": "super-to-master",
+                    "side": "code",
+                    "state": "behind",
+                    "sourceBranch": "super",
+                    "descendantBranch": "master",
+                    "ahead": 0,
+                    "behind": 1,
+                    "contractPath": contract_path.as_posix(),
+                    "syncContractPath": contract_path.as_posix(),
+                }
+            ],
+            "recoveries": [],
+        }
     )
 
 
@@ -370,9 +395,12 @@ class ExistingContractStartTests(unittest.TestCase):
             contract = self._written_contract(Path(tmp))
             retried = WorktreeCommandResult(0, {"state": "provider-setup-retried"})
 
-            with mock.patch.object(
-                start_module, "_retry_provider_setup_result", return_value=retried
-            ) as retry:
+            with (
+                mock.patch.object(
+                    start_module, "_retry_provider_setup_result", return_value=retried
+                ) as retry,
+                mock.patch.object(start_module, "source_lineage_for_contract", return_value=None),
+            ):
                 result = start_module._existing_contract_result(
                     Namespace(), contract, WorktreeArgs(retry_provider_setup=True)
                 )
@@ -384,7 +412,10 @@ class ExistingContractStartTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._written_contract(Path(tmp))
 
-            with mock.patch.object(start_module, "_retry_provider_setup_result") as retry:
+            with (
+                mock.patch.object(start_module, "_retry_provider_setup_result") as retry,
+                mock.patch.object(start_module, "source_lineage_for_contract", return_value=None),
+            ):
                 result = start_module._existing_contract_result(
                     Namespace(), contract, WorktreeArgs()
                 )
@@ -393,6 +424,61 @@ class ExistingContractStartTests(unittest.TestCase):
             assert result is not None
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.payload["state"], "attached-existing-contract")
+
+    def test_stale_lineage_blocks_existing_contract_before_reattach(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._written_contract(Path(tmp))
+            lineage = stale_source_lineage(contract.contract_path)
+
+            with mock.patch.object(
+                start_module, "source_lineage_for_contract", return_value=lineage
+            ):
+                result = start_module._existing_contract_result(
+                    Namespace(), contract, WorktreeArgs()
+                )
+
+            assert result is not None
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.payload["state"], "blocked")
+
+    def test_attach_refuses_stale_lineage_before_resuming_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._written_contract(Path(tmp))
+            lineage = stale_source_lineage(contract.contract_path)
+
+            with mock.patch.object(
+                start_module, "source_lineage_for_contract", return_value=lineage
+            ):
+                result = start_module.attach_result(
+                    WorktreeArgs(contract_path=contract.contract_path)
+                )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Attach refused", cast(str, result.payload["summary"]))
+
+    def test_status_projects_task_derived_source_lineage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._written_contract(Path(tmp))
+            lineage = stale_source_lineage(contract.contract_path)
+
+            with mock.patch.object(
+                guidance_module, "source_lineage_for_contract", return_value=lineage
+            ):
+                payload = guidance_module.status_payload(contract)
+
+            source_lineage = cast(dict[str, object], payload.get("source_lineage"))
+            self.assertEqual(source_lineage["state"], "blocked")
+
+    def test_status_omits_source_lineage_when_no_task_edge_applies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._written_contract(Path(tmp))
+
+            with mock.patch.object(
+                guidance_module, "source_lineage_for_contract", return_value=None
+            ):
+                payload = guidance_module.status_payload(contract)
+
+            self.assertNotIn("source_lineage", payload)
 
 
 class PreflightedContractTests(unittest.TestCase):
@@ -404,6 +490,7 @@ class PreflightedContractTests(unittest.TestCase):
         original = cast(Any, object())
         rebuilt = cast(Any, object())
         with (
+            mock.patch.object(start_module, "parent_source_lineage", return_value=None),
             mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
             mock.patch.object(start_module, "build_start_contract", return_value=rebuilt) as build,
             mock.patch.object(start_module, "_long_path_preflight", return_value=None),
@@ -418,6 +505,7 @@ class PreflightedContractTests(unittest.TestCase):
     def test_a_rebuild_that_fails_is_returned_instead_of_the_contract(self) -> None:
         failure = WorktreeCommandResult(2, {"state": "blocked", "summary": "rebuild failed"})
         with (
+            mock.patch.object(start_module, "parent_source_lineage", return_value=None),
             mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
             mock.patch.object(start_module, "build_start_contract", return_value=failure),
             mock.patch.object(start_module, "_long_path_preflight") as long_path,
@@ -432,6 +520,7 @@ class PreflightedContractTests(unittest.TestCase):
     def test_without_a_fast_forward_choice_the_contract_is_not_rebuilt(self) -> None:
         original = cast(Any, object())
         with (
+            mock.patch.object(start_module, "parent_source_lineage", return_value=None),
             mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
             mock.patch.object(start_module, "build_start_contract") as build,
             mock.patch.object(start_module, "_long_path_preflight", return_value=None),
@@ -446,6 +535,7 @@ class PreflightedContractTests(unittest.TestCase):
         check must run against the contract start will actually use."""
         rebuilt = cast(Any, object())
         with (
+            mock.patch.object(start_module, "parent_source_lineage", return_value=None),
             mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
             mock.patch.object(start_module, "build_start_contract", return_value=rebuilt),
             mock.patch.object(start_module, "_long_path_preflight", return_value=None) as long_path,

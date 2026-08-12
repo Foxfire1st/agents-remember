@@ -12,6 +12,7 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -547,7 +548,10 @@ class LandingFreezeResurrectionTests(unittest.IsolatedAsyncioTestCase):
             await frozen.refresh_once(now=NOW)
             self.assertTrue(final.exists())
 
-            result = reopen_task(contract.contract_path)
+            with mock.patch(
+                "agents_remember.worktrees.reopen.parent_source_lineage", return_value=None
+            ):
+                result = reopen_task(contract.contract_path)
 
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.payload["state"], "reopened")

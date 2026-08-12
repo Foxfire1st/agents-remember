@@ -33,6 +33,7 @@ PYTEST_EVENTS_REPORT_NAME = "pytest-events.jsonl"
 COVERAGE_DATA_REPORT_NAME = "coverage.data"
 QUALITY_PROGRESS_REPORT_NAME = "quality-progress.json"
 CODEX_PROBE_REPORT_NAME = "codex-probe.json"
+QUALITY_TEMP_ROOT = Path("/tmp/arq")
 
 GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
@@ -579,9 +580,10 @@ def quality_environment(
     env["COVERAGE_FILE"] = coverage_data_report_path(reports_root.parent).as_posix()
     env["AR_QUALITY_PROGRESS_REPORT"] = quality_progress_report_path(reports_root.parent).as_posix()
     env["AR_CODEX_PROBE_REPORT"] = codex_probe_report_path(reports_root.parent).as_posix()
-    # WSL imports Windows PATH/TEMP by design. The quality boundary is self-contained:
-    # native tools only, and ephemeral scratch beside the enclosure's durable reports.
-    return native_subprocess_environment(env, temp_root=reports_root / "tmp")
+    # WSL imports Windows PATH/TEMP by design. Keep durable output enclosure-owned, but use a
+    # deliberately short native scratch root: pytest-created coordination roots may contain
+    # Unix sockets, whose 103-byte address limit cannot tolerate a reports/enclosure prefix.
+    return native_subprocess_environment(env, temp_root=QUALITY_TEMP_ROOT)
 
 
 def _git_common_dir(code_worktree: Path) -> Path | None:

@@ -10,6 +10,7 @@ from pathlib import Path
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
+from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.projection import LedgerRefNode, ProviderNode, SetupProgressNode
 from agents_remember.observer.reducer import (
     AnalyticalInputs,
@@ -121,6 +122,37 @@ class EngineProcessTests(unittest.TestCase):
             0
         ]
         self.assertIsNone(node.carryoverDoneAt)
+
+    def test_source_lineage_projects_for_engine_room_diagnostics(self) -> None:
+        payload = {
+            "state": "blocked",
+            "summary": "master is behind super",
+            "edges": [
+                {
+                    "relation": "super-to-master",
+                    "side": "code",
+                    "state": "behind",
+                    "sourceBranch": "super",
+                    "descendantBranch": "master",
+                    "ahead": 0,
+                    "behind": 1,
+                    "contractPath": "/tasks/master/series-contract.md",
+                    "syncContractPath": "/tasks/master/series-contract.md",
+                }
+            ],
+            "recoveries": [],
+        }
+        for value in (payload, SourceLineageProjection.model_validate(payload)):
+            with self.subTest(value_type=type(value).__name__):
+                node = build_engine_processes(
+                    [_facts(status={"code_worktree_exists": True, "source_lineage": value})],
+                    [],
+                    [],
+                    [],
+                )[0]
+
+                self.assertEqual(node.sourceLineage.state, "blocked")  # type: ignore[union-attr]
+                self.assertEqual(node.sourceLineage.edges[0].behind, 1)  # type: ignore[union-attr]
 
     def test_successful_bootstrap_is_observed_and_complete(self) -> None:
         facts = _facts(

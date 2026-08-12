@@ -53,6 +53,7 @@ from agents_remember.tasks import (
     TaskDocument,
     write_task_doc,
 )
+from test_worktree_support import write_current_task_lineage
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -428,11 +429,20 @@ class TerminalWebSocketTests(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
         _write_leaf_task(self.tmp, repo="repo", master="master", doc_id="leaf-1")
+        write_current_task_lineage(
+            self.tmp, repo_name="repo", master_name="master", leaf_id="leaf-1"
+        )
         _write_leaf_task(
             self.tmp,
             repo="agents-remember",
             master="260628_operations-integration",
             doc_id="260628-L5",
+        )
+        write_current_task_lineage(
+            self.tmp,
+            repo_name="agents-remember",
+            master_name="260628_operations-integration",
+            leaf_id="260628-L5",
         )
         self.host = _FakeTerminalHost(cwd=self.tmp)
         self.catalog = TerminalCatalog(self.tmp / "logs/dashboard/terminal-sessions.json")

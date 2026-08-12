@@ -42,6 +42,7 @@ from agents_remember.tasks.store import read_task_doc, write_task_docs
 
 from .modules.guidance import status_payload
 from .modules.models import WorktreeCommandResult
+from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
 from .worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -70,6 +71,18 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
                     "Reopen refused: only a fully landed leaf (closeout, integration, and "
                     "cleanup completed, worktrees gone) can be reopened. " + " ".join(blockers)
                 ),
+            },
+        )
+
+    lineage = parent_source_lineage(contract)
+    if lineage_refusal(lineage) is not None:
+        assert lineage is not None
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                **lineage_block_payload(lineage),
+                "summary": ("Reopen refused before resetting task state: " + lineage.summary),
             },
         )
 

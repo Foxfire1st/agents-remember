@@ -65,6 +65,12 @@ export function DiagnosticsPanel({
       </div>
       <CommitRow label="Code source" refNode={node.codeSource} />
       <CommitRow label="Code worktree" refNode={node.codeWorktree} />
+      {node.sourceLineage ? (
+        <div className={diagRow} title={node.sourceLineage.summary}>
+          <span className={diagKey}>Source lineage</span>
+          <span className={diagValue}>{node.sourceLineage.state}</span>
+        </div>
+      ) : null}
       {setupLine ? (
         <div className={diagRow}>
           <span className={diagKey}>Provider setup</span>

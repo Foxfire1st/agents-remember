@@ -25,6 +25,7 @@ from agents_remember.serving.terminal_task_assignment import (
     assign_terminal_session_to_task,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
+from test_worktree_support import git, write_current_task_lineage
 
 
 class _Host:
@@ -97,6 +98,12 @@ def _write_topology(root: Path) -> tuple[TaskDocumentRef, TaskDocumentRef, TaskD
             master="task.md",
         ),
     )
+    write_current_task_lineage(
+        root,
+        repo_name="repo",
+        master_name="master",
+        leaf_id="leaf-1",
+    )
     return (
         TaskDocumentRef(repository="repo", path="sprint/task.json"),
         TaskDocumentRef(repository="repo", path="master/task.json"),
@@ -150,6 +157,32 @@ class TerminalTaskAssignmentTests(unittest.TestCase):
             self.assertEqual(result.status, "attached")
             self.assertEqual(catalog.get("worker").task_document_ref, leaf)  # type: ignore[union-attr]
             self.assertEqual(catalog.get("worker").binding_role, "worker")  # type: ignore[union-attr]
+
+    def test_stale_super_refuses_assignment_without_mutating_the_seat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _sprint, _master, leaf = _write_topology(root)
+            repo = root / "fixture-repositories" / "repo"
+            marker = repo / "super-moved.txt"
+            marker.write_text("new super\n", encoding="utf-8")
+            git(repo, "add", marker.name)
+            git(repo, "commit", "-m", "move super")
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("worker", spawn_role="worker"))
+
+            result = assign_terminal_session_to_task(
+                TaskAssignmentRuntime(
+                    catalog,
+                    _Host("ar-worker"),
+                    terminal_routes.TaskDocumentTopology(root),
+                ),
+                session_id="worker",
+                task_document_ref=leaf,
+            )
+
+            self.assertEqual(result.status, "source-lineage-stale")
+            self.assertEqual(result.source_lineage.state, "blocked")  # type: ignore[union-attr]
+            self.assertIsNone(catalog.get("worker").task_document_ref)  # type: ignore[union-attr]
 
     def test_same_document_and_role_is_seat_taken_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

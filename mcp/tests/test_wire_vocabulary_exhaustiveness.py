@@ -456,6 +456,7 @@ def _module_tree(relative: str) -> ast.Module:
 # --- the other seven: producers read out of their own source ---------------------------------
 
 TERMINAL_TOOL = "application/terminal_tools.py"
+TERMINAL_SPAWN_RESULTS = "application/terminal_spawn_results.py"
 # Enough of each strict model to leave only the field under test undecided.
 REPO_BASE = {"id": "r", "root": "/r", "branch": "main", "head": "0" * 40, "dirty": False}
 SESSION_BASE = {"ok": False, "session": "s"}
@@ -783,8 +784,10 @@ class ProducedLiteralTests(unittest.TestCase):
 
     def test_every_spawn_status_the_tool_can_return_validates(self) -> None:
         produced = (
-            _builder_statuses(TERMINAL_TOOL, "_spawn_refusal")
+            _builder_statuses(TERMINAL_TOOL, "spawn_refusal")
+            | _builder_statuses(TERMINAL_SPAWN_RESULTS, "spawn_refusal")
             | _payload_statuses(TERMINAL_TOOL, "spawn_agent_session")
+            | _payload_statuses(TERMINAL_SPAWN_RESULTS, "spawn_agent_session")
             | {
                 "task-document-not-found",
                 "task-document-invalid",
