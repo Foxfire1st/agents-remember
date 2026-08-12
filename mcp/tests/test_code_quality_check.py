@@ -10,6 +10,7 @@ import tempfile
 import tomllib
 import unittest
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import (
     Any,
@@ -42,6 +43,70 @@ SKIP_DECORATORS = ("skipUnless", "skipIf", "skipif")
 
 
 class CodeQualityCheckTests(unittest.TestCase):
+    def test_progress_and_coverage_state_overwrite_report_local_paths(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            root = Path(tmp)
+            source = write_sample_source(root)
+            progress = root / "reports/quality-progress.json"
+            coverage_data = root / "reports/coverage.data"
+            pytest_events = root / "reports/pytest-events.jsonl"
+            pytest_events.parent.mkdir(parents=True, exist_ok=True)
+            pytest_events.write_text("stale\n", encoding="utf-8")
+            config = replace(
+                sample_config(root, source),
+                progress_report=progress,
+                coverage_data=coverage_data,
+                pytest_report_log=pytest_events,
+            )
+
+            exit_code = check.run_quality_check(
+                config,
+                runner=fake_runner([], root / "coverage.json"),
+                printer=lambda _message: None,
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(progress.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "completed")
+            self.assertEqual(payload["step"], "complete")
+            self.assertIn("pytest", payload["completedSteps"])
+            self.assertEqual(check.subprocess_env(config)["COVERAGE_FILE"], str(coverage_data))
+            self.assertFalse(pytest_events.exists())
+
+    def test_main_uses_the_report_environment_to_select_its_native_temp_root(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            report = Path(tmp) / "reports" / "quality-progress.json"
+            environment = dict(os.environ)
+            environment[check.QUALITY_PROGRESS_REPORT_ENV] = report.as_posix()
+            with (
+                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch.object(
+                    check,
+                    "native_subprocess_environment",
+                    side_effect=lambda env, *, temp_root: {**env, "TMPDIR": str(temp_root)},
+                ) as native,
+                mock.patch.object(check, "config_from_args", return_value=mock.Mock()),
+                mock.patch.object(check, "run_quality_check", return_value=0),
+            ):
+                self.assertEqual(check.main([]), 0)
+
+            self.assertEqual(native.call_args.kwargs["temp_root"], report.parent / "tmp")
+
+    def test_main_without_a_report_uses_the_native_default_temp_root(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                check,
+                "native_subprocess_environment",
+                side_effect=lambda env, *, temp_root: {**env, "TMPDIR": str(temp_root)},
+            ) as native,
+            mock.patch.object(check, "config_from_args", return_value=mock.Mock()),
+            mock.patch.object(check, "run_quality_check", return_value=0),
+        ):
+            self.assertEqual(check.main([]), 0)
+
+        self.assertEqual(native.call_args.kwargs["temp_root"], Path("/tmp/agents-remember-quality"))
+
     def test_targeted_config_keeps_the_repository_file_size_arm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -55,12 +120,22 @@ class CodeQualityCheckTests(unittest.TestCase):
                 targeted=True,
                 diff_base="base",
                 coverage_json=None,
+                coverage_data=None,
+                progress_report=None,
+                pytest_report_log=None,
                 threshold=30.0,
                 top=20,
                 diff_floor=100.0,
             )
+            progress_report = root / "reports" / "quality-progress.json"
+            explicit_progress_report = root / "reports" / "explicit-quality-progress.json"
 
             with (
+                mock.patch.dict(
+                    os.environ,
+                    {check.QUALITY_PROGRESS_REPORT_ENV: progress_report.as_posix()},
+                    clear=True,
+                ),
                 mock.patch.object(check.quality_scope, "validate_quality_config"),
                 mock.patch.object(check.scope_reporting, "validate_invocation_environment"),
                 mock.patch.object(
@@ -73,9 +148,13 @@ class CodeQualityCheckTests(unittest.TestCase):
                 mock.patch.object(check.quality_scope, "file_size_armed", return_value=True),
             ):
                 config = check.config_from_args(args)
+                args.progress_report = explicit_progress_report
+                explicit_config = check.config_from_args(args)
 
             self.assertTrue(config.targeted)
             self.assertTrue(config.file_size_armed)
+            self.assertEqual(config.progress_report, progress_report)
+            self.assertEqual(explicit_config.progress_report, explicit_progress_report)
             file_size = next(
                 step
                 for step in check.quality_steps(config, root / "coverage.json")

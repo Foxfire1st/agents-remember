@@ -373,6 +373,7 @@ class McpToolTests(unittest.TestCase):
             "resolve_context",
             "drift_check",
             "memory_quality_check",
+            "citation_fix",
             "route_index_refresh",
             "memory_init",
             "skills_install",

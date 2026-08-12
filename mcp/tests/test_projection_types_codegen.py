@@ -236,23 +236,12 @@ class ProjectionSchemaDriftTests(unittest.TestCase):
             header_line.removeprefix("// Drift check: "), projection_types.CHECK_COMMAND
         )
 
-        common_git_result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        common_git = Path(common_git_result.stdout.strip())
-        if not common_git.is_absolute():
-            common_git = REPO_ROOT / common_git
-        project_python = common_git.resolve().parent / ".venv" / "bin" / "python"
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)
         environment["PYTHONPATH"] = "mcp/src"
 
         completed = subprocess.run(
-            [str(project_python), "scripts/sync-projection-types.py", "--check"],
+            [sys.executable, "scripts/sync-projection-types.py", "--check"],
             cwd=REPO_ROOT,
             env=environment,
             capture_output=True,

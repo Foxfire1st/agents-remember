@@ -40,6 +40,7 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     STATUS_PAYLOAD_TTL_SECONDS,
     _status_payload_cache,
 )
+from agents_remember.worktrees.lifecycle_operations import latest_operation_projection
 from agents_remember.worktrees.modules.guidance import (
     contract_payload,
     lifecycle_guidance,
@@ -97,6 +98,7 @@ def _enclosure_from_contract(contract: WorktreeContract) -> EnclosureNode:
         memoryWorktreeExists=(
             contract.memory_worktree.exists() if contract.memory_worktree else False
         ),
+        lifecycleOperation=latest_operation_projection(contract.contract_path),
     )
 
 

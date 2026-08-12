@@ -239,12 +239,22 @@ scopes ruff, the formatter, Pyright, the pytest subset, and the configured CRAP
 threshold to the leaf's change set (changed files, reverse-import closure, derived
 test subset). No rail carries a baseline or exemption list. Radon is printed as a
 report and cannot fail either tier — it exits 0 whatever it finds. CI runs the
-full wrapper on every branch push and pull request, and the full wrapper also
-runs exactly once per master at the master integration gate (invoked by
-`worktree_integrate` itself, host-managed RAM/swap by default). Leaf closeouts and leaf integrations
-run the targeted tier before creating an Agents Remember code commit even when
-hooks are not configured. See CONTRIBUTING.md for the tier table and the
-staged-content stash contract.
+full wrapper on every branch push and pull request. A pinned Dagger v0.21.8
+graph also rebuilds the exact Git candidate in a clean Ubuntu container, installs
+from scratch, runs a bundled real Codex read-only protocol probe, and executes
+the same wrapper. The full wrapper runs exactly once per master at the master
+integration gate (invoked by `worktree_integrate` itself). Leaf closeouts and
+leaf integrations run the targeted tier before creating an Agents Remember code
+commit even when hooks are not configured. See CONTRIBUTING.md for the tier
+table and the staged-content stash contract.
+
+Set `orchestration.qualityGate.executor` to `"dagger"` to make that clean Ubuntu
+graph the lifecycle-owned quality environment from WSL as well. There is no
+direct-Docker or host fallback: an unavailable Dagger engine fails explicitly.
+The graph receives a separate Git ancestry bundle plus the exact staged source,
+never the live coordination root, credentials, or container socket. Its live
+trace and final pytest, coverage, Codex-probe, and result artifacts replace the
+corresponding files under the task enclosure's `reports/` directory.
 
 The wrapper orders cheap deterministic rails before the expensive test rail:
 Ruff, formatting, file size, Pyright, Radon reports, then pytest. CRAP and changed-lines

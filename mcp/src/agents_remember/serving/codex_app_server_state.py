@@ -141,13 +141,10 @@ def validate_initialize_response(
         user_agent,
     )
     client_suffix = f" ({client_name}; {client_version})"
-    if match is None or (
-        match.group("product") != "Codex Desktop"
-        or not match.group("diagnostics").endswith(client_suffix)
-    ):
+    if match is None or not match.group("diagnostics").endswith(client_suffix):
         raise CodexAppServerError(
             "Codex initialize response has incompatible userAgent; expected "
-            "Codex Desktop/<reported-version> with optional diagnostics ending in "
+            "<server-product>/<reported-version> with optional diagnostics ending in "
             f"{client_suffix!r}, "
             f"received {user_agent!r}"
         )
@@ -157,6 +154,7 @@ def validate_initialize_response(
     platform_os = required_text(result, "platformOs", context="initialize response")
     return cli_version, {
         "userAgent": user_agent,
+        "serverProduct": match.group("product"),
         "cliVersion": cli_version,
         "codexHomePresent": bool(codex_home),
         "platformFamily": platform_family,

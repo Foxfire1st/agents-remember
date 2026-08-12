@@ -74,20 +74,30 @@ class MemoryCapPlanningTests(unittest.TestCase):
             self.assertFalse(memory_cap.systemd_scope_available())
         with mock.patch.object(memory_cap.Path, "is_dir", return_value=False):
             self.assertFalse(memory_cap.systemd_scope_available())
-        with mock.patch.object(memory_cap.os, "geteuid", return_value=0):
+        with (
+            mock.patch.object(memory_cap.shutil, "which", return_value="/usr/bin/systemd-run"),
+            mock.patch.object(memory_cap.Path, "is_dir", return_value=True),
+            mock.patch.object(memory_cap.os, "geteuid", return_value=0),
+        ):
             self.assertTrue(memory_cap.systemd_scope_available())
         with (
+            mock.patch.object(memory_cap.shutil, "which", return_value="/usr/bin/systemd-run"),
+            mock.patch.object(memory_cap.Path, "is_dir", return_value=True),
             mock.patch.object(memory_cap.os, "geteuid", return_value=1000),
             mock.patch.dict(os.environ, {}, clear=True),
         ):
             self.assertFalse(memory_cap.systemd_scope_available())
         with (
+            mock.patch.object(memory_cap.shutil, "which", return_value="/usr/bin/systemd-run"),
+            mock.patch.object(memory_cap.Path, "is_dir", return_value=True),
             mock.patch.object(memory_cap.os, "geteuid", return_value=1000),
             mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}, clear=True),
             mock.patch.object(memory_cap.Path, "is_socket", return_value=False),
         ):
             self.assertFalse(memory_cap.systemd_scope_available())
         with (
+            mock.patch.object(memory_cap.shutil, "which", return_value="/usr/bin/systemd-run"),
+            mock.patch.object(memory_cap.Path, "is_dir", return_value=True),
             mock.patch.object(memory_cap.os, "geteuid", return_value=1000),
             mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}, clear=True),
             mock.patch.object(memory_cap.Path, "is_socket", return_value=True),

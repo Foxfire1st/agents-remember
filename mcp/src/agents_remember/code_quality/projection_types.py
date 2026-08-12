@@ -47,7 +47,7 @@ SCHEMA_KEYWORDS = SCHEMA_ANNOTATION_KEYWORDS | {
     "required",
     "type",
 }
-PROJECT_PYTHON = 'PYTHONPATH=mcp/src "$(git rev-parse --git-common-dir)/../.venv/bin/python"'
+PROJECT_PYTHON = "PYTHONPATH=mcp/src python"
 REGENERATE_COMMAND = f"{PROJECT_PYTHON} scripts/sync-projection-types.py"
 CHECK_COMMAND = f"{REGENERATE_COMMAND} --check"
 

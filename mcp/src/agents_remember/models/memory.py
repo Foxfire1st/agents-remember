@@ -49,6 +49,12 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     noteworthyFindingCount: int | None = Field(default=None, ge=0)
 
 
+class CitationFixResponse(FlexibleToolResponse):
+    operation: Literal["citation_fix"] = "citation_fix"
+    repoId: str | None = None
+    dryRun: bool | None = None
+
+
 class RouteIndexRefreshResponse(FlexibleToolResponse):
     operation: Literal["route_index_refresh"] = "route_index_refresh"
     repoId: str | None = None

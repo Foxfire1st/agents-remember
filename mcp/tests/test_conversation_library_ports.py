@@ -7,10 +7,12 @@ targets — without touching real harness processes (the installed-runtime suite
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
+from unittest import mock
 
 from agents_remember.kernel.harnesses import Harness
 from agents_remember.models.conversations.capabilities import (
@@ -23,6 +25,7 @@ from agents_remember.models.conversations.identity import (
     NativeConversationRef,
 )
 from agents_remember.serving.codex_app_server_protocol import JsonObject
+from agents_remember.serving.conversation.library import codex as codex_module
 from agents_remember.serving.conversation.library.claude import ClaudeConversationLibrary
 from agents_remember.serving.conversation.library.codex import (
     AppServerSeams,
@@ -88,7 +91,7 @@ class _FakeCodexTransport:
         self.calls.append((method, params))
         if method == "initialize":
             return {
-                "userAgent": "Codex Desktop/0.144.5 (Ubuntu; x86_64) Test (agents_remember; 3.0.0)",
+                "userAgent": "agents_remember/0.144.5 (Ubuntu; x86_64) Test (agents_remember; 3.0.0)",
                 "codexHome": "/home/x/.codex",
                 "platformFamily": "unix",
                 "platformOs": "linux",
@@ -147,7 +150,11 @@ def _codex_library(script: Mapping[str, object]) -> CodexConversationLibrary:
         cursor_authority=LibraryCursorAuthority(mint_signing_key()),
         capabilities=_capabilities,  # type: ignore[arg-type]
         harness=CODEX,
-        seams=AppServerSeams(env=lambda: {}, transport_factory=lambda: transport),
+        seams=AppServerSeams(
+            env=lambda: {},
+            transport_factory=lambda: transport,
+            resolve_executable=lambda _command: sys.executable,
+        ),
     )
     library._test_transport = transport  # type: ignore[attr-defined]
     return library
@@ -221,6 +228,34 @@ THREAD_READ = {
 
 
 class CodexLibraryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_app_server_resolution_error_is_a_typed_store_failure(self) -> None:
+        server = codex_module._AppServer(
+            CODEX,
+            workspace_root=Path(self.tmp),
+            env={},
+            transport_factory=lambda: _FakeCodexTransport({}),
+            resolve_executable=lambda _command: (_ for _ in ()).throw(
+                RuntimeError("incompatible executable")
+            ),
+        )
+
+        with self.assertRaisesRegex(LibraryStoreError, "could not resolve installed harness"):
+            await server.__aenter__()
+
+    def test_native_codex_resolver_uses_the_normalized_native_environment(self) -> None:
+        with (
+            mock.patch.object(
+                codex_module, "native_path_environment", return_value={"PATH": "/bin"}
+            ) as native,
+            mock.patch.object(
+                codex_module, "resolve_native_executable", return_value="/bin/codex"
+            ) as resolve,
+        ):
+            self.assertEqual(codex_module._resolve_native_codex("codex"), "/bin/codex")
+
+        native.assert_called_once()
+        resolve.assert_called_once_with("codex", {"PATH": "/bin"})
+
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
         self.tmp = self._tmpdir.name

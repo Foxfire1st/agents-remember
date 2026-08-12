@@ -35,3 +35,30 @@ stale comments created by your change.
 
 Do not delete migration files, generated baselines, snapshots, lockfiles, or user
 data unless explicitly requested.
+
+### Linux, WSL, And Clean Quality Boundaries
+
+Treat the subprocess environment as part of the tested contract:
+
+- Linux and WSL jobs resolve native POSIX executables. Reject Windows command
+  shims, drive paths, UNC paths, and Windows-mounted executables rather than
+  handing them to a Linux child process.
+- Put `TMPDIR`, `TMP`, `TEMP`, coverage data, progress, and test reports on
+  native POSIX storage under the owning worktree enclosure. One current report
+  replaces its predecessor; do not accumulate per-run scratch artifacts.
+- Describe dry-run plans symbolically. Resolve and require an executable only
+  when execution starts, so a plan does not depend on unrelated host tools.
+- Use `sys.executable` and explicit environment ownership in Python tests. Do
+  not assume a checkout-local `.venv` or inherit workflow-control variables that
+  the test did not declare.
+- Keep `pytest -n=auto` in repository configuration so parallel execution is the
+  default contract rather than an agent memory requirement.
+
+For Agents Remember clean-environment proof, use the pinned Dagger Ubuntu graph.
+Materialize the exact staged candidate and a separate Git ancestry bundle; do
+not mount the live coordination root, credentials, or container socket. Bundle
+Codex in that graph and exercise the real read-only app-server protocol without
+submitting prompts. Dagger owns container construction, caching, graph progress,
+and service composition; Agents Remember retains task identity, approval,
+candidate selection, lifecycle recovery, and durable report projection. Do not
+add a direct-Docker or local compatibility runner beside it.

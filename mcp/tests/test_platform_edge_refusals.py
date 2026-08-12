@@ -293,6 +293,7 @@ class GrepaiMismatchedContainerTests(unittest.TestCase):
         with (
             mock.patch.object(grepai_backend, "docker_data_mount_source", return_value="/other"),
             mock.patch.object(grepai_backend, "docker_host_path_matches", return_value=False),
+            mock.patch.object(grepai_backend, "docker_command", return_value="docker"),
             mock.patch.object(grepai_backend, "run_command", return_value=FAILED_COMMAND),
         ):
             inspect_data, removal, error = (
@@ -324,6 +325,7 @@ class GrepaiMismatchedContainerTests(unittest.TestCase):
         with (
             mock.patch.object(grepai_embedder, "docker_data_mount_source", return_value="/other"),
             mock.patch.object(grepai_embedder, "docker_host_path_matches", return_value=False),
+            mock.patch.object(grepai_embedder, "docker_command", return_value="docker"),
             mock.patch.object(grepai_embedder, "run_command", return_value=FAILED_COMMAND),
         ):
             _inspect, removal, error = grepai_embedder.grepai_embedder_remove_mismatched_container(

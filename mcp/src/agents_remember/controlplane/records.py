@@ -75,6 +75,10 @@ class GateRecord(DurableRecord):
     decisionNote: str | None = None
     decidedAt: str | None = None
     evidenceRefs: list[GateEvidenceRef] = Field(default_factory=list)
+    # Internal task-bound operation fingerprint. It lets the same detached operation
+    # recover after transport/host loss without making the consumed approval reusable by
+    # a different mutation. This value is never accepted from or projected to an agent.
+    appliedOperation: str | None = None
 
 
 # Decision verbs accepted at the tool boundary, mapped to the resulting state.
@@ -182,7 +186,7 @@ def expire_gate(gate: GateRecord, *, now: str) -> GateRecord:
     return gate.model_copy(update={"ts": now, "state": "expired"})
 
 
-def apply_gate(gate: GateRecord, *, now: str) -> GateRecord:
+def apply_gate(gate: GateRecord, *, now: str, operation_key: str | None = None) -> GateRecord:
     """A new snapshot marking an approved gate consumed by its mutating tool. Pure.
 
     The ``applied`` transition this module's docstring anticipates: a mutating
@@ -191,7 +195,9 @@ def apply_gate(gate: GateRecord, *, now: str) -> GateRecord:
     (``decidedBy`` / ``decidedVia`` / ``decidedAt`` / ``decisionNote``) carries
     forward unchanged -- only ``state`` and ``ts`` advance.
     """
-    return gate.model_copy(update={"ts": now, "state": "applied"})
+    return gate.model_copy(
+        update={"ts": now, "state": "applied", "appliedOperation": operation_key}
+    )
 
 
 def reopen_gate(gate: GateRecord, *, now: str) -> GateRecord:

@@ -19,6 +19,7 @@ export const VOLATILE_AGE_FIELDS: ReadonlySet<string> = new Set([
   "ageSeconds",
   "waitSeconds",
   "heartbeatAgeSeconds",
+  "elapsedSeconds",
 ]);
 
 /**

@@ -60,6 +60,7 @@ not registered as agent MCP tools and must not appear in role briefs or handoffs
 | `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
 | `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50`, `contract_path=None` |
 | `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `repo_id`, `checks=None`, `detail_limit=50`, `contract_path=None` |
+| `citation_fix` | Regenerate anchored citation ranges only inside a contract-selected leaf memory worktree; official memory, ambiguous anchors, renames, and deletions refuse. | `repo_id`, `contract_path`, `document=None`, `expected_snapshot=None`, `dry_run=false` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
 
 The three rows above take the same optional `contract_path` as the `worktree_*` verbs: a leaf
@@ -87,14 +88,15 @@ A failed gate writes the report before refusing and names its path in the error.
 run cannot replace the previous completed result, and cleanup/abandon removes the file with the
 same `reports/` directory. The gate payload returns that stable path as `reportPath`.
 
-Citation ranges are not repaired by hand. `agents-remember memory-citations --repo <id> --contract
-<enclosure contract> [--fix]` regenerates every range that can be regenerated from its anchor — the
-whole tree in one command after a package move — and prints a work order for the rest: the anchor,
-the range, the file, and every location in the code tree that does hold that anchor. It repairs pure
-MOVES only, where a symbol kept its name and changed file; a rename, a deletion and an ambiguous
-match are refused rather than guessed at. `--contract` is **required**: unlike the tools above there
-is no argument list that names the official memory repo, and a contract that points at it is
-refused.
+Citation ranges are not repaired by hand. MCP `citation_fix(repo_id=<id>,
+contract_path=<enclosure contract>, dry_run=true|false)` regenerates every range that can be
+regenerated from its anchor — the whole tree in one call after a package move — and prints a work
+order for the rest: the anchor, the range, the file, and every location in the code tree that does
+hold that anchor. It repairs pure MOVES only, where a symbol kept its name and changed file; a
+rename, a deletion and an ambiguous match are refused rather than guessed at. `contract_path` is
+**required**: there is no argument list that names the official memory repo, and a contract that
+points at it is refused. The checkout-only CLI remains a development adapter to the same guarded
+application operation, not an agent-facing route around MCP.
 | `read_ar_files` | Batch read up to 5 repo-relative source paths in a managed repo, each paired with its file-level onboarding, plus the repository + governing route overviews (auto-attached, session-deduped); emits a facts-only `read.packet`. **The research-phase read** — use it instead of a native read up to the build decision; a native read remains the edit precondition during build. | `repo_id`, `files:[{path, source:"full"\|{startLine,endLine}, onboarding?}]`, `refresh=false` |
 
 ## Memory baseline & carryover
@@ -114,8 +116,8 @@ refused.
 | `worktree_attach` | Re-attach to an existing task contract without mutating Git. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_status` | Report worktree lifecycle phase, dirty flags, and next-step hints. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory/ledger commit messages |
-| `worktree_closeout_apply` | Apply a worktree closeout after explicit commit approval; Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, commit messages |
-| `worktree_integrate` | Land closed task branches back onto source branches (`ff-only` or `replay`). | `contract_path`, `strategy`, `dry_run=false` |
+| `worktree_closeout_apply` | Start or observe an approved, durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, commit messages |
+| `worktree_integrate` | Start or observe durable task-bound landing (`ff-only` or `replay`) and return promptly. Poll `worktree_status`; retries with conflicting input refuse. | `contract_path`, `strategy`, `dry_run=false` |
 | `worktree_cleanup` | Remove worktrees and merged task branches after integration. This is non-terminal for task documents: it never checks off steps or changes task status. | `contract_path`, `dry_run=false` |
 | `lifecycle_finalize_task` | Prove the landed edge, resolve the exact contract-bound leaf, refuse before cleanup unless every parent/nested step is done, then complete that leaf and, when it declares an existing immediate parent, automatically derive and reconcile that exact row. Standalone/no-parent tasks remain supported; the parent document's own task status and higher ancestors are not completed. | `contract_path`; optional `task_doc_path`, `master_doc_path`, and `subtask_number` are independent identity assertions; `dry_run=false` |
 

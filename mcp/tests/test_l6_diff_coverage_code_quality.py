@@ -174,7 +174,10 @@ class TestSingleOwner:
 class TestCheckRails:
     def test_run_fixed_checks(self, tmp_path: Path) -> None:
         config = SimpleNamespace(
-            project_root=tmp_path, scope=SimpleNamespace(coverage_paths=[Path("mcp/src")])
+            project_root=tmp_path,
+            scope=SimpleNamespace(coverage_paths=[Path("mcp/src")]),
+            progress=None,
+            coverage_data=None,
         )
         coverage_json = tmp_path / "coverage.json"
         coverage_json.write_text(json.dumps({"files": {"a": {}}}), encoding="utf-8")
@@ -207,7 +210,10 @@ class TestCheckRails:
 
     def test_run_fixed_checks_coverage_report_failure(self, tmp_path: Path) -> None:
         config = SimpleNamespace(
-            project_root=tmp_path, scope=SimpleNamespace(coverage_paths=[Path("mcp/src")])
+            project_root=tmp_path,
+            scope=SimpleNamespace(coverage_paths=[Path("mcp/src")]),
+            progress=None,
+            coverage_data=None,
         )
         coverage_json = tmp_path / "coverage.json"
         coverage_json.write_text("{}", encoding="utf-8")

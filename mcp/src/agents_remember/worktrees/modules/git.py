@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel import filesystem
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import run_git, run_git_with_index
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 # This module used to define its own `run_git` -- the kernel's function with the
@@ -27,6 +27,32 @@ def require_git(repo: Path, args: list[str]) -> str:
         detail = result.stderr.strip() or f"git {' '.join(args)} failed"
         raise RuntimeError(_transport_safe_git_diagnostic(detail))
     return result.stdout.strip()
+
+
+def worktree_candidate_tree(repo: Path, index_path: Path) -> str:
+    """Hash the full add-all candidate without touching the worktree's real index."""
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.unlink(missing_ok=True)
+    try:
+        for action, args in (
+            ("seed candidate index", ["read-tree", "HEAD"]),
+            ("materialize candidate tree", ["add", "-A"]),
+        ):
+            result = run_git_with_index(repo, args, index_path)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"could not {action}: "
+                    f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
+                )
+        result = run_git_with_index(repo, ["write-tree"], index_path)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "could not resolve candidate tree: "
+                f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
+            )
+        return result.stdout.strip()
+    finally:
+        index_path.unlink(missing_ok=True)
 
 
 def current_branch(repo: Path) -> str:

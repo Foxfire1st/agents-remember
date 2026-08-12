@@ -229,6 +229,8 @@ const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, "project
   "projection.analytics.driftSnapshots[].counts": "drift categories come from the drift report",
   "projection.analytics.setupSummaries[].resultCounts": "result buckets come from the setup action",
   "projection.analytics.engineProcesses[].retryArgs": "the retry call's own kwargs",
+  "projection.enclosures[].lifecycleOperation.result":
+    "the lifecycle operation result is the underlying closeout or integration payload",
 };
 
 // ── the string vocabularies ──────────────────────────────────────────────────
@@ -292,6 +294,34 @@ const VOCABULARIES: Record<
   ],
   "projection.analytics.taskDocuments[].steps[].substeps[].disposition.recordedVia": [
     "task_doc.skip_step",
+  ],
+  "projection.enclosures[].lifecycleOperation.kind": ["closeout", "integrate"],
+  "projection.enclosures[].lifecycleOperation.status": [
+    "queued",
+    "running",
+    "input-required",
+    "completed",
+    "failed",
+    "cancelled",
+  ],
+  "projection.enclosures[].lifecycleOperation.phase": [
+    "queued",
+    "preflight",
+    "memory-preflight",
+    "quality",
+    "approval-claim",
+    "recovering-after-claim",
+    "code-commit",
+    "memory-refresh",
+    "memory-commit",
+    "ledger-commit",
+    "integration-replay",
+    "integration-quality",
+    "source-merge",
+    "contract-finalization",
+    "completed",
+    "failed",
+    "cancelled",
   ],
 };
 

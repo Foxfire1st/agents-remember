@@ -23,7 +23,7 @@ file; :meth:`consume` appends its result instead.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +31,7 @@ from pathlib import Path
 from agents_remember.controlplane.durable_store import (
     OPERATOR_INBOX_OWNERSHIP,
     append_line,
+    append_lines,
     exclusive_access,
     read_log_text,
     rewrite_lines,
@@ -96,6 +97,41 @@ class OperatorInboxStore:
                 return entry, False
             self._append_unlocked(updated)
             return updated, True
+
+    def transition_many(
+        self,
+        transitions: Iterable[
+            tuple[str, Callable[[OperatorInboxEntry], OperatorInboxEntry | None]]
+        ],
+    ) -> tuple[tuple[OperatorInboxEntry, bool], ...]:
+        """Apply an ordered transition batch to one authoritative fold and durable append.
+
+        The lock covers the fold, every transition decision, model validation, and the one
+        batched append. Duplicate ids therefore see the snapshot produced by the earlier item,
+        while concurrent consumers or superseders can run only before or after the whole batch.
+        """
+        OPERATOR_INBOX_OWNERSHIP.check_declared_writer()
+        with self._exclusive_access():
+            current = fold_operator_inbox_entries(self._read_unlocked())
+            results: list[tuple[OperatorInboxEntry, bool]] = []
+            appended: list[OperatorInboxEntry] = []
+            for entry_id, transition in transitions:
+                entry = current.get(entry_id)
+                if entry is None:
+                    raise KeyError(f"no operator inbox entry {entry_id!r}")
+                updated = transition(entry)
+                if updated is None or updated is entry:
+                    results.append((entry, False))
+                    continue
+                validated = self._validated(updated)
+                current[entry_id] = validated
+                appended.append(validated)
+                results.append((validated, True))
+            append_lines(
+                self.log_path(),
+                [record.model_dump_json(by_alias=True, exclude_none=True) for record in appended],
+            )
+            return tuple(results)
 
     def read(self) -> list[OperatorInboxEntry]:
         """Read the inbox log back as validated snapshots (empty when absent)."""
@@ -275,7 +311,13 @@ class OperatorInboxStore:
             return removed, kept_current, tuple(resolved)
 
     def _append_unlocked(self, record: OperatorInboxEntry) -> None:
-        append_line(self.log_path(), record.model_dump_json(by_alias=True, exclude_none=True))
+        validated = self._validated(record)
+        append_line(self.log_path(), validated.model_dump_json(by_alias=True, exclude_none=True))
+
+    @staticmethod
+    def _validated(record: OperatorInboxEntry) -> OperatorInboxEntry:
+        """Revalidate model-copy updates at the final store-write boundary."""
+        return OperatorInboxEntry.model_validate(record.model_dump(by_alias=True))
 
     def _read_unlocked(self) -> list[OperatorInboxEntry]:
         """STRICT, unchanged: an inbox row that cannot be parsed is an ack nobody can account
@@ -288,9 +330,10 @@ class OperatorInboxStore:
         ]
 
     def _replace_unlocked(self, records: list[OperatorInboxEntry]) -> None:
+        validated = [self._validated(record) for record in records]
         rewrite_lines(
             self.log_path(),
-            [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
+            [record.model_dump_json(by_alias=True, exclude_none=True) for record in validated],
             OPERATOR_INBOX_OWNERSHIP,
         )
 

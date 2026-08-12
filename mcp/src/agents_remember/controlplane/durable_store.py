@@ -488,6 +488,22 @@ def append_line(log_path: Path, line: str) -> None:
         os.fsync(handle.fileno())
 
 
+def append_lines(log_path: Path, lines: list[str]) -> None:
+    """Append several records with one flush while the caller holds the store lock.
+
+    A transition batch is one durability unit: either every validated snapshot reaches the
+    append before the single fsync, or the caller raises before writing any of them. This avoids
+    turning a bounded sweep into one full log fold and one disk barrier per row.
+    """
+    if not lines:
+        return
+    _prepare_append_target(log_path)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("".join(f"{line}\n" for line in lines))
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def rewrite_lines(log_path: Path, lines: list[str], ownership: StoreOwnership) -> None:
     """Rewrite a locked log through the shared atomic-publish owner.
 

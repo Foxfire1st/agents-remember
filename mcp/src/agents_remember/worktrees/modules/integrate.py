@@ -18,7 +18,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     GatePolicy,
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
-from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
     GATE_TARGETED,
@@ -59,24 +59,33 @@ def quality_gate_mode(contract: WorktreeContract) -> str:
 
     A leaf contract integrates into its master branch and certifies its own change
     set; the master's series contract is the once-per-master gate and runs the full
-    wrapper with host-managed memory by default inside the integration step itself.
+    wrapper through the exact settings-selected local or Dagger executor.
     """
     return GATE_TARGETED if contract.kind == "leaf" else GATE_FULL
 
 
-def _quality_gate_memory_cap(contract: WorktreeContract) -> int | None:
+def _quality_gate_settings(contract: WorktreeContract):
     settings = load_agentic_settings(contract.coordination_root, repo_root=contract.code_repo_path)
-    return settings.quality_gate.memory_cap_bytes
+    return settings.quality_gate
+
+
+def _quality_gate_memory_cap(contract: WorktreeContract) -> int | None:
+    return _quality_gate_settings(contract).memory_cap_bytes
 
 
 def _quality_gate_preview(contract: WorktreeContract) -> dict[str, object]:
     mode = quality_gate_mode(contract)
+    settings = _quality_gate_settings(contract)
     memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
     return code_quality_gate_preview(
         contract.code_worktree,
         code_would_commit=True,
         diff_base=contract.code_base_commit,
-        plan=QualityGatePlan(mode=mode, memory_cap_bytes=memory_cap_bytes),
+        plan=QualityGatePlan(
+            mode=mode,
+            memory_cap_bytes=memory_cap_bytes,
+            executor=settings.executor,
+        ),
     )
 
 
@@ -563,6 +572,7 @@ def _integrated_result(
 
 
 def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
+    report_operation_progress(args, "preflight", current_command="validate integration eligibility")
     if not args.approved and not args.dry_run:
         raise RuntimeError("integration requires --approved after human review")
     assert args.contract_path is not None
@@ -634,11 +644,17 @@ def _apply_integration(
     handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
     """Land the code commit, then the memory commits, then merge both into their sources."""
+    report_operation_progress(
+        args, "integration-replay", current_command="resolve integration replay commits"
+    )
     integrated_code_commit, blocked = _integrated_code_commit(
         contract, args, sources.current_code_source
     )
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
+    report_operation_progress(
+        args, "integration-quality", current_command="run altitude-routed quality contract"
+    )
     quality_gate, blocked = _run_integration_quality_gate(contract)
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
@@ -654,7 +670,16 @@ def _apply_integration(
         memory_content=integrated_memory_content_commit,
         ledger=integrated_ledger_commit,
     )
+    report_operation_progress(
+        args,
+        "source-merge",
+        current_command="fast-forward code and memory source branches",
+        irreversible_boundary=True,
+    )
     _merge_integrated_commits(contract, commits)
+    report_operation_progress(
+        args, "contract-finalization", current_command="finalize integration contract edge"
+    )
     return _integrated_result(
         contract,
         args,
@@ -670,13 +695,14 @@ def _run_integration_quality_gate(
     """The altitude-routed quality gate for one integration, run before any merge.
 
     Leaf integration certifies the leaf's change set (targeted); master integration
-    runs the full wrapper once with host-managed RAM/swap by default inside the
-    integration step itself so no manager or orchestrator has to remember a
-    separate full-gate invocation. Constrained CI may configure an explicit cap.
+    runs the full wrapper once through the exact settings-selected local or Dagger
+    executor inside the integration step itself, so no manager or orchestrator has
+    to remember a separate full-gate invocation. An explicit cap remains available.
     """
     if not requires_strict_code_quality(contract.code_worktree, code_would_commit=True):
         return _quality_gate_preview(contract), None
     mode = quality_gate_mode(contract)
+    settings = _quality_gate_settings(contract)
     memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
     try:
         gate = run_strict_code_quality_gate(
@@ -688,6 +714,7 @@ def _run_integration_quality_gate(
             plan=QualityGatePlan(
                 mode=mode,
                 memory_cap_bytes=memory_cap_bytes,
+                executor=settings.executor,
             ),
             invocation="master-integration" if mode == GATE_FULL else "leaf-integration",
         )

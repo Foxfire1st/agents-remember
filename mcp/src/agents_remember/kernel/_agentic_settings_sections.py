@@ -3,6 +3,8 @@ agent-notifier, spawn, and the quality gate."""
 
 from __future__ import annotations
 
+from typing import cast
+
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
     DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
@@ -34,6 +36,7 @@ from agents_remember.kernel._agentic_settings_core import (
     LoopComplexity,
     LoopDefaults,
     LoopSettings,
+    QualityExecutor,
     QualityGateSettings,
     RoleKnobs,
     _refuse_unknown,
@@ -397,4 +400,14 @@ def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
             "orchestration.qualityGate.memoryCapBytes",
             source,
         )
-    return QualityGateSettings(memory_cap_bytes=memory_cap_bytes)
+    executor: QualityExecutor = "local"
+    if "executor" in block:
+        raw_executor = _require_string(
+            block["executor"], "orchestration.qualityGate.executor", source
+        )
+        if raw_executor not in {"local", "dagger"}:
+            raise AgenticSettingsError(
+                "orchestration.qualityGate.executor must be 'local' or 'dagger': " + source
+            )
+        executor = cast(QualityExecutor, raw_executor)
+    return QualityGateSettings(memory_cap_bytes=memory_cap_bytes, executor=executor)

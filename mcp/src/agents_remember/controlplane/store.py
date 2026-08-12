@@ -203,6 +203,7 @@ class GateStore:
         kind: GateKind,
         now: str,
         policy: GatePolicy = DEFAULT_GATE_POLICY,
+        operation_key: str | None = None,
     ) -> GateGuard:
         """Consume this lifecycle's approval for ``kind``: a COMPARE-AND-SWAP, not a read.
 
@@ -233,13 +234,15 @@ class GateStore:
         """
         with exclusive_access(self.log_path(lifecycle_id), GATE_OWNERSHIP):
             gates = self.current(lifecycle_id)
-            guard = evaluate_gate(gates, kind=kind, policy=policy)
+            guard = evaluate_gate(gates, kind=kind, policy=policy, operation_key=operation_key)
             if not guard.permitted or guard.gate_id is None:
+                return guard
+            if gates[guard.gate_id].state == "applied":
                 return guard
             # Re-entrant: `append` takes this same lock again on this thread, which
             # `exclusive_access` recognises rather than deadlocks on, so the write keeps its
             # declared-writer check instead of being open-coded here to dodge the nesting.
-            self.append(apply_gate(gates[guard.gate_id], now=now))
+            self.append(apply_gate(gates[guard.gate_id], now=now, operation_key=operation_key))
             return guard
 
     def delete(self, gate_id: str, lifecycle_id: str | None) -> bool:

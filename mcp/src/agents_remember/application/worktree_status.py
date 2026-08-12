@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
 from agents_remember.models.worktree import WorktreeSummary
 from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.lifecycle_operations import latest_operation_projection
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
@@ -53,10 +55,17 @@ def worktree_status_packet(contract_path: Path | None) -> WorktreeSummary:
             enclosurePath=resolved.as_posix(),
             error=str(error),
         )
-    return _summary_from_status_payload(git_worktree_manager.status_payload(contract))
+    return _summary_from_status_payload(
+        git_worktree_manager.status_payload(contract),
+        lifecycle_operation=latest_operation_projection(contract.contract_path),
+    )
 
 
-def _summary_from_status_payload(payload: WorktreeStatusPayload) -> WorktreeSummary:
+def _summary_from_status_payload(
+    payload: WorktreeStatusPayload,
+    *,
+    lifecycle_operation: LifecycleOperationProjection | None = None,
+) -> WorktreeSummary:
     """Project a snake_case status payload onto the camelCase wire model, field by field.
 
     ``nextTool``/``nextArgs``/``nextRequiredArgs`` are read with ``.get`` because
@@ -103,4 +112,5 @@ def _summary_from_status_payload(payload: WorktreeStatusPayload) -> WorktreeSumm
         nextArgs=payload.get("nextArgs"),
         nextRequiredArgs=payload.get("nextRequiredArgs"),
         unknownContractCells=payload.get("unknown_contract_cells"),
+        lifecycleOperation=lifecycle_operation,
     )

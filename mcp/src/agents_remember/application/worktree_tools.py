@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
 from agents_remember.application.task_ref import TaskRef
@@ -14,12 +15,26 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
     reload_provider_authority,
 )
+from agents_remember.models.lifecycle_operation import (
+    CloseoutOperationInput,
+    GatePolicyRuleSnapshot,
+    IntegrateOperationInput,
+    IntegrateStrategy,
+    LifecycleOperationKind,
+    LifecycleOperationProjection,
+)
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.lifecycle_operations import (
+    cancel_operation,
+    latest_operation_projection,
+    observe_operation,
+    start_or_observe_operation,
+)
 
 
 @dataclass(frozen=True)
@@ -232,7 +247,13 @@ def worktree_attach_tool(
 
 def worktree_status_tool(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
     args = _task_ref_namespace(config, task)
-    return _worktree_result("worktree_status", git_worktree_manager.status_result(args))
+    result = _worktree_result("worktree_status", git_worktree_manager.status_result(args))
+    contract_path = result.get("contract_path")
+    if isinstance(contract_path, str) and contract_path:
+        operation = latest_operation_projection(Path(contract_path))
+        if operation is not None:
+            result["lifecycleOperation"] = operation.model_dump(mode="json", exclude_none=True)
+    return result
 
 
 def _task_ref_namespace(
@@ -312,6 +333,20 @@ def worktree_closeout_apply_tool(
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
+    if not approval.dry_run:
+        confined = require_within_coordination(config, contract_path, "contract_path")
+        operation = start_or_observe_operation(
+            CloseoutOperationInput(
+                configPath=config.config_path.as_posix(),
+                contractPath=confined.as_posix(),
+                codeCommitMessage=messages.code,
+                memoryCommitMessage=messages.memory,
+                ledgerCommitMessage=messages.ledger,
+                approvalNote=approval.intent_note,
+                gatePolicy=_gate_policy_snapshot(config),
+            )
+        )
+        return _operation_acknowledgement("worktree_closeout_apply", operation)
     return _worktree_closeout(
         config,
         operation="worktree_closeout_apply",
@@ -325,11 +360,23 @@ def worktree_integrate_tool(
     config: McpRuntimeConfig,
     *,
     contract_path: str,
-    strategy: str = "ff-only",
+    strategy: IntegrateStrategy = "ff-only",
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     confined_contract = require_within_coordination(config, contract_path, "contract_path")
+    if not dry_run:
+        operation = start_or_observe_operation(
+            IntegrateOperationInput(
+                configPath=config.config_path.as_posix(),
+                contractPath=confined_contract.as_posix(),
+                strategy=strategy,
+                ledgerCommitMessage=ledger_commit_message,
+                gatePolicy=_gate_policy_snapshot(config),
+                autoCompleteSeats=config.retirement.auto_land_on_integration,
+            )
+        )
+        return _operation_acknowledgement("worktree_integrate", operation)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
         strategy=strategy,
@@ -352,6 +399,54 @@ def worktree_integrate_tool(
             )
         )
     return result
+
+
+def worktree_operation_cancel_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    operation_kind: str,
+    intent_note: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    if operation_kind not in {"closeout", "integrate"}:
+        raise ValueError("operation_kind must be 'closeout' or 'integrate'")
+    if not intent_note.replace("\n", " ").strip():
+        raise ValueError("operation cancellation requires a non-empty intent_note")
+    confined = require_within_coordination(config, contract_path, "contract_path")
+    kind = cast(LifecycleOperationKind, operation_kind)
+    projection = observe_operation(confined, kind) if dry_run else cancel_operation(confined, kind)
+    if projection is None:
+        raise RuntimeError(f"no {operation_kind} operation exists for this task")
+    return _operation_acknowledgement("worktree_operation_cancel", projection)
+
+
+def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:
+    return [
+        GatePolicyRuleSnapshot(
+            kind=rule.kind,
+            delegatedRole=rule.delegated_role,
+            requireReviewerVerdict=rule.require_reviewer_verdict,
+        )
+        for rule in config.orchestration.gate_policy.rules
+    ]
+
+
+def _operation_acknowledgement(
+    operation: str, projection: LifecycleOperationProjection
+) -> dict[str, Any]:
+    payload = projection.model_dump(mode="json", exclude_none=True)
+    return {
+        "ok": True,
+        "operation": operation,
+        "state": payload["status"],
+        "summary": (
+            f"{payload['kind']} is {payload['status']}; poll worktree_status for task-bound "
+            "progress. No job or process identifier is required."
+        ),
+        "pollTool": "worktree_status",
+        "lifecycleOperation": payload,
+    }
 
 
 def worktree_cleanup_tool(

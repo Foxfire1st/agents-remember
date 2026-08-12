@@ -6,7 +6,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate memory cap) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate executor/resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -432,25 +432,34 @@ passed smoke.
 
 ### orchestration.qualityGate
 
-`orchestration.qualityGate` owns optional full-wrapper resource overrides
-(260731-EFA-L17, L24). The full wrapper runs exactly once per master, at the
-master integration gate. By default it is host-managed: pytest keeps `-n=auto`,
-Linux/WSL uses available RAM normally, and configured swap remains available
-when the host experiences real memory pressure.
+`orchestration.qualityGate` selects the canonical executor and owns optional
+full-wrapper resource overrides (260731-EFA-L17, L23, L24). The full wrapper
+runs exactly once per master, at the master integration gate. Pytest keeps
+`-n=auto` in either executor. The default `local` executor uses native Linux/WSL
+tools, available RAM, and configured swap. The `dagger` executor reconstructs
+the exact staged candidate inside the pinned clean Ubuntu graph used by GitHub,
+including the real read-only Codex protocol probe, and exports its current and
+final evidence into the owning enclosure's self-overwriting `reports/` files.
 
 | Field | Default | Notes |
 | --- | --- | --- |
+| `executor` | `"local"` | `"local"` runs the canonical wrapper with native POSIX tools. `"dagger"` runs the same wrapper in the pinned clean Ubuntu Dagger graph. Selection is exact and fail closed: an unavailable Dagger engine is an error, not a fallback to local execution. |
 | `memoryCapBytes` | omitted (host-managed) | Optional hard cap for constrained CI. On hosts with systemd the integration step uses `MemoryMax=<bytes>` but leaves swap under the host's normal policy. Otherwise it applies a POSIX `RLIMIT_AS` limit to the wrapper and its rail subprocesses. A capped failure names this policy key. Positive integer when present. |
 
 ```jsonc
 "orchestration": {
-  "qualityGate": { "memoryCapBytes": 8589934592 }
+  "qualityGate": {
+    "executor": "dagger",
+    "memoryCapBytes": 8589934592
+  }
 }
 ```
 
-Targeted leaf runs (pre-push hook, leaf closeout, leaf integration) ignore this
-knob. An explicit cap is an opt-in restriction, not the default resource policy;
-the gate treats a capped kill as a failure, never a skip.
+The executor applies to lifecycle-owned leaf and master quality runs. The memory
+cap remains a full-master resource policy; targeted pre-push, leaf-closeout, and
+leaf-integration selections do not turn it into a smaller test contract. An
+explicit cap is an opt-in restriction, not the default resource policy; the gate
+treats a capped kill as a failure, never a skip.
 
 ### orchestration.concurrency, orchestration.spawn
 

@@ -4,6 +4,28 @@ from test_mcp_registration_wiring import RegistrationWiringTests
 
 
 class RegistrationWiringTests2(RegistrationWiringTests):
+    def test_worktree_operation_cancel_forwards_only_the_task_address(self) -> None:
+        recorder = self.invoke(
+            "worktree_operation_cancel",
+            "agents_remember.mcp.registration.closeout.worktree_operation_cancel_payload",
+            {
+                "contract_path": "/tmp/contract.yaml",
+                "operation_kind": "closeout",
+                "intent_note": "developer cancelled before the boundary",
+                "dry_run": True,
+            },
+        )
+
+        self.assertEqual(recorder.args, (self.config, "/tmp/contract.yaml"))
+        self.assertEqual(
+            recorder.kwargs,
+            {
+                "operation_kind": "closeout",
+                "intent_note": "developer cancelled before the boundary",
+                "dry_run": True,
+            },
+        )
+
     def test_worktree_start_defaults_to_a_real_light_task_start(self) -> None:
         recorder = self.invoke(
             "worktree_start",

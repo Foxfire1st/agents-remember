@@ -161,7 +161,8 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                     ]
                 )
 
-                result = lifecycle.grepai_run(args, "start")
+                with mock.patch.object(compose_runtime, "docker_command", return_value="docker"):
+                    result = lifecycle.grepai_run(args, "start")
         finally:
             grepai_core.grepai_release_arch = originals["grepai_release_arch"]
 
@@ -406,7 +407,10 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 ),
             ]
             for result, expected in cases:
-                with mock.patch.object(installation, "run_command", return_value=result):
+                with (
+                    mock.patch.object(installation, "run_command", return_value=result),
+                    mock.patch.object(installation, "docker_command", return_value="docker"),
+                ):
                     self.assertEqual(
                         installation.cgc_graph_content_state(layout),
                         expected,
@@ -443,7 +447,10 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 "stderr": "",
             }
 
-            with mock.patch.object(installation, "run_command", return_value=scan_logs):
+            with (
+                mock.patch.object(installation, "run_command", return_value=scan_logs),
+                mock.patch.object(installation, "docker_command", return_value="docker"),
+            ):
                 state = installation.cgc_indexing_state_probe(
                     layout, inspect_data, watcher_running=True
                 )
@@ -457,7 +464,10 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 ),
                 "stderr": "",
             }
-            with mock.patch.object(installation, "run_command", return_value=done_logs):
+            with (
+                mock.patch.object(installation, "run_command", return_value=done_logs),
+                mock.patch.object(installation, "docker_command", return_value="docker"),
+            ):
                 state = installation.cgc_indexing_state_probe(
                     layout, inspect_data, watcher_running=True
                 )
@@ -501,7 +511,8 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 ]
             )
 
-            result = lifecycle.cgc_start(args)
+            with mock.patch.object(compose_runtime, "docker_command", return_value="docker"):
+                result = lifecycle.cgc_start(args)
 
         self.assertTrue(result["ok"])
         migration = result["backend"]["migration"]
@@ -525,7 +536,8 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 ]
             )
 
-            result = lifecycle.cgc_start(args)
+            with mock.patch.object(compose_runtime, "docker_command", return_value="docker"):
+                result = lifecycle.cgc_start(args)
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["parallel"])

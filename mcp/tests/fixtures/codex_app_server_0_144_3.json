@@ -31,7 +31,7 @@
     ]
   },
   "initializeResult": {
-    "userAgent": "Codex Desktop/0.144.3 (Linux; x86_64) tmux-256color (agents_remember; 3.0.0)",
+    "userAgent": "agents_remember/0.144.3 (Linux; x86_64) tmux-256color (agents_remember; 3.0.0)",
     "codexHome": "/home/test/.codex",
     "platformFamily": "unix",
     "platformOs": "linux"

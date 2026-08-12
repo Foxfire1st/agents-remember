@@ -106,7 +106,10 @@ class StallWatchdogTests(unittest.TestCase):
 class GrepaiCloneStallTests(unittest.TestCase):
     def test_dump_stall_returns_structured_phase_result(self) -> None:
         args = SimpleNamespace(dry_run=False)
-        with mock.patch.object(grepai_seed, "_run_with_stall_watchdog", return_value=None):
+        with (
+            mock.patch.object(grepai_seed, "docker_command", return_value="docker"),
+            mock.patch.object(grepai_seed, "_run_with_stall_watchdog", return_value=None),
+        ):
             result = grepai_seed._clone_database(args, _context())
 
         self.assertFalse(result["ok"])
@@ -118,8 +121,9 @@ class GrepaiCloneStallTests(unittest.TestCase):
     def test_restore_stall_reports_restore_phase(self) -> None:
         args = SimpleNamespace(dry_run=False, seed_stall_seconds=120)
         ok_dump = mock.Mock(returncode=0)
-        with mock.patch.object(
-            grepai_seed, "_run_with_stall_watchdog", side_effect=[ok_dump, None]
+        with (
+            mock.patch.object(grepai_seed, "docker_command", return_value="docker"),
+            mock.patch.object(grepai_seed, "_run_with_stall_watchdog", side_effect=[ok_dump, None]),
         ):
             result = grepai_seed._clone_database(args, _context())
 
@@ -131,9 +135,10 @@ class GrepaiCloneStallTests(unittest.TestCase):
         """The watchdog is the only bound: no timeout kwarg reaches Popen."""
         args = SimpleNamespace(dry_run=False)
         ok = mock.Mock(returncode=0)
-        with mock.patch.object(
-            grepai_seed, "_run_with_stall_watchdog", return_value=ok
-        ) as watchdog:
+        with (
+            mock.patch.object(grepai_seed, "docker_command", return_value="docker"),
+            mock.patch.object(grepai_seed, "_run_with_stall_watchdog", return_value=ok) as watchdog,
+        ):
             result = grepai_seed._clone_database(args, _context())
 
         self.assertTrue(result["ok"])

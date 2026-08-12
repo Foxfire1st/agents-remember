@@ -56,9 +56,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "coverage>=7.14,<8",
+  "dagger-io==0.21.8",
   "httpx>=0.27,<1",
   "pytest>=9,<10",
   "pytest-cov>=7,<8",
+  "pytest-reportlog>=1,<2",
   "pytest-xdist>=3,<4",
   "pyright>=1.1,<2",
   "radon>=6,<7",

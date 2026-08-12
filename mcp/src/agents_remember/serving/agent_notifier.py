@@ -43,6 +43,7 @@ from agents_remember.serving._agent_notifier_actions import (
     _signal_dead_upstream,
     _signal_emit,
     act_on_finding,
+    act_on_findings,
 )
 from agents_remember.serving._agent_notifier_evaluation import (
     PERSISTENT_FAILURE_ATTEMPTS,
@@ -164,7 +165,7 @@ def run_agent_notifier_sweep(
         expectation_current=expectation_snapshot,
     )
     findings = evaluate_predicates(ctx, now=now, sweep=sweep)
-    actions = tuple(act_on_finding(ctx, finding, now=now, sweep=sweep) for finding in findings)
+    actions = act_on_findings(ctx, findings, now=now, sweep=sweep)
     duration_seconds = perf_counter() - started
     ctx.heartbeat_store.tick(
         now=now,

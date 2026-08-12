@@ -11,6 +11,7 @@ parent session row with meta-bound identity. Unproven shapes stay visibly unavai
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from collections.abc import Mapping
@@ -101,7 +102,7 @@ class _FakeCodexTransport:
         self.calls.append((method, params))
         if method == "initialize":
             return {
-                "userAgent": "Codex Desktop/0.145.0 (Ubuntu; x86_64) Test (agents_remember; 3.0.0)",
+                "userAgent": "agents_remember/0.145.0 (Ubuntu; x86_64) Test (agents_remember; 3.0.0)",
                 "codexHome": "/home/x/.codex",
                 "platformFamily": "unix",
                 "platformOs": "linux",
@@ -289,7 +290,11 @@ class CodexLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
             cursor_authority=LibraryCursorAuthority(mint_signing_key()),
             capabilities=_capabilities,  # type: ignore[arg-type]
             harness=CODEX,
-            seams=AppServerSeams(env=lambda: {}, transport_factory=lambda: transport),
+            seams=AppServerSeams(
+                env=lambda: {},
+                transport_factory=lambda: transport,
+                resolve_executable=lambda _command: sys.executable,
+            ),
         )
         library._test_transport = transport  # type: ignore[attr-defined]
         return library

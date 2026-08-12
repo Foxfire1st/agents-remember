@@ -41,6 +41,7 @@ from .lifecycle import (
 )
 from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
+    citation_fix_payload,
     drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
@@ -93,6 +94,7 @@ from .worktree import (
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
+    worktree_operation_cancel_payload,
     worktree_start_payload,
     worktree_status_payload,
     worktree_sync_payload,
@@ -113,6 +115,7 @@ __all__ = [
     "cgc_dependencies_payload",
     "cgc_symbol_search_payload",
     "cgc_visualize_payload",
+    "citation_fix_payload",
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",
     "context_packet_payload",
@@ -175,6 +178,7 @@ __all__ = [
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",
     "worktree_integrate_payload",
+    "worktree_operation_cancel_payload",
     "worktree_start_payload",
     "worktree_status_payload",
     "worktree_sync_payload",

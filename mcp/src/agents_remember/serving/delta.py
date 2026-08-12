@@ -34,7 +34,14 @@ from agents_remember.observer.projection import WorkspaceProjection
 #: the stable forms the diff compares. Mirrored client-side in
 #: ``dashboard/src/data/servedAges.ts`` (VOLATILE_AGE_FIELDS) -- keep the two sets in lockstep.
 VOLATILE_AGE_FIELDS = frozenset(
-    {"staleSeconds", "snapshotStaleSeconds", "ageSeconds", "waitSeconds", "heartbeatAgeSeconds"}
+    {
+        "staleSeconds",
+        "snapshotStaleSeconds",
+        "ageSeconds",
+        "waitSeconds",
+        "heartbeatAgeSeconds",
+        "elapsedSeconds",
+    }
 )
 
 

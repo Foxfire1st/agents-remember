@@ -256,6 +256,30 @@ class OperatorInboxStoreTests(unittest.TestCase):
         )
         self.assertEqual(len(self.store.read()), 2)
 
+    def test_transition_many_folds_each_step_and_appends_only_real_changes(self) -> None:
+        self.store.append(self._entry("A"))
+        results = self.store.transition_many(
+            (
+                ("A", lambda entry: entry),
+                (
+                    "A",
+                    lambda entry: consume_operator_inbox_entry(
+                        entry,
+                        now=T2,
+                        consumed_by="model",
+                        consumed_via="cli",
+                    ),
+                ),
+                ("A", lambda entry: None),
+            )
+        )
+
+        self.assertEqual([changed for _entry, changed in results], [False, True, False])
+        self.assertEqual(results[-1][0].consumedAt, T2)
+        self.assertEqual(len(self.store.read()), 2)
+        with self.assertRaisesRegex(KeyError, "missing"):
+            self.store.transition_many((("missing", lambda entry: entry),))
+
         consumed_again, consumed_now_again = self.store.consume(
             "A",
             now="2026-06-23T10:10:00+00:00",

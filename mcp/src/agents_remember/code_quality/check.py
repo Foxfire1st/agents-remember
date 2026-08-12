@@ -24,13 +24,15 @@ in source or tests; baselines, allowlists, and exemptions are not supported.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import resource
 import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.code_quality import (
@@ -44,6 +46,8 @@ from agents_remember.code_quality import (
 from agents_remember.code_quality import (
     scope as quality_scope,
 )
+from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.platform_subprocess import native_subprocess_environment
 from agents_remember.kernel.primitives import memory_cap
 
 crap_failure_line = post_coverage.crap_failure_line
@@ -77,6 +81,7 @@ def derive_scope(project_root: Path) -> GateScope:
 RADON_REPORT_NOTE = (
     "report only: radon exits 0 whatever it finds, so nothing below can fail the gate"
 )
+QUALITY_PROGRESS_REPORT_ENV = "AR_QUALITY_PROGRESS_REPORT"
 
 
 @dataclass(frozen=True)
@@ -92,6 +97,10 @@ class CheckConfig:
     targeted_base: diff_coverage.BaseResolution | None = None
     targeted_scope: targeted.TargetedScopeResult | None = None
     file_size_armed: bool = False
+    pytest_report_log: Path | None = None
+    coverage_data: Path | None = None
+    progress_report: Path | None = None
+    progress: QualityProgress | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +139,53 @@ class RailRuntime:
     runner: CommandRunner
     printer: Printer
     retry_plan: retry_proof.RetryPlan | None
+
+
+@dataclass
+class QualityProgress:
+    """One atomic, self-overwriting view of the wrapper's current rail."""
+
+    path: Path | None
+    started_at: str
+    completed: list[str]
+
+    @classmethod
+    def start(cls, path: Path | None) -> QualityProgress:
+        progress = cls(path=path, started_at=_quality_stamp(), completed=[])
+        progress.write(status="running", step="scope", detail="derive quality scope")
+        return progress
+
+    def write(self, *, status: str, step: str, detail: str) -> None:
+        if self.path is None:
+            return
+        atomic_write_text(
+            self.path,
+            json.dumps(
+                {
+                    "status": status,
+                    "step": step,
+                    "detail": detail,
+                    "startedAt": self.started_at,
+                    "updatedAt": _quality_stamp(),
+                    "completedSteps": self.completed,
+                },
+                indent=2,
+            )
+            + "\n",
+        )
+
+    def finish_step(self, step: str, *, passed: bool) -> None:
+        if passed and step not in self.completed:
+            self.completed.append(step)
+        self.write(
+            status="running" if passed else "failed",
+            step=step,
+            detail="passed" if passed else "failed",
+        )
+
+
+def _quality_stamp() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/check.py:106).
@@ -213,6 +269,8 @@ def _pytest_step(
     if getattr(config, "targeted", False) and not config.scope.test_paths:
         return None
     pytest_args = [sys.executable, "-m", "pytest", *test_args]
+    if config.pytest_report_log is not None:
+        pytest_args.append(f"--report-log={config.pytest_report_log.as_posix()}")
     if config.scope.coverage_paths:
         pytest_args += [
             *(f"--cov={module}" for module in coverage_args),
@@ -353,6 +411,9 @@ def subprocess_env(config: CheckConfig) -> dict[str, str]:  # pragma: no cover
     if existing:
         roots.append(existing)
     env["PYTHONPATH"] = os.pathsep.join(roots)
+    if config.coverage_data is not None:
+        config.coverage_data.parent.mkdir(parents=True, exist_ok=True)
+        env["COVERAGE_FILE"] = str(config.coverage_data)
     return env
 
 
@@ -363,6 +424,7 @@ def run_quality_check(
     printer: Printer = print_line,
 ) -> int:
     project_root = config.project_root.resolve()
+    progress = QualityProgress.start(config.progress_report)
     targeted = getattr(config, "targeted", False)
     if targeted and config.targeted_scope is not None and config.targeted_base is not None:
         for line in scope_reporting.targeted_scope_lines(
@@ -374,6 +436,7 @@ def run_quality_check(
                 "targeted: no Python files changed against the leaf base; there is nothing "
                 "for the leaf rails to certify"
             )
+            progress.write(status="completed", step="complete", detail="no Python changes")
             printer("result: quality-wrapper PASS")
             return 0
         if not config.scope.coverage_paths:
@@ -391,15 +454,17 @@ def run_quality_check(
         printer(line)
     with coverage_path_context(config.coverage_json, project_root) as coverage_json:
         failed_steps = execute_quality_rails(
-            config,
+            replace(config, progress=progress),
             coverage_json,
             project_root,
             runner=runner,
             printer=printer,
         )
     if failed_steps:
+        progress.write(status="failed", step="complete", detail=f"{failed_steps} failed rails")
         printer(f"result: quality-wrapper FAIL ({failed_steps} failed rails)")
         return 1
+    progress.write(status="completed", step="complete", detail="all quality rails passed")
     printer("result: quality-wrapper PASS")
     return 0
 
@@ -415,6 +480,12 @@ def execute_quality_rails(
     # An explicit output path may contain a report from an earlier tree. Never let a
     # pre-pytest refusal feed stale coverage into CRAP or diff-coverage.
     coverage_json.unlink(missing_ok=True)
+    if config.coverage_data is not None:
+        config.coverage_data.parent.mkdir(parents=True, exist_ok=True)
+        config.coverage_data.unlink(missing_ok=True)
+    if config.pytest_report_log is not None:
+        config.pytest_report_log.parent.mkdir(parents=True, exist_ok=True)
+        config.pytest_report_log.unlink(missing_ok=True)
     retry_plan = initialized_retry_plan(
         config,
         coverage_json,
@@ -496,6 +567,7 @@ def run_pytest_only(
     runner: CommandRunner,
     printer: Printer,
 ) -> int:
+    progress = config.progress or QualityProgress.start(None)
     step = next(
         (
             candidate
@@ -520,7 +592,9 @@ def run_pytest_only(
     env["COVERAGE_FILE"] = str(retry_plan.active_data_path)
     result = runner(step.name, step.command, config.project_root, env)
     retry_plan.record_pytest(result.return_code)
-    return report_pytest_result(step, result, coverage_json, printer)
+    failures = report_pytest_result(step, result, coverage_json, printer)
+    progress.finish_step(step.name, passed=failures == 0)
+    return failures
 
 
 def initialized_retry_plan(
@@ -562,17 +636,24 @@ def run_coverage_rails(
     *,
     printer: Printer,
 ) -> int:
-    return run_crap_calculator(
-        config,
-        coverage_json,
-        project_root,
-        printer=printer,
-    ) + run_diff_coverage(
+    progress = config.progress or QualityProgress.start(None)
+    progress.write(status="running", step="CRAP-Calculator", detail="score covered functions")
+    crap_failures = run_crap_calculator(
         config,
         coverage_json,
         project_root,
         printer=printer,
     )
+    progress.finish_step("CRAP-Calculator", passed=crap_failures == 0)
+    progress.write(status="running", step="diff-coverage", detail="score changed statements")
+    diff_failures = run_diff_coverage(
+        config,
+        coverage_json,
+        project_root,
+        printer=printer,
+    )
+    progress.finish_step("diff-coverage", passed=diff_failures == 0)
+    return crap_failures + diff_failures
 
 
 def run_fixed_checks(
@@ -583,12 +664,14 @@ def run_fixed_checks(
     printer: Printer,
     retry_plan: retry_proof.RetryPlan | None = None,
 ) -> int:
+    progress = config.progress or QualityProgress.start(None)
     env = subprocess_env(config)
     if retry_plan is not None:
         env["COVERAGE_FILE"] = str(retry_plan.active_data_path)
     targeted = getattr(config, "targeted", False)
     failed_steps = 0
     for step in quality_steps(config, coverage_json, retry_plan=retry_plan):
+        progress.write(status="running", step=step.name, detail="run quality rail")
         printer(step_header(step))
         printer(
             scope_reporting.fixed_step_scope_line(
@@ -604,21 +687,28 @@ def run_fixed_checks(
             # consume earlier-tree evidence after pytest was deliberately skipped.
             coverage_json.unlink(missing_ok=True)
             printer("result: pytest SKIPPED (an earlier quality rail failed)")
+            progress.finish_step(step.name, passed=False)
             continue
         if step.name == "pytest" and retry_plan is not None and retry_plan.exact:
-            failed_steps += report_cached_pytest(coverage_json, printer)
+            cached_failures = report_cached_pytest(coverage_json, printer)
+            failed_steps += cached_failures
+            progress.finish_step(step.name, passed=cached_failures == 0)
             continue
         result = runner(step.name, step.command, config.project_root, env)
         if step.name == "pytest" and retry_plan is not None:
             retry_plan.record_pytest(result.return_code)
         if step.name == "pytest":
-            failed_steps += report_pytest_result(step, result, coverage_json, printer)
+            pytest_failures = report_pytest_result(step, result, coverage_json, printer)
+            failed_steps += pytest_failures
+            progress.finish_step(step.name, passed=pytest_failures == 0)
             continue
         if result.return_code == 0:
             printer(step_success(step))
+            progress.finish_step(step.name, passed=True)
             continue
         failed_steps += 1
         printer(step_failure(step, result.return_code))
+        progress.finish_step(step.name, passed=False)
         report_memory_cap_failure(step.name, printer)
     return failed_steps
 
@@ -797,6 +887,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path for the generated Coverage.py JSON report.",
     )
     parser.add_argument(
+        "--pytest-report-log",
+        type=Path,
+        help=(
+            "Replace this JSONL file with pytest collection and result events. The report "
+            "is flushed per event so a lifecycle operation can project live progress."
+        ),
+    )
+    parser.add_argument(
+        "--coverage-data",
+        type=Path,
+        help="Keep the Coverage.py data file at this report-local path.",
+    )
+    parser.add_argument(
+        "--progress-report",
+        type=Path,
+        help=(
+            "Atomically replace this JSON file with the currently running rail and terminal "
+            "wrapper result."
+        ),
+    )
+    parser.add_argument(
         "--threshold",
         type=float,
         default=crap_calculator.DEFAULT_CRAP_THRESHOLD,
@@ -825,6 +936,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def config_from_args(args: argparse.Namespace) -> CheckConfig:
     project_root = args.project_root.resolve()
+    configured_progress = getattr(args, "progress_report", None)
+    if configured_progress is None and (
+        progress_env := os.environ.get(QUALITY_PROGRESS_REPORT_ENV)
+    ):
+        configured_progress = Path(progress_env)
+    configured_coverage_data = getattr(args, "coverage_data", None)
+    if configured_coverage_data is None and (coverage_env := os.environ.get("COVERAGE_FILE")):
+        configured_coverage_data = Path(coverage_env)
     quality_scope.validate_quality_config(project_root)
     try:
         scope_reporting.validate_invocation_environment()
@@ -846,6 +965,9 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
             targeted_base=base,
             targeted_scope=derived,
             file_size_armed=quality_scope.file_size_armed(project_root),
+            pytest_report_log=getattr(args, "pytest_report_log", None),
+            coverage_data=configured_coverage_data,
+            progress_report=configured_progress,
         )
     return CheckConfig(
         project_root=project_root,
@@ -856,12 +978,28 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
         diff_base=args.diff_base,
         diff_floor=args.diff_floor,
         file_size_armed=quality_scope.file_size_armed(project_root),
+        pytest_report_log=getattr(args, "pytest_report_log", None),
+        coverage_data=configured_coverage_data,
+        progress_report=configured_progress,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    configured_progress = args.progress_report
+    if configured_progress is None and (
+        progress_env := os.environ.get(QUALITY_PROGRESS_REPORT_ENV)
+    ):
+        configured_progress = Path(progress_env)
+    temp_root = (
+        configured_progress.parent / "tmp"
+        if configured_progress is not None
+        else Path("/tmp") / "agents-remember-quality"
+    )
+    native_environment = native_subprocess_environment(os.environ, temp_root=temp_root)
+    os.environ.clear()
+    os.environ.update(native_environment)
     if args.memory_cap_bytes is not None and args.memory_cap_bytes <= 0:
         print_line(
             "--memory-cap-bytes must be a positive integer "

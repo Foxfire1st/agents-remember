@@ -51,6 +51,7 @@ from agents_remember.kernel.git_command import (
     GIT_REPOSITORY_SELECTOR_ENV,
     git_environment,
     run_git,
+    run_git_with_index,
 )
 from agents_remember.worktrees.modules import cleanup
 from agents_remember.worktrees.modules.code_quality_gate import _git_common_dir
@@ -58,6 +59,7 @@ from agents_remember.worktrees.modules.git import (
     commit_if_dirty,
     head_commit,
     run_pre_commit_hook_if_configured,
+    worktree_candidate_tree,
 )
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
@@ -217,6 +219,43 @@ class DecoyRepositoryTests(unittest.TestCase):
 
 
 class RunnerContractTests(unittest.TestCase):
+    def test_candidate_tree_reports_each_isolated_index_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            index = root / "candidate.index"
+            failed = subprocess.CompletedProcess(["git"], 1, stdout="", stderr="candidate refused")
+            with (
+                patch(
+                    "agents_remember.worktrees.modules.git.run_git_with_index",
+                    return_value=failed,
+                ),
+                self.assertRaisesRegex(RuntimeError, "could not seed candidate index"),
+            ):
+                worktree_candidate_tree(repo, index)
+
+            success = subprocess.CompletedProcess(["git"], 0, stdout="", stderr="")
+            with (
+                patch(
+                    "agents_remember.worktrees.modules.git.run_git_with_index",
+                    side_effect=[success, success, failed],
+                ),
+                self.assertRaisesRegex(RuntimeError, "could not resolve candidate tree"),
+            ):
+                worktree_candidate_tree(repo, index)
+
+    def test_only_an_explicit_isolated_index_override_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            index = Path(tmp) / "candidate.index"
+
+            self.assertEqual(run_git_with_index(repo, ["read-tree", "HEAD"], index).returncode, 0)
+            self.assertTrue(index.is_file())
+
     def test_stdin_is_devnull_unless_input_text_is_given(self) -> None:
         # `git patch-id` reads a diff from stdin; everything else must get DEVNULL,
         # because under the stdio MCP transport the inherited descriptor is the

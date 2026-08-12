@@ -19,6 +19,7 @@ from agents_remember.application.memory_tools import (
 from agents_remember.cli import memory_citations
 from agents_remember.cli.__main__ import build_parser
 from agents_remember.errors import AuthorityError
+from agents_remember.mcp.tools import citation_fix_payload
 from agents_remember.memory_quality.style.citations import (
     extents,
     model,
@@ -356,6 +357,22 @@ class WriteGuardTests(unittest.TestCase):
 
         self.assertTrue(payload["dryRun"])
         self.assertEqual(self.snapshot(self.enclosure.leaf_onboarding), before)
+
+    def test_public_payload_keeps_the_leaf_guard(self) -> None:
+        self.plant()
+
+        payload = citation_fix_payload(
+            self.enclosure.config,
+            REPO,
+            contract_path=self.contract_path,
+            operation_scope=CitationOperationScope(),
+            dry_run=True,
+        )
+
+        self.assertEqual(payload["operation"], "citation_fix")
+        self.assertEqual(payload["onboardingRoot"], self.enclosure.leaf_onboarding.as_posix())
+        self.assertTrue(payload["dryRun"])
+        self.assertEqual(payload["claimsRepaired"], 1)
 
     def test_expected_snapshot_reaches_scoped_check_fix_and_postcheck_without_a_walk(
         self,

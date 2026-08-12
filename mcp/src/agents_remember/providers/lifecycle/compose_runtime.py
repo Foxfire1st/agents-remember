@@ -55,9 +55,11 @@ def provider_asset_text(*parts: str) -> str:
     return provider_asset_path(*parts).read_text(encoding="utf-8")
 
 
-def compose_command(render: ComposeRender, args: list[str]) -> list[str]:
+def compose_command(
+    render: ComposeRender, args: list[str], *, executable: str | None = None
+) -> list[str]:
     return [
-        docker_command(),
+        executable or docker_command(),
         "compose",
         "--project-name",
         render.project_name,
@@ -85,8 +87,9 @@ def run_compose(
 
 
 def compose_plan(render: ComposeRender, args: list[str], *, cwd: Path) -> dict[str, Any]:
+    """Describe the Docker command without requiring Docker on the planning host."""
     return {
-        "command": compose_command(render, args),
+        "command": compose_command(render, args, executable="docker"),
         "cwd": cwd.as_posix(),
         "baseFile": render.base_file.as_posix(),
         "overrideSha256": render.override_sha256,

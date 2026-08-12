@@ -483,6 +483,80 @@ def _task_worktree(root: Path) -> tuple[Path, Path]:
 
 
 class CertifiedIndexCommitTests(unittest.TestCase):
+    def test_async_candidate_refuses_later_worktree_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _repo, worktree = _task_worktree(Path(tmp))
+            (worktree / "tracked.txt").write_text("accepted\n", encoding="utf-8")
+            candidate = closeout_module.worktree_candidate_tree(
+                worktree, worktree.parent / "candidate.index"
+            )
+            (worktree / "tracked.txt").write_text("later\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,
+                self.assertRaisesRegex(RuntimeError, "candidate changed"),
+            ):
+                closeout_module._gate_staged_code(
+                    worktree,
+                    worktree_group=worktree.parent,
+                    diff_base="HEAD",
+                    candidate_tree=candidate,
+                )
+
+            gate.assert_not_called()
+
+    def test_async_candidate_is_the_tree_the_gate_receives(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _repo, worktree = _task_worktree(Path(tmp))
+            (worktree / "accepted.py").write_text("VALUE = 1\n", encoding="utf-8")
+            candidate = closeout_module.worktree_candidate_tree(
+                worktree, worktree.parent / "candidate.index"
+            )
+
+            with mock.patch.object(
+                closeout_module,
+                "run_strict_code_quality_gate",
+                return_value={"required": True, "passed": True},
+            ):
+                closeout_module._gate_staged_code(
+                    worktree,
+                    worktree_group=worktree.parent,
+                    diff_base="HEAD",
+                    candidate_tree=candidate,
+                )
+
+            self.assertEqual(git(worktree, "write-tree"), candidate)
+
+    def test_materialized_index_must_equal_the_accepted_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _repo, worktree = _task_worktree(Path(tmp))
+            (worktree / "accepted.py").write_text("VALUE = 1\n", encoding="utf-8")
+            candidate = closeout_module.worktree_candidate_tree(
+                worktree, worktree.parent / "candidate.index"
+            )
+            real_require_git = closeout_module.require_git
+
+            def mismatched_write_tree(repo: Path, args: list[str]) -> str:
+                if args == ["write-tree"]:
+                    return "f" * 40
+                return real_require_git(repo, args)
+
+            with (
+                mock.patch.object(
+                    closeout_module, "worktree_candidate_tree", return_value=candidate
+                ),
+                mock.patch.object(
+                    closeout_module, "require_git", side_effect=mismatched_write_tree
+                ),
+                self.assertRaisesRegex(RuntimeError, "while materializing the accepted tree"),
+            ):
+                closeout_module._gate_staged_code(
+                    worktree,
+                    worktree_group=worktree.parent,
+                    diff_base="HEAD",
+                    candidate_tree=candidate,
+                )
+
     def test_pre_commit_hook_runs_once_before_gate_and_not_during_verified_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             _repo, worktree = _task_worktree(Path(tmp))

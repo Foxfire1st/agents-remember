@@ -24,6 +24,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.lifecycle_state import (
     LIVE_STATES,
@@ -170,6 +171,7 @@ class EnclosureNode(BaseModel):
     cleanup: str
     codeWorktreeExists: bool = False
     memoryWorktreeExists: bool = False
+    lifecycleOperation: LifecycleOperationProjection | None = None
     actions: list[ActionAvailability] = Field(default_factory=list)
 
 

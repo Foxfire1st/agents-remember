@@ -13,12 +13,14 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application import completion_cleanup, worktree_tools
+from agents_remember.application.lifecycle_operation_worker import integration_completion_payload
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
     InboxMessage,
@@ -33,6 +35,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     RetirementSettings,
 )
 from agents_remember.mcp.tools.terminal import session_rename_payload, session_retire_payload
+from agents_remember.models.lifecycle_operation import IntegrateOperationInput
 from agents_remember.models.operator_inbox import AgentRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
@@ -57,6 +60,7 @@ from agents_remember.serving.terminal_paste import TmuxPaneCapturer
 from agents_remember.serving.turn_state import classify_turn_state
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 SPRINT = TaskDocumentRef(repository="repo", path="sprint/task.json")
@@ -713,7 +717,7 @@ class LandSeatsForTaskTests(unittest.TestCase):
 
 
 class AutoLandHookIntegrationTests(unittest.TestCase):
-    """The completion-edge cleanup wiring in ``application/worktree_tools.py``."""
+    """The completion-edge cleanup wiring in the detached integration owner."""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -747,6 +751,17 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
 
     def _catalog(self) -> TerminalCatalog:
         return TerminalCatalog(self.root / "logs" / "dashboard" / "terminal-sessions.json")
+
+    def _complete_integration(self, config: McpRuntimeConfig) -> dict[str, object]:
+        return integration_completion_payload(
+            config,
+            IntegrateOperationInput(
+                configPath=config.config_path.as_posix(),
+                contractPath=self.contract_path.as_posix(),
+                autoCompleteSeats=config.retirement.auto_land_on_integration,
+            ),
+            WorktreeCommandResult(0, {"state": "integrated"}),
+        )
 
     def _post_report(
         self,
@@ -798,21 +813,14 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
         host = _FakeHost()
 
         with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
             mock.patch.object(completion_cleanup, "TerminalHost", return_value=host),
         ):
-            result = worktree_tools.worktree_integrate_tool(
-                self._config(), contract_path=str(self.contract_path)
-            )
+            result = self._complete_integration(self._config())
 
         closed = {"worker-1", "reviewer-1", "curator-1"}
         self.assertTrue(result["ok"])
-        self.assertEqual(set(result["autoClosedSeats"]), closed)
+        self.assertEqual(set(cast(list[str], result["autoClosedSeats"])), closed)
         self.assertEqual(result["autoCloseDeferredSeats"], [])
         self.assertEqual(result["autoCloseFailedSeats"], [])
         self.assertEqual(set(host.terminated), closed)
@@ -837,20 +845,16 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
         host = _FakeHost()
 
         with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
             mock.patch.object(completion_cleanup, "TerminalHost", return_value=host),
         ):
-            result = worktree_tools.worktree_integrate_tool(
-                self._config(), contract_path=str(self.contract_path)
-            )
+            result = self._complete_integration(self._config())
 
         self.assertEqual(result["autoClosedSeats"], [])
-        self.assertEqual(set(result["autoCloseDeferredSeats"]), {"worker-1", "reviewer-1"})
+        self.assertEqual(
+            set(cast(list[str], result["autoCloseDeferredSeats"])),
+            {"worker-1", "reviewer-1"},
+        )
         self.assertEqual(result["autoCloseFailedSeats"], [])
         self.assertEqual(host.terminated, [])
         self.assertEqual(_get(catalog, "worker-1").status, "running")
@@ -867,19 +871,14 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
         catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
 
         with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
         ):
-            result = worktree_tools.worktree_integrate_tool(
-                self._config(auto_close_completed_seats=False),
-                contract_path=str(self.contract_path),
-            )
+            result = self._complete_integration(self._config(auto_close_completed_seats=False))
 
-        self.assertEqual(set(result["autoLandedSeats"]), {"worker-1", "reviewer-1", "curator-1"})
+        self.assertEqual(
+            set(cast(list[str], result["autoLandedSeats"])),
+            {"worker-1", "reviewer-1", "curator-1"},
+        )
         self.assertNotIn("autoClosedSeats", result)
         for session_id in ("worker-1", "reviewer-1", "curator-1"):
             self.assertEqual(_get(catalog, session_id).status, "landed")
@@ -889,17 +888,9 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
         catalog = self._catalog()
         catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
         with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
         ):
-            result = worktree_tools.worktree_integrate_tool(
-                self._config(auto_land_on_integration=False),
-                contract_path=str(self.contract_path),
-            )
+            result = self._complete_integration(self._config(auto_land_on_integration=False))
         self.assertNotIn("autoClosedSeats", result)
         self.assertNotIn("autoLandedSeats", result)
         self.assertEqual(_get(catalog, "worker-1").status, "running")
@@ -942,7 +933,10 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
             result = worktree_tools.lifecycle_finalize_task_tool(
                 self._config(), str(self.contract_path)
             )
-        self.assertEqual(set(result["autoClosedSeats"]), {"reviewer-1", "curator-1"})
+        self.assertEqual(
+            set(cast(list[str], result["autoClosedSeats"])),
+            {"reviewer-1", "curator-1"},
+        )
         self.assertEqual(set(host.terminated), {"reviewer-1", "curator-1"})
         self.assertEqual(_get(catalog, "mgr").status, "running")
         self.assertEqual(_get(catalog, "reviewer-1").retired_edge, "master-finalization")

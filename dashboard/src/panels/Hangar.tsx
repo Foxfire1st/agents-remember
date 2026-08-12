@@ -111,6 +111,12 @@ export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
                   <span className={badge}>closeout {enclosure.closeoutStatus}</span>
                   <span className={badge}>integrate {enclosure.integrationStatus}</span>
                   <span className={badge}>cleanup {enclosure.cleanup}</span>
+                  {enclosure.lifecycleOperation ? (
+                    <span className={badge} data-testid="hangar-lifecycle-operation">
+                      {enclosure.lifecycleOperation.kind} {enclosure.lifecycleOperation.status} ·{" "}
+                      {enclosure.lifecycleOperation.phase}
+                    </span>
+                  ) : null}
                 </div>
                 {lifecycleId && lifecycle?.gate && isWorktreeGateKind(lifecycle.gate.kind) ? (
                   <div className={actions}>

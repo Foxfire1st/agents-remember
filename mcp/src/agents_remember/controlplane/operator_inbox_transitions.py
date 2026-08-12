@@ -35,6 +35,7 @@ transition that reads it lives here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -339,6 +340,14 @@ def mark_expired(
     architect mailbox of last resort) so a dead owner chain stays visible instead of vanishing.
     """
 
+    return store.transition(entry_id, expiry_transition(now=now, options=options))
+
+
+def expiry_transition(
+    *, now: str, options: ExpiryOptions
+) -> Callable[[OperatorInboxEntry], OperatorInboxEntry | None]:
+    """Build the pure expiry transition used by one-row and sweep-batch writes."""
+
     def _apply(latest: OperatorInboxEntry) -> OperatorInboxEntry | None:
         if latest.state != "pending":
             return None
@@ -353,7 +362,7 @@ def mark_expired(
             update.update(_readdress_fields(options.readdress_to))
         return latest.model_copy(update=update)
 
-    return store.transition(entry_id, _apply)
+    return _apply
 
 
 def rebind_entry(

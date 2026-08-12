@@ -28,6 +28,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -35,7 +36,8 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.application.gate_tools import GateRaise, GateWait
-from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.application.lifecycle_operation_worker import run_worker
+from agents_remember.application.memory_tools import CarryoverSelection, CitationOperationScope
 from agents_remember.application.orchestration_tools import NudgeSubject, NudgeTarget
 from agents_remember.application.provider_tools import (
     GrepaiSearchQuery,
@@ -62,6 +64,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
 from agents_remember.mcp import tools
+from agents_remember.mcp.tools import memory as memory_payload_tools
 from agents_remember.models.base import FlexibleResponseModel
 from agents_remember.models.structural.agent import (
     DispatchAgentRequest,
@@ -179,6 +182,18 @@ def _base_fixture(root: Path):
 def _simple_payloads(config) -> dict[str, dict]:
     """Tools whose real ``*_payload`` builder runs against the base fixture."""
     leaf_ref = TaskDocumentRef(repository=REPO, path="master/leaf-1.json")
+    with mock.patch.object(
+        memory_payload_tools,
+        "citation_fix_tool",
+        return_value={"ok": True, "repoId": REPO, "dryRun": True},
+    ):
+        citation_fix = tools.citation_fix_payload(
+            config,
+            REPO,
+            contract_path="/fixture/leaf-contract.md",
+            operation_scope=CitationOperationScope(),
+            dry_run=True,
+        )
     return {
         "ping": tools.ping_payload(),
         "server_info": tools.server_info_payload(config),
@@ -251,6 +266,7 @@ def _simple_payloads(config) -> dict[str, dict]:
         "resolve_context": tools.resolve_context_payload(config, TaskRef(repo_id=REPO)),
         "drift_check": tools.drift_check_payload(config, REPO),
         "memory_quality_check": tools.memory_quality_check_payload(config, REPO),
+        "citation_fix": citation_fix,
         "route_index_refresh": tools.route_index_refresh_payload(config, REPO),
         "memory_init": tools.memory_init_payload(config, REPO),
         "skills_install": tools.skills_install_payload(config),
@@ -310,16 +326,27 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_closeout_preview"] = tools.worktree_closeout_preview_payload(
         config, contract_path, CloseoutCommitMessages(code="code commit message")
     )
-    payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
+    with mock.patch("agents_remember.worktrees.lifecycle_operations.launch_detached_worker"):
+        payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
+            config,
+            contract_path,
+            CloseoutCommitMessages(code="code commit message"),
+            CloseoutApproval(intent_note="intent note"),
+        )
+    assert run_worker(Path(contract_path), "closeout") == 0
+    payloads["worktree_operation_cancel"] = tools.worktree_operation_cancel_payload(
         config,
         contract_path,
-        CloseoutCommitMessages(code="code commit message"),
-        CloseoutApproval(intent_note="intent note"),
+        operation_kind="closeout",
+        intent_note="observe completed operation",
+        dry_run=True,
     )
     _run_git(config.workspace_root / REPO, ["checkout", "ar/demo-task"])
-    payloads["worktree_integrate"] = tools.worktree_integrate_payload(
-        config, contract_path, dry_run=False
-    )
+    with mock.patch("agents_remember.worktrees.lifecycle_operations.launch_detached_worker"):
+        payloads["worktree_integrate"] = tools.worktree_integrate_payload(
+            config, contract_path, dry_run=False
+        )
+    assert run_worker(Path(contract_path), "integrate") == 0
     payloads["worktree_cleanup"] = tools.worktree_cleanup_payload(
         config, contract_path, dry_run=False
     )

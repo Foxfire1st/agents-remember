@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.harnesses import HARNESSES, Harness
@@ -66,7 +66,7 @@ KNOWN_GATE_DELEGATION_FIELDS = frozenset({"policy", "kinds", "requireReviewerVer
 KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
 # Optional hard cap for the full quality gate. When absent, host RAM and swap own
 # pressure response; this scalar remains for constrained CI environments.
-KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes"})
+KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes", "executor"})
 KNOWN_LOOPS_FIELDS = frozenset({"defaults", "perLevel", "perMaster"})
 KNOWN_LOOP_DEFAULTS_FIELDS = frozenset({"maxRounds", "reviewerReuse", "complexity"})
 KNOWN_LOOP_COMPLEXITY_FIELDS = frozenset({"fullLoopAt", "builderAt"})
@@ -244,6 +244,9 @@ class AgentNotifierSettings:
     escalation_budget: int = DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
 
 
+QualityExecutor = Literal["local", "dagger"]
+
+
 @dataclass(frozen=True)
 class QualityGateSettings:
     """``orchestration.qualityGate`` -- the full quality gate's resource knobs.
@@ -255,6 +258,7 @@ class QualityGateSettings:
     """
 
     memory_cap_bytes: int | None = None
+    executor: QualityExecutor = "local"
 
 
 @dataclass(frozen=True)

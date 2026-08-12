@@ -10,6 +10,7 @@ from agents_remember.controlplane.enforcement import (
     evaluate_closeout_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     load_ledger,
@@ -18,7 +19,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.observer.events import now_iso
-from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
     QualityGateTarget,
@@ -37,6 +38,7 @@ from agents_remember.worktrees.modules.git import (
     is_ancestor,
     require_git,
     run_pre_commit_hook_if_configured,
+    worktree_candidate_tree,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -95,6 +97,11 @@ def closeout_changed_paths(contract) -> dict[str, list[str]]:
         "working": working,
         "committed": committed_only,
     }
+
+
+def _quality_gate_executor(contract) -> str:
+    settings = load_agentic_settings(contract.coordination_root, repo_root=contract.code_repo_path)
+    return settings.quality_gate.executor
 
 
 def _bounded_paths(paths: list[str]) -> dict[str, object]:
@@ -371,7 +378,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         contract.code_worktree,
         code_would_commit=code_dirty,
         diff_base=contract.code_base_commit,
-        plan=QualityGatePlan(mode="targeted"),
+        plan=QualityGatePlan(mode="targeted", executor=_quality_gate_executor(contract)),
     )
     return {
         "state": "would-closeout",
@@ -501,7 +508,11 @@ def _closeout_gate_guard(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     if not contract.lifecycle_id:
         return None
     store = GateStore(observer_logs_root(contract.coordination_root))
-    return evaluate_closeout_gate(store.current(contract.lifecycle_id), policy=args.gate_policy)
+    return evaluate_closeout_gate(
+        store.current(contract.lifecycle_id),
+        policy=args.gate_policy,
+        operation_key=args.operation_key or None,
+    )
 
 
 def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
@@ -576,6 +587,7 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
         kind=CLOSEOUT_GATE_KIND,
         now=now_iso(),
         policy=args.gate_policy,
+        operation_key=args.operation_key or None,
     )
     if not guard.permitted:
         raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
@@ -707,6 +719,9 @@ def _external_closeout_commits(
         raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
     code_commit = change.commit
     context = _closeout_contract_context(contract)
+    report_operation_progress(
+        args, "memory-refresh", current_command="refresh onboarding and route metadata"
+    )
     refreshed_onboarding = refresh_onboarding_metadata(contract, change)
     refreshed_route_overviews = refresh_route_overview_metadata_for_context(
         context,
@@ -722,6 +737,9 @@ def _external_closeout_commits(
         memory_quality_before_refresh, memory_quality_after_refresh
     )
     memory_content_dirty = worktree_dirty(contract.memory_worktree)
+    report_operation_progress(
+        args, "memory-commit", current_command="commit verified external memory"
+    )
     memory_commit = (
         commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
         if memory_content_dirty
@@ -732,6 +750,9 @@ def _external_closeout_commits(
     if existing_mapping is not None and existing_mapping.memory_commit == memory_commit:
         ledger_commit = contract.ledger_commit or head_commit(contract.memory_worktree)
     else:
+        report_operation_progress(
+            args, "ledger-commit", current_command="commit code-to-memory ledger mapping"
+        )
         write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
         require_git(contract.memory_worktree, ["add", "memory.md"])
         ledger_commit = commit_if_dirty(
@@ -819,7 +840,12 @@ def _refuse_conflicted_worktree(code_worktree: Path) -> None:
 
 
 def _gate_staged_code(
-    code_worktree: Path, *, worktree_group: Path, diff_base: str
+    code_worktree: Path,
+    *,
+    worktree_group: Path,
+    diff_base: str,
+    executor: str = "local",
+    candidate_tree: str | None = None,
 ) -> dict[str, object]:
     """Stage, run the configured fast hook, then gate exactly what closeout commits.
 
@@ -874,8 +900,27 @@ def _gate_staged_code(
     """
     _refuse_outside_a_linked_worktree(code_worktree)
     _refuse_conflicted_worktree(code_worktree)
+    if candidate_tree is not None:
+        current = worktree_candidate_tree(
+            code_worktree,
+            worktree_group / "reports" / ".closeout-verify.index",
+        )
+        if current != candidate_tree:
+            raise RuntimeError(
+                "closeout candidate changed after the asynchronous operation was accepted: "
+                f"expected staged tree {candidate_tree}, found {current}. Nothing was committed; "
+                "restart closeout to bind the updated candidate."
+            )
     require_git(code_worktree, ["reset", "--mixed", "--quiet", "HEAD"])
     require_git(code_worktree, ["add", "-A"])
+    if candidate_tree is not None:
+        staged = require_git(code_worktree, ["write-tree"])
+        if staged != candidate_tree:
+            raise RuntimeError(
+                "closeout candidate changed while materializing the accepted tree: "
+                f"expected {candidate_tree}, found {staged}. Nothing was committed; restart "
+                "closeout to bind the updated candidate."
+            )
     pre_commit_hook_ran = run_pre_commit_hook_if_configured(code_worktree)
     if pre_commit_hook_ran:
         # A formatter in the hook may update tracked files.  Rebuild the index before
@@ -884,7 +929,7 @@ def _gate_staged_code(
     result = run_strict_code_quality_gate(
         QualityGateTarget(code_worktree=code_worktree, worktree_group=worktree_group),
         diff_base=diff_base,
-        plan=QualityGatePlan(mode="targeted"),
+        plan=QualityGatePlan(mode="targeted", executor=executor),
     )
     return {
         **result,
@@ -995,6 +1040,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     it enforces is the whole point of 260731-EFA-L5 R3.
     """
     assert args.contract_path is not None
+    report_operation_progress(args, "preflight", current_command="validate closeout eligibility")
     contract = load_contract(args.contract_path)
     _validate_closeout_source_heads(contract)
     if args.dry_run:
@@ -1010,17 +1056,25 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         contract.code_worktree,
         code_would_commit=code_would_commit,
         diff_base=contract.code_base_commit,
-        plan=QualityGatePlan(mode="targeted"),
+        plan=QualityGatePlan(mode="targeted", executor=_quality_gate_executor(contract)),
+    )
+    report_operation_progress(
+        args, "memory-preflight", current_command="run pre-refresh memory quality"
     )
     memory_quality_before_refresh = _memory_quality_before_refresh(contract)
     strict_code_quality_required = requires_strict_code_quality(
         contract.code_worktree, code_would_commit=code_would_commit
     )
     if strict_code_quality_required:
+        report_operation_progress(
+            args, "quality", current_command="run targeted leaf quality contract"
+        )
         code_quality_gate = _gate_staged_code(
             contract.code_worktree,
             worktree_group=contract.worktree_group,
             diff_base=contract.code_base_commit,
+            executor=_quality_gate_executor(contract),
+            candidate_tree=args.candidate_tree,
         )
     # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
     # Everything above only reads or touches the index of the task's own disposable worktree, so a
@@ -1028,7 +1082,20 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     # would have to undo, so none of it may run on an approval this closeout has not already
     # consumed. Do not move this line down past the commit -- that is R3, and it is what let a
     # closeout finish its mutations and leave the approval spendable.
+    report_operation_progress(
+        args,
+        "approval-claim",
+        current_command="claim closeout approval",
+        irreversible_boundary=True,
+    )
     gate_guard = _claim_closeout_gate(contract, args)
+    report_operation_progress(
+        args,
+        "approval-claim",
+        current_command="closeout approval claimed",
+        approval_claimed=gate_guard is not None,
+    )
+    report_operation_progress(args, "code-commit", current_command="commit verified code")
     code_commit = (
         commit_verified_staged(contract.code_worktree, args.code_commit_message)
         if strict_code_quality_required
@@ -1060,6 +1127,9 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         code_commit,
         memory,
         bool(integration_reopen["reopened"]),
+    )
+    report_operation_progress(
+        args, "contract-finalization", current_command="finalize closeout contract edge"
     )
     write_contract(contract.contract_path, updated)
     return WorktreeCommandResult(

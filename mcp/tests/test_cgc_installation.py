@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -103,7 +104,11 @@ class CgcInstallDryRunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             args = _scoped_install_args(Path(tmp_dir))
 
-            result = cgc_install(args)
+            with mock.patch(
+                "agents_remember.providers.lifecycle.compose_runtime.docker_command",
+                return_value="docker",
+            ):
+                result = cgc_install(args)
 
         self.assertEqual(result["provider"], "codegraphcontext")
         self.assertEqual(result["action"], "install")
@@ -152,7 +157,11 @@ class CgcInstallDryRunTests(unittest.TestCase):
                 ]
             )
 
-            result = cgc_install(args)
+            with mock.patch(
+                "agents_remember.providers.lifecycle.compose_runtime.docker_command",
+                return_value="docker",
+            ):
+                result = cgc_install(args)
 
         self.assertEqual(result["action"], "install-all")
         self.assertTrue(result["ok"])

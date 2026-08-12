@@ -30,13 +30,14 @@ class GateScopeDerivationTests(unittest.TestCase):
 
     def test_scope_derived_from_this_checkout_reaches_the_whole_tree(self) -> None:
         scope = check.derive_scope(REPOSITORY_ROOT)
+        expected_coverage = [Path("mcp/src/agents_remember"), Path("mcp/tests")]
+        dagger_package = Path(".dagger/src/agents_remember_quality")
+        if any(path.is_relative_to(dagger_package) for path in scope.lint_paths):
+            expected_coverage.insert(0, dagger_package)
 
         self.assertGreater(len(scope.lint_paths), 500)
         self.assertEqual(scope.lint_paths, scope.type_paths)
-        self.assertEqual(
-            scope.coverage_paths,
-            [Path("mcp/src/agents_remember"), Path("mcp/tests")],
-        )
+        self.assertEqual(scope.coverage_paths, expected_coverage)
         self.assertEqual(scope.test_paths, [Path("mcp/tests")])
 
     def test_a_script_outside_every_package_reaches_ruff_and_pyright(self) -> None:

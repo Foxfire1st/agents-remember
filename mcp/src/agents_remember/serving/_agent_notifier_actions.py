@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
@@ -11,6 +12,7 @@ from agents_remember.controlplane.agent_notifier_signals import (
 )
 from agents_remember.controlplane.operator_inbox_records import (
     InboxOwner,
+    OperatorInboxEntry,
 )
 from agents_remember.controlplane.operator_inbox_transitions import ExpiryOptions
 from agents_remember.controlplane.signal_routing import (
@@ -700,3 +702,136 @@ def act_on_finding(
     if action is None:
         return AgentNotifierActionResult("none", finding, "skipped", "unhandled finding kind")
     return action(ctx, finding, now=now, sweep=sweep)
+
+
+@dataclass(frozen=True)
+class _PreparedExpiry:
+    finding: AgentNotifierFinding
+    entry_id: str
+    options: ExpiryOptions
+    event_kind: str
+    event_extra: dict[str, object]
+
+
+def act_on_findings(
+    ctx: AgentNotifierContext,
+    findings: list[AgentNotifierFinding],
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> tuple[AgentNotifierActionResult, ...]:
+    """Act on one sweep, batching independent expiry snapshots into one durable write."""
+    prepared: list[_PreparedExpiry] = []
+    results: list[AgentNotifierActionResult | None] = [None] * len(findings)
+    prepared_indexes: list[int] = []
+    topology = TaskDocumentTopology(ctx.coordination_root)
+    for index, finding in enumerate(findings):
+        item = _prepare_expiry(ctx, finding, topology=topology, sweep=sweep)
+        if item is None:
+            results[index] = act_on_finding(ctx, finding, now=now, sweep=sweep)
+            continue
+        if isinstance(item, AgentNotifierActionResult):
+            results[index] = item
+            continue
+        prepared.append(item)
+        prepared_indexes.append(index)
+    transitions = [
+        (
+            item.entry_id,
+            inbox_transitions.expiry_transition(now=now.isoformat(), options=item.options),
+        )
+        for item in prepared
+    ]
+    for item, index, (expired, _changed) in zip(
+        prepared,
+        prepared_indexes,
+        ctx.inbox_store.transition_many(transitions),
+        strict=True,
+    ):
+        sweep.remember(expired)
+        _log_event(
+            ctx,
+            item.event_kind,
+            {
+                "entryId": expired.id,
+                "agentId": expired.agentId,
+                "state": expired.state,
+                "terminalAt": expired.terminalAt,
+                **item.event_extra,
+            },
+        )
+        results[index] = AgentNotifierActionResult(
+            "expire", item.finding, expired.state, item.options.reason
+        )
+    return tuple(result for result in results if result is not None)
+
+
+def _prepare_expiry(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    topology: TaskDocumentTopology,
+    sweep: _SweepState,
+) -> _PreparedExpiry | AgentNotifierActionResult | None:
+    if finding.kind not in {"rebind-expired", "inbox-ttl-expired"}:
+        return None
+    return _prepare_known_expiry(ctx, finding, topology=topology, sweep=sweep)
+
+
+def _prepare_known_expiry(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    topology: TaskDocumentTopology,
+    sweep: _SweepState,
+) -> _PreparedExpiry | AgentNotifierActionResult | None:
+    if finding.source_id is None:
+        return AgentNotifierActionResult("expire", finding, "skipped", "no source entry id")
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return AgentNotifierActionResult("expire", finding, "skipped", "entry not pending")
+    return _prepare_pending_expiry(ctx, finding, entry=entry, topology=topology)
+
+
+def _prepare_pending_expiry(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    entry: OperatorInboxEntry,
+    topology: TaskDocumentTopology,
+) -> _PreparedExpiry | AgentNotifierActionResult | None:
+    if finding.kind == "inbox-ttl-expired":
+        return _PreparedExpiry(
+            finding=finding,
+            entry_id=entry.id,
+            options=ExpiryOptions(reason="pending-ttl-expired"),
+            event_kind="orchestration.agent-notifier.inbox-expired",
+            event_extra={},
+        )
+    owner = derive_row_owner(ctx.catalog, topology, entry)
+    if owner.agent_id is not None and owner.agent_id != entry.agentId:
+        return None
+    subject_document = entry.subjectTaskDocumentRef or entry.taskDocumentRef
+    if subject_document is None:
+        return AgentNotifierActionResult(
+            "expire", finding, "skipped", "row has no structural task address"
+        )
+    mailbox = derive_architect_owner(ctx.catalog, topology, task_document_ref=subject_document)
+    return _PreparedExpiry(
+        finding=finding,
+        entry_id=entry.id,
+        options=ExpiryOptions(
+            reason="rebind-grace-expired",
+            readdress_to=InboxOwner(
+                role=mailbox.role,
+                task_document_ref=mailbox.task_document_ref,
+                agent_id=mailbox.agent_id,
+                lifecycle_id=mailbox.lifecycle_id,
+            ),
+        ),
+        event_kind="orchestration.agent-notifier.rebind-expired",
+        event_extra={
+            "architectRole": mailbox.role,
+            "architectAgentId": mailbox.agent_id,
+        },
+    )

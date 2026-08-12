@@ -8,6 +8,7 @@ from pydantic import Field
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
+from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]
@@ -94,6 +95,7 @@ class WorktreeSummary(StrictResponseModel):
     # that they were substituted, and the file heals the next time a lifecycle tool writes it.
     unknownContractCells: list[str] | None = None
     error: str | None = None
+    lifecycleOperation: LifecycleOperationProjection | None = None
 
 
 class WorktreeCommandResponse(FlexibleToolResponse):
@@ -116,6 +118,7 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # progress as running / stale (dead heartbeat) / ok /
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
+    lifecycleOperation: LifecycleOperationProjection | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):
@@ -150,6 +153,10 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
     autoCloseDeferredSeats: list[str] = Field(default_factory=list)
     autoCloseFailedSeats: list[str] = Field(default_factory=list)
     autoLandedSeats: list[str] = Field(default_factory=list)
+
+
+class WorktreeOperationCancelResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_operation_cancel"] = "worktree_operation_cancel"
 
 
 class WorktreeCleanupResponse(WorktreeCommandResponse):

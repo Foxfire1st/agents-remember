@@ -20,10 +20,12 @@ from agents_remember.application.worktree_tools import (
     worktree_closeout_apply_tool,
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
+    worktree_operation_cancel_tool,
     worktree_status_tool,
     worktree_sync_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.lifecycle_operation import IntegrateStrategy
 
 from .base import _tool_payload
 
@@ -102,7 +104,7 @@ def worktree_integrate_payload(
     config: McpRuntimeConfig,
     contract_path: str,
     *,
-    strategy: str = "ff-only",
+    strategy: IntegrateStrategy = "ff-only",
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -113,6 +115,26 @@ def worktree_integrate_payload(
             contract_path=contract_path,
             strategy=strategy,
             ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def worktree_operation_cancel_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    operation_kind: str,
+    intent_note: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_operation_cancel",
+        worktree_operation_cancel_tool(
+            config,
+            contract_path=contract_path,
+            operation_kind=operation_kind,
+            intent_note=intent_note,
             dry_run=dry_run,
         ),
     )

@@ -23,6 +23,10 @@ from types import TracebackType
 
 from agents_remember.errors import CodexAppServerError, CodexAppServerRpcError
 from agents_remember.kernel.harnesses import Harness
+from agents_remember.kernel.platform_subprocess import (
+    native_path_environment,
+    resolve_native_executable,
+)
 from agents_remember.models.conversations.capabilities import (
     HistoryCapabilities,
 )
@@ -99,6 +103,7 @@ _AGENT_LIST_LIMIT = 100
 _LIST_GENERATION_PROBE_LIMIT = 100
 _TEXT_BLOCK_CAP = 8192
 _Capabilities = Callable[[HarnessId], Awaitable[HistoryCapabilities]]
+_ExecutableResolver = Callable[[str], str | None]
 
 
 async def probe_app_server_version(
@@ -106,10 +111,22 @@ async def probe_app_server_version(
     *,
     workspace_root: Path,
     env: Mapping[str, str],
+    transport_factory: Callable[[], CodexAppServerTransport] = CodexStdioTransport,
+    resolve_executable: _ExecutableResolver | None = None,
 ) -> str:
     """Gate probe: real connect + initialize + thread/list, returning the observed CLI version."""
 
-    async with _AppServer(harness, workspace_root=workspace_root, env=env) as server:
+    native_env = native_path_environment(env)
+    resolver = resolve_executable or (
+        lambda command: resolve_native_executable(command, native_env)
+    )
+    async with _AppServer(
+        harness,
+        workspace_root=workspace_root,
+        env=native_env,
+        transport_factory=transport_factory,
+        resolve_executable=resolver,
+    ) as server:
         await server.thread_list(cursor=None, limit=1, scope=None)
         return server.cli_version
 
@@ -124,17 +141,23 @@ class _AppServer:
         workspace_root: Path,
         env: Mapping[str, str],
         transport_factory: Callable[[], CodexAppServerTransport] = CodexStdioTransport,
+        resolve_executable: _ExecutableResolver = shutil.which,
     ) -> None:
         self._harness = harness
         self._workspace_root = workspace_root
         self._env = env
         self._transport_factory = transport_factory
+        self._resolve_executable = resolve_executable
         self._transport: CodexAppServerTransport | None = None
         self.cli_version = ""
 
     async def __aenter__(self) -> _AppServer:
-        resolver = shutil.which
-        resolved = resolver(self._harness.command)
+        try:
+            resolved = self._resolve_executable(self._harness.command)
+        except RuntimeError as exc:
+            raise LibraryStoreError(
+                f"could not resolve installed harness {self._harness.id!r}: {exc}"
+            ) from exc
         if resolved is None:
             raise LibraryStoreError(f"harness not installed: {self._harness.id!r}")
         try:
@@ -261,18 +284,24 @@ class _AppServer:
 
 @dataclass(frozen=True)
 class AppServerSeams:
-    """How a codex app-server subprocess is reached: the environment it inherits and its transport.
+    """How a codex app-server subprocess is reached and spoken to.
 
-    The environment selects the binary and its credentials; the transport factory decides how the
-    process is spoken to. A fake transport against the real environment (or the reverse) talks to a
-    process nobody meant to start, so both are replaced as one seam.
+    The resolver selects the executable, the environment supplies credentials, and the transport
+    factory decides how the process is spoken to. Tests replace all three explicitly; production
+    keeps the real resolver and therefore still fails closed when Codex is unavailable.
     """
 
     env: Callable[[], Mapping[str, str]] = lambda: os.environ
     transport_factory: Callable[[], CodexAppServerTransport] = CodexStdioTransport
+    resolve_executable: _ExecutableResolver = shutil.which
 
 
-DEFAULT_APP_SERVER_SEAMS = AppServerSeams()
+def _resolve_native_codex(command: str) -> str:
+    environment = native_path_environment(os.environ)
+    return resolve_native_executable(command, environment)
+
+
+DEFAULT_APP_SERVER_SEAMS = AppServerSeams(resolve_executable=_resolve_native_codex)
 
 
 class CodexConversationLibrary:
@@ -301,6 +330,7 @@ class CodexConversationLibrary:
         self._harness = harness
         self._env = env
         self._transport_factory = transport_factory
+        self._resolve_executable = seams.resolve_executable
 
     async def list(
         self,
@@ -451,6 +481,7 @@ class CodexConversationLibrary:
             workspace_root=Path(canonical_scope),
             env=self._env(),
             transport_factory=self._transport_factory,
+            resolve_executable=self._resolve_executable,
         )
 
     async def _list_generation(

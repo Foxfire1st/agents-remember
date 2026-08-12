@@ -242,6 +242,7 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
             worktree_tools.worktree_integrate_tool(
                 config,  # type: ignore[arg-type]
                 contract_path=str(self.coord / "enclosures" / "contract.md"),
+                dry_run=True,
             )
         (args,), _kwargs = integrate_result.call_args
         self.assertIs(args.gate_policy, HANDOVER_SEAM_POLICY)

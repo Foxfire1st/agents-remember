@@ -1,44 +1,16 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { ConversationItem } from "../../../../data/conversation/types";
 import { ConversationTimeline } from "./ConversationTimeline";
+import {
+  feedOf,
+  installScrollMemoryGeometry,
+  pinGeometry,
+} from "./scrollMemory.test-utils";
 import { msg } from "./test-utils";
 
 describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B3)", () => {
-  // Same jsdom geometry shim as the scroll-memory describe: the virtualizer needs a fixed box to render
-  // rows, and the scroll listener needs honest scrollHeight/clientHeight numbers.
-  const alignedTops: number[] = [];
-  beforeEach(() => {
-    alignedTops.length = 0;
-    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
-      configurable: true,
-      value: function (this: HTMLElement, options?: { top?: number }) {
-        const top = options?.top ?? 0;
-        alignedTops.push(top);
-        this.scrollTop = top;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, value: 6000 });
-    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: 600 });
-  });
-  afterEach(() => {
-    const proto = HTMLElement.prototype as unknown as Record<string, unknown>;
-    delete proto.scrollTo;
-    delete proto.scrollHeight;
-    delete proto.clientHeight;
-  });
-
-  function feedOf(count: number): ConversationItem[] {
-    return Array.from({ length: count }, (_, index) =>
-      msg({ itemId: `m-${index + 1}`, globalOrdinal: index + 1 }),
-    );
-  }
-
-  function pinGeometry(viewport: HTMLElement, scrollHeight: number, clientHeight: number): void {
-    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: scrollHeight });
-    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: clientHeight });
-  }
+  installScrollMemoryGeometry();
 
   /** Mount 10 rows and let the mount restore drive to the end and consume (locked at bottom). */
   async function mountSettledAtBottom() {
@@ -53,8 +25,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
   }
 
   it("deliberate scroll-up during streaming holds the EXACT position (deltas + new rows); content-driven events never re-engage; bottom arrival re-engages and clears the pill", async () => {
-    vi.useFakeTimers();
-    try {
       const onScrollMemory = vi.fn();
       const { rerender } = render(
         <ConversationTimeline items={feedOf(10)} hasOlder={false} busy={false} onLoadOlder={() => {}} onScrollMemory={onScrollMemory} />,
@@ -110,14 +80,9 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
         <ConversationTimeline items={feedOf(12)} hasOlder={false} busy={false} onLoadOlder={() => {}} onScrollMemory={onScrollMemory} />,
       );
       expect(viewport.scrollTop).toBe(7200 - 600);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("follow-on-growth: locked mid-stream, a total-height change with NO key change re-pins the window to the end", async () => {
-    vi.useFakeTimers();
-    try {
       const { viewport, rerender } = await mountSettledAtBottom();
 
       // A stream delta arrives: the last row grows in place — total height changes, the row key
@@ -133,14 +98,9 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
         <ConversationTimeline items={streamed} hasOlder={false} busy={false} onLoadOlder={() => {}} />,
       );
       expect(viewport.scrollTop).toBe(6450 - 600);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("pointerdown stands an armed restore drive down (scrollbar drag) — the restore never applies", async () => {
-    vi.useFakeTimers();
-    try {
       const items = feedOf(10);
       const { rerender } = render(
         <ConversationTimeline items={items} hasOlder={false} busy={false} onLoadOlder={() => {}} visible={false} restoreScroll={{ scrollTop: 611, atBottom: false }} />,
@@ -156,9 +116,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
       pinGeometry(viewport, 1962, 600);
       await act(async () => { await vi.advanceTimersByTimeAsync(250); });
       expect(viewport.scrollTop).toBe(0); // …never applied — the operator's position owns.
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("shows one latest chip only after the feed moves away from the live edge", () => {
@@ -181,8 +138,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
   });
 
   it("the latest chip re-engages the lock, clears its update count, and pins the end", async () => {
-    vi.useFakeTimers();
-    try {
       const { rerender } = render(
         <ConversationTimeline items={feedOf(10)} hasOlder={false} busy={false} onLoadOlder={() => {}} />,
       );
@@ -216,9 +171,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
       );
       expect(screen.queryByTestId("conversation-new-updates")).toBeNull();
       expect(viewport.scrollTop).toBe(7200 - 600);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("a wheel-up INSIDE the band holds through the next growth mid-gesture (the scroll-up trap); continuing past the band disengages and the deltas accumulate", async () => {
@@ -226,8 +178,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
     // design, so the follow-on-growth effect used to undo it on the very next delta — the
     // operator could not scroll up while following. The effect now bails while the genuine-input
     // window is open AND the landing is displaced from the end.
-    vi.useFakeTimers();
-    try {
       const { viewport, rerender } = await mountSettledAtBottom(); // 5400, locked at the end
 
       // One 50px wheel-up inside the band (distance 50 ≤ 120: the lock stays engaged)…
@@ -269,9 +219,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
         <ConversationTimeline items={feedOf(12)} hasOlder={false} busy={false} onLoadOlder={() => {}} />,
       );
       expect(viewport.scrollTop).toBe(5310);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("an in-band wheel-up SURVIVES the 500ms interaction decay — a later stream delta does not yank it back to the end (M10)", async () => {
@@ -282,8 +229,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
     // mutation-sensitive: revert the guard to `userInteractionRef.current && …` (or drop the
     // bandHoldRef arm in handleScroll) and, after the decay below, the delta re-pins to 5700 —
     // the assertion fails.
-    vi.useFakeTimers();
-    try {
       const { viewport, rerender } = await mountSettledAtBottom(); // 5400, locked at the end
 
       // One 50px wheel-up, parked INSIDE the 120px band (distance 50): the lock stays engaged.
@@ -308,9 +253,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
       );
       // Held EXACTLY at the parked offset — NOT snapped to the end (6300 − 600 = 5700).
       expect(viewport.scrollTop).toBe(5350);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("an in-band parked operator is not yanked by a NEW ROW after the decay either — the arrival counts into the pill (M10)", async () => {
@@ -319,8 +261,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
     // scrollToIndex too, so the parked offset holds and the arrival pills. Mutation-sensitive:
     // revert the row-key branch to `else if (nearBottomRef.current)` and the new row follows to the
     // end (no pill) — the pill assertion below fails (queryByTestId returns null).
-    vi.useFakeTimers();
-    try {
       const { viewport, rerender } = await mountSettledAtBottom(); // 5400, locked at the end
 
       fireEvent.wheel(viewport);
@@ -336,9 +276,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
       // The parked offset holds, and the new row is reported through the pill instead of a jump.
       expect(viewport.scrollTop).toBe(5350);
       expect(screen.getByTestId("conversation-new-updates").textContent).toContain("1 new");
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("the bottom-follow contract is intact: parked AT the exact end, a delta after the decay still re-pins to the new end (F-ac, the M10 over-fix guard)", async () => {
@@ -346,8 +283,6 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
     // bottom-follow. At the true end (distance 0) bandHoldRef is clear, so growth re-pins. A naive
     // "hold whenever displaced" fix (guard on bare `distance > 0`) would freeze at 5400 here — this
     // asserts 5700, catching that over-fix.
-    vi.useFakeTimers();
-    try {
       const { viewport, rerender } = await mountSettledAtBottom(); // 5400, at the exact end
       await act(async () => { await vi.advanceTimersByTimeAsync(600); });
 
@@ -362,8 +297,5 @@ describe("ConversationTimeline — intent lock, follow-on-growth, latest chip (B
         <ConversationTimeline items={streamed} hasOlder={false} busy={false} onLoadOlder={() => {}} />,
       );
       expect(viewport.scrollTop).toBe(5700); // 6300 − 600: followed to the new end
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

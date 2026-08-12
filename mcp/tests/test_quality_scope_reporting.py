@@ -22,6 +22,8 @@ from agents_remember.code_quality import check, diff_coverage, scope, scope_repo
 from agents_remember.worktrees.modules import code_quality_gate
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+ESLINT_EXECUTABLE = REPOSITORY_ROOT / "dashboard/node_modules/.bin/eslint"
+ESLINT_AVAILABLE = ESLINT_EXECUTABLE.is_file() and os.access(ESLINT_EXECUTABLE, os.X_OK)
 
 
 def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -607,7 +609,9 @@ class CallerProvenanceTests(unittest.TestCase):
 
     def test_closeout_labels_the_already_staged_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            environment = code_quality_gate.quality_environment(Path(tmp))
+            environment = code_quality_gate.quality_environment(
+                Path(tmp), reports_root=Path(tmp) / "enclosure" / "reports"
+            )
 
         self.assertEqual(environment[scope_reporting.INVOCATION_ENV], "closeout-staged")
         self.assertIn("staged candidate", scope_reporting.invocation_description(environment))
@@ -645,7 +649,7 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn("config=dashboard/tsconfig.json", line)
         self.assertRegex(line, r"units=3 projects; [1-9][0-9]* TypeScript inputs")
 
-    @unittest.skipUnless(shutil.which("node"), "installed Node.js runtime is unavailable")
+    @unittest.skipUnless(ESLINT_AVAILABLE, "dashboard-local ESLint executable is unavailable")
     def test_dashboard_lint_matches_live_eslint_machine_result_set(self) -> None:
         dashboard = REPOSITORY_ROOT / "dashboard"
         completed = subprocess.run(
@@ -714,7 +718,7 @@ class CallerProvenanceTests(unittest.TestCase):
                 self.assertRegex(block, r"result: [a-z-]+ PASS")
                 self.assertRegex(block, r"result: [a-z-]+ FAIL")
 
-    @unittest.skipUnless(shutil.which("node"), "installed Node.js runtime is unavailable")
+    @unittest.skipUnless(ESLINT_AVAILABLE, "dashboard-local ESLint executable is unavailable")
     def test_every_dashboard_ci_rail_uses_the_shared_provenance_path(self) -> None:
         workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
             encoding="utf-8"

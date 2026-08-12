@@ -3,8 +3,8 @@
 // Schema artifact: dashboard/src/types/projection.schema.json.
 // Served-only tail: ServedWorkspaceProjection.model_json_schema().
 // Generator: scripts/sync-projection-types.py.
-// Regenerate: PYTHONPATH=mcp/src "$(git rev-parse --git-common-dir)/../.venv/bin/python" scripts/sync-projection-types.py
-// Drift check: PYTHONPATH=mcp/src "$(git rev-parse --git-common-dir)/../.venv/bin/python" scripts/sync-projection-types.py --check
+// Regenerate: PYTHONPATH=mcp/src python scripts/sync-projection-types.py
+// Drift check: PYTHONPATH=mcp/src python scripts/sync-projection-types.py --check
 
 export const LIVE_STATES = ["running", "paused", "blocked", "awaiting-developer"] as const;
 
@@ -154,6 +154,7 @@ export interface EnclosureNode {
   integrationStatus: string;
   leafId: string;
   lifecycleId: string;
+  lifecycleOperation?: LifecycleOperationProjection;
   memoryWorktreeExists: boolean;
   repoName: string;
   taskId: string;
@@ -266,6 +267,22 @@ export interface LedgerRefNode {
   memoryCommit: string;
   memoryDate?: string;
   memorySubject?: string;
+}
+
+export interface LifecycleOperationProjection {
+  cancellable: boolean;
+  currentCommand: string;
+  elapsedSeconds: number;
+  failure?: string;
+  finishedAt?: string;
+  guidance?: string;
+  heartbeatAt?: string;
+  kind: "closeout" | "integrate";
+  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "completed" | "failed" | "cancelled";
+  reportPath: string;
+  result?: Record<string, unknown>;
+  startedAt?: string;
+  status: "queued" | "running" | "input-required" | "completed" | "failed" | "cancelled";
 }
 
 export interface LifecycleProjection {

@@ -4,6 +4,26 @@ from test_mcp_registration_wiring import RegistrationWiringTests
 
 
 class RegistrationWiringTests1(RegistrationWiringTests):
+    def test_citation_fix_forwards_the_guarded_leaf_scope(self) -> None:
+        recorder = self.invoke(
+            "citation_fix",
+            "agents_remember.mcp.registration.memory.citation_fix_payload",
+            {
+                "repo_id": "agents-remember",
+                "contract_path": "/tmp/contract.yaml",
+                "document": "mcp/example.py.md",
+                "expected_snapshot": "a" * 64,
+                "dry_run": True,
+            },
+        )
+
+        self.assertEqual(recorder.args[:2], (self.config, "agents-remember"))
+        self.assertEqual(recorder.kwargs["contract_path"], "/tmp/contract.yaml")
+        self.assertIs(recorder.kwargs["dry_run"], True)
+        scope = recorder.kwargs["operation_scope"]
+        self.assertEqual(scope.document, "mcp/example.py.md")
+        self.assertEqual(scope.expected_snapshot, "a" * 64)
+
     def test_ping_takes_no_configuration(self) -> None:
         """``ping`` is a liveness check: it must not depend on resolved settings."""
         recorder = self.invoke("ping", "agents_remember.mcp.registration.core.ping_payload")

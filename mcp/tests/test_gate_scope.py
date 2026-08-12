@@ -181,9 +181,12 @@ class PythonGateScopeTests(unittest.TestCase):
         package_files = [
             path for path in git_ls_files("*.py") if is_under(path, scope.coverage_paths)
         ]
+        expected_coverage = [Path("mcp/src/agents_remember"), Path("mcp/tests")]
+        if git_ls_files(".dagger/src/agents_remember_quality/*.py"):
+            expected_coverage.insert(0, Path(".dagger/src/agents_remember_quality"))
         self.assertEqual(
             sorted(scope.coverage_paths),
-            [Path("mcp/src/agents_remember"), Path("mcp/tests")],
+            expected_coverage,
             "the tracked top-level package set changed; coverage and CRAP scope moved with it",
         )
         self.assertGreater(len(package_files), 0)

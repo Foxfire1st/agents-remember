@@ -124,13 +124,142 @@
       "humanReviewStatus": "pending",
       "closeoutStatus": "not-started",
       "integrationStatus": "not-started",
-      "cleanup": "pending",
-      "codeWorktreeExists": true,
-      "memoryWorktreeExists": true,
-      "actions": [
+    "cleanup": "pending",
+    "codeWorktreeExists": true,
+    "memoryWorktreeExists": true,
+    "lifecycleOperation": {
+      "kind": "closeout",
+      "status": "failed",
+      "phase": "failed",
+      "startedAt": "2026-08-12T12:00:00+00:00",
+      "heartbeatAt": "2026-08-12T12:00:10+00:00",
+      "finishedAt": "2026-08-12T12:00:12+00:00",
+      "elapsedSeconds": 12,
+      "currentCommand": "quality: diff-coverage",
+      "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
+      "result": {
+        "reason": "fixture failure"
+      },
+      "failure": "fixture failure",
+      "guidance": "Fix the reported preflight failure, then restart this task operation.",
+      "cancellable": false
+    },
+    "actions": [
         { "action": "worktree_sync", "enabled": true },
         { "action": "worktree_integrate", "enabled": false, "disabledReason": "closeout has not run", "nextSafeAction": "worktree_closeout_preview" }
       ]
+    },
+    {
+      "enclosure": "sim-op-queued", "enclosureId": "sim-op-queued", "leafId": "sim-op-queued", "taskId": "SIM-OP-QUEUED",
+      "taskName": "lifecycle-queued", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-queued-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "queued", "phase": "queued", "elapsedSeconds": 0, "currentCommand": "queued", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-preflight", "enclosureId": "sim-op-preflight", "leafId": "sim-op-preflight", "taskId": "SIM-OP-PREFLIGHT",
+      "taskName": "lifecycle-preflight", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-preflight-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "preflight", "elapsedSeconds": 1, "currentCommand": "preflight", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-memory-preflight", "enclosureId": "sim-op-memory-preflight", "leafId": "sim-op-memory-preflight", "taskId": "SIM-OP-MEMORY-PREFLIGHT",
+      "taskName": "lifecycle-memory-preflight", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-memory-preflight-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "memory-preflight", "elapsedSeconds": 2, "currentCommand": "memory preflight", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-quality", "enclosureId": "sim-op-quality", "leafId": "sim-op-quality", "taskId": "SIM-OP-QUALITY",
+      "taskName": "lifecycle-quality", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-quality-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "quality", "elapsedSeconds": 3, "currentCommand": "quality", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-approval-claim", "enclosureId": "sim-op-approval-claim", "leafId": "sim-op-approval-claim", "taskId": "SIM-OP-APPROVAL-CLAIM",
+      "taskName": "lifecycle-approval-claim", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-approval-claim-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "approval-claim", "elapsedSeconds": 4, "currentCommand": "approval claim", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-recovering", "enclosureId": "sim-op-recovering", "leafId": "sim-op-recovering", "taskId": "SIM-OP-RECOVERING",
+      "taskName": "lifecycle-recovering-after-claim", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-recovering-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "input-required", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "input-required", "phase": "recovering-after-claim", "elapsedSeconds": 5, "currentCommand": "recovering approval", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-code-commit", "enclosureId": "sim-op-code-commit", "leafId": "sim-op-code-commit", "taskId": "SIM-OP-CODE-COMMIT",
+      "taskName": "lifecycle-code-commit", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-code-commit-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "code-commit", "elapsedSeconds": 6, "currentCommand": "code commit", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-memory-refresh", "enclosureId": "sim-op-memory-refresh", "leafId": "sim-op-memory-refresh", "taskId": "SIM-OP-MEMORY-REFRESH",
+      "taskName": "lifecycle-memory-refresh", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-memory-refresh-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "memory-refresh", "elapsedSeconds": 7, "currentCommand": "memory refresh", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-memory-commit", "enclosureId": "sim-op-memory-commit", "leafId": "sim-op-memory-commit", "taskId": "SIM-OP-MEMORY-COMMIT",
+      "taskName": "lifecycle-memory-commit", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-memory-commit-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "memory-commit", "elapsedSeconds": 8, "currentCommand": "memory commit", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-ledger-commit", "enclosureId": "sim-op-ledger-commit", "leafId": "sim-op-ledger-commit", "taskId": "SIM-OP-LEDGER-COMMIT",
+      "taskName": "lifecycle-ledger-commit", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-ledger-commit-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "running", "integrationStatus": "not-started", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "closeout", "status": "running", "phase": "ledger-commit", "elapsedSeconds": 9, "currentCommand": "ledger commit", "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-integration-replay", "enclosureId": "sim-op-integration-replay", "leafId": "sim-op-integration-replay", "taskId": "SIM-OP-INTEGRATION-REPLAY",
+      "taskName": "lifecycle-integration-replay", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-integration-replay-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "completed", "integrationStatus": "running", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "integrate", "status": "running", "phase": "integration-replay", "elapsedSeconds": 10, "currentCommand": "integration replay", "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-integration-quality", "enclosureId": "sim-op-integration-quality", "leafId": "sim-op-integration-quality", "taskId": "SIM-OP-INTEGRATION-QUALITY",
+      "taskName": "lifecycle-integration-quality", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-integration-quality-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "completed", "integrationStatus": "running", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "integrate", "status": "running", "phase": "integration-quality", "elapsedSeconds": 11, "currentCommand": "integration quality", "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log", "cancellable": true },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-source-merge", "enclosureId": "sim-op-source-merge", "leafId": "sim-op-source-merge", "taskId": "SIM-OP-SOURCE-MERGE",
+      "taskName": "lifecycle-source-merge", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-source-merge-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "completed", "integrationStatus": "running", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "integrate", "status": "running", "phase": "source-merge", "elapsedSeconds": 12, "currentCommand": "source merge", "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-contract-finalization", "enclosureId": "sim-op-contract-finalization", "leafId": "sim-op-contract-finalization", "taskId": "SIM-OP-CONTRACT-FINALIZATION",
+      "taskName": "lifecycle-contract-finalization", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-contract-finalization-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "completed", "integrationStatus": "input-required", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "integrate", "status": "input-required", "phase": "contract-finalization", "elapsedSeconds": 13, "currentCommand": "contract finalization", "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-completed", "enclosureId": "sim-op-completed", "leafId": "sim-op-completed", "taskId": "SIM-OP-COMPLETED",
+      "taskName": "lifecycle-completed", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-completed-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "completed", "integrationStatus": "completed", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "integrate", "status": "completed", "phase": "completed", "elapsedSeconds": 14, "currentCommand": "completed", "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log", "cancellable": false },
+      "actions": []
+    },
+    {
+      "enclosure": "sim-op-cancelled", "enclosureId": "sim-op-cancelled", "leafId": "sim-op-cancelled", "taskId": "SIM-OP-CANCELLED",
+      "taskName": "lifecycle-cancelled", "repoName": "agents-remember", "taskRoot": "/tasks/sim", "lifecycleId": "sim-op-cancelled-lifecycle", "worktreeGroup": "sim-group",
+      "humanReviewStatus": "approved", "closeoutStatus": "completed", "integrationStatus": "cancelled", "cleanup": "pending", "codeWorktreeExists": true, "memoryWorktreeExists": true,
+      "lifecycleOperation": { "kind": "integrate", "status": "cancelled", "phase": "cancelled", "elapsedSeconds": 15, "currentCommand": "cancelled", "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log", "cancellable": false },
+      "actions": []
     }
   ],
   "providers": [

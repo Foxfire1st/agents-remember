@@ -204,7 +204,7 @@ for line in sys.stdin:
     if method == "initialize":
         record(method, params, response="success")
         send(request_id, {{
-            "userAgent": "Codex Desktop/0.145.0 (Linux; x86_64) (agents_remember; 3.0.0)",
+            "userAgent": "agents_remember/0.145.0 (Linux; x86_64) (agents_remember; 3.0.0)",
             "codexHome": "/tmp/codex-home",
             "platformFamily": "unix",
             "platformOs": "linux",

@@ -39,6 +39,7 @@ from agents_remember.models.lifecycle import (
 )
 from agents_remember.models.lifecycle_finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.memory import (
+    CitationFixResponse,
     DriftCheckResponse,
     MemoryBaselineAdoptResponse,
     MemoryBaselineStatusResponse,
@@ -105,6 +106,7 @@ from agents_remember.models.worktree import (
     WorktreeCloseoutApplyResponse,
     WorktreeCloseoutPreviewResponse,
     WorktreeIntegrateResponse,
+    WorktreeOperationCancelResponse,
     WorktreeStartResponse,
     WorktreeStatusResponse,
     WorktreeSyncResponse,
@@ -157,6 +159,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "resolve_context": ResolveContextResponse,
     "drift_check": DriftCheckResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
+    "citation_fix": CitationFixResponse,
     "route_index_refresh": RouteIndexRefreshResponse,
     "memory_init": MemoryInitResponse,
     "skills_install": SkillsInstallResponse,
@@ -178,6 +181,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "worktree_closeout_preview": WorktreeCloseoutPreviewResponse,
     "worktree_closeout_apply": WorktreeCloseoutApplyResponse,
     "worktree_integrate": WorktreeIntegrateResponse,
+    "worktree_operation_cancel": WorktreeOperationCancelResponse,
     "worktree_cleanup": WorktreeCleanupResponse,
     "worktree_abandon": WorktreeAbandonResponse,
     "task_reopen": TaskReopenResponse,

@@ -61,6 +61,7 @@ def evaluate_gate(
     *,
     kind: GateKind,
     policy: GatePolicy = DEFAULT_GATE_POLICY,
+    operation_key: str | None = None,
 ) -> GateGuard:
     """Decide whether a lifecycle's current gate set permits a gate kind. Pure.
 
@@ -87,10 +88,15 @@ def evaluate_gate(
             gate.id,
         )
     if gate.state == "applied":
+        recovering = operation_key is not None and gate.appliedOperation == operation_key
         return GateGuard(
             kind,
-            False,
-            f"{kind} gate {gate.id} was already applied; open a fresh gate for a new mutation",
+            recovering,
+            (
+                f"{kind} gate {gate.id} is already bound to this recovering operation"
+                if recovering
+                else f"{kind} gate {gate.id} was already applied; open a fresh gate for a new mutation"
+            ),
             gate.id,
         )
     return GateGuard(
@@ -104,6 +110,7 @@ def evaluate_gate(
 def evaluate_closeout_gate(
     gates: Mapping[str, GateRecord],
     policy: GatePolicy = DEFAULT_GATE_POLICY,
+    operation_key: str | None = None,
 ) -> CloseoutGuard:
     """Compatibility wrapper for closeout enforcement."""
-    return evaluate_gate(gates, kind=CLOSEOUT_GATE_KIND, policy=policy)
+    return evaluate_gate(gates, kind=CLOSEOUT_GATE_KIND, policy=policy, operation_key=operation_key)

@@ -777,6 +777,17 @@
           "title": "Lifecycleid",
           "type": "string"
         },
+        "lifecycleOperation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LifecycleOperationProjection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "memoryWorktreeExists": {
           "default": false,
           "title": "Memoryworktreeexists",
@@ -1540,6 +1551,155 @@
         "memoryCommit"
       ],
       "title": "LedgerRefNode",
+      "type": "object"
+    },
+    "LifecycleOperationProjection": {
+      "additionalProperties": false,
+      "description": "Public task-addressed view; process and resume identities never cross the wire.",
+      "properties": {
+        "cancellable": {
+          "default": false,
+          "title": "Cancellable",
+          "type": "boolean"
+        },
+        "currentCommand": {
+          "default": "",
+          "title": "Currentcommand",
+          "type": "string"
+        },
+        "elapsedSeconds": {
+          "title": "Elapsedseconds",
+          "type": "number"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure"
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finishedat"
+        },
+        "guidance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Guidance"
+        },
+        "heartbeatAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heartbeatat"
+        },
+        "kind": {
+          "enum": [
+            "closeout",
+            "integrate"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "queued",
+            "preflight",
+            "memory-preflight",
+            "quality",
+            "approval-claim",
+            "recovering-after-claim",
+            "code-commit",
+            "memory-refresh",
+            "memory-commit",
+            "ledger-commit",
+            "integration-replay",
+            "integration-quality",
+            "source-merge",
+            "contract-finalization",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "reportPath": {
+          "title": "Reportpath",
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Startedat"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "input-required",
+            "completed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "status",
+        "phase",
+        "elapsedSeconds",
+        "reportPath"
+      ],
+      "title": "LifecycleOperationProjection",
       "type": "object"
     },
     "LifecycleProjection": {

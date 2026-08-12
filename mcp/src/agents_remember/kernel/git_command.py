@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 GIT_REPOSITORY_SELECTOR_ENV = (
@@ -71,6 +72,14 @@ GIT_LOCAL_TIMEOUT_SECONDS = 300
 GIT_REMOTE_TIMEOUT_SECONDS = 120
 GIT_METADATA_TIMEOUT_SECONDS = 30
 GIT_BULK_REMOTE_TIMEOUT_SECONDS = 1800
+
+
+@dataclass(frozen=True)
+class _GitRun:
+    work_dir: Path
+    input_text: str | None
+    timeout: float
+    environment: dict[str, str]
 
 
 def git_environment() -> dict[str, str]:
@@ -124,28 +133,62 @@ def run_git(
     repository the command happens to reach.
     """
 
-    work = repo_root if work_dir is None else work_dir
+    return _run_git(
+        repo_root,
+        args,
+        _GitRun(
+            work_dir=repo_root if work_dir is None else work_dir,
+            input_text=input_text,
+            timeout=timeout,
+            environment=git_environment(),
+        ),
+    )
+
+
+def run_git_with_index(
+    repo_root: Path, args: list[str], index_path: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run Git against one explicit isolated index after stripping ambient selectors."""
+    environment = git_environment()
+    environment["GIT_INDEX_FILE"] = index_path.as_posix()
+    return _run_git(
+        repo_root,
+        args,
+        _GitRun(
+            work_dir=repo_root,
+            input_text=None,
+            timeout=GIT_LOCAL_TIMEOUT_SECONDS,
+            environment=environment,
+        ),
+    )
+
+
+def _run_git(
+    repo_root: Path, args: list[str], execution: _GitRun
+) -> subprocess.CompletedProcess[str]:
     stdin_kwargs: dict[str, object] = (
-        {"input": input_text} if input_text is not None else {"stdin": subprocess.DEVNULL}
+        {"input": execution.input_text}
+        if execution.input_text is not None
+        else {"stdin": subprocess.DEVNULL}
     )
     return subprocess.run(
         [
             "git",
             "-C",
-            work.as_posix(),
+            execution.work_dir.as_posix(),
             "-c",
             "core.longpaths=true",
             "-c",
             f"safe.directory={repo_root.as_posix()}",
             *args,
         ],
-        cwd=work,
+        cwd=execution.work_dir,
         text=True,
         encoding="utf-8",
         errors="surrogateescape",
         capture_output=True,
-        env=git_environment(),
-        timeout=timeout,
+        env=execution.environment,
+        timeout=execution.timeout,
         check=False,
         **stdin_kwargs,  # type: ignore[arg-type]
     )

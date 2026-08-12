@@ -120,6 +120,50 @@ jobs:
           PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step build
           if npm run build; then echo "result: dashboard-build PASS"; else echo "result: dashboard-build FAIL"; exit 1; fi
 
+  clean-linux:
+    name: Dagger Ubuntu install + Codex protocol + quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Resolve the changed-lines base
+        run: |
+          base="$(git merge-base HEAD "origin/${{ github.event.repository.default_branch }}")"
+          echo "AR_CLEAN_DIFF_BASE=${base}" >> "${GITHUB_ENV}"
+
+      - name: Materialize the exact Git ancestry bundle
+        run: git bundle create "${RUNNER_TEMP}/agents-remember-quality.bundle" HEAD
+
+      - name: Export reports from the pinned Dagger Ubuntu pipeline
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.8"
+          verb: call
+          args: >-
+            quality --source=. --repository-bundle=${{ runner.temp }}/agents-remember-quality.bundle
+            --mode=full --diff-base=${{ env.AR_CLEAN_DIFF_BASE }}
+            reports export --path=${{ runner.temp }}/agents-remember-clean/reports
+
+      - name: Enforce the cached Dagger result
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.8"
+          verb: call
+          args: >-
+            verify --source=. --repository-bundle=${{ runner.temp }}/agents-remember-quality.bundle
+            --mode=full --diff-base=${{ env.AR_CLEAN_DIFF_BASE }}
+
+      - name: Upload the self-overwriting clean-room reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: clean-linux-reports
+          path: ${{ runner.temp }}/agents-remember-clean/reports/
+          if-no-files-found: error
+
   randomized-order:
     name: Scheduled randomized Python test order
     if: github.event_name == 'schedule'

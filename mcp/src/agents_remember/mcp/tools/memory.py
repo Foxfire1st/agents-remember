@@ -6,10 +6,13 @@ from typing import Any
 
 from agents_remember.application.memory_tools import (
     DEFAULT_CARRYOVER_MESSAGES,
+    DEFAULT_CITATION_OPERATION_SCOPE,
     DEFAULT_MEMORY_BRANCHES,
     CarryoverCommitMessages,
     CarryoverSelection,
+    CitationOperationScope,
     MemoryBranches,
+    citation_fix_tool,
     drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
@@ -59,6 +62,26 @@ def memory_quality_check_payload(
             checks=checks,
             detail_limit=detail_limit,
             contract_path=contract_path,
+        ),
+    )
+
+
+def citation_fix_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    *,
+    contract_path: str,
+    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "citation_fix",
+        citation_fix_tool(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            dry_run=dry_run,
+            operation_scope=operation_scope,
         ),
     )
 

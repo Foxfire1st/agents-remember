@@ -19,6 +19,14 @@ from agents_remember.code_quality import check, retry_proof
 from agents_remember.code_quality.scope import GateScope
 
 
+@pytest.fixture(autouse=True)
+def _isolate_outer_quality_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests own the invocation mode instead of inheriting the wrapper's CI marker."""
+
+    monkeypatch.delenv("AR_QUALITY_INVOCATION", raising=False)
+    monkeypatch.delenv(retry_proof.DISABLE_ENV, raising=False)
+
+
 def test_changed_test_contexts_and_collection_context_are_removed(tmp_path: Path) -> None:
     source = tmp_path / "source.coverage"
     destination = tmp_path / "destination.coverage"

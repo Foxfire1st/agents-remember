@@ -14,13 +14,25 @@ from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import git_environment, run_git
+from agents_remember.kernel.platform_subprocess import (
+    native_command,
+    native_subprocess_environment,
+)
 from agents_remember.kernel.primitives import memory_cap
+from agents_remember.worktrees.modules.clean_quality_executor import (
+    CleanQualityRequest,
+    run_clean_quality,
+)
 
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
 QUALITY_MODULE = "agents_remember.code_quality.check"
 FAILURE_OUTPUT_LINES = 40
 REPORT_DIRECTORY_NAME = "reports"
 TEST_RESULTS_REPORT_NAME = "test-results.md"
+PYTEST_EVENTS_REPORT_NAME = "pytest-events.jsonl"
+COVERAGE_DATA_REPORT_NAME = "coverage.data"
+QUALITY_PROGRESS_REPORT_NAME = "quality-progress.json"
+CODEX_PROBE_REPORT_NAME = "codex-probe.json"
 
 GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
@@ -38,6 +50,7 @@ class QualityGatePlan:
     mode: str = GATE_TARGETED
     memory_cap_bytes: int | None = None
     systemd_run_available: bool | None = None
+    executor: str = "local"
 
 
 @dataclass(frozen=True)
@@ -55,11 +68,13 @@ class _QualityGateReport:
     command: list[str]
     invocation: str
     mode: str
+    executor: str
     diff_base: str
     started_at: datetime
     finished_at: datetime
     elapsed_seconds: float
     cap_plan: memory_cap.MemoryCapPlan | None
+    requested_memory_cap_bytes: int | None
 
 
 def quality_wrapper_path(code_worktree: Path) -> Path:
@@ -72,16 +87,50 @@ def test_results_report_path(worktree_group: Path) -> Path:
     return worktree_group / REPORT_DIRECTORY_NAME / TEST_RESULTS_REPORT_NAME
 
 
+def pytest_events_report_path(worktree_group: Path) -> Path:
+    """Return the enclosure-owned, self-overwriting live pytest event report."""
+    return worktree_group / REPORT_DIRECTORY_NAME / PYTEST_EVENTS_REPORT_NAME
+
+
+def coverage_data_report_path(worktree_group: Path) -> Path:
+    """Return the enclosure-owned Coverage.py state path."""
+    return worktree_group / REPORT_DIRECTORY_NAME / COVERAGE_DATA_REPORT_NAME
+
+
+def quality_progress_report_path(worktree_group: Path) -> Path:
+    """Return the one atomic current-rail projection for this enclosure."""
+    return worktree_group / REPORT_DIRECTORY_NAME / QUALITY_PROGRESS_REPORT_NAME
+
+
+def codex_probe_report_path(worktree_group: Path) -> Path:
+    """Return the real-versus-fake Codex integration evidence path."""
+    return worktree_group / REPORT_DIRECTORY_NAME / CODEX_PROBE_REPORT_NAME
+
+
 def _gate_command(
     diff_base: str,
     *,
     mode: str = GATE_TARGETED,
     memory_cap_bytes: int | None = None,
     systemd_run_available: bool | None = None,
+    executor: str = "local",
 ) -> str:
     """The command as reported, so a payload reader can rerun exactly what ran."""
     if mode not in {GATE_TARGETED, GATE_FULL}:
         raise ValueError(f"unknown quality gate mode: {mode}")
+    if executor not in {"local", "dagger"}:
+        raise ValueError(f"unknown quality gate executor: {executor}")
+    if executor == "dagger":
+        return shlex.join(
+            _dagger_report_command(
+                QualityGatePlan(
+                    mode=mode,
+                    memory_cap_bytes=memory_cap_bytes,
+                    executor=executor,
+                ),
+                diff_base,
+            )
+        )
     base = f" --diff-base {diff_base}" if diff_base else ""
     if mode == GATE_TARGETED:
         return f"python -m {QUALITY_MODULE} --targeted{base}"
@@ -139,18 +188,25 @@ def code_quality_gate_preview(
             ),
         }
     plan = plan or QualityGatePlan()
+    if plan.executor not in {"local", "dagger"}:
+        raise ValueError(f"unknown quality gate executor: {plan.executor}")
     memory_cap_payload: dict[str, object] = {}
     if plan.mode == GATE_FULL:
         cap_bytes = plan.memory_cap_bytes
-        memory_cap_payload = _memory_policy_payload(
+        cap_plan = (
             None
-            if cap_bytes is None
+            if cap_bytes is None or plan.executor == "dagger"
             else memory_cap.plan_capped_command(
                 "python",
                 ["-m", QUALITY_MODULE],
                 cap_bytes,
                 systemd_run_available=plan.systemd_run_available,
             )
+        )
+        memory_cap_payload = _memory_policy_payload(
+            cap_plan,
+            executor=plan.executor,
+            requested_cap_bytes=cap_bytes,
         )
     return {
         "required": True,
@@ -160,9 +216,11 @@ def code_quality_gate_preview(
             mode=plan.mode,
             memory_cap_bytes=plan.memory_cap_bytes,
             systemd_run_available=plan.systemd_run_available,
+            executor=plan.executor,
         ),
         "diffBase": diff_base,
         "mode": plan.mode,
+        "executor": plan.executor,
         **memory_cap_payload,
         "reason": (
             "closeout stages the whole task worktree so the gate's scope is the commit's "
@@ -177,7 +235,7 @@ def run_subprocess(
     command: list[str], cwd: Path, env: Mapping[str, str]
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        command,
+        native_command(command, env),
         cwd=cwd,
         env=dict(env),
         text=True,
@@ -215,14 +273,38 @@ def run_strict_code_quality_gate(
     plan = plan or QualityGatePlan()
     if plan.mode not in {GATE_TARGETED, GATE_FULL}:
         raise ValueError(f"unknown quality gate mode: {plan.mode}")
-    command, invocation, cap_plan = _gate_command_parts(code_worktree, plan, diff_base, invocation)
+    if plan.executor not in {"local", "dagger"}:
+        raise ValueError(f"unknown quality gate executor: {plan.executor}")
+    pytest_report = pytest_events_report_path(target.worktree_group)
+    command, invocation, cap_plan = _gate_command_parts(
+        code_worktree,
+        plan,
+        diff_base,
+        invocation,
+        pytest_report=pytest_report,
+    )
     started_at = datetime.now(UTC)
     started = time.monotonic()
-    result = runner(
-        command,
-        code_worktree,
-        quality_environment(code_worktree, invocation=invocation),
-    )
+    if plan.executor == "dagger":
+        result = run_clean_quality(
+            CleanQualityRequest(
+                code_worktree=code_worktree,
+                worktree_group=target.worktree_group,
+                mode=plan.mode,
+                diff_base=diff_base,
+                memory_cap_bytes=plan.memory_cap_bytes,
+            )
+        )
+    else:
+        result = runner(
+            command,
+            code_worktree,
+            quality_environment(
+                code_worktree,
+                reports_root=target.worktree_group / REPORT_DIRECTORY_NAME,
+                invocation=invocation,
+            ),
+        )
     finished_at = datetime.now(UTC)
     report_path = test_results_report_path(target.worktree_group)
     _write_test_results_report(
@@ -232,11 +314,13 @@ def run_strict_code_quality_gate(
             command=command,
             invocation=invocation,
             mode=plan.mode,
+            executor=plan.executor,
             diff_base=diff_base,
             started_at=started_at,
             finished_at=finished_at,
             elapsed_seconds=time.monotonic() - started,
             cap_plan=cap_plan,
+            requested_memory_cap_bytes=plan.memory_cap_bytes,
         )
     )
     if result.returncode != 0:
@@ -250,11 +334,21 @@ def run_strict_code_quality_gate(
             mode=plan.mode,
             memory_cap_bytes=plan.memory_cap_bytes,
             systemd_run_available=plan.systemd_run_available,
+            executor=plan.executor,
         ),
         "diffBase": diff_base,
         "mode": plan.mode,
+        "executor": plan.executor,
         "reportPath": report_path.as_posix(),
-        **(_memory_policy_payload(cap_plan) if plan.mode == GATE_FULL else {}),
+        **(
+            _memory_policy_payload(
+                cap_plan,
+                executor=plan.executor,
+                requested_cap_bytes=plan.memory_cap_bytes,
+            )
+            if plan.mode == GATE_FULL
+            else {}
+        ),
     }
 
 
@@ -267,6 +361,7 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
         f"- Status: **{'passed' if report.result.returncode == 0 else 'failed'}**",
         f"- Invocation: `{report.invocation}`",
         f"- Mode: `{report.mode}`",
+        f"- Executor: `{report.executor}`",
         f"- Diff base: `{report.diff_base or '(none)'}`",
         f"- Exit code: `{report.result.returncode}`",
         f"- Started: `{report.started_at.replace(microsecond=0).isoformat()}`",
@@ -283,11 +378,19 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
                 "- Swap policy: `host-managed`",
             ]
         )
+    elif report.requested_memory_cap_bytes is not None:
+        lines.extend(
+            [
+                "- Memory-cap policy: `dagger-inner-wrapper`",
+                f"- Memory-cap bytes: `{report.requested_memory_cap_bytes}`",
+                "- Swap policy: `container-host-managed`",
+            ]
+        )
     elif report.mode == GATE_FULL:
         lines.extend(
             [
-                "- Memory policy: `host-managed`",
-                "- Swap policy: `host-managed`",
+                f"- Memory policy: `{'container-host-managed' if report.executor == 'dagger' else 'host-managed'}`",
+                f"- Swap policy: `{'container-host-managed' if report.executor == 'dagger' else 'host-managed'}`",
             ]
         )
     lines.extend(
@@ -315,10 +418,20 @@ def _gate_command_parts(
     plan: QualityGatePlan,
     diff_base: str,
     invocation: str,
+    *,
+    pytest_report: Path | None = None,
 ) -> tuple[list[str], str, memory_cap.MemoryCapPlan | None]:
     """The concrete command, its invocation label, and (full runs) the cap plan."""
+    if plan.executor == "dagger":
+        return (
+            _dagger_report_command(plan, diff_base),
+            "master-integration" if plan.mode == GATE_FULL else invocation,
+            None,
+        )
     python = quality_python(code_worktree)
     module_args = ["-m", QUALITY_MODULE]
+    if pytest_report is not None:
+        module_args += ["--pytest-report-log", pytest_report.as_posix()]
     if plan.mode == GATE_TARGETED:
         module_args.append("--targeted")
     if diff_base:
@@ -336,9 +449,44 @@ def _gate_command_parts(
     return cap_plan.command, "master-integration", cap_plan
 
 
+def _dagger_report_command(plan: QualityGatePlan, diff_base: str) -> list[str]:
+    command = [
+        "dagger",
+        "call",
+        "quality",
+        "--source=<exact-staged-candidate>",
+        "--repository-bundle=<exact-git-ancestry-bundle>",
+        f"--mode={plan.mode}",
+    ]
+    if diff_base:
+        command.append(f"--diff-base={diff_base}")
+    if plan.memory_cap_bytes is not None:
+        command.append(f"--memory-cap-bytes={plan.memory_cap_bytes}")
+    return command
+
+
 def _memory_policy_payload(
     cap_plan: memory_cap.MemoryCapPlan | None,
+    *,
+    executor: str = "local",
+    requested_cap_bytes: int | None = None,
 ) -> dict[str, object]:
+    if executor == "dagger":
+        policy: dict[str, object] = {
+            "mode": "container-host-managed" if requested_cap_bytes is None else "explicit-cap",
+            "pytestProcesses": "auto",
+            "swap": "container-host-managed",
+        }
+        if requested_cap_bytes is None:
+            return {"memoryPolicy": policy}
+        return {
+            "memoryPolicy": policy,
+            "memoryCap": {
+                "capBytes": requested_cap_bytes,
+                "policy": "dagger-inner-wrapper",
+                "mechanism": "container-wrapper",
+            },
+        }
     policy: dict[str, object] = {
         "mode": "host-managed" if cap_plan is None else "explicit-cap",
         "pytestProcesses": "auto",
@@ -404,7 +552,10 @@ def quality_python(code_worktree: Path) -> Path:
 
 
 def quality_environment(
-    code_worktree: Path, *, invocation: str = "closeout-staged"
+    code_worktree: Path,
+    *,
+    reports_root: Path,
+    invocation: str = "closeout-staged",
 ) -> dict[str, str]:
     """Put the current worktree package first even when Python comes from another checkout.
 
@@ -425,14 +576,12 @@ def quality_environment(
     # closeout has already reset and staged the whole task worktree; integration runs
     # on a clean checkout at the commit about to land.
     env["AR_QUALITY_INVOCATION"] = invocation
-    if os.name != "nt":
-        # A WSL-hosted harness can inherit Windows TEMP/TMP paths. Besides letting one test
-        # delete another process's shared capture file, those long mount paths push local
-        # harness-control sockets past the Unix-domain path limit. Quality scratch is ephemeral;
-        # keep it on the platform's short, process-safe temp root while the durable, self-
-        # overwriting result remains under the worktree enclosure's reports directory.
-        env.update({name: "/tmp" for name in ("TMPDIR", "TMP", "TEMP")})
-    return env
+    env["COVERAGE_FILE"] = coverage_data_report_path(reports_root.parent).as_posix()
+    env["AR_QUALITY_PROGRESS_REPORT"] = quality_progress_report_path(reports_root.parent).as_posix()
+    env["AR_CODEX_PROBE_REPORT"] = codex_probe_report_path(reports_root.parent).as_posix()
+    # WSL imports Windows PATH/TEMP by design. The quality boundary is self-contained:
+    # native tools only, and ephemeral scratch beside the enclosure's durable reports.
+    return native_subprocess_environment(env, temp_root=reports_root / "tmp")
 
 
 def _git_common_dir(code_worktree: Path) -> Path | None:

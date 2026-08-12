@@ -7,11 +7,13 @@ from mcp.server.fastmcp import FastMCP
 from agents_remember.application.memory_tools import (
     CarryoverCommitMessages,
     CarryoverSelection,
+    CitationOperationScope,
     MemoryBranches,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 from ..tools import (
+    citation_fix_payload,
     drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
@@ -74,6 +76,30 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
             checks=checks,
             detail_limit=detail_limit,
             contract_path=contract_path,
+        )
+
+    @server.tool()
+    def citation_fix(
+        repo_id: str,
+        contract_path: str,
+        document: str | None = None,
+        expected_snapshot: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Regenerate anchored citation ranges inside one leaf memory worktree. The enclosure
+        contract is mandatory and the application guard refuses the official memory repo. A
+        pure move is repaired; renamed, deleted, or ambiguous anchors remain a curator worklist.
+        Preview with dry_run=true. Use document for one onboarding-relative file and
+        expected_snapshot to assert a previously built immutable source generation."""
+        return citation_fix_payload(
+            config,
+            repo_id,
+            contract_path=contract_path,
+            operation_scope=CitationOperationScope(
+                document=document,
+                expected_snapshot=expected_snapshot,
+            ),
+            dry_run=dry_run,
         )
 
     @server.tool()

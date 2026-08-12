@@ -17,6 +17,7 @@ describe("VOLATILE_AGE_FIELDS", () => {
   it("mirrors serving/delta.py exactly (keep the two sets in lockstep)", () => {
     expect([...VOLATILE_AGE_FIELDS].sort()).toEqual([
       "ageSeconds",
+      "elapsedSeconds",
       "heartbeatAgeSeconds",
       "snapshotStaleSeconds",
       "staleSeconds",

@@ -199,11 +199,11 @@ async def test_compatible_patch_version_is_accepted_after_capability_negotiation
 
 
 @pytest.mark.anyio
-async def test_desktop_user_agent_uses_host_version_and_exact_client_identity() -> None:
+async def test_client_user_agent_uses_host_version_and_exact_client_identity() -> None:
     data = fixture()
     initialize = fixture_object(data, "initializeResult")
     initialize["userAgent"] = (
-        "Codex Desktop/0.147.0 (Ubuntu 22.4.0; x86_64) dumb (agents_remember; 3.0.0)"
+        "agents_remember/0.147.0 (Ubuntu 22.4.0; x86_64) unknown (agents_remember; 3.0.0)"
     )
     fixture_object(data, "threadStartResult", "thread")["cliVersion"] = "0.147.0"
     transport = FakeCodexTransport()
@@ -219,11 +219,11 @@ async def test_desktop_user_agent_uses_host_version_and_exact_client_identity() 
 
 
 @pytest.mark.anyio
-async def test_host_first_user_agent_rejects_wrong_client_identity() -> None:
+async def test_client_user_agent_rejects_wrong_client_identity() -> None:
     data = fixture()
     initialize = fixture_object(data, "initializeResult")
     initialize["userAgent"] = (
-        "Codex Desktop/0.147.0 (Ubuntu 22.4.0; x86_64) dumb (agents_remember; 3.0.1)"
+        "agents_remember/0.147.0 (Ubuntu 22.4.0; x86_64) unknown (agents_remember; 3.0.1)"
     )
     transport = FakeCodexTransport()
     prime_start(transport, data)
@@ -231,6 +231,25 @@ async def test_host_first_user_agent_rejects_wrong_client_identity() -> None:
     with pytest.raises(CodexAppServerError, match="incompatible userAgent"):
         await make_adapter(transport).start(launch())
     assert transport.stop_modes == ["forced"]
+
+
+@pytest.mark.anyio
+async def test_desktop_server_product_keeps_exact_client_identity() -> None:
+    data = fixture()
+    initialize = fixture_object(data, "initializeResult")
+    initialize["userAgent"] = (
+        "Codex Desktop/0.147.0 (Ubuntu 22.4.0; x86_64) unknown (agents_remember; 3.0.0)"
+    )
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    fixture_object(data, "threadStartResult", "thread")["cliVersion"] = "0.147.0"
+
+    adapter = make_adapter(transport)
+    handshake = await adapter.start(launch())
+    try:
+        assert handshake.adapter_id == "codex-app-server:0.147.0"
+    finally:
+        await adapter.stop("forced")
 
 
 @pytest.mark.anyio
