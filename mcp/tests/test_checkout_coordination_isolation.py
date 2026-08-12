@@ -169,11 +169,9 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         self._undeclared_checkout(source)
         escaped = self.root / "live-ar-coordination" / "operator-inbox.jsonl"
 
-        with (
-            self.assertRaisesRegex(CheckoutCoordinationError, "leaf-local"),
-            exclusive_access(escaped, OPERATOR_INBOX_OWNERSHIP),
-        ):
-            pass
+        guard = exclusive_access(escaped, OPERATOR_INBOX_OWNERSHIP)
+        with self.assertRaisesRegex(CheckoutCoordinationError, "leaf-local"):
+            guard.__enter__()
 
         self.assertFalse(escaped.parent.exists())
         self.assertFalse(escaped.with_name(f"{escaped.name}.lock").exists())
