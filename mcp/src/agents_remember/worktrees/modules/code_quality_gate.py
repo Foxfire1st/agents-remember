@@ -33,7 +33,7 @@ QualityRunner = Callable[[list[str], Path, Mapping[str, str]], subprocess.Comple
 
 @dataclass(frozen=True)
 class QualityGatePlan:
-    """What one gate run is: which contract, and (for full runs) the memory cap."""
+    """What one gate run is, plus an optional explicit full-run memory cap."""
 
     mode: str = GATE_TARGETED
     memory_cap_bytes: int | None = None
@@ -86,7 +86,7 @@ def _gate_command(
     if mode == GATE_TARGETED:
         return f"python -m {QUALITY_MODULE} --targeted{base}"
     if memory_cap_bytes is None:
-        raise ValueError("full quality gate command requires memory_cap_bytes")
+        return f"python -m {QUALITY_MODULE}{base}"
     plan = memory_cap.plan_capped_command(
         "python",
         ["-m", QUALITY_MODULE],
@@ -142,20 +142,16 @@ def code_quality_gate_preview(
     memory_cap_payload: dict[str, object] = {}
     if plan.mode == GATE_FULL:
         cap_bytes = plan.memory_cap_bytes
-        if cap_bytes is None:
-            raise ValueError("full quality gate preview requires memory_cap_bytes")
-        memory_cap_payload = {
-            "memoryCap": {
-                "capBytes": cap_bytes,
-                "policy": memory_cap.QUALITY_MEMORY_CAP_POLICY,
-                "mechanism": memory_cap.plan_capped_command(
-                    "python",
-                    ["-m", QUALITY_MODULE],
-                    cap_bytes,
-                    systemd_run_available=plan.systemd_run_available,
-                ).mechanism,
-            }
-        }
+        memory_cap_payload = _memory_policy_payload(
+            None
+            if cap_bytes is None
+            else memory_cap.plan_capped_command(
+                "python",
+                ["-m", QUALITY_MODULE],
+                cap_bytes,
+                systemd_run_available=plan.systemd_run_available,
+            )
+        )
     return {
         "required": True,
         "status": GATE_ENFORCED,
@@ -258,17 +254,7 @@ def run_strict_code_quality_gate(
         "diffBase": diff_base,
         "mode": plan.mode,
         "reportPath": report_path.as_posix(),
-        **(
-            {
-                "memoryCap": {
-                    "capBytes": cap_plan.cap_bytes,
-                    "policy": cap_plan.policy,
-                    "mechanism": cap_plan.mechanism,
-                }
-            }
-            if cap_plan is not None
-            else {}
-        ),
+        **(_memory_policy_payload(cap_plan) if plan.mode == GATE_FULL else {}),
     }
 
 
@@ -294,6 +280,14 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
                 f"- Memory-cap policy: `{report.cap_plan.policy}`",
                 f"- Memory-cap mechanism: `{report.cap_plan.mechanism}`",
                 f"- Memory-cap bytes: `{report.cap_plan.cap_bytes}`",
+                "- Swap policy: `host-managed`",
+            ]
+        )
+    elif report.mode == GATE_FULL:
+        lines.extend(
+            [
+                "- Memory policy: `host-managed`",
+                "- Swap policy: `host-managed`",
             ]
         )
     lines.extend(
@@ -332,10 +326,7 @@ def _gate_command_parts(
     if plan.mode != GATE_FULL:
         return [python.as_posix(), *module_args], invocation, None
     if plan.memory_cap_bytes is None:
-        raise RuntimeError(
-            "full quality gate requires a settings-owned memory cap "
-            f"({memory_cap.QUALITY_MEMORY_CAP_POLICY})"
-        )
+        return [python.as_posix(), *module_args], "master-integration", None
     cap_plan = memory_cap.plan_capped_command(
         python,
         module_args,
@@ -343,6 +334,26 @@ def _gate_command_parts(
         systemd_run_available=plan.systemd_run_available,
     )
     return cap_plan.command, "master-integration", cap_plan
+
+
+def _memory_policy_payload(
+    cap_plan: memory_cap.MemoryCapPlan | None,
+) -> dict[str, object]:
+    policy: dict[str, object] = {
+        "mode": "host-managed" if cap_plan is None else "explicit-cap",
+        "pytestProcesses": "auto",
+        "swap": "host-managed",
+    }
+    if cap_plan is None:
+        return {"memoryPolicy": policy}
+    return {
+        "memoryPolicy": policy,
+        "memoryCap": {
+            "capBytes": cap_plan.cap_bytes,
+            "policy": cap_plan.policy,
+            "mechanism": cap_plan.mechanism,
+        },
+    }
 
 
 def _gate_failure_message(

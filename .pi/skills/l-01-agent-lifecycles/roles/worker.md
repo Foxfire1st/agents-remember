@@ -75,7 +75,7 @@ quality altitude ladder (260731-EFA-L17), leaf checks are change-set-scoped: the
 the closeout staged gate run `agents_remember.code_quality.check --targeted` (changed files +
 reverse-import closure + derived test subset), and `memory_quality_check` stays a per-leaf
 closeout gate. The **full** wrapper is not a leaf check: it runs once per master, at the master
-integration gate, memory-capped. A red check you cannot fix inside the leaf's scope is an
+integration gate, with host-managed RAM/swap by default. A red check you cannot fix inside the leaf's scope is an
 escalation, not a workaround.
 
 ### 5 — The Turn Report (mandatory, your last act)

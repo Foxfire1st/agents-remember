@@ -38,8 +38,9 @@ master's leaf loop to the master-exit seam, then hand over.
   builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
 - Quality altitude ladder (260731-EFA-L17): leaf closeout and leaf integration run the
   change-set-scoped contract (`agents_remember.code_quality.check --targeted`); the FULL wrapper
-  runs exactly once per master inside `worktree_integrate` at master altitude, memory-capped
-  (`orchestration.qualityGate.memoryCapBytes`). `memory_quality_check` stays a per-leaf closeout
+  runs exactly once per master inside `worktree_integrate` at master altitude with host-managed
+  RAM/swap by default; constrained CI may set `orchestration.qualityGate.memoryCapBytes`.
+  `memory_quality_check` stays a per-leaf closeout
   gate; a leaf closeout that skips its required checks is refused, not passed.
 - Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf
   document and role `curator`, so the plane claims the `(leaf document, curator)` seat; dispatch

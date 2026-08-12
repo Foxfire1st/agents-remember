@@ -138,7 +138,7 @@ Set it up once per clone:
 | --- | --- | --- | --- | --- |
 | `fast` | pre-commit | the staged content | generated-copy checks (skills, runtime, harness), ruff, `ruff format --check`, Pyright | about 20 seconds |
 | `targeted` | pre-push | Git's ref updates plus the leaf change set (changed Python files, reverse-import closure, derived test subset) at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the change-set-scoped wrapper (`--targeted`) | about a minute |
-| `full` | manual; also master integration (`worktree_integrate` on a series/master contract) | the whole tree at current-checkout bytes; memory-capped at the master integration gate | generated-copy checks, then the full wrapper | minutes (~13-18) |
+| `full` | manual; also master integration (`worktree_integrate` on a series/master contract) | the whole tree at current-checkout bytes; host-managed RAM/swap by default at the master integration gate | generated-copy checks, then the full wrapper | minutes (~13-18) |
 
 The fast tier enumerates Python paths with `git ls-files '*.py'` (the
 staged/index population); the targeted tier derives its input from the leaf diff

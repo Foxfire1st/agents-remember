@@ -59,12 +59,12 @@ def quality_gate_mode(contract: WorktreeContract) -> str:
 
     A leaf contract integrates into its master branch and certifies its own change
     set; the master's series contract is the once-per-master gate and runs the full
-    wrapper, memory-capped, inside the integration step itself.
+    wrapper with host-managed memory by default inside the integration step itself.
     """
     return GATE_TARGETED if contract.kind == "leaf" else GATE_FULL
 
 
-def _quality_gate_memory_cap(contract: WorktreeContract) -> int:
+def _quality_gate_memory_cap(contract: WorktreeContract) -> int | None:
     settings = load_agentic_settings(contract.coordination_root, repo_root=contract.code_repo_path)
     return settings.quality_gate.memory_cap_bytes
 
@@ -670,8 +670,9 @@ def _run_integration_quality_gate(
     """The altitude-routed quality gate for one integration, run before any merge.
 
     Leaf integration certifies the leaf's change set (targeted); master integration
-    runs the full wrapper once, memory-capped, inside the integration step itself so
-    no manager or orchestrator has to remember a separate full-gate invocation.
+    runs the full wrapper once with host-managed RAM/swap by default inside the
+    integration step itself so no manager or orchestrator has to remember a
+    separate full-gate invocation. Constrained CI may configure an explicit cap.
     """
     if not requires_strict_code_quality(contract.code_worktree, code_would_commit=True):
         return _quality_gate_preview(contract), None

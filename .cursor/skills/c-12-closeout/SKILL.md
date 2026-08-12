@@ -80,8 +80,9 @@ change-set-scoped: the pre-push tier and the closeout staged gate run the wrappe
 `--targeted` (ruff over changed files, pyright over changed files plus the reverse-import closure,
 pytest over the derived test subset, coverage/CRAP over changed production modules, and the
 changed-lines coverage floor). The **full** wrapper runs exactly once per master, at the master
-integration gate, inside `worktree_integrate` itself, memory-capped
-(`orchestration.qualityGate.memoryCapBytes`; systemd MemoryMax scope or the rlimit fallback). It is
+integration gate, inside `worktree_integrate` itself, with host-managed RAM and swap by default.
+Constrained CI may opt into `orchestration.qualityGate.memoryCapBytes` (systemd MemoryMax scope or
+the rlimit fallback). It is
 not a leaf gate. `memory_quality_check` is explicitly carved out: it stays a per-leaf closeout
 gate. A leaf closeout that tries to skip its required checks — a changed production module with no
 derived test subset, a failed targeted run, or a missing wrapper — is refused loudly, never passed

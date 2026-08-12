@@ -241,7 +241,7 @@ test subset). No rail carries a baseline or exemption list. Radon is printed as 
 report and cannot fail either tier — it exits 0 whatever it finds. CI runs the
 full wrapper on every branch push and pull request, and the full wrapper also
 runs exactly once per master at the master integration gate (invoked by
-`worktree_integrate` itself, memory-capped). Leaf closeouts and leaf integrations
+`worktree_integrate` itself, host-managed RAM/swap by default). Leaf closeouts and leaf integrations
 run the targeted tier before creating an Agents Remember code commit even when
 hooks are not configured. See CONTRIBUTING.md for the tier table and the
 staged-content stash contract.

@@ -137,7 +137,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertIsNone(settings.concurrency.max_parallel_leaves)
         self.assertIsNone(settings.concurrency.max_sub_agents)
         self.assertIsNone(settings.spawn_harness)
-        self.assertEqual(settings.quality_gate.memory_cap_bytes, 2147483648)
+        self.assertIsNone(settings.quality_gate.memory_cap_bytes)
         self.assertEqual(settings.sources, ())
 
     def test_repo_root_is_optional(self) -> None:
@@ -949,7 +949,7 @@ class SeedTests(unittest.TestCase):
 
 
 class QualityGateSettingsTests(unittest.TestCase):
-    """``orchestration.qualityGate`` (260731-EFA-L17-R3): the full gate memory cap."""
+    """``orchestration.qualityGate``: optional hard cap over host-managed memory."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -963,7 +963,7 @@ class QualityGateSettingsTests(unittest.TestCase):
     def test_defaults_when_absent(self) -> None:
         settings = load_agentic_settings(self.coordination_root)
 
-        self.assertEqual(settings.quality_gate.memory_cap_bytes, 2147483648)
+        self.assertIsNone(settings.quality_gate.memory_cap_bytes)
 
     def test_memory_cap_bytes_parses_and_overrides(self) -> None:
         write_settings(
@@ -983,7 +983,7 @@ class QualityGateSettingsTests(unittest.TestCase):
 
         settings = load_agentic_settings(self.coordination_root)
 
-        self.assertEqual(settings.quality_gate.memory_cap_bytes, 2147483648)
+        self.assertIsNone(settings.quality_gate.memory_cap_bytes)
 
     def test_unknown_quality_gate_key_fails_loud(self) -> None:
         path = write_settings(

@@ -388,7 +388,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "whole task worktree, runs its configured fast hook once, restages any hook edits, "
             "and runs the leaf's targeted contract over exactly what it will commit. The code "
             "commit bypasses hooks so nothing restarts after the wrapper's pytest-final phase. "
-            "The full wrapper runs once per master at the memory-capped master "
+            "The full wrapper runs once per master at the host-managed master "
             "integration gate. After the code commit, external-memory closeout refreshes "
             "onboarding and entity metadata plus route overviews and indexes, reruns memory "
             "quality without the preflight's temporary base provenance, and only then commits "

@@ -23,9 +23,6 @@ from agents_remember.kernel.primitives.gate_policy import (
 from agents_remember.kernel.primitives.inbox_backoff import (
     DEFAULT_RATE_LIMIT_SECONDS,
 )
-from agents_remember.kernel.primitives.memory_cap import (
-    DEFAULT_FULL_GATE_MEMORY_CAP_BYTES,
-)
 
 
 class AgenticSettingsError(AgentsRememberError):
@@ -67,8 +64,8 @@ KNOWN_HARNESS_ENTRY_FIELDS = frozenset(
 )
 KNOWN_GATE_DELEGATION_FIELDS = frozenset({"policy", "kinds", "requireReviewerVerdictAtSeams"})
 KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
-# The full quality gate's memory cap. One scalar knob, settings-owned so the
-# once-per-master full run is bounded without a code change.
+# Optional hard cap for the full quality gate. When absent, host RAM and swap own
+# pressure response; this scalar remains for constrained CI environments.
 KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes"})
 KNOWN_LOOPS_FIELDS = frozenset({"defaults", "perLevel", "perMaster"})
 KNOWN_LOOP_DEFAULTS_FIELDS = frozenset({"maxRounds", "reviewerReuse", "complexity"})
@@ -251,14 +248,13 @@ class AgentNotifierSettings:
 class QualityGateSettings:
     """``orchestration.qualityGate`` -- the full quality gate's resource knobs.
 
-    ``memory_cap_bytes`` bounds every full-wrapper run at the master integration
-    gate. The integration step wraps the run in a systemd scope with MemoryMax when
-    one is available, and falls back to a POSIX address-space rlimit inside the
-    wrapper otherwise (see ``kernel.memory_cap``). Targeted leaf runs are not
-    full runs and are not capped by this knob.
+    ``memory_cap_bytes=None`` leaves the full wrapper host-managed, including the
+    host's normal swap policy. An explicit value wraps the run in a systemd
+    ``MemoryMax`` scope when available and otherwise uses a POSIX address-space
+    rlimit (see ``kernel.memory_cap``). Targeted leaf runs never use this knob.
     """
 
-    memory_cap_bytes: int = DEFAULT_FULL_GATE_MEMORY_CAP_BYTES
+    memory_cap_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -341,7 +337,6 @@ def default_agentic_settings_seed() -> dict[str, Any]:
         "version": 1,
         "orchestration": {
             "gateDelegation": {"policy": "all-human"},
-            "qualityGate": {"memoryCapBytes": DEFAULT_FULL_GATE_MEMORY_CAP_BYTES},
             "loops": {
                 "defaults": {
                     "maxRounds": DEFAULT_LOOP_MAX_ROUNDS,

@@ -1,20 +1,22 @@
-"""Memory-bound full quality-gate runs.
+"""Optional hard limits for full quality-gate runs.
 
 A full wrapper run is expensive (~0.5 GB RSS plateau measured 2026-08-05) and the
 whole point of moving it to the master integration gate was to stop the parallel
-leaf multiplier from taking down the host. Every full run therefore executes
-under a settings-owned cap:
+leaf multiplier. Full runs are host-managed by default: pytest keeps ``-n=auto``
+and the operating system may use swap when real RAM pressure occurs. Operators
+may still opt into a hard settings-owned cap:
 
 - on a host with systemd, ``systemd-run --scope`` (``--user`` for a non-root
   user manager) with ``MemoryMax=<bytes>`` is the primary mechanism, and an
-  over-cap run is killed inside its own scope;
+  over-cap run is killed inside its own scope, while the host's normal swap policy
+  remains available;
 - otherwise the closest available mechanism is a POSIX address-space rlimit
   (``RLIMIT_AS``) applied inside the wrapper itself and inherited by every rail
   subprocess, so an over-cap run dies with ``MemoryError`` rather than taking the
   VM down with it.
 
-The policy name is part of every failure so an operator sees exactly which knob
-to raise: ``orchestration.qualityGate.memoryCapBytes``.
+The policy name is part of every explicitly capped failure so an operator sees
+exactly which knob constrained it: ``orchestration.qualityGate.memoryCapBytes``.
 """
 
 from __future__ import annotations
@@ -26,10 +28,6 @@ from pathlib import Path
 
 # The settings-owned policy key (schema: docs/reference/settings-json.md).
 QUALITY_MEMORY_CAP_POLICY = "orchestration.qualityGate.memoryCapBytes"
-
-# Measured full-run plateau ~0.5 GB RSS; 2 GiB leaves headroom for the address
-# space the RLIMIT_AS fallback sees while still bounding a runaway run.
-DEFAULT_FULL_GATE_MEMORY_CAP_BYTES = 2 * 1024**3
 
 # Env var the wrapper sets after applying the rlimit, so step-failure output can
 # name the cap without inventing a second configuration source.
@@ -115,10 +113,6 @@ def plan_capped_command(
                 "--quiet",
                 "-p",
                 f"MemoryMax={cap_bytes}",
-                # Without a swap cap the WSL/host swap absorbs the over-cap run and the
-                # hard MemoryMax never fires; MemorySwapMax=0 makes the cap real.
-                "-p",
-                "MemorySwapMax=0",
                 "--description",
                 f"agents-remember full quality gate ({policy})",
                 str(executable),

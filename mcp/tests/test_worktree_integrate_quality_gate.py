@@ -133,6 +133,11 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
         self.assertEqual(integrate_mod._quality_gate_memory_cap(contract), 123456)
 
+    def test_quality_gate_memory_is_host_managed_when_the_cap_is_absent(self) -> None:
+        contract = integration_contract(self.root, kind="series")
+
+        self.assertIsNone(integrate_mod._quality_gate_memory_cap(contract))
+
     def test_a_refused_gate_blocks_integration_without_merging(self) -> None:
         contract = integration_contract(self.root, kind="leaf")
 

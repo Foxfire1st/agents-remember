@@ -10,7 +10,6 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
     DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
     DEFAULT_EXPECTATION_SLA_SECONDS,
-    DEFAULT_FULL_GATE_MEMORY_CAP_BYTES,
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_RATE_LIMIT_SECONDS,
@@ -383,7 +382,7 @@ def _parse_spawn(
 def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
     """``orchestration.qualityGate``: the full gate's memory cap in bytes.
 
-    Absent -> the documented default (2 GiB). Unknown keys fail loud like every other
+    Absent -> host-managed RAM and swap. Unknown keys fail loud like every other
     orchestration family; a null at the family key is refused by
     :func:`_refuse_null_families` before this parser runs.
     """
@@ -391,7 +390,7 @@ def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
         return QualityGateSettings()
     block = _require_object(raw, "orchestration.qualityGate", source)
     _refuse_unknown(block, KNOWN_QUALITY_GATE_FIELDS, "orchestration.qualityGate", source)
-    memory_cap_bytes = DEFAULT_FULL_GATE_MEMORY_CAP_BYTES
+    memory_cap_bytes = None
     if "memoryCapBytes" in block:
         memory_cap_bytes = _require_positive_int(
             block["memoryCapBytes"],

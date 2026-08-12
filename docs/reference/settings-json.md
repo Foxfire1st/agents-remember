@@ -298,8 +298,8 @@ a harness/MCP restart.
 
 **Defaults.** An absent file, or an absent key, means: all-human gate
 delegation, the loop defaults below, no role overrides, no concurrency caps,
-no spawn harness preference (detection-gated spawns), and the full quality
-gate's default memory cap (2 GiB, see `orchestration.qualityGate`).
+no spawn harness preference (detection-gated spawns), and a host-managed full
+quality gate with normal RAM and swap behavior (see `orchestration.qualityGate`).
 
 ### orchestration.gateDelegation
 
@@ -432,23 +432,25 @@ passed smoke.
 
 ### orchestration.qualityGate
 
-`orchestration.qualityGate` owns the full quality wrapper's resource knobs
-(260731-EFA-L17). The full wrapper runs exactly once per master, at the master
-integration gate, and every such run is memory-bounded.
+`orchestration.qualityGate` owns optional full-wrapper resource overrides
+(260731-EFA-L17, L24). The full wrapper runs exactly once per master, at the
+master integration gate. By default it is host-managed: pytest keeps `-n=auto`,
+Linux/WSL uses available RAM normally, and configured swap remains available
+when the host experiences real memory pressure.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `memoryCapBytes` | `2147483648` (2 GiB) | The memory cap for a full-wrapper run. On hosts with systemd the integration step runs the wrapper in a `systemd-run --scope` with `MemoryMax=<bytes>` and `MemorySwapMax=0` (so swap cannot mask the hard cap); otherwise the wrapper applies a POSIX `RLIMIT_AS` address-space rlimit to itself and every rail it spawns (the closest available mechanism). An over-cap run dies inside its own scope/process with a loud failure naming this policy key. Positive integer. |
+| `memoryCapBytes` | omitted (host-managed) | Optional hard cap for constrained CI. On hosts with systemd the integration step uses `MemoryMax=<bytes>` but leaves swap under the host's normal policy. Otherwise it applies a POSIX `RLIMIT_AS` limit to the wrapper and its rail subprocesses. A capped failure names this policy key. Positive integer when present. |
 
 ```jsonc
 "orchestration": {
-  "qualityGate": { "memoryCapBytes": 2147483648 }
+  "qualityGate": { "memoryCapBytes": 8589934592 }
 }
 ```
 
-Targeted leaf runs (pre-push hook, leaf closeout, leaf integration) are not full
-runs and are not capped by this knob. Raise `memoryCapBytes` only after the run
-itself is proven healthy; the gate treats a killed run as a failure, never a skip.
+Targeted leaf runs (pre-push hook, leaf closeout, leaf integration) ignore this
+knob. An explicit cap is an opt-in restriction, not the default resource policy;
+the gate treats a capped kill as a failure, never a skip.
 
 ### orchestration.concurrency, orchestration.spawn
 

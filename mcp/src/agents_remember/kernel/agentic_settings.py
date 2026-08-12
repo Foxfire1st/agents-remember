@@ -4,8 +4,8 @@ The agentic settings family -- everything under the top-level ``orchestration``
 key: gate delegation, the three-party-loop knobs, per-role knob overrides,
 concurrency caps, the spawn harness preference, and the harness-definition
 extension/override table (``orchestration.harnesses``, 260703-L16) -- lives in
-TWO JSON files that are merged on every read; the full quality gate's memory cap
-is ``orchestration.qualityGate``:
+TWO JSON files that are merged on every read; the full quality gate's optional
+hard-cap override is ``orchestration.qualityGate``:
 
 - GLOBAL: ``<coordination_root>/system/settings.json``
 - LOCAL:  ``<code_repo>/system/settings.json`` (optional; merged OVER global)
@@ -57,7 +57,6 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
     DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
     DEFAULT_EXPECTATION_SLA_SECONDS,
-    DEFAULT_FULL_GATE_MEMORY_CAP_BYTES,
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_REVIEWER_REUSE,
@@ -139,7 +138,6 @@ __all__ = [
     "DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET",
     "DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS",
     "DEFAULT_EXPECTATION_SLA_SECONDS",
-    "DEFAULT_FULL_GATE_MEMORY_CAP_BYTES",
     "DEFAULT_LOOP_MAX_ROUNDS",
     "DEFAULT_LOOP_PER_LEVEL",
     "DEFAULT_REVIEWER_REUSE",

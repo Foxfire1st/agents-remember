@@ -110,7 +110,7 @@ class MemoryCapPlanningTests(unittest.TestCase):
         self.assertIn("--user", plan.command)
         self.assertIn("--scope", plan.command)
         self.assertIn("MemoryMax=2147483648", plan.command)
-        self.assertIn("MemorySwapMax=0", plan.command)
+        self.assertFalse(any(part.startswith("MemorySwapMax=") for part in plan.command))
         self.assertIn("python", plan.command)
         self.assertIn("--diff-base", plan.command)
         with mock.patch.object(memory_cap.os, "geteuid", return_value=0):

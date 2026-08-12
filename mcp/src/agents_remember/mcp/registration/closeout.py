@@ -59,7 +59,7 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         derived test subset, mandatory CRAP enforcement over changed modules) over exactly
         that staged content, before any code, memory, ledger, contract, or applied-gate
         commit; then commits in order. The full wrapper is NOT a leaf gate: it runs once per
-        master at the master integration gate, memory-capped. A refused gate leaves the task
+        master at the master integration gate with host-managed memory by default. A refused gate leaves the task
         worktree staged and commits nothing; retries reset and restage from the working tree.
         MUTATING and commit-gated: preview and approval precede apply. Requires intent_note."""
         return worktree_closeout_apply_payload(
@@ -83,8 +83,9 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     ) -> dict[str, Any]:
         """Land a closed task branch back onto its source branch (strategy 'ff-only' or
         'replay'). Runs the altitude-routed quality gate before any merge: leaf integration
-        certifies its change set (--targeted); master integration runs the full wrapper once,
-        memory-capped (orchestration.qualityGate.memoryCapBytes), inside this step. MUTATING:
+        certifies its change set (--targeted); master integration runs the full wrapper once
+        with host-managed RAM/swap by default inside this step; constrained CI may configure
+        orchestration.qualityGate.memoryCapBytes. MUTATING:
         moves branch refs; preview with dry_run=true."""
         return worktree_integrate_payload(
             config,

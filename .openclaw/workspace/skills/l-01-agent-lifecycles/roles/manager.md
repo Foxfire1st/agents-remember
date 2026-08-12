@@ -161,8 +161,9 @@ stops belong to the orchestrator via the system-specialist protocol.
   done.
 - **Quality altitude ladder (260731-EFA-L17).** Leaf closeout and leaf integration run the
   change-set-scoped contract (`agents_remember.code_quality.check --targeted`); the full wrapper
-  runs exactly once per master inside `worktree_integrate` at master altitude, memory-capped
-  (`orchestration.qualityGate.memoryCapBytes`). `memory_quality_check` is NOT part of that move:
+  runs exactly once per master inside `worktree_integrate` at master altitude with host-managed
+  RAM/swap by default; constrained CI may set `orchestration.qualityGate.memoryCapBytes`.
+  `memory_quality_check` is NOT part of that move:
   it stays a per-leaf closeout gate, and a leaf closeout that skips its required checks is
   refused, not passed.
 - **Seat cleanup** — a completed leaf's worker/reviewer/curator chats have no further active

@@ -232,9 +232,11 @@ class CodeQualityGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown quality gate mode"):
             code_quality_gate._gate_command("", mode="bogus")
 
-    def test_gate_command_requires_a_cap_for_the_full_mode(self) -> None:
-        with self.assertRaisesRegex(ValueError, "requires memory_cap_bytes"):
-            code_quality_gate._gate_command("", mode=code_quality_gate.GATE_FULL)
+    def test_full_gate_command_is_host_managed_without_an_explicit_cap(self) -> None:
+        self.assertEqual(
+            code_quality_gate._gate_command("", mode=code_quality_gate.GATE_FULL),
+            "python -m agents_remember.code_quality.check",
+        )
 
     def test_full_gate_preview_names_the_memory_cap_and_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -255,37 +257,64 @@ class CodeQualityGateTests(unittest.TestCase):
             assert isinstance(memory_cap, dict)
             self.assertEqual(memory_cap["capBytes"], 2147483648)
             self.assertEqual(memory_cap["policy"], "orchestration.qualityGate.memoryCapBytes")
+            policy = preview["memoryPolicy"]
+            assert isinstance(policy, dict)
+            self.assertEqual(policy["mode"], "explicit-cap")
+            self.assertEqual(policy["pytestProcesses"], "auto")
+            self.assertEqual(policy["swap"], "host-managed")
 
-    def test_full_gate_preview_without_a_cap_is_refused(self) -> None:
+    def test_full_gate_preview_without_a_cap_is_host_managed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
-            with self.assertRaisesRegex(ValueError, "requires memory_cap_bytes"):
-                code_quality_gate.code_quality_gate_preview(
-                    worktree,
-                    code_would_commit=True,
-                    plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
-                )
+            preview = code_quality_gate.code_quality_gate_preview(
+                worktree,
+                code_would_commit=True,
+                plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
+            )
 
-    def test_full_gate_without_a_cap_is_refused(self) -> None:
+            self.assertNotIn("memoryCap", preview)
+            policy = preview["memoryPolicy"]
+            assert isinstance(policy, dict)
+            self.assertEqual(policy["mode"], "host-managed")
+            self.assertEqual(policy["pytestProcesses"], "auto")
+            self.assertEqual(policy["swap"], "host-managed")
+
+    def test_full_gate_without_a_cap_runs_with_host_memory_and_swap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
+            calls: list[list[str]] = []
 
-            with (
-                mock.patch.object(
-                    code_quality_gate,
-                    "quality_python",
-                    return_value=Path(sys.executable),
-                ),
-                self.assertRaisesRegex(RuntimeError, "settings-owned memory cap"),
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                del cwd, env
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout="passed\n")
+
+            with mock.patch.object(
+                code_quality_gate,
+                "quality_python",
+                return_value=Path(sys.executable),
             ):
-                code_quality_gate.run_strict_code_quality_gate(
+                result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
-                    runner=lambda command, cwd, env: subprocess.CompletedProcess(
-                        command, 0, stdout=""
-                    ),
+                    runner=runner,
                 )
+
+            self.assertEqual(
+                calls,
+                [[sys.executable, "-m", "agents_remember.code_quality.check"]],
+            )
+            self.assertNotIn("memoryCap", result)
+            policy = result["memoryPolicy"]
+            assert isinstance(policy, dict)
+            self.assertEqual(policy["mode"], "host-managed")
+            report = worktree / "enclosure" / "reports" / "test-results.md"
+            report_text = report.read_text(encoding="utf-8")
+            self.assertIn("- Memory policy: `host-managed`", report_text)
+            self.assertIn("- Swap policy: `host-managed`", report_text)
 
     def test_gate_run_refuses_unknown_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
