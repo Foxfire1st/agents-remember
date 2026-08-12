@@ -845,6 +845,7 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
             targeted=True,
             targeted_base=base,
             targeted_scope=derived,
+            file_size_armed=quality_scope.file_size_armed(project_root),
         )
     return CheckConfig(
         project_root=project_root,

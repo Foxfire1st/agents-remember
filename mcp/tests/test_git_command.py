@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import os
 import subprocess
 import sys
@@ -53,7 +54,11 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.worktrees.modules import cleanup
 from agents_remember.worktrees.modules.code_quality_gate import _git_common_dir
-from agents_remember.worktrees.modules.git import commit_if_dirty, head_commit
+from agents_remember.worktrees.modules.git import (
+    commit_if_dirty,
+    head_commit,
+    run_pre_commit_hook_if_configured,
+)
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 
@@ -289,6 +294,25 @@ class RunnerContractTests(unittest.TestCase):
         # bytes in two is wedged, and a wedged remote inside an MCP tool call cannot be
         # cancelled by the client.
         self.assertLess(GIT_REMOTE_TIMEOUT_SECONDS, GIT_LOCAL_TIMEOUT_SECONDS)
+
+    def test_failed_hook_diagnostic_with_invalid_bytes_is_json_serializable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            hook = repo / ".git" / "hooks" / "pre-commit"
+            hook.write_bytes(b"#!/bin/sh\nprintf '\\201' >&2\nexit 1\n")
+            hook.chmod(0o755)
+
+            raw = run_git(repo, ["hook", "run", "pre-commit"])
+            self.assertIn("\udc81", raw.stderr)
+
+            with self.assertRaises(RuntimeError) as raised:
+                run_pre_commit_hook_if_configured(repo)
+
+            diagnostic = str(raised.exception)
+            self.assertIn(r"\udc81", diagnostic)
+            json.dumps({"error": diagnostic}, ensure_ascii=False).encode("utf-8")
 
 
 class RemoteBranchStallTests(unittest.TestCase):

@@ -145,6 +145,7 @@ def test_generated_and_data_dirs_are_not_undeclared(tmp_path: Path) -> None:
             "mcp/src/agents_remember/serving/__init__.py": "",
             "mcp/src/agents_remember/package_data/skills/x.txt": "",
             "mcp/src/agents_remember/__pycache__/x.pyc": "",
+            "mcp/src/agents_remember/controllers/__pycache__/deleted.cpython-311.pyc": "",
             "mcp/src/agents_remember/.hidden/__init__.py": "",
         },
     )

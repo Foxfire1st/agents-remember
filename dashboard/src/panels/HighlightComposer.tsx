@@ -49,6 +49,11 @@ import { fetchHarnesses, type HarnessInfo } from '../data/terminal';
 // terminal. Images/attachments remain UA-10 and are stated as unavailable instead of being
 // smuggled through PTY paste or filesystem-path conventions.
 
+// Zustand's React adapter requires selector snapshots to retain identity while the store is
+// unchanged. Keep the pre-projection fallback stable so an empty dashboard cannot enter React's
+// useSyncExternalStore update loop during startup.
+const EMPTY_TASK_DOCUMENTS: TaskDocNode[] = [];
+
 const popover = css({ maxWidth: 'min(32rem, 94vw)' });
 const dialog = css({
   display: 'flex',
@@ -719,7 +724,9 @@ function HighlightComposerImpl({
   onSent?: (sessionId: string) => void;
 }) {
   const state = useHighlightComposerState();
-  const taskDocuments = useDashboard((dashboard) => dashboard.analytics?.taskDocuments ?? []);
+  const taskDocuments = useDashboard(
+    (dashboard) => dashboard.analytics?.taskDocuments ?? EMPTY_TASK_DOCUMENTS,
+  );
   const { directLeafChat, targets, selectedKey, selected } = useHighlightTargets({
     selection: state.selection,
     sessions: state.sessions,

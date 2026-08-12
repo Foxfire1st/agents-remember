@@ -116,7 +116,13 @@ def imports_of(path: Path) -> list[tuple[int, str, tuple[str, ...]]]:
 
 
 def undeclared_dirs(source_root: Path, contract: LayersContract) -> list[str]:
-    """Top-level directories under agents_remember that layers.toml does not declare."""
+    """Top-level Python source packages that ``layers.toml`` does not declare.
+
+    A deleted package can leave an ignored ``__pycache__`` directory in a long-lived
+    checkout.  That bytecode debris is not source architecture and must not make the
+    master gate depend on checkout hygiene.  Any undeclared directory that still owns a
+    Python source file remains a hard failure, including namespace-package layouts.
+    """
     undeclared: list[str] = []
     for entry in sorted(source_root.iterdir()):
         if not entry.is_dir():
@@ -124,6 +130,10 @@ def undeclared_dirs(source_root: Path, contract: LayersContract) -> list[str]:
         if entry.name in contract.ranks:
             continue
         if entry.name in {"__pycache__", "package_data"} or entry.name.startswith("."):
+            continue
+        if not any(
+            path.is_file() and "__pycache__" not in path.parts for path in entry.rglob("*.py")
+        ):
             continue
         undeclared.append(entry.name)
     return undeclared

@@ -169,7 +169,9 @@ class _AppServer:
                 },
             )
             cli_version, _evidence = validate_initialize_response(
-                initialize, client_name=_CLIENT_NAME
+                initialize,
+                client_name=_CLIENT_NAME,
+                client_version=_CLIENT_VERSION,
             )
             await transport.notify("initialized", {})
         except (CodexAppServerError, OSError) as exc:

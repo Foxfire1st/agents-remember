@@ -15,10 +15,17 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 # helpers below now call the one guarded runner; nothing else about them changed.
 
 
+def _transport_safe_git_diagnostic(text: str) -> str:
+    """Render surrogateescaped Git bytes without leaking invalid Unicode to MCP."""
+
+    return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
 def require_git(repo: Path, args: list[str]) -> str:
     result = run_git(repo, args)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+        detail = result.stderr.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(_transport_safe_git_diagnostic(detail))
     return result.stdout.strip()
 
 

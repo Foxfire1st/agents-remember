@@ -379,6 +379,7 @@ class CodexAppServerSession:
         cli_version, evidence = validate_initialize_response(
             initialize,
             client_name=self.settings.client_name,
+            client_version=self.settings.client_version,
         )
         await transport.notify("initialized", {})
         return cli_version, evidence

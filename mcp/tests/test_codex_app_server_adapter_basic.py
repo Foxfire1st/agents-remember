@@ -20,6 +20,7 @@ from test_codex_app_server_adapter import (
     launch,
     make_adapter,
     prime_start,
+    settle,
 )
 
 
@@ -198,6 +199,41 @@ async def test_compatible_patch_version_is_accepted_after_capability_negotiation
 
 
 @pytest.mark.anyio
+async def test_desktop_user_agent_uses_host_version_and_exact_client_identity() -> None:
+    data = fixture()
+    initialize = fixture_object(data, "initializeResult")
+    initialize["userAgent"] = (
+        "Codex Desktop/0.147.0 (Ubuntu 22.4.0; x86_64) dumb (agents_remember; 3.0.0)"
+    )
+    fixture_object(data, "threadStartResult", "thread")["cliVersion"] = "0.147.0"
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+
+    handshake = await adapter.start(launch())
+    try:
+        assert handshake.adapter_id == "codex-app-server:0.147.0"
+        assert handshake.raw["codexCliVersion"] == "0.147.0"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_host_first_user_agent_rejects_wrong_client_identity() -> None:
+    data = fixture()
+    initialize = fixture_object(data, "initializeResult")
+    initialize["userAgent"] = (
+        "Codex Desktop/0.147.0 (Ubuntu 22.4.0; x86_64) dumb (agents_remember; 3.0.1)"
+    )
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+
+    with pytest.raises(CodexAppServerError, match="incompatible userAgent"):
+        await make_adapter(transport).start(launch())
+    assert transport.stop_modes == ["forced"]
+
+
+@pytest.mark.anyio
 async def test_missing_initialize_field_and_version_identity_mismatch_fail_loudly() -> None:
     missing_data = fixture()
     fixture_object(missing_data, "initializeResult").pop("platformOs")
@@ -253,5 +289,68 @@ async def test_resume_preserves_exact_thread_and_effective_settings() -> None:
             "model": "gpt-5.6-sol",
             "model_reasoning_effort": "xhigh",
         }
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_settings_updates_cover_matching_stale_and_drift_branches() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-sol", "effort": "xhigh"},
+                },
+            }
+        )
+        await settle()
+        assert (await adapter.snapshot()).raw["settingsPending"] is False
+
+        await adapter.set_effort("high")
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-sol", "effort": "xhigh"},
+                },
+            }
+        )
+        await settle()
+        assert (await adapter.snapshot()).raw["settingsPending"] is True
+
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-sol", "effort": "high"},
+                },
+            }
+        )
+        await settle()
+        assert (await adapter.snapshot()).raw["settingsPending"] is False
+
+        await adapter.set_effort("medium")
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-sol", "effort": "low"},
+                },
+            }
+        )
+        await settle()
+        snapshot = await adapter.snapshot()
+        assert snapshot.control == "failed"
+        assert "outside the deliberate adapter setter" in str(snapshot.raw["protocolError"])
     finally:
         await adapter.stop("forced")

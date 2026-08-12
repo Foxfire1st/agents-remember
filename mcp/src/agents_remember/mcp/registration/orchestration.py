@@ -45,6 +45,7 @@ def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> N
     def message_child(
         task_document_ref: TaskDocumentRef,
         role: StructuralRole,
+        *,
         ask: str,
         response: str,
         message_kind: AgentMessageKind = "message",

@@ -137,6 +137,21 @@ afterEach(() => {
 });
 
 describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
+  it("keeps the pre-projection task-document snapshot stable", async () => {
+    dashboardStore.setState({ analytics: null });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const { findByTestId } = render(<HighlightComposer />);
+      expect(await findByTestId("highlight-add-to-chat")).not.toBeNull();
+      expect(consoleError.mock.calls.flat().join(" ")).not.toContain(
+        "The result of getSnapshot should be cached",
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("renders nothing until there is a selection", () => {
     vi.mocked(useSelectionCapture).mockReturnValue({ selection: null, clear });
     const { queryByTestId } = render(<HighlightComposer />);

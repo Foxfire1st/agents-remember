@@ -88,7 +88,7 @@ class _FakeCodexTransport:
         self.calls.append((method, params))
         if method == "initialize":
             return {
-                "userAgent": "agents_remember/0.144.5 (Ubuntu; x86_64) Test (agents_remember; 3.0.0)",
+                "userAgent": "Codex Desktop/0.144.5 (Ubuntu; x86_64) Test (agents_remember; 3.0.0)",
                 "codexHome": "/home/x/.codex",
                 "platformFamily": "unix",
                 "platformOs": "linux",

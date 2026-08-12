@@ -133,16 +133,22 @@ def validate_initialize_response(
     result: Mapping[str, object],
     *,
     client_name: str,
+    client_version: str,
 ) -> tuple[str, JsonObject]:
     user_agent = required_text(result, "userAgent", context="initialize response")
     match = re.fullmatch(
-        rf"{re.escape(client_name)}/(?P<version>\S+)(?: \S(?:.*\S)?)?",
+        r"(?P<product>[^/\s](?:[^/]*[^/\s])?)/(?P<version>\S+)(?P<diagnostics>(?: .*)?)",
         user_agent,
     )
-    if match is None:
+    client_suffix = f" ({client_name}; {client_version})"
+    if match is None or (
+        match.group("product") != "Codex Desktop"
+        or not match.group("diagnostics").endswith(client_suffix)
+    ):
         raise CodexAppServerError(
             "Codex initialize response has incompatible userAgent; expected "
-            f"{client_name}/<reported-version> with an optional diagnostic suffix, "
+            "Codex Desktop/<reported-version> with optional diagnostics ending in "
+            f"{client_suffix!r}, "
             f"received {user_agent!r}"
         )
     cli_version = match.group("version")

@@ -42,6 +42,61 @@ SKIP_DECORATORS = ("skipUnless", "skipIf", "skipif")
 
 
 class CodeQualityCheckTests(unittest.TestCase):
+    def test_targeted_config_keeps_the_repository_file_size_arm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = write_sample_source(root)
+            full_scope = sample_config(root, source).scope
+            derived = mock.Mock()
+            derived.to_gate_scope.return_value = full_scope
+            derived.coverage_root_modules = ()
+            args = mock.Mock(
+                project_root=root,
+                targeted=True,
+                diff_base="base",
+                coverage_json=None,
+                threshold=30.0,
+                top=20,
+                diff_floor=100.0,
+            )
+
+            with (
+                mock.patch.object(check.quality_scope, "validate_quality_config"),
+                mock.patch.object(check.scope_reporting, "validate_invocation_environment"),
+                mock.patch.object(
+                    check.diff_coverage,
+                    "resolve_base",
+                    return_value=mock.Mock(revision="base"),
+                ),
+                mock.patch.object(check.targeted, "derive_targeted_scope", return_value=derived),
+                mock.patch.object(check, "derive_scope", return_value=full_scope),
+                mock.patch.object(check.quality_scope, "file_size_armed", return_value=True),
+            ):
+                config = check.config_from_args(args)
+
+            self.assertTrue(config.targeted)
+            self.assertTrue(config.file_size_armed)
+            file_size = next(
+                step
+                for step in check.quality_steps(config, root / "coverage.json")
+                if step.name == "file-size"
+            )
+            self.assertNotIn("--report", file_size.command)
+
+    def test_every_development_entrypoint_pins_the_same_ruff_version(self) -> None:
+        requirements = (REPOSITORY_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        package = tomllib.loads(
+            (REPOSITORY_ROOT / "mcp" / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        required = next(line for line in requirements.splitlines() if line.startswith("ruff=="))
+        package_ruff = next(
+            item
+            for item in package["project"]["optional-dependencies"]["dev"]
+            if item.startswith("ruff")
+        )
+
+        self.assertEqual(package_ruff, required)
+
     def test_quality_check_runs_fixed_suite_and_crap_calculator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
