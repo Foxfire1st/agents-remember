@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 DaemonRole = Literal["mcp", "dashboard"]
-ExecutionMode = Literal["mcp", "dashboard", "test"]
+ExecutionMode = Literal["mcp", "dashboard", "lifecycle-operation", "test"]
 CheckoutKind = Literal["linked", "primary"]
 
 DEV_COORDINATION_DIRECTORY = "dev-ar-coordination"
@@ -64,6 +64,16 @@ def declare_execution_mode(mode: ExecutionMode) -> None:
 def declare_test_process() -> None:
     """Declare pytest's explicit hermetic mode without pretending it is a daemon."""
     declare_execution_mode("test")
+
+
+def declare_lifecycle_operation_process() -> None:
+    """Declare the task-bound detached closeout/integration worker.
+
+    The worker is launched only from a durable plane-owned operation record.  It must use
+    live coordination authority to claim the bound gate and finalize the task edge, but it
+    is not either long-lived store daemon and therefore receives no daemon writer role.
+    """
+    declare_execution_mode("lifecycle-operation")
 
 
 def declared_execution_mode() -> ExecutionMode | None:

@@ -12,6 +12,7 @@ from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
+from _global_state import preserve_owned_mutable_state
 from agents_remember.application import lifecycle_operation_worker, worktree_tools
 from agents_remember.application.task_ref import TaskRef
 from agents_remember.controlplane.records import (
@@ -827,11 +828,17 @@ def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path)
     assert parsed.contract_path == contract.contract_path
 
     services = Mock()
+    entry_order: list[str] = []
     with (
         patch.object(
             lifecycle_operation_worker,
+            "declare_lifecycle_operation_process",
+            side_effect=lambda: entry_order.append("declare"),
+        ) as declare_operation,
+        patch.object(
+            lifecycle_operation_worker,
             "build_default_worktree_services",
-            return_value=services,
+            side_effect=lambda: (entry_order.append("build"), services)[1],
         ) as build_services,
         patch.object(lifecycle_operation_worker, "bind_worktree_services") as bind_services,
         patch.object(lifecycle_operation_worker, "run_worker", return_value=7) as run,
@@ -842,6 +849,8 @@ def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path)
             )
             == 7
         )
+    declare_operation.assert_called_once_with()
+    assert entry_order == ["declare", "build"]
     build_services.assert_called_once_with()
     bind_services.assert_called_once_with(services)
     run.assert_called_once_with(contract.contract_path, "closeout")
@@ -858,7 +867,11 @@ def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path)
         "--kind",
         "closeout",
     ]
-    with patch.object(sys, "argv", argv), pytest.raises(SystemExit) as exited:
+    with (
+        preserve_owned_mutable_state(),
+        patch.object(sys, "argv", argv),
+        pytest.raises(SystemExit) as exited,
+    ):
         runpy.run_path(
             Path(lifecycle_operation_worker.__file__).as_posix(),
             run_name="__main__",

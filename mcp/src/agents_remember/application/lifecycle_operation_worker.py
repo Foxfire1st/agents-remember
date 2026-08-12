@@ -17,6 +17,9 @@ from agents_remember.application.worktree_services import (
     bind_worktree_services,
     build_default_worktree_services,
 )
+from agents_remember.kernel.primitives.checkout_coordination import (
+    declare_lifecycle_operation_process,
+)
 from agents_remember.kernel.primitives.gate_policy import (
     DecisionRole,
     GatePolicy,
@@ -313,6 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    declare_lifecycle_operation_process()
     bind_worktree_services(build_default_worktree_services())
     return run_worker(args.contract_path, cast(LifecycleOperationKind, args.kind))
 

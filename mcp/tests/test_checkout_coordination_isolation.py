@@ -19,7 +19,10 @@ from agents_remember.controlplane.durable_store import (
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.checkout_coordination import (
     CheckoutCoordinationError,
+    declare_lifecycle_operation_process,
     declare_test_process,
+    declared_daemon_role,
+    declared_execution_mode,
     resolve_checkout_location,
 )
 from agents_remember.kernel.primitives.runtime_config import ConfigError, load_config
@@ -245,3 +248,16 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         append_line(target, "test-row")
 
         self.assertEqual(target.read_text(encoding="utf-8"), "test-row\n")
+
+    def test_lifecycle_operation_uses_live_authority_without_claiming_daemon_role(self) -> None:
+        _checkout, source = self._checkout()
+        self._undeclared_checkout(source)
+        settings = self.root / "live-settings.json"
+        self._settings(settings)
+
+        declare_lifecycle_operation_process()
+        config = load_config(settings)
+
+        self.assertEqual(declared_execution_mode(), "lifecycle-operation")
+        self.assertIsNone(declared_daemon_role())
+        self.assertEqual(config.coordination_root, self.root / "live-ar-coordination")
