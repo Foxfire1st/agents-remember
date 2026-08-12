@@ -18,6 +18,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving import _app_terminal_routes as terminal_routes
 from agents_remember.serving._app_common import TerminalAttachTaskRequest
+from agents_remember.serving.seat_binding import role_suffixed_leaf_base
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.serving.terminal_task_assignment import (
     TaskAssignmentRuntime,
@@ -286,6 +287,13 @@ class TerminalTaskAssignmentTests(unittest.TestCase):
             self.assertEqual(response.status_code, 409)
             self.assertIn(b"seat-taken", response.body)
             self.assertIn(b"taskDocumentRef", response.body)
+
+    def test_legacy_role_suffix_parser_covers_supported_separators_and_refusals(self) -> None:
+        self.assertEqual(role_suffixed_leaf_base("leaf-WORKER"), ("leaf", "worker"))
+        self.assertEqual(role_suffixed_leaf_base("leaf/reviewer"), ("leaf", "reviewer"))
+        self.assertEqual(role_suffixed_leaf_base("leaf:curator"), ("leaf", "curator"))
+        self.assertIsNone(role_suffixed_leaf_base("worker"))
+        self.assertIsNone(role_suffixed_leaf_base("leaf-unknown"))
 
 
 if __name__ == "__main__":

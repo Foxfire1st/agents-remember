@@ -75,18 +75,25 @@ from agents_remember.controlplane.records import (
 )
 from agents_remember.controlplane.store import GateStore
 
-if TYPE_CHECKING:
-    from agents_remember.models.structural.gates import GateState
-else:
+
+def _gate_state_type():
+    """Resolve the current model, or the historical path used by sensitivity fixtures."""
+
     try:
-        from agents_remember.models.structural.gates import GateState
+        return importlib.import_module("agents_remember.models.structural.gates").GateState
     except ModuleNotFoundError as exc:
         # The sensitivity case imports this current harness against an extracted historical base
         # commit, which predates the structural models subpackage. This branch exists only in the
         # cross-version test harness; the installed package exposes no compatibility module.
         if exc.name != "agents_remember.models.structural":
             raise
-        GateState = importlib.import_module("agents_remember.models.gates").GateState
+        return importlib.import_module("agents_remember.models.gates").GateState
+
+
+if TYPE_CHECKING:
+    from agents_remember.models.structural.gates import GateState
+else:
+    GateState = _gate_state_type()
 from agents_remember.providers.degradation import (
     DEGRADATION_EVENT_SCHEMA,
     ProviderDegradationStore,

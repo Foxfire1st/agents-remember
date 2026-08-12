@@ -11,6 +11,7 @@ from typing import cast
 from unittest import mock
 
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees import leaf_refs
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError, resolve_leaf_ref
 from agents_remember.worktrees.modules.cli import main as worktree_cli_main
 from agents_remember.worktrees.worktree_contract import (
@@ -462,6 +463,21 @@ class LeafRefResolutionTests(unittest.TestCase):
             self.assertEqual(by_doc_id.qualified_id, "repo-a/fix-thing/260707-T1")
             self.assertEqual(by_folder.qualified_id, by_doc_id.qualified_id)
             self.assertEqual(by_enclosure.qualified_id, by_doc_id.qualified_id)
+
+    def test_single_repository_inference_ignores_non_active_task_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertIsNone(leaf_refs._single_repo_name(root))
+
+            tasks = root / "tasks"
+            tasks.mkdir()
+            (tasks / "README.md").write_text("not a repository\n", encoding="utf-8")
+            (tasks / leaf_refs.ARCHIVE_DIR).mkdir()
+            (tasks / "repo-a").mkdir()
+            self.assertEqual(leaf_refs._single_repo_name(root), "repo-a")
+
+            (tasks / "repo-b").mkdir()
+            self.assertIsNone(leaf_refs._single_repo_name(root))
 
 
 if __name__ == "__main__":

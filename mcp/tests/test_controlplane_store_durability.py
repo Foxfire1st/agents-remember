@@ -38,7 +38,10 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
+import _store_durability as store_durability
 from _store_durability import (
     ADAPTERS,
     APPEND_CASES,
@@ -442,3 +445,32 @@ class HarnessSensitivityTests(_TempRootTest):
             "commit and is the one store that already survived this window; a loss here means "
             "the harness is measuring something other than the defect",
         )
+
+
+class GateStateCompatibilityTests(unittest.TestCase):
+    def test_resolver_uses_the_current_structural_model(self) -> None:
+        expected = object()
+        current = SimpleNamespace(GateState=expected)
+        with mock.patch.object(store_durability.importlib, "import_module", return_value=current):
+            self.assertIs(store_durability._gate_state_type(), expected)
+
+    def test_resolver_uses_the_historical_model_only_when_structural_models_are_absent(
+        self,
+    ) -> None:
+        expected = object()
+        missing = ModuleNotFoundError(name="agents_remember.models.structural")
+        historical = SimpleNamespace(GateState=expected)
+        with mock.patch.object(
+            store_durability.importlib,
+            "import_module",
+            side_effect=(missing, historical),
+        ):
+            self.assertIs(store_durability._gate_state_type(), expected)
+
+    def test_resolver_does_not_hide_an_unrelated_import_failure(self) -> None:
+        missing = ModuleNotFoundError(name="unrelated_dependency")
+        with (
+            mock.patch.object(store_durability.importlib, "import_module", side_effect=missing),
+            self.assertRaises(ModuleNotFoundError),
+        ):
+            store_durability._gate_state_type()

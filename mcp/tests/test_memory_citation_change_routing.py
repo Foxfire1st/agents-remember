@@ -272,25 +272,13 @@ class ChangeRoutingTests(ChangeDetectionCase):
             last_verified=baseline,
         )
 
-        original = claim_change_router.run_git
-
         def routed(
-            root: Path,
+            _root: Path,
             args: list[str],
-            *,
-            work_dir: Path | None = None,
-            input_text: str | None = None,
-            timeout: float,
+            **_kwargs: object,
         ):
-            if args[0] == "status":
-                return SimpleNamespace(returncode=1, stdout="", stderr="status exploded")
-            return original(
-                root,
-                args,
-                work_dir=work_dir,
-                input_text=input_text,
-                timeout=timeout,
-            )
+            self.assertEqual(args[0], "status")
+            return SimpleNamespace(returncode=1, stdout="", stderr="status exploded")
 
         with (
             mock.patch.object(claim_change_router, "run_git", new=routed),
@@ -374,7 +362,3 @@ class ChangeRoutingTests(ChangeDetectionCase):
         self.assert_clean(result)
         self.assertEqual(calls, 1)
         self.assertEqual(result["changeRouting"]["localHistoricalBlobReadsSkipped"], 2)  # type: ignore[index]
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -25,6 +25,7 @@ import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -50,18 +51,12 @@ def _isolate_xdist_worker_cache(
     worker_id: str,
 ) -> Iterator[None]:
     """Keep process-global application caches private to each xdist worker."""
-    if worker_id == "master":
+    del worker_id
+    with mock.patch.dict(
+        os.environ,
+        {"XDG_CACHE_HOME": str(tmp_path_factory.getbasetemp() / "xdg-cache")},
+    ):
         yield
-        return
-    previous = os.environ.get("XDG_CACHE_HOME")
-    os.environ["XDG_CACHE_HOME"] = str(tmp_path_factory.getbasetemp() / "xdg-cache")
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop("XDG_CACHE_HOME", None)
-        else:
-            os.environ["XDG_CACHE_HOME"] = previous
 
 
 @pytest.fixture(scope="session", autouse=True)

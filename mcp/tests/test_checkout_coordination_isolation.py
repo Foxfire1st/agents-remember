@@ -173,7 +173,7 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
             self.assertRaisesRegex(CheckoutCoordinationError, "leaf-local"),
             exclusive_access(escaped, OPERATOR_INBOX_OWNERSHIP),
         ):
-            append_line(escaped, "unsafe")
+            pass
 
         self.assertFalse(escaped.parent.exists())
         self.assertFalse(escaped.with_name(f"{escaped.name}.lock").exists())
@@ -236,7 +236,3 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         append_line(target, "test-row")
 
         self.assertEqual(target.read_text(encoding="utf-8"), "test-row\n")
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -310,17 +310,6 @@ class SpawnAgentSessionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
-        env = base.get("env")
-        role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
-        if role is not None and "task_document_ref" not in base:
-            base["task_document_ref"] = (
-                SPRINT_REF
-                if role
-                in {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
-                else MASTER_REF
-                if role == "manager"
-                else LEAF_REF
-            )
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log

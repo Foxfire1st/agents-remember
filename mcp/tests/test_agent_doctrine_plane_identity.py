@@ -40,14 +40,12 @@ def _agent_instruction_files(root: Path) -> list[Path]:
 
 @pytest.mark.parametrize("skill_root", [CANONICAL_SKILL, PACKAGED_SKILL])
 def test_agent_doctrine_contains_no_control_plane_address_instructions(skill_root: Path) -> None:
-    findings: list[str] = []
     for path in _agent_instruction_files(skill_root):
         text = path.read_text(encoding="utf-8")
         for forbidden in FORBIDDEN_AGENT_INSTRUCTIONS:
-            if forbidden.casefold() in text.casefold():
-                findings.append(f"{path.relative_to(skill_root)}: {forbidden}")
-
-    assert findings == []
+            assert forbidden.casefold() not in text.casefold(), (
+                f"{path.relative_to(skill_root)}: {forbidden}"
+            )
 
 
 def test_packaged_agent_doctrine_is_the_canonical_skill_exactly() -> None:

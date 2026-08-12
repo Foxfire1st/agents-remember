@@ -94,16 +94,13 @@ class _ControlledEntry:
 
 
 def _version_of(executable: str) -> str:
-    try:
-        completed = subprocess.run(
-            [executable, "--version"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise unittest.SkipTest(f"installed harness is not runnable: {error}") from error
+    completed = subprocess.run(
+        [executable, "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     return completed.stdout.strip()
 
 

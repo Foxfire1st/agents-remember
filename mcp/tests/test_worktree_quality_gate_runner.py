@@ -499,11 +499,11 @@ class CodeQualityGateTests(unittest.TestCase):
                 os.pathsep.join([(worktree / "mcp" / "src").as_posix(), "/pre-existing"]),
             )
             self.assertIn("PATH", env)
-            if os.name != "nt":
-                self.assertEqual(
-                    {name: env[name] for name in ("TMPDIR", "TMP", "TEMP")},
-                    {"TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"},
-                )
+            temp_names = ("TMPDIR", "TMP", "TEMP")
+            expected_temp = {"nt": {name: os.environ.get(name) for name in temp_names}}.get(
+                os.name, {name: "/tmp" for name in temp_names}
+            )
+            self.assertEqual({name: env.get(name) for name in temp_names}, expected_temp)
 
     def test_gate_capture_replaces_non_utf8_output_before_report_or_transport(self) -> None:
         completed = subprocess.CompletedProcess(["quality"], 1, stdout="bad\ufffdoutput")

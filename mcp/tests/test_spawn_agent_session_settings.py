@@ -34,14 +34,15 @@ LEAF_REF = TaskDocumentRef(repository="repo-a", path="master/leaf-1.json")
 
 def _role_ref(kwargs: dict[str, object]) -> TaskDocumentRef | None:
     env = kwargs.get("env")
-    role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
-    if role in {"architect", "orchestrator", "strategist", "designer", "system-specialist"}:
-        return SPRINT_REF
-    if role == "manager":
-        return MASTER_REF
-    if role in {"worker", "reviewer", "curator"}:
-        return LEAF_REF
-    return None
+    role = str(env.get("AR_SPAWN_ROLE", "")) if isinstance(env, dict) else ""
+    return (
+        dict.fromkeys(
+            ("architect", "orchestrator", "strategist", "designer", "system-specialist"),
+            SPRINT_REF,
+        )
+        | {"manager": MASTER_REF}
+        | dict.fromkeys(("worker", "reviewer", "curator"), LEAF_REF)
+    ).get(role)
 
 
 class SettingsDefinedHarnessTests(unittest.TestCase):

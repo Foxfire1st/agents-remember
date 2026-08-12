@@ -80,16 +80,13 @@ def _entry(
     only supplies what makes a seat a seat here (its id and the leaf it holds) rather than
     re-declaring the row's fields as parameters that drift from it.
     """
-    role: str | None = None
-    if session_id.startswith("orchestrator"):
-        role, task_document_ref = "orchestrator", task_document_ref or SPRINT_REF
-    elif session_id.startswith("manager"):
-        role, task_document_ref = "manager", task_document_ref or MASTER_REF
-    elif session_id.startswith("worker"):
-        role = "worker"
-        task_document_ref = task_document_ref or (
-            LEAF_2_REF if session_id.endswith("-2") else LEAF_1_REF
-        )
+    role = session_id.partition("-")[0]
+    default_ref = {
+        "orchestrator": SPRINT_REF,
+        "manager": MASTER_REF,
+        "worker": {"2": LEAF_2_REF}.get(session_id.rpartition("-")[2], LEAF_1_REF),
+    }[role]
+    task_document_ref = task_document_ref or default_ref
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Chat {session_id}",

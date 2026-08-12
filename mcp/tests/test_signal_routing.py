@@ -31,13 +31,12 @@ PARALLEL_LEAF = TaskDocumentRef(repository="repo-a", path="master/leaf-2.json")
 
 class _Hierarchy:
     def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
-        if ref in (LEAF, PARALLEL_LEAF):
-            return MASTER
-        if ref == MASTER:
-            return SPRINT
-        if ref == SPRINT:
-            return None
-        raise KeyError(ref.key)
+        return {
+            LEAF: MASTER,
+            PARALLEL_LEAF: MASTER,
+            MASTER: SPRINT,
+            SPRINT: None,
+        }[ref]
 
 
 class SignalRoutingTests(unittest.TestCase):

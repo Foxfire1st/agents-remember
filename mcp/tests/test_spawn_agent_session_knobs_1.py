@@ -150,7 +150,7 @@ class SpawnKnobApplicationTests1(SpawnKnobApplicationTests):
                     "task_document_ref": MASTER_REF,
                     "spawned_by_session": "orchestrator-tier",
                 }
-            elif role in {"worker", "curator"}:
+            else:
                 spawn_args = {"task_document_ref": LEAF_REF}
             payload = self._spawn(
                 session_id=f"{role}-tier",

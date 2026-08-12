@@ -478,7 +478,6 @@ def test_control_plane_identity_migration_schema_dispatch(tmp_path: Path) -> Non
 
     def unsupported(_path, _ownership, _model, transform):
         transform({"schema": "unsupported"})
-        return 0
 
     with (
         patch.object(identity, "migrate_jsonl_records", side_effect=unsupported),
