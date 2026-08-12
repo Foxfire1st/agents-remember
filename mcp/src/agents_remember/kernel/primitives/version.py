@@ -10,8 +10,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 SERVER_NAME = "agents-remember"
 
-try:
-    # Single source of truth: the installed package metadata (mcp/pyproject.toml).
-    SERVER_VERSION = version("agents-remember-mcp")
-except PackageNotFoundError:  # running from a source checkout without an install
-    SERVER_VERSION = "3.0.0rc6"
+
+def _resolve_server_version() -> str:
+    """Return installed metadata, or the release identity for a source checkout."""
+    try:
+        # Single source of truth: the installed package metadata (mcp/pyproject.toml).
+        return version("agents-remember-mcp")
+    except PackageNotFoundError:  # running from a source checkout without an install
+        return "3.0.0rc7"
+
+
+SERVER_VERSION = _resolve_server_version()
