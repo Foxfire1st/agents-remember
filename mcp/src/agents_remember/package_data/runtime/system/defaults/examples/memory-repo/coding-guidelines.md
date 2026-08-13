@@ -54,7 +54,12 @@ Treat the subprocess environment as part of the tested contract:
 - Keep `pytest -n=auto` in repository configuration so parallel execution is the
   default contract rather than an agent memory requirement.
 
-For Agents Remember clean-environment proof, use the pinned Dagger Ubuntu graph.
+For Agents Remember acceptance proof, use only the pinned Dagger Ubuntu graph:
+`mode=targeted` for a leaf/focused run and `mode=full` once at master integration.
+Both modes require the recorded source commit as `diff-base`; never infer it from the
+container checkout. A direct host pytest or wrapper invocation is diagnostic only and
+must not be reported as acceptance. Discover the live public contract with
+`dagger call quality --help` rather than relying on a remembered command.
 Materialize the exact staged candidate and a separate Git ancestry bundle; do
 not mount the live coordination root, credentials, or container socket. Bundle
 Codex in that graph and exercise the real read-only app-server protocol without

@@ -183,6 +183,11 @@ stops belong to the orchestrator via the system-specialist protocol.
   `memory_quality_check` is NOT part of that move:
   it stays a per-leaf closeout gate, and a leaf closeout that skips its required checks is
   refused, not passed.
+- **Dagger-only acceptance for Agents Remember.** Interpret the leaf contract as Dagger
+  `mode=targeted` with the recorded master base and the master gate as Dagger `mode=full`
+  with the recorded super base. Both bases are mandatory. Host pytest/direct-wrapper runs
+  are diagnostics only and cannot satisfy either gate; consult
+  `dagger call quality --help` instead of reconstructing a remembered invocation.
 - **Seat cleanup** — a completed leaf's worker/reviewer/curator chats have no further active
   purpose. `worktree_integrate` auto-closes each one (config-gated, default ON) only after that
   exact session's turn report is durable for the exact leaf; retirement gracefully stops control,

@@ -91,10 +91,15 @@ def test_agents_remember_quality_module_is_pinned_and_parseable() -> None:
     )
     assert DAGGER_MODULE_ID.endswith(".main")
     assert "@openai/codex@{CODEX_VERSION}" in source
-    assert "repository_bundle: dagger.File" in source
+    assert "repository_bundle: Annotated[" in source
+    assert "dagger.File" in source
     assert "candidate_head" not in source
     assert '"/tmp/ar-candidate.bundle",\n                    "HEAD"' in source
     assert 'with_exec(["git", "add", "--all"])' in source
+    assert "from typing import Annotated" in source
+    assert "from dagger import Doc" in source
+    assert "Required Git commit used for changed-line coverage" in source
+    assert "'targeted' derives the changed leaf subset" in source
 
 
 def test_agents_remember_quality_exports_failures_before_verify_refuses() -> None:
@@ -107,21 +112,26 @@ def test_agents_remember_quality_exports_failures_before_verify_refuses() -> Non
 
 
 @pytest.mark.parametrize(
-    ("mode", "memory_cap", "message"),
+    ("mode", "diff_base", "memory_cap", "message"),
     [
-        ("quick", 0, "unknown quality mode"),
-        ("full", -1, "memory_cap_bytes cannot be negative"),
+        ("quick", "base", 0, "unknown quality mode"),
+        ("full", "", 0, "diff_base must name"),
+        ("full", "base", -1, "memory_cap_bytes cannot be negative"),
     ],
 )
 def test_dagger_quality_refuses_invalid_public_inputs(
-    mode: str, memory_cap: int, message: str
+    mode: str, diff_base: str, memory_cap: int, message: str
 ) -> None:
     module = load_dagger_module()
 
     with pytest.raises(ValueError, match=message):
         asyncio.run(
             module.AgentsRememberQuality().quality(
-                object(), object(), mode=mode, memory_cap_bytes=memory_cap
+                object(),
+                object(),
+                diff_base=diff_base,
+                mode=mode,
+                memory_cap_bytes=memory_cap,
             )
         )
 
@@ -159,12 +169,14 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
     ]
 
 
-def test_dagger_quality_full_defaults_do_not_add_targeted_optional_flags() -> None:
+def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() -> None:
     module = load_dagger_module()
     fake_dag = FakeDag([0, 0, 0])
 
     with patch.object(module, "dag", fake_dag):
-        asyncio.run(module.AgentsRememberQuality().quality(object(), object()))
+        asyncio.run(
+            module.AgentsRememberQuality().quality(object(), object(), diff_base="base-commit")
+        )
 
     wrapper = next(
         command
@@ -172,7 +184,7 @@ def test_dagger_quality_full_defaults_do_not_add_targeted_optional_flags() -> No
         if "agents_remember.code_quality.check" in command
     )
     assert "--targeted" not in wrapper
-    assert "--diff-base" not in wrapper
+    assert wrapper[-2:] == ["--diff-base", "base-commit"]
     assert "--memory-cap-bytes" not in wrapper
 
 
@@ -190,7 +202,9 @@ def test_dagger_quality_exports_failure_at_the_exact_completed_boundary(
     fake_dag = FakeDag(exit_codes)
 
     with patch.object(module, "dag", fake_dag):
-        result = asyncio.run(module.AgentsRememberQuality().quality(object(), object()))
+        result = asyncio.run(
+            module.AgentsRememberQuality().quality(object(), object(), diff_base="base-commit")
+        )
 
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
     assert result.exit_code != 0
@@ -204,7 +218,9 @@ def test_dagger_verify_returns_green_and_refuses_red_quality_results() -> None:
 
     with patch.object(module.AgentsRememberQuality, "quality", quality):
         assert (
-            asyncio.run(module.AgentsRememberQuality().verify(object(), object()))
+            asyncio.run(
+                module.AgentsRememberQuality().verify(object(), object(), diff_base="base-commit")
+            )
             == "clean Ubuntu quality passed"
         )
 
@@ -213,4 +229,6 @@ def test_dagger_verify_returns_green_and_refuses_red_quality_results() -> None:
         patch.object(module.AgentsRememberQuality, "quality", quality),
         pytest.raises(RuntimeError, match="exit code 4"),
     ):
-        asyncio.run(module.AgentsRememberQuality().verify(object(), object()))
+        asyncio.run(
+            module.AgentsRememberQuality().verify(object(), object(), diff_base="base-commit")
+        )

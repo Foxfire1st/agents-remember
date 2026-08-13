@@ -248,9 +248,15 @@ leaf integrations run the targeted tier before creating an Agents Remember code
 commit even when hooks are not configured. See CONTRIBUTING.md for the tier
 table and the staged-content stash contract.
 
-Set `orchestration.qualityGate.executor` to `"dagger"` to make that clean Ubuntu
-graph the lifecycle-owned quality environment from WSL as well. There is no
-direct-Docker or host fallback: an unavailable Dagger engine fails explicitly.
+Agents Remember acceptance runs only through that Dagger graph. Keep
+`orchestration.qualityGate.executor` set to `"dagger"`; a direct host invocation of
+pytest or the Python wrapper is diagnostic evidence, never an acceptance result.
+Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
+full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
+`diff-base`; the public Dagger function refuses an empty base instead of comparing
+the candidate to Git's empty tree. Run `dagger call quality --help` to see the
+current modes and argument contract. There is no direct-Docker or host fallback:
+an unavailable Dagger engine fails explicitly.
 The graph receives a separate Git ancestry bundle plus the exact staged source,
 never the live coordination root, credentials, or container socket. Its live
 trace and final pytest, coverage, Codex-probe, and result artifacts replace the

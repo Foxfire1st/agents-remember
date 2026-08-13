@@ -88,6 +88,13 @@ gate. A leaf closeout that tries to skip its required checks — a changed produ
 derived test subset, a failed targeted run, or a missing wrapper — is refused loudly, never passed
 silently.
 
+For Agents Remember itself, acceptance is Dagger-only. The closeout gate invokes the
+pinned Ubuntu graph in `mode=targeted` with the contract's recorded code base as the
+mandatory `diff-base`; master integration invokes `mode=full` with the recorded super
+base. Host pytest and direct wrapper commands are diagnostics, not substitutes and not
+handoff evidence. Use `dagger call quality --help` when the public invocation needs to be
+inspected; do not reconstruct its arguments from memory.
+
 Every completed strict wrapper invocation atomically replaces the enclosure-owned
 `reports/test-results.md` with its full output, including pytest. Passing closeout and integration
 payloads expose that path as `reportPath`; a failing gate writes it before refusing and includes the

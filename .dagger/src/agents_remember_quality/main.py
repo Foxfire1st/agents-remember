@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Annotated
 
 import dagger
-from dagger import ReturnType, check, dag, field, function, object_type
+from dagger import Doc, ReturnType, check, dag, field, function, object_type
 
 PLAYWRIGHT_IMAGE = (
     "mcr.microsoft.com/playwright:v1.60.0-noble@"
@@ -30,15 +31,38 @@ class AgentsRememberQuality:
     @function
     async def quality(
         self,
-        source: dagger.Directory,
-        repository_bundle: dagger.File,
-        mode: str = "full",
-        diff_base: str = "",
-        memory_cap_bytes: int = 0,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree to install and test in clean Ubuntu."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the candidate commit and its ancestry."),
+        ],
+        diff_base: Annotated[
+            str,
+            Doc(
+                "Required Git commit used for changed-line coverage: the leaf base in "
+                "targeted mode or the super-integration base in full mode."
+            ),
+        ],
+        mode: Annotated[
+            str,
+            Doc(
+                "Acceptance altitude: 'targeted' derives the changed leaf subset; "
+                "'full' runs the complete repository suite once at master integration."
+            ),
+        ] = "full",
+        memory_cap_bytes: Annotated[
+            int,
+            Doc("Optional container memory cap in bytes; zero leaves memory host-managed."),
+        ] = 0,
     ) -> QualityResult:
-        """Install from scratch, probe real Codex, and run the canonical wrapper."""
+        """Run the canonical clean-Ubuntu acceptance gate and export its reports."""
         if mode not in {"targeted", "full"}:
             raise ValueError(f"unknown quality mode: {mode}")
+        if not diff_base.strip():
+            raise ValueError("diff_base must name the explicit acceptance comparison commit")
         if memory_cap_bytes < 0:
             raise ValueError("memory_cap_bytes cannot be negative")
         reports = "/reports"
@@ -157,8 +181,7 @@ class AgentsRememberQuality:
             ]
             if mode == "targeted":
                 command.append("--targeted")
-            if diff_base:
-                command += ["--diff-base", diff_base]
+            command += ["--diff-base", diff_base]
             if memory_cap_bytes > 0:
                 command += ["--memory-cap-bytes", str(memory_cap_bytes)]
             container = await container.with_exec(command, expect=ReturnType.ANY).sync()
@@ -188,19 +211,34 @@ class AgentsRememberQuality:
     @check
     async def verify(
         self,
-        source: dagger.Directory,
-        repository_bundle: dagger.File,
-        mode: str = "full",
-        diff_base: str = "",
-        memory_cap_bytes: int = 0,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree already supplied to the quality call."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the candidate commit and its ancestry."),
+        ],
+        diff_base: Annotated[
+            str,
+            Doc("The same explicit comparison commit supplied to the quality call."),
+        ],
+        mode: Annotated[
+            str,
+            Doc("The same 'targeted' or 'full' acceptance altitude supplied to quality."),
+        ] = "full",
+        memory_cap_bytes: Annotated[
+            int,
+            Doc("The same optional container memory cap supplied to quality."),
+        ] = 0,
     ) -> str:
         """Fail the caller when the cached canonical quality result is not green."""
         result = await self.quality(
-            source,
-            repository_bundle,
-            mode,
-            diff_base,
-            memory_cap_bytes,
+            source=source,
+            repository_bundle=repository_bundle,
+            diff_base=diff_base,
+            mode=mode,
+            memory_cap_bytes=memory_cap_bytes,
         )
         if result.exit_code != 0:
             raise RuntimeError(f"clean Ubuntu quality failed with exit code {result.exit_code}")

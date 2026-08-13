@@ -430,7 +430,3 @@ def _git(repo: Path, *args: str) -> str:
         text=True,
     )
     return result.stdout.strip()
-
-
-if __name__ == "__main__":
-    unittest.main()

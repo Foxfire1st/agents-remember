@@ -37,9 +37,12 @@ master's leaf loop to the master-exit seam, then hand over.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
 - Quality altitude ladder (260731-EFA-L17): leaf closeout and leaf integration run the
-  change-set-scoped contract (`agents_remember.code_quality.check --targeted`); the FULL wrapper
-  runs exactly once per master inside `worktree_integrate` at master altitude with host-managed
-  RAM/swap by default; constrained CI may set `orchestration.qualityGate.memoryCapBytes`.
+  pinned Dagger graph in `mode=targeted` with the recorded leaf base; the FULL Dagger
+  `mode=full` wrapper runs exactly once per master inside `worktree_integrate` with the
+  recorded super base. Host pytest/direct-wrapper runs are diagnostics only. Both Dagger
+  modes require `diff-base`; inspect `dagger call quality --help` rather than guessing.
+  The master gate runs at master altitude with host-managed RAM/swap by default;
+  constrained CI may set `orchestration.qualityGate.memoryCapBytes`.
   `memory_quality_check` stays a per-leaf closeout
   gate; a leaf closeout that skips its required checks is refused, not passed.
 - Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf

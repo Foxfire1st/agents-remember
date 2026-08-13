@@ -63,6 +63,25 @@ For larger workflow changes, open a discussion or draft pull request early inste
 
 ## Quality gates
 
+### Acceptance runs in Dagger
+
+For this repository, only the pinned Dagger Ubuntu graph produces acceptance
+evidence. A host `pytest` or direct `agents_remember.code_quality.check` run is useful
+while diagnosing a failure, but it cannot certify a leaf or master. The two accepted
+invocations are:
+
+- `mode=targeted` for focused leaf acceptance (changed files, reverse-import closure,
+  and the derived pytest subset);
+- `mode=full` once at master integration for the complete repository suite.
+
+Both modes require the exact Git comparison commit through `--diff-base`. In a leaf,
+that is the recorded master base; at master integration, it is the recorded super
+base. An omitted base is refused because the clean-room checkout has no trustworthy
+implicit upstream and must never turn changed-lines coverage into whole-tree coverage
+against Git's empty tree. `dagger call quality --help` is the executable reference for
+the current inputs; the lifecycle tools construct the source snapshot and ancestry
+bundle and invoke it automatically.
+
 One wrapper, `python -m agents_remember.code_quality.check`, is the gate. Four of
 its steps enforce and fail the run on any finding: ruff (lint, including the
 complexity rules `C901`, `PLR0911`, `PLR0912`, `PLR0915`), `ruff format --check`,
@@ -129,7 +148,7 @@ Set it up once per clone:
 1. Install the dev environment: `pip install -e "mcp[dev]"`
 2. Enable the shared hooks: run `./setup-hooks.sh` (or `git config core.hooksPath .githooks`)
 
-### The two local tiers
+### Local diagnostic tiers
 
 `.githooks/pre-commit` and `.githooks/pre-push` are thin wrappers over
 `.githooks/_gate.sh`, which takes the tier as its argument:
@@ -137,8 +156,8 @@ Set it up once per clone:
 | Tier | Hook | Input state it reports | Runs | Cost |
 | --- | --- | --- | --- | --- |
 | `fast` | pre-commit | the staged content | generated-copy checks (skills, runtime, harness), ruff, `ruff format --check`, Pyright | about 20 seconds |
-| `targeted` | pre-push | Git's ref updates plus the leaf change set (changed Python files, reverse-import closure, derived test subset) at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the change-set-scoped wrapper (`--targeted`) | about a minute |
-| `full` | manual; also master integration (`worktree_integrate` on a series/master contract) | the whole tree at current-checkout bytes; host-managed RAM/swap by default at the master integration gate | generated-copy checks, then the full wrapper | minutes (~13-18) |
+| `targeted` | pre-push diagnostic | Git's ref updates plus the leaf change set (changed Python files, reverse-import closure, derived test subset) at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the change-set-scoped wrapper (`--targeted`); Dagger still supplies acceptance | about a minute |
+| `full` | manual diagnostic | the whole tree at current-checkout bytes | generated-copy checks, then the full wrapper; master acceptance remains Dagger `mode=full` | minutes (~13-18) |
 
 The fast tier enumerates Python paths with `git ls-files '*.py'` (the
 staged/index population); the targeted tier derives its input from the leaf diff
@@ -149,10 +168,10 @@ quality scope roots and state that they are **not** in the index/diff
 measurement. That is a report, never implicit staging. Neither tier passes a
 narrowing flag to ruff: `ruff check` runs at the configured selection in both;
 the targeted tier simply points the rails at the leaf's change set, so the
-complexity rules bite at commit time and not only on push. The full wrapper runs
-exactly once per master, at the master integration gate, invoked by the
-integration step itself; leaf closeouts and leaf integrations run the targeted
-tier only.
+complexity rules bite at commit time and not only on push. The accepting Dagger
+full wrapper runs exactly once per master, at the master integration gate, invoked
+by the integration step itself; leaf closeouts and leaf integrations use accepting
+Dagger targeted mode only. Host hooks do not replace either acceptance boundary.
 
 The pre-push hook forwards Git's four-field ref-update lines as provenance. It
 does not stage, stash, or mutate the index, and it does not claim the current
@@ -244,10 +263,10 @@ zero tests again, or if the runner and the registry drift apart in either direct
 
 ### Closeout
 
-Worktree closeout runs the leaf change-set-scoped quality contract (`--targeted`)
-before creating a code commit, even when hooks are not configured, in any
-repository whose checkout carries the wrapper. The full wrapper runs exactly once
-per master, at the master integration gate, invoked by the integration step
+Worktree closeout runs the leaf change-set-scoped quality contract through Dagger
+`mode=targeted` before creating a code commit, even when hooks are not configured,
+in any repository whose checkout carries the wrapper. Dagger `mode=full` runs exactly
+once per master, at the master integration gate, invoked by the integration step
 itself. A checkout that does not carry the wrapper is reported as
 `wrapper-unavailable` in the closeout payload — the commit still happens, and the
 payload states that it was not quality-checked.

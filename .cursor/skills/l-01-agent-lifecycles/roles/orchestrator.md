@@ -331,6 +331,12 @@ the integration step, with host-managed RAM/swap by default; constrained CI may 
 contract (`--targeted`), and `memory_quality_check` stays a per-leaf closeout gate. Do not run a
 separate full wrapper per leaf — that is the waste the ladder removes.
 
+For Agents Remember, both altitudes are accepted only from the pinned Dagger Ubuntu
+graph: `mode=targeted` with the recorded master base for leaf/focused work, then
+`mode=full` with the recorded super base at master integration. Host pytest and direct
+wrapper invocations are diagnostic only. Both Dagger calls require `diff-base`; use
+`dagger call quality --help` as the executable contract rather than a remembered command.
+
 The wrapper itself runs inexpensive rails first and pytest as its final subprocess; CRAP and
 changed-lines coverage then score the new pytest coverage artifact. If pytest passed and only a
 coverage-derived rail refused, a later local invocation may reuse the content-addressed proof:

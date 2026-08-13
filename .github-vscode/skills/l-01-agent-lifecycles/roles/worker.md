@@ -78,6 +78,11 @@ closeout gate. The **full** wrapper is not a leaf check: it runs once per master
 integration gate, with host-managed RAM/swap by default. A red check you cannot fix inside the leaf's scope is an
 escalation, not a workaround.
 
+In the Agents Remember repository, the prescribed focused/leaf check means Dagger
+`mode=targeted` with the recorded leaf base as `diff-base`. Direct host pytest or wrapper
+runs may diagnose a failure but never satisfy the check. Inspect
+`dagger call quality --help` if the invocation contract is unclear; do not guess it.
+
 ### 5 — The Turn Report (mandatory, your last act)
 
 Write `templates/turn-report.md` to the path the brief names (convention:
