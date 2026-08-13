@@ -22,7 +22,7 @@ from agents_remember.controlplane.records import (
 )
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.lifecycle_operation import (
+from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
 )

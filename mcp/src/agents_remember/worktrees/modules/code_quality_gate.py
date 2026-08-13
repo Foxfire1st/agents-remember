@@ -249,6 +249,15 @@ def run_subprocess(
     )
 
 
+def _validated_quality_gate_plan(plan: QualityGatePlan | None) -> QualityGatePlan:
+    resolved = plan or QualityGatePlan()
+    if resolved.mode not in {GATE_TARGETED, GATE_FULL}:
+        raise ValueError(f"unknown quality gate mode: {resolved.mode}")
+    if resolved.executor not in {"local", "dagger"}:
+        raise ValueError(f"unknown quality gate executor: {resolved.executor}")
+    return resolved
+
+
 def run_strict_code_quality_gate(
     target: QualityGateTarget,
     *,
@@ -271,11 +280,7 @@ def run_strict_code_quality_gate(
             "strict code-quality gate cannot run before code commit: "
             f"project-owned wrapper is missing at {wrapper}"
         )
-    plan = plan or QualityGatePlan()
-    if plan.mode not in {GATE_TARGETED, GATE_FULL}:
-        raise ValueError(f"unknown quality gate mode: {plan.mode}")
-    if plan.executor not in {"local", "dagger"}:
-        raise ValueError(f"unknown quality gate executor: {plan.executor}")
+    plan = _validated_quality_gate_plan(plan)
     pytest_report = pytest_events_report_path(target.worktree_group)
     command, invocation, cap_plan = _gate_command_parts(
         code_worktree,

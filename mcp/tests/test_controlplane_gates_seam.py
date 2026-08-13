@@ -343,6 +343,7 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
         with (
             mock.patch.object(integrate_mod, "load_contract", return_value=self.contract),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(
                 integrate_mod,
                 "_integration_replay_requirements",

@@ -44,7 +44,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import agents_remember
 from _durability_measurement import (
     MIN_SUCCESSFUL_RECLAIMS,
     VacuousRunError,
@@ -1118,7 +1117,7 @@ def run_case(scenario: str, case: str, root: Path, **overrides: Any) -> dict[str
 # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:1115).
 def _require_source_root(expected: str) -> str:  # pragma: no cover
     """Refuse to measure unless ``agents_remember`` resolved under the tree the caller named."""
-    resolved = str(Path(agents_remember.__file__).resolve().parent.parent)
+    resolved = str(Path(str(sys.modules["agents_remember"].__file__)).resolve().parent.parent)
     if Path(resolved) != Path(expected).resolve():
         raise SystemExit(
             f"harness refused: expected agents_remember under {expected!r}, got {resolved!r}"

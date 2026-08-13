@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -16,7 +17,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.code_quality import check as quality_check
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_module
-from agents_remember.worktrees.modules import code_quality_gate
+from agents_remember.worktrees.modules import closeout_memory_quality, code_quality_gate
 from agents_remember.worktrees.modules.git import commit_if_dirty, commit_verified_staged
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -53,6 +54,36 @@ def _quality_target(
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
+    def test_memory_quality_failure_without_a_findings_list_has_a_bounded_message(self) -> None:
+        message = closeout_memory_quality._failure_message(
+            {"findingCount": 1, "findings": {"unexpected": "shape"}}
+        )
+
+        self.assertIn("findingCount=1", message)
+        self.assertNotIn("Findings:", message)
+
+    def test_source_lineage_is_rechecked_after_quality_before_approval_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = dirty_open_external_contract_fixture(Path(tmp))
+            with (
+                mock.patch.object(
+                    closeout_module,
+                    "_validate_closeout_source_state",
+                    side_effect=[None, RuntimeError("super moved during quality")],
+                ) as source_check,
+                mock.patch.object(
+                    closeout_module,
+                    "_closeout_quality_preflight",
+                    return_value=({"required": True, "passed": True}, {}, False),
+                ),
+                mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
+                self.assertRaisesRegex(RuntimeError, "super moved during quality"),
+            ):
+                worktree_manager.command_closeout(closeout_args(contract))
+
+            self.assertEqual(source_check.call_count, 2)
+            claim.assert_not_called()
+
     def test_memory_preflight_failure_never_starts_the_code_quality_gate(self) -> None:
         """A broken entity catalog must abort before hooks, Ruff, Pyright, or pytest."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -296,6 +327,23 @@ def _gate_scope_contract_fixture(root: Path):
             base_commit=git(code_repo, "rev-parse", "HEAD"),
         ),
     )
+    parent = default_series_contract(
+        ContractTask(
+            name="Gate Scope Master",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="chat-task",
+            memory_mode="internal",
+        ),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="main",
+            base_commit=git(code_repo, "rev-parse", "HEAD"),
+        ),
+    )
+    write_contract(parent.contract_path, parent)
+    contract = replace(contract, parent_contract_path=parent.contract_path)
     git(
         code_repo,
         "worktree",

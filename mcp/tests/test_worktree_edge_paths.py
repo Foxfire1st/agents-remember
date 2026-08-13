@@ -733,15 +733,14 @@ class OverviewRevisionTests(unittest.TestCase):
 class IntegrationRefusalTests(unittest.TestCase):
     """Integration refuses before it moves any branch."""
 
-    def test_ff_only_refuses_once_the_source_branch_has_moved_past_the_closeout(self) -> None:
-        """A source branch that advanced past the landed commit cannot be fast-forwarded
-        onto it; the block names replay as the way through and leaves main where it is."""
+    def test_integration_refuses_once_the_master_source_moves_past_the_closeout(self) -> None:
+        """A leaf cannot integrate after its master source advances; it must sync first."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
-            main_before = git(contract.code_repo_path, "rev-parse", "main")
+            source_before = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
             commit(contract.code_repo_path, "parallel.txt", "parallel\n", "parallel work")
-            moved_main = git(contract.code_repo_path, "rev-parse", "main")
+            moved_source = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
 
             result = integrate_module.integrate_result(
                 WorktreeArgs(
@@ -753,10 +752,13 @@ class IntegrationRefusalTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 2)
-            self.assertEqual(result.payload["state"], "blocked-non-ff")
-            self.assertIn("--strategy replay", str(result.payload["summary"]))
-            self.assertNotEqual(moved_main, main_before)
-            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), moved_main)
+            self.assertEqual(result.payload["state"], "source-lineage-stale")
+            self.assertEqual(result.payload["nextOperation"], "sync_source_lineage")
+            self.assertNotEqual(moved_source, source_before)
+            self.assertEqual(
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                moved_source,
+            )
 
     def test_a_non_fast_forward_memory_ledger_aborts_before_the_code_branch_moves(
         self,
@@ -768,11 +770,15 @@ class IntegrationRefusalTests(unittest.TestCase):
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
             assert contract.memory_repo_path is not None
-            code_main_before = git(contract.code_repo_path, "rev-parse", "main")
+            code_source_before = git(
+                contract.code_repo_path, "rev-parse", contract.code_source_branch
+            )
             commit(
                 contract.memory_repo_path, "unrelated.md", "unrelated\n", "parallel official memory"
             )
-            memory_main_before = git(contract.memory_repo_path, "rev-parse", "main")
+            memory_source_before = git(
+                contract.memory_repo_path, "rev-parse", contract.memory_source_branch
+            )
 
             with self.assertRaises(RuntimeError) as raised:
                 integrate_module._merge_integrated_commits(
@@ -789,9 +795,13 @@ class IntegrationRefusalTests(unittest.TestCase):
                 "integrated memory ledger commit is not a fast-forward from the current "
                 "memory branch",
             )
-            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), code_main_before)
             self.assertEqual(
-                git(contract.memory_repo_path, "rev-parse", "main"), memory_main_before
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                code_source_before,
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
+                memory_source_before,
             )
 
 

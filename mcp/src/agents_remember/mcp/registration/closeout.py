@@ -9,7 +9,7 @@ from agents_remember.application.worktree_tools import (
     CloseoutCommitMessages,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.lifecycle_operation import IntegrateStrategy
+from agents_remember.models.lifecycles.operation import IntegrateStrategy
 
 from ..tools import (
     worktree_abandon_payload,
@@ -22,6 +22,13 @@ from ..tools import (
 
 
 def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Register landing tools through cohesive bounded registration groups."""
+    _register_closeout_command_tools(server, config)
+    _register_integration_command_tools(server, config)
+    _register_reclamation_command_tools(server, config)
+
+
+def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_closeout_preview(
         *,
@@ -80,6 +87,8 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
             CloseoutApproval(intent_note=intent_note, dry_run=dry_run),
         )
 
+
+def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_integrate(
         *,
@@ -124,6 +133,8 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
             dry_run=dry_run,
         )
 
+
+def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_cleanup(
         *, contract_path: str, dry_run: bool = False, teardown_providers: bool = True

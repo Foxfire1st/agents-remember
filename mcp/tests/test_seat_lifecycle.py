@@ -35,7 +35,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     RetirementSettings,
 )
 from agents_remember.mcp.tools.terminal import session_rename_payload, session_retire_payload
-from agents_remember.models.lifecycle_operation import IntegrateOperationInput
+from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.models.operator_inbox import AgentRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (

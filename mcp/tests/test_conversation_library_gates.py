@@ -5,9 +5,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from agents_remember.kernel.harnesses import Harness
 from agents_remember.serving.conversation.library import gates as gates_module
+from agents_remember.serving.conversation.library import helper_host
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
 from agents_remember.serving.conversation.library.gates import (
     LOCKED_CODEX_RUNTIME_VERSION,
@@ -19,6 +21,28 @@ CODEX = Harness(id="codex", name="Codex", command="codex", argv=("codex",))
 CLAUDE = Harness(id="claude", name="Claude", command="claude", argv=("claude",))
 PI = Harness(id="pi", name="Pi", command="pi", argv=("pi",))
 REGISTRY = (CODEX, CLAUDE, PI)
+
+
+class HelperPreflightTests(unittest.TestCase):
+    def test_preflight_reports_each_static_helper_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            root = Path(tmp_str)
+            with mock.patch.object(helper_host.shutil, "which", return_value=None):
+                self.assertIn("node runtime", helper_host.helper_preflight("claude").reason or "")
+            with mock.patch.object(helper_host, "helper_root", return_value=root):
+                self.assertIn(
+                    "entry is missing",
+                    helper_host.helper_preflight("claude", node="node").reason or "",
+                )
+                entry = root / "src" / "claude.ts"
+                entry.parent.mkdir()
+                entry.write_text("// helper\n", encoding="utf-8")
+                self.assertIn(
+                    "dependencies are not installed",
+                    helper_host.helper_preflight("claude", node="node").reason or "",
+                )
+                (root / "node_modules").mkdir()
+                self.assertIsNone(helper_host.helper_preflight("claude", node="node").reason)
 
 
 class _FakeHelperHost:

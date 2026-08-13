@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
+from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.worktree import SourceLineageProjection, WorktreeSummary
 from agents_remember.worktrees import git_worktree_manager
 from agents_remember.worktrees.lifecycle_operations import latest_operation_projection

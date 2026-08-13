@@ -25,7 +25,7 @@ from types import UnionType
 from typing import Literal, Union, cast, get_args, get_origin
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.models.lifecycle import LiveState, Phase, State, TerminalState
+from agents_remember.models.lifecycles.responses import LiveState, Phase, State, TerminalState
 
 
 class LifecycleVocabularyError(AgentsRememberError):

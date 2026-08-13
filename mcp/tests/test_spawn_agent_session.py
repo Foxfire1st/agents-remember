@@ -17,7 +17,6 @@ from typing import Any
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-import agents_remember
 from agents_remember.application.terminal_tools import (
     RetiredSpawnInputs,
     SpawnedBy,
@@ -59,7 +58,9 @@ from test_worktree_support import git, write_current_task_lineage
 
 # The source root of the agents_remember package this test process imported -- what the opener
 # seeds onto every harness-runner spawn's PYTHONPATH.
-_DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
+_DAEMON_PACKAGE_ROOT = str(
+    Path(str(sys.modules["agents_remember"].__file__)).resolve().parent.parent
+)
 SPRINT_REF = TaskDocumentRef(repository="repo", path="sprint/task.json")
 MASTER_REF = TaskDocumentRef(repository="repo", path="master/task.json")
 LEAF_REF = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
@@ -401,7 +402,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("worker-1"))
 
-    def test_stale_super_refuses_a_worker_before_host_creation(self) -> None:
+    def test_stale_super_refuses_every_leaf_role_before_host_creation(self) -> None:
         path = agentic_settings_path(self.tmp)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -409,11 +410,12 @@ class SpawnAgentSessionTests(unittest.TestCase):
                 {
                     "orchestration": {
                         "roles": {
-                            "worker": {
+                            role: {
                                 "harness": "claude",
                                 "model": "claude-fable-5",
                                 "effort": "max",
                             }
+                            for role in ("worker", "reviewer", "curator")
                         }
                     }
                 }
@@ -425,16 +427,18 @@ class SpawnAgentSessionTests(unittest.TestCase):
         git(self.repo, "add", marker.name)
         git(self.repo, "commit", "-m", "move super")
 
-        payload = self._spawn(
-            task_document_ref=LEAF_REF,
-            env={"AR_SPAWN_ROLE": "worker"},
-        )
+        for role in ("worker", "reviewer", "curator"):
+            with self.subTest(role=role):
+                payload = self._spawn(
+                    task_document_ref=LEAF_REF,
+                    env={"AR_SPAWN_ROLE": role},
+                )
 
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["status"], "source-lineage-stale")
-        self.assertEqual(payload["sourceLineage"]["state"], "blocked")
-        self.assertEqual(self.host.ensured, [])
-        self.assertIsNone(self.catalog.get("worker-1"))
+                self.assertFalse(payload["ok"])
+                self.assertEqual(payload["status"], "source-lineage-stale")
+                self.assertEqual(payload["sourceLineage"]["state"], "blocked")
+                self.assertEqual(self.host.ensured, [])
+                self.assertIsNone(self.catalog.get("worker-1"))
 
     def test_context_including_empty_string_refuses_before_every_spawn_side_effect(self) -> None:
         for context in ("", "draft packet"):

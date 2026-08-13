@@ -39,7 +39,7 @@ from unittest.mock import patch
 
 import pytest
 from _global_state import preserve_owned_mutable_state
-from agents_remember.application import server_startup
+from agents_remember.application.runtime import startup as server_startup
 from agents_remember.controlplane import attention_dismissals as attention_module
 from agents_remember.controlplane import durable_store
 from agents_remember.controlplane.attention_dismissals import (

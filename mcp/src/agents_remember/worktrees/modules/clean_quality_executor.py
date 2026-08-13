@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.platform_subprocess import (
     native_command,
@@ -175,7 +175,7 @@ def _publish_reports(source: Path, destination: Path) -> None:
             target = destination / report.name
             temporary = target.with_name(f".{target.name}.tmp")
             shutil.copyfile(report, temporary)
-            os.replace(temporary, target)
+            atomic_replace(temporary, target)
 
 
 def _git_ok(

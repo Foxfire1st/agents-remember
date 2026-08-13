@@ -111,7 +111,6 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-import agents_remember
 from agents_remember.kernel.git_facts import VALID_REPO_STATES
 from agents_remember.kernel.git_freshness import VALID_FRESHNESS_STATES
 from agents_remember.models.context_packet import BranchFreshness as WireBranchFreshness
@@ -143,7 +142,7 @@ from agents_remember.worktrees.worktree_contract import (
     amend_contract,
 )
 
-PACKAGE_ROOT = Path(agents_remember.__file__).resolve().parent
+PACKAGE_ROOT = Path(str(sys.modules["agents_remember"].__file__)).resolve().parent
 
 # The guidance keys the packet projection actually copies onto the wire model. `summary` and
 # `carryoverDoneAt` are not among them, and `WorktreeSummary` is strict, so filtering here is

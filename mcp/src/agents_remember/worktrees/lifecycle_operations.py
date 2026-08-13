@@ -19,7 +19,7 @@ from agents_remember.kernel.platform_subprocess import (
     native_command,
     native_subprocess_environment,
 )
-from agents_remember.models.lifecycle_operation import (
+from agents_remember.models.lifecycles.operation import (
     LifecycleOperationInput,
     LifecycleOperationKind,
     LifecycleOperationProjection,

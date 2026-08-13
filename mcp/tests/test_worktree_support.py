@@ -31,6 +31,7 @@ from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
+    WorktreeContract,
     default_contract,
     default_series_contract,
     load_contract,
@@ -347,6 +348,29 @@ def open_external_contract_fixture(root: Path):
             base_commit=memory_base,
         ),
     )
+    parent = default_series_contract(
+        ContractTask(
+            name="Commit Approval Master",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="chat-task",
+            memory_mode="external",
+        ),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="main",
+            base_commit=code_base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="main",
+            base_commit=memory_base,
+        ),
+    )
+    write_contract(parent.contract_path, parent)
+    contract = replace(contract, parent_contract_path=parent.contract_path)
     assert contract.memory_worktree is not None
     git(
         code_repo,
@@ -401,6 +425,54 @@ def claimed_external_contract_fixture(root: Path):
     return contract, baseline, sidecar
 
 
+def _series_parent_fixture(
+    root: Path,
+    *,
+    task_name: str,
+    code_repo: Path,
+    memory_repo: Path,
+) -> tuple[WorktreeContract, Path, Path]:
+    """Create the real super -> master edge used by leaf lifecycle fixtures."""
+    code_base = git(code_repo, "rev-parse", "HEAD")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    slug = task_name.lower().replace(" ", "-")
+    code_branch = f"ar/{slug}-master"
+    memory_branch = f"ar/{slug}-master"
+    code_worktree = root / f"{slug}-master-code"
+    memory_worktree = root / f"{slug}-master-memory"
+    git(code_repo, "worktree", "add", "-b", code_branch, str(code_worktree), code_base)
+    git(memory_repo, "worktree", "add", "-b", memory_branch, str(memory_worktree), memory_base)
+    parent = default_series_contract(
+        ContractTask(
+            name=task_name,
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="chat-task",
+            memory_mode="external",
+        ),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch=code_branch,
+            base_commit=code_base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch=memory_branch,
+            base_commit=memory_base,
+        ),
+    )
+    parent = replace(
+        parent,
+        code_worktree=code_worktree,
+        memory_worktree=memory_worktree,
+        ledger_path=memory_worktree / "memory.md",
+    )
+    write_contract(parent.contract_path, parent)
+    return parent, code_worktree, memory_worktree
+
+
 def committed_range_external_contract_fixture(root: Path):
     """Open external contract whose changes are already committed on the work branch.
 
@@ -417,6 +489,12 @@ def committed_range_external_contract_fixture(root: Path):
     git(memory_repo, "add", "-A")
     git(memory_repo, "commit", "-m", "Add memory baseline")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
+    parent, code_master, memory_master = _series_parent_fixture(
+        root,
+        task_name="Committed Range Thing",
+        code_repo=code_repo,
+        memory_repo=memory_repo,
+    )
     contract = default_contract(
         ContractTask(
             name="Committed Range Thing",
@@ -427,39 +505,40 @@ def committed_range_external_contract_fixture(root: Path):
         ),
         leaf=LeafIdentity(worktree_name="committed-range-thing"),
         code=RepoBranchPlan(
-            repo_path=code_repo,
-            source_branch="main",
+            repo_path=code_master,
+            source_branch=parent.code_work_branch,
             work_branch="ar/committed-range-thing",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
-            repo_path=memory_repo,
-            source_branch="main",
+            repo_path=memory_master,
+            source_branch=parent.memory_work_branch,
             work_branch="ar/committed-range-thing",
             base_commit=memory_base,
         ),
     )
     assert contract.memory_worktree is not None
     git(
-        code_repo,
+        code_master,
         "worktree",
         "add",
         "-b",
         contract.code_work_branch,
         str(contract.code_worktree),
-        "main",
+        parent.code_work_branch,
     )
     git(
-        memory_repo,
+        memory_master,
         "worktree",
         "add",
         "-b",
         contract.memory_work_branch,
         str(contract.memory_worktree),
-        "main",
+        parent.memory_work_branch,
     )
     commit_file(contract.code_worktree, "feature.txt", "feature v2\n", "Add feature")
     commit_file(contract.code_worktree, "raw.txt", "raw\n", "Add raw transport")
+    contract = replace(contract, parent_contract_path=parent.contract_path)
     write_contract(contract.contract_path, contract)
     return contract
 
@@ -489,6 +568,12 @@ def closed_external_contract_fixture(
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
+    parent, code_master, memory_master = _series_parent_fixture(
+        root,
+        task_name="Integrate Thing",
+        code_repo=code_repo,
+        memory_repo=memory_repo,
+    )
     contract = default_contract(
         ContractTask(
             name="Integrate Thing",
@@ -499,36 +584,36 @@ def closed_external_contract_fixture(
         ),
         leaf=LeafIdentity(worktree_name="integrate-thing", lifecycle_id="LC-INTEGRATE-THING"),
         code=RepoBranchPlan(
-            repo_path=code_repo,
-            source_branch="main",
+            repo_path=code_master,
+            source_branch=parent.code_work_branch,
             work_branch="ar/integrate-thing",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
-            repo_path=memory_repo,
-            source_branch="main",
+            repo_path=memory_master,
+            source_branch=parent.memory_work_branch,
             work_branch="ar/integrate-thing",
             base_commit=memory_base,
         ),
     )
     assert contract.memory_worktree is not None
     git(
-        code_repo,
+        code_master,
         "worktree",
         "add",
         "-b",
         contract.code_work_branch,
         str(contract.code_worktree),
-        "main",
+        parent.code_work_branch,
     )
     git(
-        memory_repo,
+        memory_master,
         "worktree",
         "add",
         "-b",
         contract.memory_work_branch,
         str(contract.memory_worktree),
-        "main",
+        parent.memory_work_branch,
     )
     code_commit = commit_file(contract.code_worktree, code_path, code_content, "Add feature")
     memory_content_commit = commit_file(
@@ -539,6 +624,7 @@ def closed_external_contract_fixture(
     )
     closed = replace(
         contract,
+        parent_contract_path=parent.contract_path,
         human_review_status="approved",
         approved_for_commit=True,
         closeout_status="completed",

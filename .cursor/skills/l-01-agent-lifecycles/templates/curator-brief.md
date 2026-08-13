@@ -5,7 +5,8 @@ spawned fresh per leaf after builder code exists and the reviewer verdict is ava
 is the curator's entire session start** — it replaces the front half the spawner already ran. This
 is the change-set and intent feeding contract: the curator never infers either from transcript
 memory. It is FED the landed change set, existing intent anchors, the leaf task doc, approved
-developer/design rulings, and notes/ as inputs.
+developer/design rulings, the manager's immediately preceding current source-lineage projection,
+and notes/ as inputs. The control plane repeats that lineage proof before process creation.
 
 Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="curator",
 brief=<this complete brief>)`. The control plane claims the `(leaf document, curator)` seat and
@@ -28,6 +29,9 @@ below, then stop.
 - Memory: `<memory-worktree-path>` (branch `<memory-work-branch>`) — your only write surface.
 - Enclosure contract: `<enclosure-contract-path>` — pass this as `contract_path` to every memory
   tool below; it is what scopes them to this leaf instead of the official memory repo.
+- Pre-curator lineage: `<worktree_status sourceLineage projection>` — captured by the manager
+  immediately before dispatch and `state=current` across every applicable super → master → leaf
+  code and external-memory edge. This is evidence, never a caller-supplied commit-id authority.
 
 ## The landed change set (fed, not inferred)
 - Code diff: `<base-commit>..<worker-head-commit-or-HEAD>` in the code worktree — <changed-path
@@ -147,6 +151,10 @@ send a blocker report instead of a completion report.
 **Compiler notes for the manager.**
 
 - Fill every `<placeholder>`; a brief with an unresolved placeholder is not dispatchable.
+- Immediately before compiling this brief, call `worktree_status` for the canonical leaf and require
+  `sourceLineage.state=current`. If it is stale or unavailable, synchronize and reconcile before
+  curator dispatch. `dispatch_agent` repeats the proof and refuses before process creation if the
+  lineage moves between the manager's check and the dispatch transaction.
 - `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
   `enclosures/<leaf-id>/`. Without it the curator cannot run the closeout check on its own work,
   and its `route_index_refresh` writes into the official memory repo.

@@ -30,7 +30,7 @@ from agents_remember.application.provider_tools import (
     GrepaiTraceQuery,
     ProviderQueryScope,
 )
-from agents_remember.application.runtime_install import RuntimeInstallRequest
+from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,

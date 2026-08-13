@@ -135,18 +135,28 @@ stops belong to the orchestrator via the system-specialist protocol.
   (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
   genuinely new changes.
 - **Curator coherence pass — mandatory, not skippable.** After builder code is ready and the reviewer
-  verdict is available (when the leaf tier ran one), compile a brief from
+  verdict is available (when the leaf tier ran one), call `worktree_status` for the canonical leaf
+  and require its complete task-derived code and external-memory `sourceLineage` to be `current`.
+  This is the last manager-owned action before onboarding begins. If super has advanced beyond the
+  master, or the master has advanced beyond the leaf, run the contract-addressed `worktree_sync`,
+  reconcile the landed code first, and obtain any required delta review before handing work to the
+  curator. Never ask the curator to document a stale branch. The plane repeats this same lineage
+  proof before creating the curator seat, so an omitted or raced check fails closed without a
+  hosted-process side effect. Once current, compile a brief from
   `../templates/curator-brief.md` carrying the leaf's **landed change set** (code diff over the
   leaf contract's recorded base-to-head range, with paths/counters — pulled from the leaf contract,
   never guessed), the **leaf task doc**, approved design/developer decisions, existing
   onboarding/entity intent anchors, and **notes/** (builder turn report + reviewer verdict), then
   dispatch a **fresh curator** on the canonical leaf document with role `curator` and the complete
-  coherence brief. The curator reconciles existing intent, ruled change intent, and implemented
+  coherence brief, including the current lineage projection returned by that preflight. The curator
+  reconciles existing intent, ruled change intent, and implemented
   reality; routes each accepted truth to the right onboarding home; and writes onboarding only,
   returning a coherence report. **Do not run the closeout preview before this pass exists** — the
   `c-12-closeout` skill's missing-onboarding and changed-sidecar checks are this pass's output, not
   something this seat patches inline. Leaf closeout inputs are exactly: **builder code + reviewer
-  verdict + curator coherence pass**.
+  verdict + current source-lineage proof + curator coherence pass**. Closeout and integration still
+  re-prove lineage after their long quality work; the pre-curator proof prevents wasted or stale
+  onboarding, while the exit proof closes the later time-of-check/time-of-use window.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the

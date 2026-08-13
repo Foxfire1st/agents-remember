@@ -24,7 +24,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
+from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.lifecycle_state import (

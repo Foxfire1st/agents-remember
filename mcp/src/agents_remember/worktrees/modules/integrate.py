@@ -43,6 +43,11 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.source_lineage import (
+    lineage_block_payload,
+    lineage_refusal,
+    source_lineage_for_contract,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -336,6 +341,67 @@ class IntegrationSources:
         return self.code_replay_required or self.memory_replay_required
 
 
+def _integration_lineage_block(
+    contract: WorktreeContract, *, persist: bool
+) -> WorktreeCommandResult | None:
+    projection = source_lineage_for_contract(contract)
+    refusal = lineage_refusal(projection)
+    if refusal is None:
+        return None
+    assert projection is not None
+    status, reason = refusal
+    recovery = lineage_block_payload(projection)
+    recovery.pop("state", None)
+    recovery.pop("summary", None)
+    return WorktreeCommandResult(
+        2,
+        blocked_integration_payload(
+            contract,
+            status,
+            f"integration requires current transitive source lineage: {reason}",
+            persist=persist,
+            developer_decision_required=False,
+            **recovery,
+        ),
+    )
+
+
+def _integration_sources_moved_block(
+    contract: WorktreeContract, sources: IntegrationSources
+) -> WorktreeCommandResult | None:
+    current_code = head_commit(contract.code_repo_path, contract.code_source_branch)
+    moved = current_code != sources.current_code_source
+    current_memory = ""
+    if contract.memory_mode == "external":
+        assert contract.memory_repo_path is not None
+        current_memory = head_commit(contract.memory_repo_path, contract.memory_source_branch)
+        moved = moved or current_memory != sources.current_memory_source
+    if not moved:
+        return None
+    return WorktreeCommandResult(
+        2,
+        blocked_integration_payload(
+            contract,
+            "source-moved-during-quality",
+            "integration source branches moved while the quality gate ran; retry from "
+            "preflight so the combined candidate is certified against the new tips",
+            developer_decision_required=False,
+            nextOperation="request_integration_decision",
+            nextTool="worktree_integrate",
+            nextArgs={"contract_path": contract.contract_path.as_posix(), "dry_run": True},
+        ),
+    )
+
+
+def _integration_source_state_block(
+    contract: WorktreeContract, sources: IntegrationSources
+) -> WorktreeCommandResult | None:
+    """Re-prove transitive ancestry and the exact source-tip snapshot."""
+    return _integration_lineage_block(contract, persist=True) or _integration_sources_moved_block(
+        contract, sources
+    )
+
+
 def _integration_replay_requirements(contract: WorktreeContract) -> IntegrationSources:
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
     current_memory_source = ""
@@ -580,6 +646,9 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if contract.integration_status == "completed":
         return WorktreeCommandResult(0, {"state": "already-integrated", **status_payload(contract)})
     validate_integrate_contract(contract)
+    lineage_block = _integration_lineage_block(contract, persist=not args.dry_run)
+    if lineage_block is not None:
+        return lineage_block
     # The master-exit seam consumer (mirror of the closeout gate): when a
     # master-handover-approval gate is addressed to this contract's master or
     # series (its `enclosure`), only a policy-valid approval lets the
@@ -658,6 +727,11 @@ def _apply_integration(
     quality_gate, blocked = _run_integration_quality_gate(contract)
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
+    # A full gate can run for minutes. Re-prove both the transitive chain and the exact
+    # source tips before replay or merge so the certified candidate cannot go stale in-flight.
+    blocked = _integration_source_state_block(contract, sources)
+    if blocked is not None:
+        return blocked
     integrated_memory_content_commit, integrated_ledger_commit, blocked = (
         _integrated_memory_commits(
             contract, args, sources.current_memory_source, integrated_code_commit
@@ -670,6 +744,9 @@ def _apply_integration(
         memory_content=integrated_memory_content_commit,
         ledger=integrated_ledger_commit,
     )
+    blocked = _integration_source_state_block(contract, sources)
+    if blocked is not None:
+        return blocked
     report_operation_progress(
         args,
         "source-merge",

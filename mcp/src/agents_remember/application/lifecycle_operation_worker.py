@@ -28,7 +28,7 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.kernel.primitives.gate_vocab import GateKind
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
-from agents_remember.models.lifecycle_operation import (
+from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
     LifecycleOperationKind,

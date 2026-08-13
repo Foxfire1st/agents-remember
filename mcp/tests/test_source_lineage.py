@@ -22,9 +22,11 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start import _preflighted_contract, attach_result
 from agents_remember.worktrees.source_lineage import (
+    _repository_identity,
     lineage_block_payload,
     lineage_refusal,
     parent_source_lineage,
+    require_current_source_lineage,
     source_lineage_for_contract,
     source_lineage_for_task,
 )
@@ -39,6 +41,15 @@ from agents_remember.worktrees.worktree_contract import (
 
 
 class SourceLineageTests(unittest.TestCase):
+    def test_repository_identity_rejects_absent_and_non_git_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertIsNone(_repository_identity(None))
+            self.assertIsNone(_repository_identity(root / "absent"))
+            plain = root / "plain"
+            plain.mkdir()
+            self.assertIsNone(_repository_identity(plain))
+
     def test_sprint_roles_have_no_single_master_lineage_edge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _fixture(Path(tmp))
@@ -243,6 +254,28 @@ class SourceLineageTests(unittest.TestCase):
             assert projection is not None
             self.assertEqual(projection.state, "unavailable")
 
+    def test_parent_and_leaf_paths_may_be_sibling_worktrees_of_one_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _fixture(root)
+            parent_checkout = root / "parent-checkout"
+            _git(
+                fixture.code_repo,
+                "worktree",
+                "add",
+                "--detach",
+                str(parent_checkout),
+                "super",
+            )
+            parent = replace(fixture.master_contract, code_repo_path=parent_checkout)
+            write_contract(parent.contract_path, parent)
+
+            projection = source_lineage_for_contract(fixture.leaf_contract)
+
+            assert projection is not None
+            self.assertEqual(projection.state, "current")
+            self.assertTrue(all(edge.state == "current" for edge in projection.edges))
+
     def test_diverged_master_reports_divergence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _fixture(Path(tmp))
@@ -255,6 +288,20 @@ class SourceLineageTests(unittest.TestCase):
             self.assertEqual(projection.state, "blocked")
             self.assertEqual(projection.edges[0].state, "diverged")
             self.assertEqual((projection.edges[0].ahead, projection.edges[0].behind), (1, 1))
+
+    def test_lifecycle_boundary_requires_the_full_transitive_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            self.assertIsNotNone(
+                require_current_source_lineage(fixture.leaf_contract, operation="closeout")
+            )
+            _commit_on(fixture.code_repo, "super", "super.txt")
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "closeout requires current transitive source lineage.*worktree_sync",
+            ):
+                require_current_source_lineage(fixture.leaf_contract, operation="closeout")
 
 
 class _Fixture:

@@ -66,7 +66,11 @@ const badge = css({
   borderColor: "grid",
   borderRadius: "2px",
   color: "muted",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
 });
+const operationBadge = css({ flex: "1 1 18rem", minWidth: "0", maxWidth: "100%" });
 const actions = css({ display: "flex", gap: "0.3rem" });
 
 export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
@@ -112,9 +116,13 @@ export function Hangar({ onSelect }: { onSelect: (id: string) => void }) {
                   <span className={badge}>integrate {enclosure.integrationStatus}</span>
                   <span className={badge}>cleanup {enclosure.cleanup}</span>
                   {enclosure.lifecycleOperation ? (
-                    <span className={badge} data-testid="hangar-lifecycle-operation">
+                    <span
+                      className={`${badge} ${operationBadge}`}
+                      data-testid="hangar-lifecycle-operation"
+                      title={enclosure.lifecycleOperation.currentCommand}
+                    >
                       {enclosure.lifecycleOperation.kind} {enclosure.lifecycleOperation.status} ·{" "}
-                      {enclosure.lifecycleOperation.phase}
+                      {enclosure.lifecycleOperation.phase} · {enclosure.lifecycleOperation.currentCommand}
                     </span>
                   ) : null}
                 </div>

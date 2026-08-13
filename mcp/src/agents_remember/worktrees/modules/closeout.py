@@ -20,6 +20,10 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
+from agents_remember.worktrees.modules.closeout_memory_quality import (
+    combine_memory_quality,
+    run_memory_quality_phase,
+)
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
     QualityGateTarget,
@@ -72,6 +76,7 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_route_overview_refresh_plan,
 )
 from agents_remember.worktrees.services import worktree_services
+from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     amend_contract,
@@ -486,6 +491,12 @@ def _validate_closeout_source_heads(contract) -> None:
             )
 
 
+def _validate_closeout_source_state(contract) -> None:
+    """Prove immediate source heads and the full super -> master -> leaf chain."""
+    _validate_closeout_source_heads(contract)
+    require_current_source_lineage(contract, operation="closeout")
+
+
 def _closeout_approval_note(args: WorktreeArgs) -> str:
     if not args.approved:
         raise RuntimeError("closeout requires --approved after explicit commit approval")
@@ -611,85 +622,6 @@ def _closeout_contract_context(contract):
     return replace(context, code_repository_root=contract.code_worktree)
 
 
-def _format_memory_quality_finding(finding: dict[str, Any]) -> str:
-    path = str(finding.get("path") or finding.get("sourceFile") or "")
-    code = str(finding.get("code") or finding.get("check") or "memory_quality")
-    message = str(finding.get("message") or "")
-    return f"{code}{f' at {path}' if path else ''}: {message}"
-
-
-def _memory_quality_failure_message(result: dict[str, Any]) -> str:
-    finding_count = int(result.get("findingCount", 0))
-    findings = result.get("findings", [])
-    sample: list[str] = []
-    if isinstance(findings, list):
-        sample = [
-            _format_memory_quality_finding(finding)
-            for finding in findings[:5]
-            if isinstance(finding, dict)
-        ]
-    details = "; ".join(sample)
-    if details:
-        details = f" Findings: {details}"
-    return (
-        "external-memory closeout requires a clean memory_quality_check before memory commit; "
-        f"findingCount={finding_count}.{details} Fix memory/onboarding issues, rerun "
-        "memory_quality_check, then rerun closeout."
-    )
-
-
-def _run_memory_quality_phase(
-    context,
-    checks: tuple[str, ...],
-    *,
-    unstamped_code_commit: str | None = None,
-) -> dict[str, Any]:
-    result = worktree_services().memory_quality.run_check(
-        context.onboarding_root,
-        checks=checks,
-        drift_context=worktree_services().memory_quality.drift_context(
-            code_repository_root=context.code_repository_root,
-            context=context,
-            detail_limit=50,
-            unstamped_code_commit=unstamped_code_commit,
-        ),
-    )
-    if not result.get("ok", False):
-        raise RuntimeError(_memory_quality_failure_message(result))
-    return result
-
-
-def _combined_memory_quality(
-    before_refresh: dict[str, Any], after_refresh: dict[str, Any]
-) -> dict[str, Any]:
-    """One official closeout gate, reported after both temporal phases pass.
-
-    The before phase may be empty: claim evidence is only comparable once the commit it must
-    be compared against exists, so phases with no declared checks contribute no result at all.
-    """
-    before_checks, after_checks = worktree_services().memory_quality.check_groups()
-    report_only_sample = [
-        *before_refresh.get("reportOnlySample", []),
-        *after_refresh["reportOnlySample"],
-    ][:50]
-    return {
-        "ok": True,
-        "checks": {**before_refresh.get("checks", {}), **after_refresh["checks"]},
-        "findingCount": before_refresh.get("findingCount", 0) + after_refresh["findingCount"],
-        "findings": [*before_refresh.get("findings", []), *after_refresh["findings"]],
-        "reportOnlyFindingCount": (
-            before_refresh.get("reportOnlyFindingCount", 0)
-            + after_refresh["reportOnlyFindingCount"]
-        ),
-        "reportOnlySample": report_only_sample,
-        "reportOnlySampleCount": len(report_only_sample),
-        "closeoutPhases": {
-            "beforeMetadataRefresh": list(before_checks),
-            "afterMetadataRefresh": list(after_checks),
-        },
-    }
-
-
 @dataclass(frozen=True)
 class _MemoryCloseoutOutcome:
     """What external-memory closeout committed and refreshed.
@@ -732,8 +664,8 @@ def _external_closeout_commits(
     refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
     _, after_checks = worktree_services().memory_quality.check_groups()
-    memory_quality_after_refresh = _run_memory_quality_phase(context, after_checks)
-    memory_quality = _combined_memory_quality(
+    memory_quality_after_refresh = run_memory_quality_phase(context, after_checks)
+    memory_quality = combine_memory_quality(
         memory_quality_before_refresh, memory_quality_after_refresh
     )
     memory_content_dirty = worktree_dirty(contract.memory_worktree)
@@ -1026,11 +958,80 @@ def _memory_quality_before_refresh(contract) -> dict[str, Any]:
     if contract.memory_mode != "external":
         return {}
     before_checks, _ = worktree_services().memory_quality.check_groups()
-    return _run_memory_quality_phase(
+    return run_memory_quality_phase(
         _closeout_contract_context(contract),
         before_checks,
         unstamped_code_commit=contract.code_base_commit,
     )
+
+
+@dataclass(frozen=True)
+class _CloseoutResultFacts:
+    code_commit: str
+    memory: _MemoryCloseoutOutcome
+    attestations: _CloseoutAttestations
+    code_quality_gate: dict[str, Any]
+    integration_reopen: dict[str, Any]
+    gate_guard: CloseoutGuard | None
+
+
+def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, Any]:
+    """Build the completed-closeout response after all durable writes finish."""
+    memory = facts.memory
+    attestations = facts.attestations
+    return {
+        "state": "closed",
+        **status_payload(updated),
+        "summary": "Closeout completed; integrate the task branches back into their source branches.",
+        "code_commit": facts.code_commit,
+        "memory_content_commit": memory.memory_commit,
+        "ledger_commit": memory.ledger_commit,
+        "refreshed_onboarding": _bounded_paths(
+            [item["source_path"] for item in memory.refreshed_onboarding]
+        ),
+        "sidecars_attested_no_impact": _bounded_paths(attestations.attested_sidecars),
+        "unonboarded_changed_paths": _bounded_paths(attestations.unonboarded_paths),
+        "refreshed_entities": memory.refreshed_entities,
+        "refreshed_route_overviews": memory.refreshed_route_overviews,
+        "route_overviews_attested_no_impact": attestations.attested_overviews,
+        "route_overviews_stamped_without_body_review": attestations.stamped_overviews,
+        "route_index_refresh": memory.route_index_refresh,
+        "memory_quality": memory.memory_quality,
+        "code_quality_gate": facts.code_quality_gate,
+        "integration_reopen": facts.integration_reopen,
+        "closeout_gate": _closeout_gate_payload(facts.gate_guard),
+    }
+
+
+def _closeout_quality_preflight(
+    contract, args: WorktreeArgs, *, code_would_commit: bool
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Run the reversible memory and code gates before approval is consumed."""
+    code_quality_gate = code_quality_gate_preview(
+        contract.code_worktree,
+        code_would_commit=code_would_commit,
+        diff_base=contract.code_base_commit,
+        plan=QualityGatePlan(mode="targeted", executor=_quality_gate_executor(contract)),
+    )
+    report_operation_progress(
+        args, "memory-preflight", current_command="run pre-refresh memory quality"
+    )
+    memory_quality = _memory_quality_before_refresh(contract)
+    strict_required = requires_strict_code_quality(
+        contract.code_worktree, code_would_commit=code_would_commit
+    )
+    if strict_required:
+        report_operation_progress(
+            args, "quality", current_command="run targeted leaf quality contract"
+        )
+        code_quality_gate = _gate_staged_code(
+            contract.code_worktree,
+            worktree_group=contract.worktree_group,
+            diff_base=contract.code_base_commit,
+            executor=_quality_gate_executor(contract),
+            candidate_tree=args.candidate_tree,
+        )
+    return code_quality_gate, memory_quality, strict_required
 
 
 def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -1042,7 +1043,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     assert args.contract_path is not None
     report_operation_progress(args, "preflight", current_command="validate closeout eligibility")
     contract = load_contract(args.contract_path)
-    _validate_closeout_source_heads(contract)
+    _validate_closeout_source_state(contract)
     if args.dry_run:
         return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     approval_note = _closeout_approval_note(args)
@@ -1052,30 +1053,12 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     changed_paths = worklist["all"]
     attestations = _closeout_attestations(contract, worklist)
     code_would_commit = worktree_dirty(contract.code_worktree)
-    code_quality_gate = code_quality_gate_preview(
-        contract.code_worktree,
-        code_would_commit=code_would_commit,
-        diff_base=contract.code_base_commit,
-        plan=QualityGatePlan(mode="targeted", executor=_quality_gate_executor(contract)),
+    code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
+        _closeout_quality_preflight(contract, args, code_would_commit=code_would_commit)
     )
-    report_operation_progress(
-        args, "memory-preflight", current_command="run pre-refresh memory quality"
-    )
-    memory_quality_before_refresh = _memory_quality_before_refresh(contract)
-    strict_code_quality_required = requires_strict_code_quality(
-        contract.code_worktree, code_would_commit=code_would_commit
-    )
-    if strict_code_quality_required:
-        report_operation_progress(
-            args, "quality", current_command="run targeted leaf quality contract"
-        )
-        code_quality_gate = _gate_staged_code(
-            contract.code_worktree,
-            worktree_group=contract.worktree_group,
-            diff_base=contract.code_base_commit,
-            executor=_quality_gate_executor(contract),
-            candidate_tree=args.candidate_tree,
-        )
+    # The source line can move while memory/quality checks run. Re-prove it at the
+    # last reversible boundary so no commit is minted from a stale task ancestry.
+    _validate_closeout_source_state(contract)
     # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
     # Everything above only reads or touches the index of the task's own disposable worktree, so a
     # refusal up there must not spend the approval; everything below writes a commit somebody
@@ -1134,26 +1117,15 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     write_contract(contract.contract_path, updated)
     return WorktreeCommandResult(
         0,
-        {
-            "state": "closed",
-            **status_payload(updated),
-            "summary": "Closeout completed; integrate the task branches back into their source branches.",
-            "code_commit": code_commit,
-            "memory_content_commit": memory.memory_commit,
-            "ledger_commit": memory.ledger_commit,
-            "refreshed_onboarding": _bounded_paths(
-                [item["source_path"] for item in memory.refreshed_onboarding]
+        _closed_result_payload(
+            updated,
+            _CloseoutResultFacts(
+                code_commit=code_commit,
+                memory=memory,
+                attestations=attestations,
+                code_quality_gate=code_quality_gate,
+                integration_reopen=integration_reopen,
+                gate_guard=gate_guard,
             ),
-            "sidecars_attested_no_impact": _bounded_paths(attestations.attested_sidecars),
-            "unonboarded_changed_paths": _bounded_paths(attestations.unonboarded_paths),
-            "refreshed_entities": memory.refreshed_entities,
-            "refreshed_route_overviews": memory.refreshed_route_overviews,
-            "route_overviews_attested_no_impact": attestations.attested_overviews,
-            "route_overviews_stamped_without_body_review": attestations.stamped_overviews,
-            "route_index_refresh": memory.route_index_refresh,
-            "memory_quality": memory.memory_quality,
-            "code_quality_gate": code_quality_gate,
-            "integration_reopen": integration_reopen,
-            "closeout_gate": _closeout_gate_payload(gate_guard),
-        },
+        ),
     )

@@ -20,7 +20,6 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-import agents_remember
 from agents_remember.kernel.harnesses import Harness
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
@@ -46,7 +45,9 @@ from test_worktree_support import write_current_task_lineage
 
 # The source root of the agents_remember package this test process imported (``.../mcp/src``) --
 # what the opener must seed onto the runner spawn's PYTHONPATH.
-_DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
+_DAEMON_PACKAGE_ROOT = str(
+    Path(str(sys.modules["agents_remember"].__file__)).resolve().parent.parent
+)
 LEAF_REF = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
 MASTER_REF = TaskDocumentRef(repository="repo", path="master/task.json")
 

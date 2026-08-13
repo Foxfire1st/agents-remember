@@ -136,4 +136,31 @@ describe("Hangar renders worktree truth (L11)", () => {
     expect(queryAllByTestId("hangar-row")).toHaveLength(0);
     expect(getByText(/no live persistent worktrees/i)).not.toBeNull();
   });
+
+  it("shows the durable live command for a running lifecycle operation", () => {
+    const currentCommand = "quality: dagger — run targeted pytest shard 7/16";
+    dashboardStore.setState({
+      lifecycles: {},
+      enclosures: {
+        running: enclosure({
+          enclosure: "running",
+          lifecycleOperation: {
+            cancellable: true,
+            currentCommand,
+            elapsedSeconds: 42,
+            kind: "closeout",
+            phase: "quality",
+            reportPath: "reports/closeout-operation.log",
+            status: "running",
+          },
+        }),
+      },
+    });
+
+    const { getByTestId } = render(<Hangar onSelect={vi.fn()} />);
+    const operation = getByTestId("hangar-lifecycle-operation");
+
+    expect(operation.textContent).toContain(currentCommand);
+    expect(operation.getAttribute("title")).toBe(currentCommand);
+  });
 });

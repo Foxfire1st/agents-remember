@@ -8,7 +8,7 @@ from pydantic import Field
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
-from agents_remember.models.lifecycle_operation import LifecycleOperationProjection
+from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import (
@@ -108,6 +109,20 @@ def lineage_refusal(
     recovery = projection.recoveries[0].contractPath if projection.recoveries else None
     suffix = f" First run worktree_sync for {recovery}." if recovery else ""
     return status, f"{projection.summary}{suffix}"
+
+
+def require_current_source_lineage(
+    contract: WorktreeContract, *, operation: str
+) -> SourceLineageProjection | None:
+    """Refuse a lifecycle boundary unless its full task-derived ancestry is current."""
+    projection = source_lineage_for_contract(contract)
+    refusal = lineage_refusal(projection)
+    if refusal is None:
+        return projection
+    status, detail = refusal
+    raise RuntimeError(
+        f"{operation} requires current transitive source lineage ({status}): {detail}"
+    )
 
 
 def lineage_block_payload(projection: SourceLineageProjection) -> dict[str, object]:
@@ -238,7 +253,20 @@ def _linked_edge(
 
 
 def _same_repo(left: Path | None, right: Path | None) -> bool:
-    return left is not None and right is not None and left.resolve() == right.resolve()
+    left_identity = _repository_identity(left)
+    right_identity = _repository_identity(right)
+    return left_identity is not None and left_identity == right_identity
+
+
+def _repository_identity(repo: Path | None) -> Path | None:
+    """Resolve Git's shared identity so sibling worktree paths compare as one repo."""
+    if repo is None or not repo.is_dir():
+        return None
+    result = run_git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    common_dir = result.stdout.strip()
+    if result.returncode != 0 or not common_dir:
+        return None
+    return Path(common_dir).resolve()
 
 
 def _edge(edge: _EdgeInput) -> SourceLineageEdge:
@@ -300,7 +328,7 @@ def _projection(edges: list[SourceLineageEdge]) -> SourceLineageProjection:
     summary = (
         "Source lineage is current across every applicable code and external-memory edge."
         if state == "current"
-        else "Source lineage is stale; sync the ordered parent edges before starting or resuming a task-bound seat."
+        else "Source lineage is stale; sync the ordered parent edges before task-bound work continues."
         if state == "blocked"
         else "Source lineage could not be proven; task-bound seats fail closed until contract and branch evidence is restored."
     )

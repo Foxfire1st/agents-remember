@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -15,6 +16,41 @@ from agents_remember.providers import (
     lifecycle,
     lifecycle_service,
 )
+from agents_remember.providers.lifecycle import command_runner
+
+
+class ProviderCommandRunnerTests(unittest.TestCase):
+    def test_success_uses_devnull_or_explicit_stdin_and_unlimited_timeout(self) -> None:
+        completed = command_runner.subprocess.CompletedProcess(
+            ["tool"], 0, stdout="out", stderr="err"
+        )
+        with (
+            mock.patch.object(command_runner, "subprocess_env", return_value={"SAFE": "1"}),
+            mock.patch.object(command_runner.subprocess, "run", return_value=completed) as run,
+        ):
+            result = command_runner.run_command(["tool"], cwd=Path("/tmp"), timeout=0)
+            command_runner.run_command(["tool"], cwd=Path("/tmp"), stdin_text="request", timeout=2)
+
+        self.assertEqual((result["returncode"], result["timedOut"]), (0, False))
+        self.assertIs(run.call_args_list[0].kwargs["stdin"], command_runner.subprocess.DEVNULL)
+        self.assertIsNone(run.call_args_list[0].kwargs["timeout"])
+        self.assertEqual(run.call_args_list[1].kwargs["input"], "request")
+        self.assertEqual(run.call_args_list[1].kwargs["timeout"], 2)
+
+    def test_timeout_is_raised_or_returned_only_when_allowed(self) -> None:
+        error = command_runner.subprocess.TimeoutExpired(
+            ["tool"], 3, output=b"partial", stderr="problem"
+        )
+        with mock.patch.object(command_runner.subprocess, "run", side_effect=error):
+            with self.assertRaises(command_runner.subprocess.TimeoutExpired):
+                command_runner.run_command(["tool"], cwd=Path("/tmp"), timeout=3)
+            result = command_runner.run_command(
+                ["tool"], cwd=Path("/tmp"), timeout=3, allow_timeout=True
+            )
+
+        self.assertTrue(result["timedOut"])
+        self.assertEqual(result["stdout"], "partial")
+        self.assertEqual(result["stderr"], "problem")
 
 
 class ProviderLifecycleRenderTests(unittest.TestCase):

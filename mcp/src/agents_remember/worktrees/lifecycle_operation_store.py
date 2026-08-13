@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.models.lifecycle_operation import (
+from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationRecord,
     LifecycleOperationStatus,

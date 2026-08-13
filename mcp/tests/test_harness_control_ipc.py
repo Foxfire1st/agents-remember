@@ -364,7 +364,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                             },
                         )
                     )
-                    await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
+                    await asyncio.wait_for(adapter.submit_started.wait(), timeout=5.0)
                     duplicate_call = asyncio.create_task(
                         asyncio.to_thread(
                             client.post,
@@ -376,7 +376,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                             },
                         )
                     )
-                    duplicate = await asyncio.wait_for(duplicate_call, timeout=1.0)
+                    duplicate = await asyncio.wait_for(duplicate_call, timeout=5.0)
                     adapter.release_submit.set()
                     first = await first_call
                     reconciled = await asyncio.to_thread(

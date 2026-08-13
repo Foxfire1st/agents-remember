@@ -25,7 +25,7 @@ from agents_remember.application.worktree_tools import (
     worktree_sync_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.lifecycle_operation import IntegrateStrategy
+from agents_remember.models.lifecycles.operation import IntegrateStrategy
 
 from .base import _tool_payload
 

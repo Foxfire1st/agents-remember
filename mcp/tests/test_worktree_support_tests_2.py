@@ -311,10 +311,12 @@ class WorktreeSupport2(WorktreeSupportTests):
             reintegrated = load_contract(contract.contract_path)
             self.assertEqual(reintegrated.integration_status, "completed")
             self.assertEqual(
-                git(contract.code_repo_path, "rev-parse", "main"), reintegrated.code_commit
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                reintegrated.code_commit,
             )
             self.assertEqual(
-                git(contract.memory_repo_path, "rev-parse", "main"), reintegrated.ledger_commit
+                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
+                reintegrated.ledger_commit,
             )
 
     def test_noop_recloseout_after_integration_keeps_completed_state(self) -> None:
@@ -322,8 +324,10 @@ class WorktreeSupport2(WorktreeSupportTests):
             root = Path(tmp)
             contract = integrated_external_contract_fixture(root)
             assert contract.memory_repo_path is not None
-            code_source = git(contract.code_repo_path, "rev-parse", "main")
-            memory_source = git(contract.memory_repo_path, "rev-parse", "main")
+            code_source = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
+            memory_source = git(
+                contract.memory_repo_path, "rev-parse", contract.memory_source_branch
+            )
 
             output = io.StringIO()
             with redirect_stdout(output):
@@ -349,17 +353,30 @@ class WorktreeSupport2(WorktreeSupportTests):
             self.assertEqual(loaded.code_commit, contract.code_commit)
             self.assertEqual(loaded.memory_content_commit, contract.memory_content_commit)
             self.assertEqual(loaded.ledger_commit, contract.ledger_commit)
-            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), code_source)
-            self.assertEqual(git(contract.memory_repo_path, "rev-parse", "main"), memory_source)
+            self.assertEqual(
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                code_source,
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
+                memory_source,
+            )
 
     def test_closeout_excludes_sync_transported_committed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
             commit_file(contract.code_repo_path, "other.txt", "other\n", "Parallel landing")
-            new_main = git(contract.code_repo_path, "rev-parse", "HEAD")
-            git(contract.code_worktree, "merge", "--no-ff", "-m", "Sync main", "main")
-            synced = replace(contract, code_base_commit=new_main)
+            new_source = git(contract.code_repo_path, "rev-parse", "HEAD")
+            git(
+                contract.code_worktree,
+                "merge",
+                "--no-ff",
+                "-m",
+                "Sync source",
+                contract.code_source_branch,
+            )
+            synced = replace(contract, code_base_commit=new_source)
             write_contract(synced.contract_path, synced)
             args = Namespace(
                 contract_path=contract.contract_path,
@@ -601,10 +618,12 @@ class WorktreeSupport2(WorktreeSupportTests):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(worktree_manager.command_integrate(args), 0)
             self.assertEqual(
-                git(contract.code_repo_path, "rev-parse", "main"), contract.code_commit
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                contract.code_commit,
             )
             self.assertEqual(
-                git(contract.memory_repo_path, "rev-parse", "main"), contract.ledger_commit
+                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
+                contract.ledger_commit,
             )
             loaded = load_contract(contract.contract_path)
             self.assertEqual(loaded.integration_status, "completed")
@@ -650,7 +669,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             with self.assertRaises(RuntimeError):
                 worktree_manager.command_cleanup(args)
 
-    def test_integrate_replay_handles_parallel_non_overlapping_changes(self) -> None:
+    def test_integrate_refuses_parallel_non_overlapping_source_changes_until_sync(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
@@ -664,7 +683,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 "# parallel\n",
                 "Document parallel change",
             )
-            commit_memory_ledger(
+            parallel_ledger = commit_memory_ledger(
                 contract.memory_repo_path,
                 parallel_code,
                 parallel_memory_content,
@@ -677,27 +696,25 @@ class WorktreeSupport2(WorktreeSupportTests):
                 ledger_commit_message="Replay integration ledger",
                 dry_run=False,
             )
-            with redirect_stdout(io.StringIO()):
-                self.assertEqual(worktree_manager.command_integrate(args), 0)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_integrate(args), 2)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["state"], "source-lineage-stale")
+            self.assertEqual(payload["nextOperation"], "sync_source_lineage")
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.integration_status, "completed")
-            self.assertNotEqual(loaded.integrated_code_commit, contract.code_commit)
-            self.assertNotEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
+            self.assertEqual(loaded.integration_status, "blocked")
             self.assertEqual(
-                git(contract.code_repo_path, "rev-parse", "main"), loaded.integrated_code_commit
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                parallel_code,
             )
             self.assertEqual(
-                git(contract.memory_repo_path, "rev-parse", "main"), loaded.integrated_ledger_commit
+                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
+                parallel_ledger,
             )
-            self.assertTrue((contract.code_repo_path / "feature.txt").exists())
             self.assertTrue((contract.code_repo_path / "parallel.txt").exists())
-            ledger = parse_ledger_text(
-                (contract.memory_repo_path / "memory.md").read_text(encoding="utf-8")
-            )
-            self.assertEqual(ledger.rows[0].code_commit, loaded.integrated_code_commit)
-            self.assertEqual(ledger.rows[0].memory_commit, loaded.integrated_memory_content_commit)
 
-    def test_integrate_replay_blocks_code_conflicts_before_main_moves(self) -> None:
+    def test_integrate_refuses_parallel_conflicting_source_changes_until_sync(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(
@@ -718,11 +735,16 @@ class WorktreeSupport2(WorktreeSupportTests):
             with redirect_stdout(output):
                 self.assertEqual(worktree_manager.command_integrate(args), 2)
             payload = json.loads(output.getvalue())
-            self.assertEqual(payload["state"], "blocked-code-conflict")
-            self.assertTrue(payload["developer_decision_required"])
-            self.assertEqual(git(contract.code_repo_path, "rev-parse", "main"), parallel_code)
+            self.assertEqual(payload["state"], "source-lineage-stale")
+            self.assertEqual(payload["nextOperation"], "sync_source_lineage")
+            self.assertFalse(payload["developer_decision_required"])
             self.assertEqual(
-                git(contract.memory_repo_path, "rev-parse", "main"), contract.memory_base_commit
+                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
+                parallel_code,
+            )
+            self.assertEqual(
+                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
+                contract.memory_base_commit,
             )
             loaded = load_contract(contract.contract_path)
             self.assertEqual(loaded.integration_status, "blocked")

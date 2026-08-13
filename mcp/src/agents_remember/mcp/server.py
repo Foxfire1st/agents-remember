@@ -6,7 +6,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
-from agents_remember.application import server_startup
+from agents_remember.application.runtime import startup as server_startup
 
 # Application owns process trust and startup composition; transport only invokes it.
 # Server factories stay state-free for in-process tests.

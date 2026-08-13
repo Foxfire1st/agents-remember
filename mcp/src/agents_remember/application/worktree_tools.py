@@ -15,7 +15,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
     reload_provider_authority,
 )
-from agents_remember.models.lifecycle_operation import (
+from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     GatePolicyRuleSnapshot,
     IntegrateOperationInput,

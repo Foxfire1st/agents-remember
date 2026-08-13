@@ -6,7 +6,9 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -171,6 +173,182 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         self.assertEqual(result.payload["state"], "blocked-quality-gate")
         merge.assert_not_called()
 
+    def test_source_movement_after_quality_refuses_before_memory_or_merge(self) -> None:
+        contract = integration_contract(self.root, kind="leaf")
+        moved = integrate_mod.WorktreeCommandResult(2, {"state": "source-moved-during-quality"})
+
+        with (
+            mock.patch.object(integrate_mod, "_integrated_code_commit", return_value=("c1", None)),
+            mock.patch.object(
+                integrate_mod,
+                "_run_integration_quality_gate",
+                return_value=({"passed": True}, None),
+            ),
+            mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
+            mock.patch.object(
+                integrate_mod, "_integration_sources_moved_block", return_value=moved
+            ) as source_check,
+            mock.patch.object(integrate_mod, "_integrated_memory_commits") as memory,
+            mock.patch.object(integrate_mod, "_merge_integrated_commits") as merge,
+        ):
+            result = integrate_mod._apply_integration(
+                contract,
+                WorktreeArgs(strategy="ff-only"),
+                integrate_mod.IntegrationSources(
+                    current_code_source="c0",
+                    current_memory_source="",
+                    code_replay_required=False,
+                    memory_replay_required=False,
+                ),
+                handover_warning=None,
+            )
+
+        self.assertEqual(result.payload["state"], "source-moved-during-quality")
+        source_check.assert_called_once()
+        memory.assert_not_called()
+        merge.assert_not_called()
+
+    def test_source_movement_after_memory_resolution_refuses_before_merge(self) -> None:
+        contract = integration_contract(self.root, kind="leaf")
+        moved = integrate_mod.WorktreeCommandResult(2, {"state": "source-moved-during-quality"})
+
+        with (
+            mock.patch.object(integrate_mod, "_integrated_code_commit", return_value=("c1", None)),
+            mock.patch.object(
+                integrate_mod,
+                "_run_integration_quality_gate",
+                return_value=({"passed": True}, None),
+            ),
+            mock.patch.object(
+                integrate_mod, "_integration_source_state_block", side_effect=[None, moved]
+            ) as source_check,
+            mock.patch.object(
+                integrate_mod,
+                "_integrated_memory_commits",
+                return_value=("", "", None),
+            ),
+            mock.patch.object(integrate_mod, "_merge_integrated_commits") as merge,
+        ):
+            result = integrate_mod._apply_integration(
+                contract,
+                WorktreeArgs(strategy="ff-only"),
+                integrate_mod.IntegrationSources(
+                    current_code_source="c0",
+                    current_memory_source="",
+                    code_replay_required=False,
+                    memory_replay_required=False,
+                ),
+                handover_warning=None,
+            )
+
+        self.assertEqual(result.payload["state"], "source-moved-during-quality")
+        self.assertEqual(source_check.call_count, 2)
+        merge.assert_not_called()
+
+    def test_source_tip_comparison_distinguishes_unchanged_and_moved(self) -> None:
+        contract = integration_contract(self.root, kind="leaf")
+        sources = integrate_mod.IntegrationSources(
+            current_code_source="c0",
+            current_memory_source="",
+            code_replay_required=False,
+            memory_replay_required=False,
+        )
+        with mock.patch.object(integrate_mod, "head_commit", return_value="c0"):
+            self.assertIsNone(integrate_mod._integration_sources_moved_block(contract, sources))
+        with (
+            mock.patch.object(integrate_mod, "head_commit", return_value="c1"),
+            mock.patch.object(integrate_mod, "write_contract"),
+        ):
+            result = integrate_mod._integration_sources_moved_block(contract, sources)
+        assert result is not None
+        self.assertEqual(result.payload["state"], "source-moved-during-quality")
+
+
+class MemoryReplayBranchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.root = root
+        self.contract = replace(
+            integration_contract(root),
+            memory_mode="external",
+            memory_repo_path=root / "memory-repo",
+            memory_source_branch="ar/master",
+            memory_work_branch="ar/leaf",
+            memory_base_commit="m0",
+            memory_worktree=root / "memory-worktree",
+            memory_content_commit="m1",
+            ledger_commit="m2",
+            ledger_path=root / "memory-worktree" / "memory.md",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_existing_scratch_branch_refuses_before_checkout(self) -> None:
+        with (
+            mock.patch.object(integrate_mod, "branch_exists", return_value=True),
+            mock.patch.object(
+                integrate_mod,
+                "blocked_integration_payload",
+                side_effect=lambda _contract, state, _reason, **_extra: {"state": state},
+            ),
+            mock.patch.object(integrate_mod, "run_git") as run_git,
+        ):
+            _content, _ledger, blocked = integrate_mod.replay_memory_content(
+                self.contract, "c1", "ledger"
+            )
+
+        assert blocked is not None
+        self.assertEqual(blocked["state"], "blocked-existing-integration-branch")
+        run_git.assert_not_called()
+
+    def test_checkout_and_rebase_failures_are_bounded(self) -> None:
+        failed = SimpleNamespace(returncode=1, stdout="out", stderr="err")
+        passed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        for name, results, state in (
+            ("checkout", [failed], "blocked-memory-replay"),
+            ("rebase", [passed, failed], "blocked-memory-conflict"),
+        ):
+            with (
+                self.subTest(name=name),
+                mock.patch.object(integrate_mod, "branch_exists", return_value=False),
+                mock.patch.object(integrate_mod, "run_git", side_effect=results),
+                mock.patch.object(
+                    integrate_mod,
+                    "blocked_integration_payload",
+                    side_effect=lambda _contract, value, _reason, **_extra: {"state": value},
+                ),
+            ):
+                _content, _ledger, blocked = integrate_mod.replay_memory_content(
+                    self.contract, "c1", "ledger"
+                )
+                assert blocked is not None
+                self.assertEqual(blocked["state"], state)
+
+    def test_success_rewrites_the_mapping_and_commits_the_ledger(self) -> None:
+        passed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            mock.patch.object(integrate_mod, "branch_exists", return_value=False),
+            mock.patch.object(integrate_mod, "run_git", side_effect=[passed, passed]),
+            mock.patch.object(integrate_mod, "head_commit", return_value="m3"),
+            mock.patch.object(integrate_mod, "load_ledger", return_value="old") as load,
+            mock.patch.object(integrate_mod, "prepend_mapping", return_value="new") as prepend,
+            mock.patch.object(integrate_mod, "write_ledger") as write,
+            mock.patch.object(integrate_mod, "require_git") as require_git,
+            mock.patch.object(integrate_mod, "commit_if_dirty", return_value="m4"),
+        ):
+            content, ledger, blocked = integrate_mod.replay_memory_content(
+                self.contract, "c1", "ledger"
+            )
+
+        self.assertIsNone(blocked)
+        self.assertEqual((content, ledger), ("m3", "m4"))
+        load.assert_called_once_with(self.contract.ledger_path)
+        prepend.assert_called_once_with("old", "c1", "m3")
+        write.assert_called_once_with(self.contract.ledger_path, "new")
+        require_git.assert_called_once_with(self.contract.memory_worktree, ["add", "memory.md"])
+
     def test_dry_run_reports_the_planned_gate_without_running_it(self) -> None:
         contract = integration_contract(self.root, kind="series")
         wrapper = contract.code_worktree / "mcp/src/agents_remember/code_quality/check.py"
@@ -180,6 +358,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         with (
             mock.patch.object(integrate_mod, "load_contract", return_value=contract),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(
                 integrate_mod,
                 "_integration_replay_requirements",

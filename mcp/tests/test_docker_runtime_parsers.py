@@ -5,10 +5,12 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.providers.lifecycle import docker_runtime
 from agents_remember.providers.lifecycle.docker_runtime import (
     docker_container_health,
     docker_container_networks,
@@ -21,6 +23,43 @@ from agents_remember.providers.lifecycle.docker_runtime import (
     mount_source_for_destination,
     parse_docker_timestamp,
 )
+
+
+class DockerInspectContainerTests(unittest.TestCase):
+    def test_inspect_refuses_command_json_and_shape_failures(self) -> None:
+        cases = (
+            ({"returncode": 1, "stdout": ""}, None),
+            ({"returncode": 0, "stdout": "not-json"}, None),
+            ({"returncode": 0, "stdout": "{}"}, None),
+            ({"returncode": 0, "stdout": "[]"}, None),
+        )
+        for result, expected in cases:
+            with (
+                self.subTest(result=result),
+                mock.patch.object(docker_runtime, "run_command", return_value=result),
+                mock.patch.object(docker_runtime, "docker_command", return_value="docker"),
+            ):
+                self.assertIs(
+                    docker_runtime.docker_inspect_container(
+                        "container", cwd=Path("/tmp"), timeout=3
+                    ),
+                    expected,
+                )
+
+    def test_inspect_returns_the_first_container_record(self) -> None:
+        with (
+            mock.patch.object(
+                docker_runtime,
+                "run_command",
+                return_value={"returncode": 0, "stdout": '[{"Id": "one"}, {"Id": "two"}]'},
+            ),
+            mock.patch.object(docker_runtime, "docker_command", return_value="docker"),
+        ):
+            result = docker_runtime.docker_inspect_container(
+                "container", cwd=Path("/tmp"), timeout=3
+            )
+
+        self.assertEqual(result, {"Id": "one"})
 
 
 class ParseDockerTimestampTests(unittest.TestCase):

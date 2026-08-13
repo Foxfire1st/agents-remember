@@ -13,6 +13,7 @@ demolition lands: every class here is a demolition proof, not a behavior test.
 from __future__ import annotations
 
 import importlib.util
+import sys
 import tempfile
 import unittest
 from dataclasses import replace
@@ -20,7 +21,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-import agents_remember
 from agents_remember.controlplane import expectation_rows
 from agents_remember.controlplane import operator_inbox_transitions as transitions
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
@@ -411,7 +411,7 @@ class TurnReportByRetirementTests(_DemolitionCase):
     """(e) turn-report-by retired: verify no consumer writes or evaluates it."""
 
     def test_no_source_writes_turn_report_by_rows(self) -> None:
-        src_root = Path(agents_remember.__file__).resolve().parent
+        src_root = Path(str(sys.modules["agents_remember"].__file__)).resolve().parent
         offenders: list[str] = []
         for path in src_root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")

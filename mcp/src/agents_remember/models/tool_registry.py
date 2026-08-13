@@ -28,7 +28,8 @@ from agents_remember.models.benchmarks import (
 )
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
-from agents_remember.models.lifecycle import (
+from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
+from agents_remember.models.lifecycles.responses import (
     LifecycleBlockResponse,
     LifecycleEndResponse,
     LifecyclePhaseResponse,
@@ -37,7 +38,6 @@ from agents_remember.models.lifecycle import (
     LifecycleTurnEndNotificationResponse,
     SwitchLifecycleResponse,
 )
-from agents_remember.models.lifecycle_finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.memory import (
     CitationFixResponse,
     DriftCheckResponse,
