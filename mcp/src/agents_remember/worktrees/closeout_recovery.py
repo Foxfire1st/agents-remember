@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     load_ledger,
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     commit_if_dirty,
@@ -18,6 +21,69 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     worktree_dirty,
 )
+
+
+@dataclass(frozen=True)
+class MemoryCloseoutOutcome:
+    """What external-memory closeout committed and refreshed."""
+
+    memory_commit: str = ""
+    ledger_commit: str = ""
+    refreshed_onboarding: list[dict[str, str]] = field(default_factory=list)
+    refreshed_entities: list[dict[str, object]] = field(default_factory=list)
+    refreshed_route_overviews: list[dict[str, str]] = field(default_factory=list)
+    route_index_refresh: dict[str, object] = field(default_factory=dict)
+    memory_quality: dict[str, object] = field(default_factory=dict)
+
+
+def prove_closeout_recovery_commits(
+    contract, commits: LifecycleOperationRecoveryCommits
+) -> MemoryCloseoutOutcome:
+    """Prove the exact post-commit state without replaying any closeout mutation."""
+    require_clean(contract.code_worktree, "recovering closeout code worktree")
+    code_head = head_commit(contract.code_worktree)
+    if code_head != commits.codeCommit:
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            f"recorded code commit {commits.codeCommit}, found task HEAD {code_head}"
+        )
+    if contract.memory_mode != "external":
+        if commits.memoryContentCommit or commits.ledgerCommit:
+            raise RuntimeError(
+                "closeout contract-finalization recovery recorded external-memory commits "
+                "for an internal-memory contract"
+            )
+        return MemoryCloseoutOutcome()
+    if contract.memory_worktree is None or contract.ledger_path is None:
+        raise RuntimeError("external-memory closeout recovery requires memory worktree and ledger")
+    require_clean(contract.memory_worktree, "recovering closeout memory worktree")
+    memory_head = head_commit(contract.memory_worktree)
+    if memory_head != commits.ledgerCommit:
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            f"recorded ledger commit {commits.ledgerCommit}, found memory HEAD {memory_head}"
+        )
+    mapping = find_mapping(load_ledger(contract.ledger_path), commits.codeCommit)
+    if mapping is None or mapping.memory_commit != commits.memoryContentCommit:
+        found = "missing" if mapping is None else mapping.memory_commit
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            f"ledger mapping for {commits.codeCommit} is {found}, expected "
+            f"{commits.memoryContentCommit}"
+        )
+    if not is_ancestor(
+        contract.memory_worktree,
+        commits.memoryContentCommit,
+        commits.ledgerCommit,
+    ):
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            "recorded memory content is not reachable from the recorded ledger commit"
+        )
+    return MemoryCloseoutOutcome(
+        memory_commit=commits.memoryContentCommit,
+        ledger_commit=commits.ledgerCommit,
+    )
 
 
 def accepted_code_commit(
@@ -34,6 +100,9 @@ def accepted_code_commit(
         code_commit = head_commit(contract.code_worktree)
         if code_commit != commits.codeCommit:
             raise RuntimeError("closeout recovery code commit does not match task HEAD")
+    elif contract.kind != "leaf":
+        require_clean(contract.code_worktree, "recording series/master closeout code")
+        code_commit = head_commit(contract.code_worktree)
     elif resuming and not worktree_dirty(contract.code_worktree):
         code_commit = head_commit(contract.code_worktree)
     else:

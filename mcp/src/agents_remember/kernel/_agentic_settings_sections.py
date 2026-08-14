@@ -385,7 +385,7 @@ def _parse_spawn(
 def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
     """``orchestration.qualityGate``: the full gate's memory cap in bytes.
 
-    Absent -> host-managed RAM and swap. Unknown keys fail loud like every other
+    Absent -> Dagger container runtime-managed RAM and swap. Unknown keys fail loud like every other
     orchestration family; a null at the family key is refused by
     :func:`_refuse_null_families` before this parser runs.
     """
@@ -407,8 +407,8 @@ def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
         )
         if raw_executor != "dagger":
             raise AgenticSettingsError(
-                "orchestration.qualityGate.executor must be 'dagger'; host-local quality is "
-                "diagnostic only and cannot authorize lifecycle acceptance: " + source
+                "orchestration.qualityGate.executor must be 'dagger'; host-local test "
+                "execution is forbidden: " + source
             )
         executor = cast(QualityExecutor, raw_executor)
     return QualityGateSettings(memory_cap_bytes=memory_cap_bytes, executor=executor)

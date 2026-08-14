@@ -53,7 +53,7 @@ def _patch_external_refresh(stack: ExitStack) -> None:
 
 class CloseoutRecoveryTests(unittest.TestCase):
     def test_code_commit_recovery_proves_head_and_candidate_tree(self) -> None:
-        contract = SimpleNamespace(code_worktree=Path("/code"))
+        contract = SimpleNamespace(kind="leaf", code_worktree=Path("/code"))
         args = WorktreeArgs(
             candidate_tree="b" * 40,
             recovery_commits=LifecycleOperationRecoveryCommits(codeCommit="a" * 40),
@@ -84,7 +84,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
             )
 
     def test_clean_claimed_code_commit_is_journaled_without_recommit(self) -> None:
-        contract = SimpleNamespace(code_worktree=Path("/code"))
+        contract = SimpleNamespace(kind="leaf", code_worktree=Path("/code"))
         evidence: dict[str, object] = {}
         args = WorktreeArgs(
             candidate_tree="b" * 40,
@@ -110,6 +110,32 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 "ledgerCommit": "",
             },
         )
+
+    def test_series_closeout_reuses_the_clean_accepted_head_without_committing(self) -> None:
+        contract = SimpleNamespace(kind="series", code_worktree=Path("/code"))
+        args = WorktreeArgs(candidate_tree="b" * 40)
+        with (
+            mock.patch.object(closeout_recovery_journal, "require_clean") as require_clean,
+            mock.patch.object(closeout_recovery_journal, "head_commit", return_value="a" * 40),
+            mock.patch.object(closeout_recovery_journal, "require_git", return_value="b" * 40),
+            mock.patch.object(
+                closeout_recovery_journal, "commit_verified_staged"
+            ) as commit_verified,
+            mock.patch.object(closeout_recovery_journal, "commit_if_dirty") as commit_dirty,
+        ):
+            found = closeout_recovery_journal.accepted_code_commit(
+                contract,
+                args,
+                strict_code_quality_required=False,
+                resuming=False,
+            )
+
+        self.assertEqual(found, "a" * 40)
+        require_clean.assert_called_once_with(
+            contract.code_worktree, "recording series/master closeout code"
+        )
+        commit_verified.assert_not_called()
+        commit_dirty.assert_not_called()
 
     def test_external_resume_rejects_conflict_missing_head_and_unreachable_content(self) -> None:
         contract = SimpleNamespace(
@@ -183,7 +209,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
             code_head = git(contract.code_worktree, "rev-parse", "HEAD")
             no_memory = LifecycleOperationRecoveryCommits(codeCommit=code_head)
             with self.assertRaisesRegex(RuntimeError, "recorded code commit"):
-                closeout_module._prove_closeout_recovery_commits(
+                closeout_recovery_journal.prove_closeout_recovery_commits(
                     contract, LifecycleOperationRecoveryCommits(codeCommit="a" * 40)
                 )
 
@@ -195,11 +221,11 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 ledger_path=None,
             )
             self.assertEqual(
-                closeout_module._prove_closeout_recovery_commits(internal, no_memory),
-                closeout_module._MemoryCloseoutOutcome(),
+                closeout_recovery_journal.prove_closeout_recovery_commits(internal, no_memory),
+                closeout_recovery_journal.MemoryCloseoutOutcome(),
             )
             with self.assertRaisesRegex(RuntimeError, "recorded external-memory commits"):
-                closeout_module._prove_closeout_recovery_commits(
+                closeout_recovery_journal.prove_closeout_recovery_commits(
                     internal,
                     LifecycleOperationRecoveryCommits(
                         codeCommit=code_head,
@@ -208,7 +234,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                     ),
                 )
             with self.assertRaisesRegex(RuntimeError, "requires memory worktree and ledger"):
-                closeout_module._prove_closeout_recovery_commits(
+                closeout_recovery_journal.prove_closeout_recovery_commits(
                     replace(contract, memory_worktree=None, ledger_path=None), no_memory
                 )
 
@@ -218,8 +244,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
             assert contract.memory_worktree is not None
             assert contract.ledger_path is not None
             code_head = git(contract.code_worktree, "rev-parse", "HEAD")
-            mapping = closeout_module.find_mapping(
-                closeout_module.load_ledger(contract.ledger_path), code_head
+            mapping = closeout_recovery_journal.find_mapping(
+                closeout_recovery_journal.load_ledger(contract.ledger_path), code_head
             )
             assert mapping is not None
             proven = LifecycleOperationRecoveryCommits(
@@ -227,22 +253,31 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 memoryContentCommit=mapping.memory_commit,
                 ledgerCommit=git(contract.memory_worktree, "rev-parse", "HEAD"),
             )
+            self.assertEqual(
+                closeout_recovery_journal.prove_closeout_recovery_commits(contract, proven),
+                closeout_recovery_journal.MemoryCloseoutOutcome(
+                    memory_commit=proven.memoryContentCommit,
+                    ledger_commit=proven.ledgerCommit,
+                ),
+            )
             with self.assertRaisesRegex(RuntimeError, "found memory HEAD"):
-                closeout_module._prove_closeout_recovery_commits(
+                closeout_recovery_journal.prove_closeout_recovery_commits(
                     contract, proven.model_copy(update={"ledgerCommit": "d" * 40})
                 )
             for observed in (None, SimpleNamespace(memory_commit="e" * 40)):
                 with (
                     self.subTest(observed=observed),
-                    mock.patch.object(closeout_module, "find_mapping", return_value=observed),
+                    mock.patch.object(
+                        closeout_recovery_journal, "find_mapping", return_value=observed
+                    ),
                     self.assertRaisesRegex(RuntimeError, "ledger mapping"),
                 ):
-                    closeout_module._prove_closeout_recovery_commits(contract, proven)
+                    closeout_recovery_journal.prove_closeout_recovery_commits(contract, proven)
             with (
-                mock.patch.object(closeout_module, "is_ancestor", return_value=False),
+                mock.patch.object(closeout_recovery_journal, "is_ancestor", return_value=False),
                 self.assertRaisesRegex(RuntimeError, "not reachable"),
             ):
-                closeout_module._prove_closeout_recovery_commits(contract, proven)
+                closeout_recovery_journal.prove_closeout_recovery_commits(contract, proven)
 
     def test_completed_recovery_must_match_exactly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

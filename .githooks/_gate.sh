@@ -9,8 +9,10 @@
 # Enable once per clone:  ./setup-hooks.sh
 # Prerequisite:           pip install -e "mcp[dev]"
 #
-# The hook tiers run deterministic non-test checks only. Acceptance tests are owned
-# by the pinned Dagger graph at closeout, integration, and CI. In linked worktrees,
+# The hook tiers run deterministic non-test checks only. Acceptance is owned by the
+# pinned Dagger graph exactly once at leaf closeout and once at master integration.
+# Push, pull-request, tag, publish, and leaf-integration paths do not rerun it. Pull
+# requests still own GitHub's deterministic non-test checks. In linked worktrees,
 # use the primary worktree's virtual environment when necessary and put the current
 # checkout's source first on PYTHONPATH.
 
@@ -196,15 +198,9 @@ run_fast_checks() {
   return 0
 }
 
-# The full tier carries the changed-lines coverage floor, which needs to know what
-# this branch was cut from. It resolves that itself -- AR_GATE_DIFF_BASE, then the
-# pull request base, the configured upstream, then the default branch -- and prints
-# the base it chose. Export AR_GATE_DIFF_BASE before pushing from a leaf branch cut
-# from a series branch: git cannot infer that fork point, and without it the floor
-# compares against the default branch and asks you to cover the series' lines too.
 run_targeted_checks() {
   run_fast_checks || return 1
-  echo "[$label] result: targeted hook PASS; task closeout and CI own Dagger acceptance."
+  echo "[$label] result: targeted hook PASS; leaf closeout owns targeted Dagger acceptance."
   return 0
 }
 

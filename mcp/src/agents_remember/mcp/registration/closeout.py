@@ -99,9 +99,9 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
     ) -> dict[str, Any]:
         """Start or observe task-bound landing onto its source branch (strategy 'ff-only'
         or 'replay'). A mutating call returns promptly; worktree_status projects the durable
-        phase and result without exposing operation identity. Runs the altitude-routed quality gate before any merge: leaf integration
-        certifies its change set (--targeted); master integration runs the full wrapper once
-        through orchestration.qualityGate.executor (local or Dagger) inside this step.
+        phase and result without exposing operation identity. Leaf integration reuses the
+        acceptance bound to its closeout commit without rerunning it; master integration runs
+        the full wrapper once through the pinned Dagger executor inside this step.
         An explicit orchestration.qualityGate.memoryCapBytes remains available. MUTATING:
         moves branch refs; preview with dry_run=true. Repeat the same task input to
         observe/recover it; conflicting input refuses."""

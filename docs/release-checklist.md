@@ -5,11 +5,11 @@ GitHub Releases (there is no `CHANGELOG.md`); the canonical tag is `mcp-vX.Y.Z`.
 
 ## Quality
 
-- [ ] `python -m agents_remember.code_quality.check` passes (Ruff — complexity rules
-      included — `ruff format --check`, file size, Pyright, the full pytest suite, and
-      mandatory CRAP/diff-coverage enforcement). Cheap rails precede pytest; the two Radon
-      steps are reports and cannot fail it, and no rail carries a baseline or exemption list.
-- [ ] CI is green on the PR across the Python `3.11 / 3.12 / 3.13` matrix.
+- [ ] Every leaf was accepted once by the lifecycle-owned Dagger `mode=targeted`
+      gate before its commit, and the master was accepted once by Dagger `mode=full`
+      at integration. Do not rerun either gate for release.
+- [ ] The pull-request-only deterministic repository check is green. It validates
+      generated copies, lint, formatting, and types; it does not run acceptance tests.
 
 ## Version sync (must all match)
 
@@ -34,6 +34,7 @@ GitHub Releases (there is no `CHANGELOG.md`); the canonical tag is `mcp-vX.Y.Z`.
 ## Tag & publish
 
 - [ ] Land the release on `main` via PR (PR-gated `main`).
-- [ ] Push the `mcp-vX.Y.Z` tag at the merged commit; confirm `publish-mcp-to-pypi.yml` succeeds and the
-      version resolves on PyPI.
+- [ ] Push the `mcp-vX.Y.Z` tag at the merged commit; the publish workflow first
+      proves the tag is reachable from `origin/main`, then builds and publishes without
+      rerunning acceptance. Confirm it succeeds and the version resolves on PyPI.
 - [ ] Create the GitHub Release on the `mcp-vX.Y.Z` tag.

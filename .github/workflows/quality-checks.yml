@@ -1,17 +1,10 @@
 name: Quality checks
 
 on:
-  # Run on every branch push. Tag releases call this workflow from publish-mcp-to-pypi.yml.
-  push:
-    branches: ["**"]
-  # Every pull request, whatever its base branch.
+  # The pull request owns GitHub-side validation. Ordinary branch pushes do not launch
+  # a duplicate workflow. Acceptance remains lifecycle-owned: targeted at leaf closeout
+  # and full at master integration, never by GitHub CI.
   pull_request:
-  # Callable so the release path can require this gate on the tagged tree.
-  # Consumer: .github/workflows/publish-mcp-to-pypi.yml (job `quality`).
-  workflow_call:
-  # Re-run the same canonical Dagger gate on its weekly schedule.
-  schedule:
-    - cron: "17 3 * * 1"
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -19,41 +12,31 @@ concurrency:
 
 jobs:
   clean-linux:
-    name: Dagger Ubuntu full-repository quality
+    name: Deterministic repository checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 0
 
-      - name: Resolve the changed-lines base
-        run: |
-          base="$(git merge-base HEAD "origin/${{ github.event.repository.default_branch }}")"
-          echo "AR_CLEAN_DIFF_BASE=${base}" >> "${GITHUB_ENV}"
-
-      - name: Materialize the exact Git ancestry bundle
-        run: git bundle create "${RUNNER_TEMP}/agents-remember-quality.bundle" HEAD
-
-      - name: Export reports from the pinned Dagger Ubuntu pipeline
-        uses: dagger/dagger-for-github@v8.4.1
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          version: "v0.21.8"
-          verb: call
-          args: >-
-            quality --source=. --repository-bundle=${{ runner.temp }}/agents-remember-quality.bundle
-            --mode=full --diff-base=${{ env.AR_CLEAN_DIFF_BASE }}
-            reports export --path=${{ runner.temp }}/agents-remember-clean/reports
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
 
-      - name: Enforce the exported Dagger result
-        run: >-
-          jq -e '.status == "passed" and .exitCode == 0'
-          "${RUNNER_TEMP}/agents-remember-clean/reports/clean-quality-results.json"
-
-      - name: Upload the self-overwriting clean-room reports
-        if: always()
-        uses: actions/upload-artifact@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          name: clean-linux-reports
-          path: ${{ runner.temp }}/agents-remember-clean/reports/
-          if-no-files-found: error
+          python-version: "3.12"
+
+      - name: Install Python development dependencies
+        run: python -m pip install -e "mcp[dev]"
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Run deterministic non-test checks
+        run: ./.githooks/_gate.sh targeted

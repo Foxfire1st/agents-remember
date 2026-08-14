@@ -66,9 +66,9 @@ For larger workflow changes, open a discussion or draft pull request early inste
 ### Acceptance runs in Dagger
 
 For this repository, only the pinned Dagger Ubuntu graph produces acceptance
-evidence. A host `pytest` or direct `agents_remember.code_quality.check` run is useful
-while diagnosing a failure, but it cannot certify a leaf or master. The two accepted
-invocations are:
+evidence. Host `pytest`, Vitest, Playwright, and direct
+`agents_remember.code_quality.check` execution refuse before test or retry planning.
+The lifecycle tools own the two accepted invocations:
 
 - `mode=targeted` for focused leaf acceptance (changed files, reverse-import closure,
   and the derived pytest subset);
@@ -82,8 +82,10 @@ against Git's empty tree. `dagger call quality --help` is the executable referen
 the current inputs; the lifecycle tools construct the source snapshot and ancestry
 bundle and invoke it automatically.
 
-One wrapper, `python -m agents_remember.code_quality.check`, is the gate. Four of
-its steps enforce and fail the run on any finding: ruff (lint, including the
+Inside that nonce-attested graph, one wrapper,
+`python -m agents_remember.code_quality.check`, is the gate. It is an internal
+executor, not a host command. Four of its steps enforce and fail the run on any
+finding: ruff (lint, including the
 complexity rules `C901`, `PLR0911`, `PLR0912`, `PLR0915`), `ruff format --check`,
 Pyright (types), and the full pytest suite — followed by CRAP (complexity x
 **branch** coverage), where any score at or above the configured threshold is a hard
@@ -127,16 +129,10 @@ floor the median commit here (234 changed units) may leave 23 lines untested, wh
 a whole function. `mcp/src/agents_remember/code_quality/diff_coverage.py` carries the
 measurements.
 
-The comparison point is the merge base against your source branch, resolved in this
-order and printed on every run: `AR_GATE_DIFF_BASE`, the pull request base, the
-branch's configured upstream, then the default branch. Set `AR_GATE_DIFF_BASE` when
-you are on a leaf branch cut from a series branch — git cannot infer that fork point,
-and without it the gate compares against `main` and asks you to cover the series'
-lines as well as your own.
-
-```sh
-AR_GATE_DIFF_BASE=ar/<series-branch> python -m agents_remember.code_quality.check
-```
+The lifecycle supplies the comparison point as `AR_GATE_DIFF_BASE` from the
+worktree contract. On a leaf branch it is the recorded series base, and at master
+integration it is the recorded super base. Do not substitute a host invocation:
+the wrapper refuses without the nonce-attested Dagger environment.
 
 Changed Python outside the measured packages — the suite itself, `scripts/`, the
 provider images — is listed on every run under its own heading rather than dropped,
@@ -156,28 +152,22 @@ Set it up once per clone:
 | Tier | Hook | Input state it reports | Runs | Cost |
 | --- | --- | --- | --- | --- |
 | `fast` | pre-commit | the staged content | generated-copy checks (skills, runtime, harness), ruff, `ruff format --check`, Pyright | about 20 seconds |
-| `targeted` | pre-push diagnostic | Git's ref updates plus the leaf change set (changed Python files, reverse-import closure, derived test subset) at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the change-set-scoped wrapper (`--targeted`); Dagger still supplies acceptance | about a minute |
-| `full` | manual diagnostic | the whole tree at current-checkout bytes | generated-copy checks, then the full wrapper; master acceptance remains Dagger `mode=full` | minutes (~13-18) |
+| `targeted` | pre-push diagnostic | Git's ref updates plus current-checkout bytes at index-known paths | the same deterministic non-test checks as `fast`; Dagger acceptance is not run | about 20 seconds |
+| `full` | manual refusal | none | refuses host execution and points to the lifecycle-owned Dagger gate | immediate |
 
 The fast tier enumerates Python paths with `git ls-files '*.py'` (the
-staged/index population); the targeted tier derives its input from the leaf diff
-(changed files, reverse-import closure, derived test subset). Every rail prints
-that input, its resolved config, and its unit count before its result. The manual
-and full-tier wrapper also enumerate non-ignored untracked files inside the
-quality scope roots and state that they are **not** in the index/diff
-measurement. That is a report, never implicit staging. Neither tier passes a
-narrowing flag to ruff: `ruff check` runs at the configured selection in both;
-the targeted tier simply points the rails at the leaf's change set, so the
-complexity rules bite at commit time and not only on push. The accepting Dagger
-full wrapper runs exactly once per master, at the master integration gate, invoked
-by the integration step itself; leaf closeouts and leaf integrations use accepting
-Dagger targeted mode only. Host hooks do not replace either acceptance boundary.
+staged/index population). The targeted pre-push tier repeats those deterministic
+non-test checks against current-checkout bytes and records the pushed refs as
+provenance. Neither tier runs pytest, Vitest, Playwright, or the Dagger acceptance
+graph. The accepting targeted graph runs exactly once when a leaf closeout creates
+its commit. Leaf integration lands that exact certified commit without rerunning it.
+The accepting full graph runs exactly once per master, at the master integration
+gate invoked by `worktree_integrate`. Host hooks do not replace either acceptance
+boundary.
 
 The pre-push hook forwards Git's four-field ref-update lines as provenance. It
-does not stage, stash, or mutate the index, and it does not claim the current
-checkout is the pushed commit tree. The fixed rails still read current-checkout
-bytes at index-known paths, and changed-lines coverage still compares the
-resolved base to the working tree; the output says exactly that limitation.
+does not stage, stash, mutate the index, run tests, or claim that the current
+checkout is the pushed commit tree.
 
 The fast tier is cheap on purpose. `--no-verify` is all-or-nothing: it disables
 every check, not only the slow one. A pre-commit hook expensive enough to be
@@ -202,24 +192,17 @@ success, on failure, and on Ctrl-C. What follows from that:
 
 ### CI
 
-`.github/workflows/quality-checks.yml` runs the same wrapper on every branch push
-and every pull request, on Python 3.11, 3.12, and 3.13, alongside the dashboard
-frontend rail (lint, typecheck, unit tests, build). The branch ruleset on `main`
-requires all four to pass before a merge — `Quality wrapper (Python 3.11)`,
-`Quality wrapper (Python 3.12)`, `Quality wrapper (Python 3.13)` and
-`Dashboard frontend rail` — so a local `--no-verify` delays the verdict rather
-than avoiding it.
+GitHub validation is pull-request-only. Ordinary branch pushes do not launch a
+second copy of the same workflows. `.github/workflows/quality-checks.yml` installs
+the Python and dashboard development dependencies and runs the deterministic
+non-test hook: generated-copy checks, Ruff, `ruff format --check`, Pyright,
+dashboard code generation, lint, and typecheck. A finding fails the pull request.
 
-Two consequences worth knowing. The ruleset sets
-`strict_required_status_checks_policy`, so a branch must also be up to date with
-`main` before it can merge: a stale branch has to rebase and go green again on all
-four. And because the frontend rail runs `npm ci && npm run build`, a registry
-outage or a Node drift blocks merges until it is fixed — that is the intended
-trade, not a misconfiguration.
-
-This paragraph describes what the ruleset actually enforces. If the required
-contexts change, change it here in the same commit; a document that runs ahead of
-the setting is the failure mode this section exists to avoid.
+Neither workflow runs Dagger acceptance or a host test suite. The pull request
+validates the GitHub environment and merge surface; it does not spend the leaf or
+master acceptance boundary again. If required status-check names change, update
+the branch ruleset in the same change so the PR cannot merge without its current
+checks.
 
 ### The environment-gated integration paths
 
@@ -231,21 +214,22 @@ one: all eight were registered and documented while no test carried
 `@pytest.mark.<name>`, so `pytest -m ar_run_pi_rpc_smoke` selected nothing, and
 nothing set any of the variables either.
 
-`scripts/run-gated-integration.py` is one command per path, and `list` prints what
-each one needs plus whether this machine has it:
+`scripts/run-gated-integration.py list` reports each selection and what it needs.
+Execution is test-capable and therefore refuses outside the nonce-attested Dagger
+environment; it is not a host-test escape hatch:
 
 ```sh
 python scripts/run-gated-integration.py list
-python scripts/run-gated-integration.py ar-run-pi-rpc-smoke
 ```
 
-`.github/workflows/integration-gated.yml` runs the two that need no vendor account
-on every push and pull request, and fails on failure:
+The environment-gated paths are not GitHub PR checks. They are pytest selections and
+therefore inherit the repository-wide Dagger attestation requirement; a host or plain
+GitHub runner is refused before collection. Their requirements remain:
 
-| Path | Needs | Runs in CI |
+| Path | Needs | Automated PR check |
 | --- | --- | --- |
-| `ar-run-pi-rpc-smoke` | node + npm; installs its own pinned Pi build and drives it `--offline` against `127.0.0.1` | yes |
-| `agents-remember-real-mcp-config` | a generated settings file; spawns this repo's own MCP server over stdio. The live grepai half additionally needs the self-hosted docker stack up and indexed | the planning half |
+| `ar-run-pi-rpc-smoke` | node + npm; installs its own pinned Pi build and drives it `--offline` against `127.0.0.1` | no |
+| `agents-remember-real-mcp-config` | a generated settings file; spawns this repo's own MCP server over stdio. The live grepai half additionally needs the self-hosted docker stack up and indexed | no |
 | `ar-codex-app-server-live-smoke` | an installed, signed-in Codex whose live catalogue advertises the model. Sends no prompt, so it bills nothing | no |
 | `ar-codex-app-server-live-conformance` | the same install, plus two real turns. Bills | no |
 | `ar-claude-stream-smoke` | an installed, signed-in Claude Code. The prompt is the local `/cost` command, so spend is negligible | no |
@@ -264,12 +248,13 @@ zero tests again, or if the runner and the registry drift apart in either direct
 ### Closeout
 
 Worktree closeout runs the leaf change-set-scoped quality contract through Dagger
-`mode=targeted` before creating a code commit, even when hooks are not configured,
-in any repository whose checkout carries the wrapper. Dagger `mode=full` runs exactly
-once per master, at the master integration gate, invoked by the integration step
-itself. A checkout that does not carry the wrapper is reported as
-`wrapper-unavailable` in the closeout payload — the commit still happens, and the
-payload states that it was not quality-checked.
+`mode=targeted` before creating a code commit, even when hooks are not configured.
+Dagger `mode=full` runs exactly once per master, at the master integration gate,
+invoked by the integration step itself. Leaf integration, push, pull-request
+validation, tag, and publish do not rerun either acceptance. Agents Remember owns
+this integrated wrapper, so removing it is a hard refusal at leaf closeout and master
+integration. A consuming repository without this adapter instead receives the generic
+`wrapper-unavailable` state and follows the executor policy in its own memory root.
 
 ## Writing guidelines
 

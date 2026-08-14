@@ -49,22 +49,17 @@ files involved, the invariants that must hold, what NOT to touch.>
 ## Coding guidelines (read before your first edit)
 `<memory-worktree-path>/system/coding-guidelines.md` — your diff is written against it: file and
 function budgets, responsibility rules, source-comment scope (no task/leaf ids in shipped
-comments), typed boundary parameters, D1/D2/D3 stability. Green wrapper rails prove none of this.
+comments), typed boundary parameters, D1/D2/D3 stability. Green acceptance evidence proves none of this.
 Name any guideline finding or plan conflict in your turn report; a contradiction you hide is a
 verdict finding, not a style note.
 
 ## Checks (green before you report)
-- Focused acceptance: Dagger `mode=targeted` with `diff-base=<leaf base>`; record the
-  exact lifecycle-owned command and result. Any narrower host command is diagnostic only
-  and must be labelled that way.
-- Leaf (change-set-scoped): the owning lifecycle runs the pinned Dagger graph in
-  `mode=targeted` with `diff-base=<leaf base>` — it must exit 0. A host pytest or direct
-  wrapper run is diagnostic only and does not satisfy this check; use
-  `dagger call quality --help` to inspect the live argument contract. The FULL wrapper is
-  NOT a leaf check (quality altitude ladder, 260731-EFA-L17): it runs
-  once per master at the master integration gate with host-managed RAM/swap by default;
-  `memory_quality_check` stays a
-  per-leaf closeout gate.
+- Read `system/git-workflow.md`, `system/coding-guidelines.md`, and `system/tools.md`; copy their
+  repository-specific leaf acceptance command, environment, and evidence requirements into this
+  brief before dispatch. Do not invent a runner or fallback.
+- Leaf closeout owns one change-set-scoped acceptance run. Leaf integration does not rerun it. The
+  full-repository check is NOT a leaf check: it runs once per master at master integration.
+  `memory_quality_check` stays a per-leaf closeout gate.
 - `git diff --check` in both worktrees.
 
 ## Curator handoff input

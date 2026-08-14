@@ -5,7 +5,7 @@ import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 from fastapi import FastAPI
 
@@ -53,16 +53,35 @@ if TYPE_CHECKING:
         McpRuntimeConfig,
     )
 
+_Args = ParamSpec("_Args")
+_Result = TypeVar("_Result")
+
+
+async def _to_thread_drained_on_cancel(
+    function: Callable[_Args, _Result],
+    /,
+    *args: _Args.args,
+    **kwargs: _Args.kwargs,
+) -> _Result:
+    """Do not let a cancelled lifespan return while its worker thread still writes."""
+    worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await worker
+        raise
+
 
 async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
     degradation_alerts = DegradationAlertDelivery(config.coordination_root)
     while True:
         try:
-            snapshot = await asyncio.to_thread(
+            snapshot = await _to_thread_drained_on_cancel(
                 sample_provider_containers, cwd=config.coordination_root
             )
-            await asyncio.to_thread(metrics_store.record, snapshot)
-            await asyncio.to_thread(
+            await _to_thread_drained_on_cancel(metrics_store.record, snapshot)
+            await _to_thread_drained_on_cancel(
                 evaluate_provider_degradation,
                 config,
                 stop_provider_stacks=partial(
@@ -73,7 +92,7 @@ async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetrics
                 degradation_alerts=degradation_alerts,
             )
             # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
-            await asyncio.to_thread(metrics_store.compact)
+            await _to_thread_drained_on_cancel(metrics_store.compact)
         except Exception:
             logger.exception("provider metrics sample failed; retrying next interval")
         await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)

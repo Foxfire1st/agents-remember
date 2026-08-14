@@ -233,24 +233,21 @@ runs the same check inside the suite.
 
 The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
 pre-commit runs the fast tier over the **staged** content: the generated-copy
-checks above, plus Ruff, `ruff format --check`, and Pyright. pre-push runs the
-targeted tier: `python -m agents_remember.code_quality.check --targeted`, which
-scopes ruff, the formatter, Pyright, the pytest subset, and the configured CRAP
-threshold to the leaf's change set (changed files, reverse-import closure, derived
-test subset). No rail carries a baseline or exemption list. Radon is printed as a
-report and cannot fail either tier — it exits 0 whatever it finds. CI runs the
-full wrapper on every branch push and pull request. A pinned Dagger v0.21.8
-graph also rebuilds the exact Git candidate in a clean Ubuntu container, installs
-from scratch, runs a bundled real Codex read-only protocol probe, and executes
-the same wrapper. The full wrapper runs exactly once per master at the master
-integration gate (invoked by `worktree_integrate` itself). Leaf closeouts and
-leaf integrations run the targeted tier before creating an Agents Remember code
-commit even when hooks are not configured. See CONTRIBUTING.md for the tier
-table and the staged-content stash contract.
+checks above, plus Ruff, `ruff format --check`, Pyright, and deterministic dashboard
+checks. pre-push repeats those non-test checks against current-checkout bytes and
+records the pushed refs. It does not run acceptance. GitHub runs its deterministic
+non-test checks once per pull request, not once again for every branch push. A
+pinned Dagger v0.21.8 graph rebuilds the exact Git candidate
+in a clean Ubuntu container, installs from scratch, runs a bundled real Codex
+read-only protocol probe, and executes the accepting wrapper. Targeted Dagger runs
+once when each leaf closeout creates its commit. Leaf integration lands that exact
+certified commit without a rerun. Full Dagger runs once when each master integrates
+into super. PR validation, tagging, and publishing do not rerun acceptance. See
+CONTRIBUTING.md for the tier table and staged-content contract.
 
 Agents Remember acceptance runs only through that Dagger graph. Keep
 `orchestration.qualityGate.executor` set to `"dagger"`; a direct host invocation of
-pytest or the Python wrapper is diagnostic evidence, never an acceptance result.
+pytest or the Python wrapper is refused, not treated as diagnostic evidence.
 Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
 full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
 `diff-base`; the public Dagger function refuses an empty base instead of comparing
@@ -262,24 +259,18 @@ never the live coordination root, credentials, or container socket. Its live
 trace and final pytest, coverage, Codex-probe, and result artifacts replace the
 corresponding files under the task enclosure's `reports/` directory.
 
-The wrapper orders cheap deterministic rails before the expensive test rail:
-Ruff, formatting, file size, Pyright, Radon reports, then pytest. CRAP and changed-lines
-coverage are fast calculations over pytest's branch-coverage artifact and run last. When a
-local run's pytest rail passes but a coverage-derived rail fails, the wrapper stores a
-content-addressed proof under the worktree's common Git directory. An exact retry reuses that
-proof; a test-only retry removes the edited tests' coverage contexts and runs only those test
-modules. Any source, configuration, selected-suite, Python/tool, environment, or artifact
-change refuses reuse. A conservative delta-coverage failure triggers one conclusive full
-pytest fallback. CI never reuses local proof. Set `AR_QUALITY_NO_RETRY=1` to force a fresh
-local run while diagnosing the retry mechanism.
+Inside the nonce-attested Dagger graph, the wrapper orders cheap deterministic rails before the
+expensive test rail: Ruff, formatting, file size, Pyright, Radon reports, then pytest. CRAP and
+changed-lines coverage score that run's branch-coverage artifact last. Content-addressed exact or
+test-only retry proof is an internal Dagger optimization; any source, configuration, selected-suite,
+runtime, environment, or artifact drift runs the ordinary selection in the same graph. There is no
+host retry path or fallback. Lifecycle acceptance disables proof reuse by default with
+`AR_QUALITY_NO_RETRY=1`.
 
-Every rail prints one provenance line naming its actual input, resolved config,
-and unit count. A manual dirty-tree run also lists non-ignored untracked files
-inside source, test, script, generated-copy, and dashboard roots as **not in the
-index/diff measurement**; it reports them without staging or stashing them. The
-pre-push hook forwards Git's ref updates for context but still says that the
-wrapper reads current-checkout bytes at index-known paths and a base-to-working-
-tree diff. It never claims that this is a checkout of the pushed commit range.
+Every Dagger rail prints one provenance line naming its actual input, resolved config, and unit
+count. The deterministic pre-push hook separately forwards Git's ref updates and checks
+current-checkout bytes at index-known paths; it runs no tests and never claims acceptance for the
+pushed commit range.
 
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The

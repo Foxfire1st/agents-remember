@@ -22,10 +22,10 @@ from agents_remember.models.lifecycles.operation import LifecycleOperationRecove
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
-    GATE_TARGETED,
     QualityGatePlan,
     QualityGateTarget,
     code_quality_gate_preview,
+    requires_integrated_acceptance,
     requires_strict_code_quality,
     run_strict_code_quality_gate,
 )
@@ -61,13 +61,10 @@ HANDOVER_GATE_KIND = "master-handover-approval"
 
 
 def quality_gate_mode(contract: WorktreeContract) -> str:
-    """The altitude routing for one integration.
-
-    A leaf contract integrates into its master branch and certifies its own change
-    set; the master's series contract is the once-per-master gate and runs the full
-    wrapper through the pinned Dagger executor.
-    """
-    return GATE_TARGETED if contract.kind == "leaf" else GATE_FULL
+    """Return the only accepting integration mode: full, at master altitude."""
+    if contract.kind == "leaf":
+        raise ValueError("leaf integration reuses the exact leaf-closeout acceptance")
+    return GATE_FULL
 
 
 def _quality_gate_settings(contract: WorktreeContract):
@@ -80,6 +77,17 @@ def _quality_gate_memory_cap(contract: WorktreeContract) -> int | None:
 
 
 def _quality_gate_preview(contract: WorktreeContract) -> dict[str, object]:
+    if contract.kind == "leaf":
+        return {
+            "required": False,
+            "status": "certified-at-leaf-closeout",
+            "command": "",
+            "mode": "targeted",
+            "reason": (
+                "leaf integration lands the exact commit certified once at leaf closeout; "
+                "integration does not rerun acceptance"
+            ),
+        }
     mode = quality_gate_mode(contract)
     settings = _quality_gate_settings(contract)
     memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
@@ -92,6 +100,7 @@ def _quality_gate_preview(contract: WorktreeContract) -> dict[str, object]:
             memory_cap_bytes=memory_cap_bytes,
             executor=settings.executor,
         ),
+        required_when_missing=requires_integrated_acceptance(contract.repo_name),
     )
 
 
@@ -894,8 +903,9 @@ def _apply_integration(
         quality_gate, blocked = _run_integration_quality_gate(contract)
         if blocked is not None:
             return WorktreeCommandResult(2, blocked)
-        # A full gate can run for minutes. Re-prove both the transitive chain and the exact
-        # source tips before memory replay or source merge so its certified code cannot go stale.
+        # The master-altitude full gate can run for minutes. Re-prove both the transitive
+        # chain and the exact source tips before memory replay or source merge so its
+        # certified code cannot go stale. The same proof is cheap and harmless for a leaf.
         blocked = _integration_source_state_block(contract, sources)
         if blocked is not None:
             return blocked
@@ -1024,14 +1034,19 @@ def _restore_replayed_memory_worktree(
 def _run_integration_quality_gate(
     contract: WorktreeContract,
 ) -> tuple[dict[str, object], dict[str, object] | None]:
-    """The altitude-routed quality gate for one integration, run before any merge.
+    """Run the one integration-owned acceptance: full, at master altitude.
 
-    Leaf integration certifies the leaf's change set (targeted); master integration
-    runs the full wrapper once through the pinned Dagger executor inside the integration
-    step itself, so no manager or orchestrator has
-    to remember a separate full-gate invocation. An explicit cap remains available.
+    Leaf integration reuses the exact targeted acceptance already bound to its closeout
+    commit. Master integration runs the full wrapper once through the pinned Dagger
+    executor inside the integration step itself. An explicit cap remains available.
     """
-    if not requires_strict_code_quality(contract.code_worktree, code_would_commit=True):
+    if contract.kind == "leaf":
+        return _quality_gate_preview(contract), None
+    if not requires_strict_code_quality(
+        contract.code_worktree,
+        code_would_commit=True,
+        required_when_missing=requires_integrated_acceptance(contract.repo_name),
+    ):
         return _quality_gate_preview(contract), None
     mode = quality_gate_mode(contract)
     settings = _quality_gate_settings(contract)

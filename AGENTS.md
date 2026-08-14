@@ -154,8 +154,11 @@ candidate checkout:
 dagger call quality --source=. --repository-bundle=<candidate.bundle> --mode=<targeted|full> --diff-base=<commit> reports export --path=<enclosure>/reports
 ```
 
-The exported `clean-quality-results.json` is the single authoritative result. CI and
-closeout enforce it; no host-wrapper or second Dagger projection is an acceptance gate.
+The exported `clean-quality-results.json` is the single authoritative result. Leaf
+closeout enforces targeted acceptance once and master integration enforces full acceptance
+once; leaf integration, push, pull-request, tag, and publish paths do not rerun it.
+GitHub pull requests still run their deterministic non-test checks, but those are not
+acceptance gates. No host-wrapper or second Dagger projection is an acceptance gate.
 The Python, Vitest, and Playwright harnesses also fail closed at startup unless the pinned
 Dagger graph supplies a matching per-run environment nonce and in-container attestation file.
 There is no host-test compatibility path: invoking those suites outside Dagger is an error.

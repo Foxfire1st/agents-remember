@@ -2,46 +2,31 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
-import sys
 import time
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NoReturn
 
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.kernel.git_command import git_environment, run_git
-from agents_remember.kernel.platform_subprocess import (
-    native_command,
-    native_subprocess_environment,
-)
-from agents_remember.kernel.primitives import memory_cap
 from agents_remember.worktrees.modules.clean_quality_executor import (
     CleanQualityRequest,
     run_clean_quality,
 )
 
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
-QUALITY_MODULE = "agents_remember.code_quality.check"
 FAILURE_OUTPUT_LINES = 40
 REPORT_DIRECTORY_NAME = "reports"
 TEST_RESULTS_REPORT_NAME = "test-results.md"
-PYTEST_EVENTS_REPORT_NAME = "pytest-events.jsonl"
-COVERAGE_DATA_REPORT_NAME = "coverage.data"
-QUALITY_PROGRESS_REPORT_NAME = "quality-progress.json"
-CODEX_PROBE_REPORT_NAME = "codex-probe.json"
-QUALITY_TEMP_ROOT = Path("/tmp/arq")
 
 GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
 GATE_WRAPPER_UNAVAILABLE = "wrapper-unavailable"
 GATE_TARGETED = "targeted"
 GATE_FULL = "full"
-
-QualityRunner = Callable[[list[str], Path, Mapping[str, str]], subprocess.CompletedProcess[str]]
+SELF_ACCEPTANCE_REPOSITORY = "agents-remember"
 
 
 @dataclass(frozen=True)
@@ -50,7 +35,6 @@ class QualityGatePlan:
 
     mode: str = GATE_TARGETED
     memory_cap_bytes: int | None = None
-    systemd_run_available: bool | None = None
     executor: str = "dagger"
 
 
@@ -74,7 +58,6 @@ class _QualityGateReport:
     started_at: datetime
     finished_at: datetime
     elapsed_seconds: float
-    cap_plan: memory_cap.MemoryCapPlan | None
     requested_memory_cap_bytes: int | None
 
 
@@ -88,73 +71,49 @@ def test_results_report_path(worktree_group: Path) -> Path:
     return worktree_group / REPORT_DIRECTORY_NAME / TEST_RESULTS_REPORT_NAME
 
 
-def pytest_events_report_path(worktree_group: Path) -> Path:
-    """Return the enclosure-owned, self-overwriting live pytest event report."""
-    return worktree_group / REPORT_DIRECTORY_NAME / PYTEST_EVENTS_REPORT_NAME
-
-
-def coverage_data_report_path(worktree_group: Path) -> Path:
-    """Return the enclosure-owned Coverage.py state path."""
-    return worktree_group / REPORT_DIRECTORY_NAME / COVERAGE_DATA_REPORT_NAME
-
-
-def quality_progress_report_path(worktree_group: Path) -> Path:
-    """Return the one atomic current-rail projection for this enclosure."""
-    return worktree_group / REPORT_DIRECTORY_NAME / QUALITY_PROGRESS_REPORT_NAME
-
-
-def codex_probe_report_path(worktree_group: Path) -> Path:
-    """Return the real-versus-fake Codex integration evidence path."""
-    return worktree_group / REPORT_DIRECTORY_NAME / CODEX_PROBE_REPORT_NAME
-
-
 def _gate_command(
     diff_base: str,
     *,
     mode: str = GATE_TARGETED,
     memory_cap_bytes: int | None = None,
-    systemd_run_available: bool | None = None,
     executor: str = "dagger",
 ) -> str:
     """The command as reported, so a payload reader can rerun exactly what ran."""
     if mode not in {GATE_TARGETED, GATE_FULL}:
         raise ValueError(f"unknown quality gate mode: {mode}")
-    if executor not in {"local", "dagger"}:
-        raise ValueError(f"unknown quality gate executor: {executor}")
-    if executor == "dagger":
-        return shlex.join(
-            _dagger_report_command(
-                QualityGatePlan(
-                    mode=mode,
-                    memory_cap_bytes=memory_cap_bytes,
-                    executor=executor,
-                ),
-                diff_base,
-            )
+    if executor != "dagger":
+        raise ValueError("quality gate executor must be the pinned Dagger graph")
+    return shlex.join(
+        _dagger_report_command(
+            QualityGatePlan(
+                mode=mode,
+                memory_cap_bytes=memory_cap_bytes,
+                executor=executor,
+            ),
+            diff_base,
         )
-    base = f" --diff-base {diff_base}" if diff_base else ""
-    if mode == GATE_TARGETED:
-        return f"python -m {QUALITY_MODULE} --targeted{base}"
-    if memory_cap_bytes is None:
-        return f"python -m {QUALITY_MODULE}{base}"
-    plan = memory_cap.plan_capped_command(
-        "python",
-        ["-m", QUALITY_MODULE],
-        memory_cap_bytes,
-        systemd_run_available=systemd_run_available,
     )
-    rendered = " ".join(plan.command)
-    return f"{rendered}{base}"
 
 
-def requires_strict_code_quality(code_worktree: Path, *, code_would_commit: bool) -> bool:
-    """Whether this closeout must run the wrapper the checkout carries.
+def requires_integrated_acceptance(repo_name: str) -> bool:
+    """Whether repository policy makes the integrated wrapper mandatory."""
+    return repo_name == SELF_ACCEPTANCE_REPOSITORY
 
-    Availability of the wrapper decides this, not the repository's name: the gate
-    is documented as mandatory for every repository, so it applies wherever it can
-    run at all.
+
+def requires_strict_code_quality(
+    code_worktree: Path,
+    *,
+    code_would_commit: bool,
+    required_when_missing: bool = False,
+) -> bool:
+    """Whether this boundary must run the integrated acceptance adapter.
+
+    Consumer repositories opt in by carrying the adapter. A repository whose own
+    policy requires the adapter can additionally make its absence fail closed.
     """
-    return code_would_commit and quality_wrapper_path(code_worktree).is_file()
+    return code_would_commit and (
+        required_when_missing or quality_wrapper_path(code_worktree).is_file()
+    )
 
 
 def code_quality_gate_preview(
@@ -163,6 +122,7 @@ def code_quality_gate_preview(
     code_would_commit: bool,
     diff_base: str = "",
     plan: QualityGatePlan | None = None,
+    required_when_missing: bool = False,
 ) -> dict[str, object]:
     """Report which of the three gate states this closeout is in.
 
@@ -178,6 +138,11 @@ def code_quality_gate_preview(
             "reason": "no code commit would be created",
         }
     if not quality_wrapper_path(code_worktree).is_file():
+        if required_when_missing:
+            raise RuntimeError(
+                "repository policy requires integrated acceptance, but the candidate is missing "
+                f"its self-owned wrapper at {QUALITY_WRAPPER.as_posix()}"
+            )
         return {
             "required": False,
             "status": GATE_WRAPPER_UNAVAILABLE,
@@ -196,21 +161,9 @@ def code_quality_gate_preview(
         )
     memory_cap_payload: dict[str, object] = {}
     if plan.mode == GATE_FULL:
-        cap_bytes = plan.memory_cap_bytes
-        cap_plan = (
-            None
-            if cap_bytes is None or plan.executor == "dagger"
-            else memory_cap.plan_capped_command(
-                "python",
-                ["-m", QUALITY_MODULE],
-                cap_bytes,
-                systemd_run_available=plan.systemd_run_available,
-            )
-        )
         memory_cap_payload = _memory_policy_payload(
-            cap_plan,
             executor=plan.executor,
-            requested_cap_bytes=cap_bytes,
+            requested_cap_bytes=plan.memory_cap_bytes,
         )
     return {
         "required": True,
@@ -219,7 +172,6 @@ def code_quality_gate_preview(
             diff_base,
             mode=plan.mode,
             memory_cap_bytes=plan.memory_cap_bytes,
-            systemd_run_available=plan.systemd_run_available,
             executor=plan.executor,
         ),
         "diffBase": diff_base,
@@ -233,23 +185,6 @@ def code_quality_gate_preview(
             "master, at the master integration gate, not at leaf closeout."
         ),
     }
-
-
-def run_subprocess(
-    command: list[str], cwd: Path, env: Mapping[str, str]
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        native_command(command, env),
-        cwd=cwd,
-        env=dict(env),
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
 
 
 def _validated_quality_gate_plan(plan: QualityGatePlan | None) -> QualityGatePlan:
@@ -283,17 +218,10 @@ def run_strict_code_quality_gate(
     if not wrapper.is_file():
         raise RuntimeError(
             "strict code-quality gate cannot run before code commit: "
-            f"project-owned wrapper is missing at {wrapper}"
+            f"self-owned wrapper is missing at {wrapper}"
         )
     plan = _validated_quality_gate_plan(plan)
-    pytest_report = pytest_events_report_path(target.worktree_group)
-    command, invocation, cap_plan = _gate_command_parts(
-        code_worktree,
-        plan,
-        diff_base,
-        invocation,
-        pytest_report=pytest_report,
-    )
+    command, invocation = _gate_command_parts(plan, diff_base, invocation)
     started_at = datetime.now(UTC)
     started = time.monotonic()
     result = run_clean_quality(
@@ -319,7 +247,6 @@ def run_strict_code_quality_gate(
             started_at=started_at,
             finished_at=finished_at,
             elapsed_seconds=time.monotonic() - started,
-            cap_plan=cap_plan,
             requested_memory_cap_bytes=plan.memory_cap_bytes,
         )
     )
@@ -327,10 +254,8 @@ def run_strict_code_quality_gate(
         raise RuntimeError(
             _gate_failure_message(
                 result,
-                cap_plan,
                 report_path,
                 requested_memory_cap_bytes=plan.memory_cap_bytes,
-                executor=plan.executor,
             )
         )
     return {
@@ -341,7 +266,6 @@ def run_strict_code_quality_gate(
             diff_base,
             mode=plan.mode,
             memory_cap_bytes=plan.memory_cap_bytes,
-            systemd_run_available=plan.systemd_run_available,
             executor=plan.executor,
         ),
         "diffBase": diff_base,
@@ -350,7 +274,6 @@ def run_strict_code_quality_gate(
         "reportPath": report_path.as_posix(),
         **(
             _memory_policy_payload(
-                cap_plan,
                 executor=plan.executor,
                 requested_cap_bytes=plan.memory_cap_bytes,
             )
@@ -365,34 +288,11 @@ def run_local_quality_diagnostic(
     *,
     diff_base: str = "",
     plan: QualityGatePlan | None = None,
-    runner: QualityRunner = run_subprocess,
-) -> subprocess.CompletedProcess[str]:
-    """Run the host wrapper as a diagnostic; never produce acceptance evidence."""
-    wrapper = quality_wrapper_path(target.code_worktree)
-    if not wrapper.is_file():
-        raise RuntimeError(f"local quality diagnostic wrapper is missing at {wrapper}")
-    requested = plan or QualityGatePlan()
-    diagnostic_plan = QualityGatePlan(
-        mode=requested.mode,
-        memory_cap_bytes=requested.memory_cap_bytes,
-        systemd_run_available=requested.systemd_run_available,
-        executor="local",
-    )
-    command, invocation, _ = _gate_command_parts(
-        target.code_worktree,
-        diagnostic_plan,
-        diff_base,
-        "local-diagnostic",
-        pytest_report=pytest_events_report_path(target.worktree_group),
-    )
-    return runner(
-        command,
-        target.code_worktree,
-        quality_environment(
-            target.code_worktree,
-            reports_root=target.worktree_group / REPORT_DIRECTORY_NAME,
-            invocation=invocation,
-        ),
+) -> NoReturn:
+    """Refuse host quality execution; acceptance and test diagnostics are Dagger-only."""
+    del target, diff_base, plan
+    raise RuntimeError(
+        "host quality execution is forbidden; run tests through the pinned Dagger graph"
     )
 
 
@@ -413,16 +313,7 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
         f"- Elapsed seconds: `{report.elapsed_seconds:.3f}`",
         f"- Command: `{shlex.join(report.command)}`",
     ]
-    if report.cap_plan is not None:
-        lines.extend(
-            [
-                f"- Memory-cap policy: `{report.cap_plan.policy}`",
-                f"- Memory-cap mechanism: `{report.cap_plan.mechanism}`",
-                f"- Memory-cap bytes: `{report.cap_plan.cap_bytes}`",
-                "- Swap policy: `host-managed`",
-            ]
-        )
-    elif report.requested_memory_cap_bytes is not None:
+    if report.requested_memory_cap_bytes is not None:
         lines.extend(
             [
                 "- Memory-cap policy: `dagger-inner-wrapper`",
@@ -433,8 +324,8 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
     elif report.mode == GATE_FULL:
         lines.extend(
             [
-                f"- Memory policy: `{'container-host-managed' if report.executor == 'dagger' else 'host-managed'}`",
-                f"- Swap policy: `{'container-host-managed' if report.executor == 'dagger' else 'host-managed'}`",
+                "- Memory policy: `container-host-managed`",
+                "- Swap policy: `container-host-managed`",
             ]
         )
     lines.extend(
@@ -458,39 +349,17 @@ def _write_test_results_report(report: _QualityGateReport) -> None:
 
 
 def _gate_command_parts(
-    code_worktree: Path,
     plan: QualityGatePlan,
     diff_base: str,
     invocation: str,
-    *,
-    pytest_report: Path | None = None,
-) -> tuple[list[str], str, memory_cap.MemoryCapPlan | None]:
-    """The concrete command, its invocation label, and (full runs) the cap plan."""
-    if plan.executor == "dagger":
-        return (
-            _dagger_report_command(plan, diff_base),
-            "master-integration" if plan.mode == GATE_FULL else invocation,
-            None,
-        )
-    python = quality_python(code_worktree)
-    module_args = ["-m", QUALITY_MODULE]
-    if pytest_report is not None:
-        module_args += ["--pytest-report-log", pytest_report.as_posix()]
-    if plan.mode == GATE_TARGETED:
-        module_args.append("--targeted")
-    if diff_base:
-        module_args += ["--diff-base", diff_base]
-    if plan.mode != GATE_FULL:
-        return [python.as_posix(), *module_args], invocation, None
-    if plan.memory_cap_bytes is None:
-        return [python.as_posix(), *module_args], "master-integration", None
-    cap_plan = memory_cap.plan_capped_command(
-        python,
-        module_args,
-        plan.memory_cap_bytes,
-        systemd_run_available=plan.systemd_run_available,
+) -> tuple[list[str], str]:
+    """The symbolic Dagger command and its invocation label."""
+    if plan.executor != "dagger":
+        raise ValueError("quality gate executor must be the pinned Dagger graph")
+    return (
+        _dagger_report_command(plan, diff_base),
+        "master-integration" if plan.mode == GATE_FULL else invocation,
     )
-    return cap_plan.command, "master-integration", cap_plan
 
 
 def _dagger_report_command(plan: QualityGatePlan, diff_base: str) -> list[str]:
@@ -510,69 +379,38 @@ def _dagger_report_command(plan: QualityGatePlan, diff_base: str) -> list[str]:
 
 
 def _memory_policy_payload(
-    cap_plan: memory_cap.MemoryCapPlan | None,
     *,
-    executor: str = "local",
+    executor: str = "dagger",
     requested_cap_bytes: int | None = None,
 ) -> dict[str, object]:
-    if executor == "dagger":
-        policy: dict[str, object] = {
-            "mode": "container-host-managed" if requested_cap_bytes is None else "explicit-cap",
-            "pytestProcesses": "auto",
-            "swap": "container-host-managed",
-        }
-        if requested_cap_bytes is None:
-            return {"memoryPolicy": policy}
-        return {
-            "memoryPolicy": policy,
-            "memoryCap": {
-                "capBytes": requested_cap_bytes,
-                "policy": "dagger-inner-wrapper",
-                "mechanism": "container-wrapper",
-            },
-        }
+    if executor != "dagger":
+        raise ValueError("quality gate executor must be the pinned Dagger graph")
     policy: dict[str, object] = {
-        "mode": "host-managed" if cap_plan is None else "explicit-cap",
+        "mode": "container-host-managed" if requested_cap_bytes is None else "explicit-cap",
         "pytestProcesses": "auto",
-        "swap": "host-managed",
+        "swap": "container-host-managed",
     }
-    if cap_plan is None:
+    if requested_cap_bytes is None:
         return {"memoryPolicy": policy}
     return {
         "memoryPolicy": policy,
         "memoryCap": {
-            "capBytes": cap_plan.cap_bytes,
-            "policy": cap_plan.policy,
-            "mechanism": cap_plan.mechanism,
+            "capBytes": requested_cap_bytes,
+            "policy": "dagger-inner-wrapper",
+            "mechanism": "container-wrapper",
         },
     }
 
 
 def _gate_failure_message(
     result: subprocess.CompletedProcess[str],
-    cap_plan: memory_cap.MemoryCapPlan | None,
     report_path: Path,
     *,
     requested_memory_cap_bytes: int | None = None,
-    executor: str = "dagger",
 ) -> str:
-    """One refusal message: nothing committed, plus cap policy when a cap ran."""
+    """One refusal message: nothing committed, plus Dagger cap policy when requested."""
     details = _failure_output(result.stdout)
-    if cap_plan is not None:
-        killed = (
-            " The scope was killed by the memory cap (returncode -9, shell exit 137) "
-            "inside its own scope."
-            if result.returncode in (137, -9)
-            else ""
-        )
-        details += (
-            f"\nfull gate memory policy: {cap_plan.policy}; "
-            f"mechanism={cap_plan.mechanism}; cap={cap_plan.cap_bytes} bytes; "
-            f"exit code {result.returncode}.{killed}"
-            " Raise orchestration.qualityGate.memoryCapBytes only after the run itself "
-            "is proven healthy."
-        )
-    elif executor == "dagger" and requested_memory_cap_bytes is not None:
+    if requested_memory_cap_bytes is not None:
         killed = (
             " The Dagger container scope was killed by the memory cap."
             if result.returncode in (137, -9)
@@ -589,68 +427,6 @@ def _gate_failure_message(
         f" Full output: {report_path.as_posix()}."
         f"{details}"
     )
-
-
-def quality_python(code_worktree: Path) -> Path:
-    """Use the worktree or shared-clone dev interpreter, then the active server Python."""
-    local_python = code_worktree / ".venv" / "bin" / "python"
-    if local_python.is_file():
-        return local_python
-    common_dir = _git_common_dir(code_worktree)
-    if common_dir is not None:
-        shared_python = common_dir.parent / ".venv" / "bin" / "python"
-        if shared_python.is_file():
-            return shared_python
-    active_python = Path(sys.executable)
-    if active_python.is_file():
-        return active_python
-    raise RuntimeError(
-        "strict code-quality gate cannot run before code commit: no Python interpreter found"
-    )
-
-
-def quality_environment(
-    code_worktree: Path,
-    *,
-    reports_root: Path,
-    invocation: str = "closeout-staged",
-) -> dict[str, str]:
-    """Put the current worktree package first even when Python comes from another checkout.
-
-    Built from :func:`git_environment` rather than ``os.environ``: the wrapper this hands the
-    environment to derives its own scope from ``git ls-files`` and its diff base from
-    ``merge-base``, and closeout spawns it from paths where ``GIT_DIR`` can be exported. Every
-    git call inside that subprocess strips the selectors itself today, so this is defence in
-    depth -- but the gate decides which repository gets certified, and that must not rest on
-    the good behaviour of a child process this one cannot see.
-    """
-    env = git_environment()
-    entries = [(code_worktree / "mcp" / "src").as_posix()]
-    existing = env.get("PYTHONPATH")
-    if existing:
-        entries.append(existing)
-    env["PYTHONPATH"] = os.pathsep.join(entries)
-    # Naming the invoking altitude lets the shared wrapper describe what it certifies:
-    # closeout has already reset and staged the whole task worktree; integration runs
-    # on a clean checkout at the commit about to land.
-    env["AR_QUALITY_INVOCATION"] = invocation
-    env["COVERAGE_FILE"] = coverage_data_report_path(reports_root.parent).as_posix()
-    env["AR_QUALITY_PROGRESS_REPORT"] = quality_progress_report_path(reports_root.parent).as_posix()
-    env["AR_CODEX_PROBE_REPORT"] = codex_probe_report_path(reports_root.parent).as_posix()
-    # WSL imports Windows PATH/TEMP by design. Keep durable output enclosure-owned, but use a
-    # deliberately short native scratch root: pytest-created coordination roots may contain
-    # Unix sockets, whose 103-byte address limit cannot tolerate a reports/enclosure prefix.
-    return native_subprocess_environment(env, temp_root=QUALITY_TEMP_ROOT)
-
-
-def _git_common_dir(code_worktree: Path) -> Path | None:
-    # On the one runner: an inherited GIT_DIR would answer with *its* common dir, and
-    # this value decides which repository the closeout quality gate then certifies.
-    result = run_git(code_worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    if result.returncode != 0:
-        return None
-    value = result.stdout.strip()
-    return Path(value) if value else None
 
 
 def _failure_output(output: str) -> str:

@@ -2,13 +2,14 @@
 """Run the environment-gated integration paths, one command per path.
 
 ``pyproject.toml`` registers eight markers for suites that skip unless an ``AR_*``
-variable opts them in. Registering them made them nameable; until this script and the
-``integration-gated`` workflow landed, nothing ran any of them, so fifteen tests over
+variable opts them in. Registering them made them nameable; until this script landed,
+nothing could run any of them intentionally, so fifteen tests over
 the Pi RPC transport, the Codex app-server, the Claude stream-json transport, the L3
 control routes, the production evidence seam and the real MCP stdio server were never
 executed by anything.
 
-Two of the eight need no vendor account and run in CI on every push:
+Two of the eight need no vendor account and can run inside the lifecycle-owned Dagger
+acceptance graph:
 
 ``ar-run-pi-rpc-smoke``
     Installs ``@earendil-works/pi-coding-agent`` into its own temp prefix and drives it
@@ -20,7 +21,7 @@ Two of the eight need no vendor account and run in CI on every push:
     without it the live grepai search runs too and needs the self-hosted docker stack up
     and indexed (``ar-grepai-postgres`` / ``ar-grepai-ollama`` / ``ar-grepai-watcher``).
 
-Six need something a CI runner cannot hold, and each says which:
+Six require an explicitly provisioned vendor CLI and credentials, and each says which:
 
 ``ar-codex-app-server-live-smoke``
     An installed, signed-in Codex whose live ``model/list`` advertises the requested
@@ -57,8 +58,8 @@ from xml.etree import ElementTree
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-CI_SAFE = "no vendor account"
-LOCAL_ONLY = "local only"
+CREDENTIAL_FREE = "no vendor account"
+VENDOR_CREDENTIALS = "vendor credentials required"
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-run-pi-rpc-smoke",
         marker="ar_run_pi_rpc_smoke",
         environment={"AR_RUN_PI_RPC_SMOKE": "1"},
-        category=CI_SAFE,
+        category=CREDENTIAL_FREE,
         requires=(
             "node + npm, and the npm registry reachable. The suite installs "
             "@earendil-works/pi-coding-agent@0.80.7 into a temp prefix itself and drives it "
@@ -91,7 +92,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="agents-remember-real-mcp-config",
         marker="agents_remember_real_mcp_config",
         environment={},
-        category=CI_SAFE,
+        category=CREDENTIAL_FREE,
         requires=(
             "a settings file, which this script generates. The planning test needs "
             "nothing else; the live search test needs the self-hosted grepai docker stack "
@@ -102,7 +103,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-codex-app-server-live-smoke",
         marker="ar_codex_app_server_live_smoke",
         environment={"AR_CODEX_APP_SERVER_LIVE_SMOKE": "1"},
-        category=LOCAL_ONLY,
+        category=VENDOR_CREDENTIALS,
         requires=(
             "an installed, signed-in Codex whose live model catalogue advertises "
             "AR_CODEX_SMOKE_MODEL (default gpt-5.6-sol) at AR_CODEX_SMOKE_EFFORT (default "
@@ -115,7 +116,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-codex-app-server-live-conformance",
         marker="ar_codex_app_server_live_conformance",
         environment={"AR_CODEX_APP_SERVER_LIVE_CONFORMANCE": "1"},
-        category=LOCAL_ONLY,
+        category=VENDOR_CREDENTIALS,
         requires=(
             "the same install, a catalogue advertising at least two selectable models, "
             "and two real turns. THIS ONE BILLS."
@@ -126,7 +127,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-claude-stream-smoke",
         marker="ar_claude_stream_smoke",
         environment={"AR_CLAUDE_STREAM_SMOKE": "1"},
-        category=LOCAL_ONLY,
+        category=VENDOR_CREDENTIALS,
         requires=(
             "an installed, signed-in Claude Code (or AR_CLAUDE_STREAM_BINARY pointing at "
             "one). The prompt is the local /cost slash command rather than a model turn, so "
@@ -139,7 +140,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-run-control-plane-installed",
         marker="ar_run_control_plane_installed",
         environment={"AR_RUN_CONTROL_PLANE_INSTALLED": "1"},
-        category=LOCAL_ONLY,
+        category=VENDOR_CREDENTIALS,
         requires=(
             "exactly codex 0.144.5 and pi 0.80.7 on PATH (each class skips itself on a "
             "version mismatch), signed in, plus real billed turns including a 600-word "
@@ -151,7 +152,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-run-control-installed",
         marker="ar_run_control_installed",
         environment={"AR_RUN_CONTROL_INSTALLED": "1"},
-        category=LOCAL_ONLY,
+        category=VENDOR_CREDENTIALS,
         requires=(
             "exactly codex 0.144.5 and pi 0.80.7 on PATH, signed in, plus the essay "
             "prompt, two further settled turns and an uploaded PNG. THIS ONE BILLS."
@@ -162,7 +163,7 @@ PATHS: tuple[GatedPath, ...] = (
         name="ar-run-evidence-installed",
         marker="ar_run_evidence_installed",
         environment={"AR_RUN_EVIDENCE_INSTALLED": "1"},
-        category=LOCAL_ONLY,
+        category=VENDOR_CREDENTIALS,
         requires=(
             "exactly codex 0.144.5 and pi 0.80.7 on PATH, signed in. The prompts are tiny "
             '("Reply with exactly the word OK"), but it persists a real thread into your '
@@ -187,7 +188,7 @@ def settings_document(root: Path) -> dict[str, object]:
     """A settings file for the real MCP server, holding no credential of any kind.
 
     The provider entries name this repository's own self-hosted stacks. Nothing here
-    reaches a vendor, which is why the planning half of that suite runs in CI.
+    reaches a vendor, which is why the planning half can run in Dagger without credentials.
     """
     return {
         "version": 1,
@@ -284,8 +285,8 @@ def verify_passed(report: Path, expected: int) -> int:
 
     A skipped test exits pytest 0, so a runner that only checks the exit code reports
     success for a job that ran nothing. Several of these suites skip themselves when a
-    binary is missing from PATH, which is precisely the state this workflow exists to
-    end, so the count is read from pytest's own JUnit report rather than inferred.
+    binary is missing from PATH, which is precisely the state this selection exists to
+    expose, so the count is read from pytest's own JUnit report rather than inferred.
     """
     if not report.is_file():
         print(f"pytest wrote no JUnit report at {report}", flush=True)
@@ -328,17 +329,20 @@ def print_listing() -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one of the eight environment-gated integration paths. Two need no "
-            "vendor account and run in CI; the other six need an installed, signed-in "
-            "vendor CLI and mostly bill for real turns, so they run here."
+            "Select one of the eight environment-gated integration paths inside the "
+            "pinned Dagger graph. Two need no vendor account; the other six need an "
+            "installed, signed-in vendor CLI and mostly bill for real turns."
         )
     )
     parser.add_argument(
         "path",
         nargs="?",
-        choices=[*sorted(BY_NAME), "list", "ci-safe"],
+        choices=[*sorted(BY_NAME), "list", "credential-free"],
         default="list",
-        help="A path name, 'list' for the table, or 'ci-safe' for both credential-free paths.",
+        help=(
+            "A path name, 'list' for the table, or 'credential-free' for both "
+            "no-vendor-account paths."
+        ),
     )
     parser.add_argument(
         "--dry-run-only",
@@ -353,15 +357,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help=(
             "Fail unless exactly this many tests ran and passed. A skipped test exits "
-            "pytest 0, so CI uses this to tell 'ran' from 'was skipped'."
+            "pytest 0, so acceptance uses this to tell 'ran' from 'was skipped'."
         ),
     )
     return parser
 
 
 def selected(name: str) -> list[GatedPath]:
-    if name == "ci-safe":
-        return [path for path in PATHS if path.category == CI_SAFE]
+    if name == "credential-free":
+        return [path for path in PATHS if path.category == CREDENTIAL_FREE]
     return [BY_NAME[name]]
 
 

@@ -116,17 +116,19 @@ class GatedPathInventoryTests(unittest.TestCase):
         for path in self.runner.PATHS:
             with self.subTest(path=path.name):
                 self.assertTrue(path.requires.strip())
-                self.assertIn(path.category, {self.runner.CI_SAFE, self.runner.LOCAL_ONLY})
+                self.assertIn(
+                    path.category,
+                    {self.runner.CREDENTIAL_FREE, self.runner.VENDOR_CREDENTIALS},
+                )
 
-    def test_the_credential_free_paths_are_exactly_the_two_ci_runs(self) -> None:
-        # Which paths CI runs is a claim about what they need, so it is asserted here
-        # rather than left to a workflow file nobody reads. Pi RPC installs its own
+    def test_the_credential_free_paths_are_exactly_the_two_dagger_safe_runs(self) -> None:
+        # Credential freedom is a claim about what each path needs, so it is asserted
+        # here rather than inferred by external automation. Pi RPC installs its own
         # runtime and drives it offline against 127.0.0.1; the real-MCP path spawns this
         # repository's own server against a generated settings file. Everything else
-        # needs an installed, signed-in vendor CLI, and four of those bill for real
-        # turns.
+        # needs an installed, signed-in vendor CLI, and four of those bill for real turns.
         credential_free = {
-            path.name for path in self.runner.PATHS if path.category == self.runner.CI_SAFE
+            path.name for path in self.runner.PATHS if path.category == self.runner.CREDENTIAL_FREE
         }
 
         self.assertEqual(
@@ -134,18 +136,17 @@ class GatedPathInventoryTests(unittest.TestCase):
             {"ar-run-pi-rpc-smoke", "agents-remember-real-mcp-config"},
         )
 
-    def test_the_workflow_runs_every_credential_free_path(self) -> None:
-        workflow = (REPO_ROOT / ".github" / "workflows" / "integration-gated.yml").read_text(
-            encoding="utf-8"
+    def test_github_pr_checks_do_not_bypass_dagger_for_gated_pytest_paths(self) -> None:
+        workflows = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
         )
 
-        for path in self.runner.PATHS:
-            with self.subTest(path=path.name):
-                if path.category == self.runner.CI_SAFE:
-                    self.assertIn(path.name, workflow)
+        self.assertNotIn("run-gated-integration.py", workflows)
+        self.assertNotIn("python -m pytest", workflows)
 
     def test_the_dry_run_selection_names_a_test_that_exists(self) -> None:
-        # A stale node id would make the CI job run nothing and still exit 0.
+        # A stale node id would make an acceptance selection run nothing and still exit 0.
         node = self.runner.DRY_RUN_NODE
         file_part, class_name, test_name = node.split("::")
         source = (REPO_ROOT / file_part).read_text(encoding="utf-8")
@@ -224,9 +225,9 @@ class RunnerBehaviourTests(unittest.TestCase):
 
         self.assertEqual(environment["AGENTS_REMEMBER_REAL_MCP_CONFIG"], "/tmp/settings.json")
 
-    def test_ci_safe_selects_both_credential_free_paths(self) -> None:
+    def test_credential_free_selects_both_no_vendor_account_paths(self) -> None:
         self.assertEqual(
-            [path.name for path in self.runner.selected("ci-safe")],
+            [path.name for path in self.runner.selected("credential-free")],
             ["ar-run-pi-rpc-smoke", "agents-remember-real-mcp-config"],
         )
 
@@ -235,7 +236,7 @@ class RunnerBehaviourTests(unittest.TestCase):
             name="probe",
             marker="probe",
             environment={},
-            category=self.runner.LOCAL_ONLY,
+            category=self.runner.VENDOR_CREDENTIALS,
             requires="nothing",
             binaries=("a-binary-that-does-not-exist",),
         )

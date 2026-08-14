@@ -188,18 +188,15 @@ stops belong to the orchestrator via the system-specialist protocol.
   the developer's portfolio-gate approval of this series, recorded in the planner master's
   decision log, covers dependency-ordered leaf integrations. Loop until the master's leaves are
   done.
-- **Quality altitude ladder (260731-EFA-L17).** Leaf closeout and leaf integration run the
-  change-set-scoped contract (`agents_remember.code_quality.check --targeted`); the full wrapper
-  runs exactly once per master inside `worktree_integrate` at master altitude with host-managed
-  RAM/swap by default; constrained CI may set `orchestration.qualityGate.memoryCapBytes`.
+- **Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
+  acceptance exactly once, and leaf integration lands that exact certified commit without
+  rerunning it. The repository-prescribed full check runs exactly once per master at master
+  integration altitude. Resolve the concrete executor, permitted environment, arguments, resource
+  policy, and evidence contract from the repository's `system/git-workflow.md`,
+  `system/coding-guidelines.md`, and `system/tools.md`; never infer them or add a fallback.
   `memory_quality_check` is NOT part of that move:
   it stays a per-leaf closeout gate, and a leaf closeout that skips its required checks is
   refused, not passed.
-- **Dagger-only acceptance for Agents Remember.** Interpret the leaf contract as Dagger
-  `mode=targeted` with the recorded master base and the master gate as Dagger `mode=full`
-  with the recorded super base. Both bases are mandatory. Host pytest/direct-wrapper runs
-  are diagnostics only and cannot satisfy either gate; consult
-  `dagger call quality --help` instead of reconstructing a remembered invocation.
 - **Seat cleanup** — a completed leaf's worker/reviewer/curator chats have no further active
   purpose. `worktree_integrate` auto-closes each one (config-gated, default ON) only after that
   exact session's turn report is durable for the exact leaf; retirement gracefully stops control,

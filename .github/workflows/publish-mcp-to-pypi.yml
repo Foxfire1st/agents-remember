@@ -16,27 +16,26 @@ on:
       - "mcp-v*"
 
 jobs:
-  # A tag can point at any commit, including one that never reached `main` and was
-  # therefore never seen by the branch ruleset. Re-running the gate on the tagged
-  # tree is what makes the publish path safe.
-  #
-  # This single call runs BOTH rails of quality-checks.yml -- the `Quality wrapper`
-  # matrix and `Dashboard frontend rail`. `workflow_call` invokes a whole workflow
-  # rather than one of its jobs, so a second caller job would duplicate the run, not
-  # add coverage.
-  quality:
-    name: Quality gate
-    uses: ./.github/workflows/quality-checks.yml
-
   build:
     name: Build MCP package
-    needs: [quality]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      # Acceptance belongs to the lifecycle: targeted once when each leaf commits,
+      # then full once when its master integrates. Publishing proves that the tagged
+      # commit landed on main instead of spending either acceptance boundary again.
+      - name: Refuse a tag whose commit has not landed on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "release tag must point to a commit reachable from origin/main" >&2
+            exit 1
+          }
 
       - name: Set up Node
         uses: actions/setup-node@v4

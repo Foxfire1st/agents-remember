@@ -44,13 +44,12 @@ master's leaf loop to the master-exit seam, then hand over.
   governing route overviews, and the import/call graph. The reviewer chair fans out one
   independent reviewer per route and returns a verdict with a complete route-coverage table;
   direct/builder-verified tiers may reduce loop machinery, never remove this gate.
-- Quality altitude ladder (260731-EFA-L17): leaf closeout and leaf integration run the
-  pinned Dagger graph in `mode=targeted` with the recorded leaf base; the FULL Dagger
-  `mode=full` wrapper runs exactly once per master inside `worktree_integrate` with the
-  recorded super base. Host pytest/direct-wrapper runs are diagnostics only. Both Dagger
-  modes require `diff-base`; inspect `dagger call quality --help` rather than guessing.
-  The master gate runs at master altitude with host-managed RAM/swap by default;
-  constrained CI may set `orchestration.qualityGate.memoryCapBytes`.
+- Quality altitude ladder: leaf closeout runs the repository-prescribed change-set-scoped
+  acceptance exactly once; leaf integration lands that certified commit without a rerun. The
+  repository-prescribed full check runs exactly once per master at master integration altitude.
+  Resolve the concrete executor, environment, arguments, resource policy, retry rules, and evidence
+  contract from the repository's `system/git-workflow.md`, `system/coding-guidelines.md`, and
+  `system/tools.md`; never guess or substitute a fallback.
   `memory_quality_check` stays a per-leaf closeout
   gate; a leaf closeout that skips its required checks is refused, not passed.
 - Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf

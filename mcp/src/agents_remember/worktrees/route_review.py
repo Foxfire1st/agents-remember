@@ -73,6 +73,8 @@ def build_route_review(
 
 def require_current_route_review(contract: WorktreeContract) -> dict[str, object]:
     """Return current passing evidence or refuse before curator/closeout work begins."""
+    if contract.kind != "leaf":
+        return {"required": False, "status": "not-required-master-altitude"}
     if not code_change_present(contract):
         return {"required": False, "status": "not-required-no-code-change"}
     found = resolve_terminal_leaf_doc(contract.task_root, contract.leaf_id)

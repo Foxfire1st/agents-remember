@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Fast pre-commit tier: certify the STAGED content — the thing the commit will
 # actually contain — with ruff, Pyright, and the generated-copy checks. Under
-# half a minute on a warm checkout. The full suite (pytest + CRAP) runs on push.
+# half a minute on a warm checkout. Tests run only through lifecycle-owned Dagger.
 #
 # Bypass intentionally with `git commit --no-verify`, remembering that the flag
 # turns off every check, not just the one that annoyed you.

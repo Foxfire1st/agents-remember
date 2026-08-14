@@ -54,10 +54,10 @@ from agents_remember.kernel.git_command import (
     run_git_with_index,
 )
 from agents_remember.worktrees.modules import cleanup
-from agents_remember.worktrees.modules.code_quality_gate import _git_common_dir
 from agents_remember.worktrees.modules.git import (
     commit_if_dirty,
     head_commit,
+    require_git,
     run_pre_commit_hook_if_configured,
     worktree_candidate_tree,
 )
@@ -408,9 +408,8 @@ class QualityGateGitTests(unittest.TestCase):
             self.assertEqual(listed, ["real.py"])
 
     def test_the_closeout_gate_resolves_the_common_dir_of_the_worktree_it_was_given(self) -> None:
-        # `_git_common_dir` decides which repository the closeout quality gate certifies.
-        # An inherited GIT_DIR answers with *its* common dir, so the gate would then run
-        # against a repository the closeout never touched.
+        # The shared required-git probe decides which repository the closeout quality
+        # gate certifies. An inherited GIT_DIR must not redirect it to another repo.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             real, decoy = root / "real", root / "decoy"
@@ -423,13 +422,20 @@ class QualityGateGitTests(unittest.TestCase):
             plain.mkdir()
 
             with patch.dict(os.environ, _selectors(decoy)):
-                common = _git_common_dir(real)
-                # A directory that is not a repository: the probe reports None rather
-                # than falling through to the decoy that GIT_DIR is pointing at.
-                self.assertIsNone(_git_common_dir(plain))
+                common = Path(
+                    require_git(
+                        real,
+                        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                    )
+                )
+                # A directory that is not a repository refuses rather than falling
+                # through to the decoy that GIT_DIR is pointing at.
+                with self.assertRaisesRegex(RuntimeError, "not a git repository"):
+                    require_git(
+                        plain,
+                        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+                    )
 
-            self.assertIsNotNone(common)
-            assert common is not None
             self.assertEqual(common.resolve(), (real / ".git").resolve())
 
     def test_a_failed_gate_git_call_raises_the_typed_domain_error(self) -> None:

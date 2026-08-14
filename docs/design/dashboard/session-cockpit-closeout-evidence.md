@@ -66,7 +66,8 @@ is in `announcer.test.ts`, `submitClient.test.ts`, `CockpitLiveRegions.test.tsx`
 
 ## L8 performance and fetch evidence
 
-Run from `dashboard/`:
+The measurements were captured by this internal command inside the nonce-attested Dagger
+environment; host execution is refused:
 
 ```sh
 npm run perf:cockpit

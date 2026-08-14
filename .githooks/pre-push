@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Targeted pre-push tier: preserve Git's ref-update input as provenance, then run
-# the leaf change-set-scoped project-owned suite without staging, stashing, or
-# mutating the index.
+# deterministic non-test checks without staging, stashing, or mutating the index.
+# Leaf acceptance belongs to closeout and runs only in Dagger.
 #
 # Bypass intentionally with `git push --no-verify`.
 

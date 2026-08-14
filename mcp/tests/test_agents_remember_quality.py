@@ -10,11 +10,12 @@ from types import ModuleType
 from unittest.mock import patch
 
 import pytest
-from conftest import (
+from agents_remember.code_quality.dagger_environment import (
     DAGGER_TEST_ATTESTATION_ENV,
+    DaggerEnvironmentError,
     dagger_test_environment_error,
-    require_dagger_test_environment,
 )
+from conftest import require_dagger_test_environment
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DAGGER_MANIFEST = REPOSITORY_ROOT / "dagger.json"
@@ -131,7 +132,12 @@ def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path:
         or ""
     )
     with (
-        patch("conftest.dagger_test_environment_error", return_value="outside Dagger"),
+        patch(
+            "conftest._require_dagger_test_environment",
+            side_effect=DaggerEnvironmentError(
+                "Agents Remember tests are Dagger-only; refusing host execution"
+            ),
+        ),
         pytest.raises(pytest.UsageError, match="refusing host execution"),
     ):
         require_dagger_test_environment()

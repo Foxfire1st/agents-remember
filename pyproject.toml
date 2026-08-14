@@ -191,13 +191,13 @@ filterwarnings = [
 # `mcp/tests/test_gated_integration_runner.py` fails if any of them selects zero tests
 # again.
 #
-# Nothing ran them either. `scripts/run-gated-integration.py` is the one command per
-# path, and `.github/workflows/integration-gated.yml` runs the two that need no vendor
-# account -- `ar_run_pi_rpc_smoke`, which installs its own Pi build and drives it
-# offline against 127.0.0.1, and `agents_remember_real_mcp_config`, which spawns this
-# repository's own MCP server against a generated settings file. The other six need an
-# installed, signed-in vendor CLI and four of them bill for real model turns, so they
-# run locally and the runner states what each one needs.
+# `scripts/run-gated-integration.py` is the one selector per path. The two
+# credential-free paths can participate in lifecycle-owned Dagger acceptance:
+# `ar_run_pi_rpc_smoke`, which installs its own Pi build and drives it offline against
+# 127.0.0.1, and `agents_remember_real_mcp_config`, which spawns this repository's own
+# MCP server against a generated settings file. The other six need an installed,
+# signed-in vendor CLI and four bill for real model turns. They remain explicit opt-ins,
+# and like every pytest path they refuse execution outside the pinned Dagger graph.
 #
 # `mcp/tests/test_code_quality_check.py` asserts this list and the suite's actual
 # environment gates stay in step in both directions.

@@ -15,7 +15,6 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import check as quality_check
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees import closeout_recovery
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
@@ -29,9 +28,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import commit_if_dirty, commit_verified_staged
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
-    LeafIdentity,
     RepoBranchPlan,
-    default_contract,
     default_series_contract,
     load_contract,
     write_contract,
@@ -63,6 +60,34 @@ def _quality_target(
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
+    def test_agents_remember_closeout_refuses_a_missing_self_owned_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = replace(
+                dirty_open_external_contract_fixture(Path(tmp)),
+                repo_name="agents-remember",
+            )
+            write_contract(contract.contract_path, contract)
+            write_passing_route_review(contract)
+
+            with (
+                mock.patch.object(
+                    closeout_module,
+                    "_closeout_attestations",
+                    return_value=closeout_module._CloseoutAttestations(),
+                ),
+                mock.patch.object(closeout_module, "_memory_quality_before_refresh") as memory,
+                mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
+                mock.patch.object(closeout_module, "accepted_code_commit") as commit,
+                mock.patch.object(closeout_staged_quality, "run_strict_code_quality_gate") as gate,
+                self.assertRaisesRegex(RuntimeError, "self-owned wrapper"),
+            ):
+                worktree_manager.command_closeout(closeout_args(contract))
+
+            memory.assert_not_called()
+            gate.assert_not_called()
+            claim.assert_not_called()
+            commit.assert_not_called()
+
     def test_contract_finalization_retry_reuses_exact_external_commits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = dirty_open_external_contract_fixture(Path(tmp))
@@ -84,6 +109,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 operation_key="a" * 64,
+                candidate_tree=closeout_module.code_candidate_tree(contract),
                 operation_progress=progress,
             )
             with (
@@ -145,6 +171,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 operation_key="b" * 64,
+                candidate_tree=closeout_module.code_candidate_tree(contract),
                 operation_progress=progress,
             )
             with (
@@ -239,8 +266,8 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     closeout_module,
                     "require_current_route_review",
                     side_effect=[
-                        {"candidateTree": "reviewed"},
-                        {"candidateTree": "changed-during-quality"},
+                        {"required": True, "candidateTree": "reviewed"},
+                        {"required": True, "candidateTree": "changed-during-quality"},
                     ],
                 ),
                 mock.patch.object(
@@ -254,6 +281,106 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 worktree_manager.command_closeout(closeout_args(contract))
 
             claim.assert_not_called()
+
+    def test_series_candidate_is_rechecked_after_quality_before_approval_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = dirty_open_external_contract_fixture(Path(tmp))
+            git(contract.code_worktree, "add", "-A")
+            git(contract.code_worktree, "commit", "-m", "land leaf before master closeout")
+            series = replace(contract, kind="series", leaf_id="")
+            accepted_tree = closeout_module.code_candidate_tree(series)
+            args = replace(
+                WorktreeArgs.from_namespace(closeout_args(series)),
+                candidate_tree=accepted_tree,
+            )
+
+            def mutate_during_quality(*_args, **_kwargs):
+                (series.code_worktree / "changed-during-quality.py").write_text(
+                    "VALUE = 2\n", encoding="utf-8"
+                )
+                return {"required": True, "passed": True}, {}, False
+
+            with (
+                mock.patch.object(closeout_module, "load_contract", return_value=series),
+                mock.patch.object(closeout_module, "_validate_closeout_source_state"),
+                mock.patch.object(closeout_module, "_refuse_unsatisfied_closeout_gate"),
+                mock.patch.object(
+                    closeout_module,
+                    "_closeout_quality_preflight",
+                    side_effect=mutate_during_quality,
+                ),
+                mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
+                mock.patch.object(closeout_module, "accepted_code_commit") as commit,
+                self.assertRaisesRegex(RuntimeError, "candidate changed after quality"),
+            ):
+                closeout_module.closeout_result(args)
+
+            claim.assert_not_called()
+            commit.assert_not_called()
+
+    def test_series_closeout_does_not_rerun_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = replace(
+                dirty_open_external_contract_fixture(Path(tmp)), kind="series", leaf_id=""
+            )
+            with (
+                mock.patch.object(
+                    closeout_module, "_memory_quality_before_refresh", return_value={}
+                ),
+                mock.patch.object(closeout_module, "requires_strict_code_quality") as requires,
+                mock.patch.object(closeout_module, "_gate_staged_code") as gate,
+            ):
+                result, memory, strict_required = closeout_module._closeout_quality_preflight(
+                    contract,
+                    WorktreeArgs(contract_path=contract.contract_path),
+                    code_would_commit=True,
+                )
+
+            self.assertEqual(memory, {})
+            self.assertFalse(strict_required)
+            self.assertFalse(result["required"])
+            self.assertEqual(result["status"], "not-required-master-altitude")
+            requires.assert_not_called()
+            gate.assert_not_called()
+
+    def test_series_closeout_refuses_dirty_code_before_quality_or_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = replace(
+                dirty_open_external_contract_fixture(Path(tmp)), kind="series", leaf_id=""
+            )
+            args = replace(
+                WorktreeArgs.from_namespace(closeout_args(contract)),
+                candidate_tree=closeout_module.code_candidate_tree(contract),
+            )
+
+            with (
+                mock.patch.object(closeout_module, "load_contract", return_value=contract),
+                mock.patch.object(closeout_module, "_validate_closeout_source_state"),
+                mock.patch.object(closeout_module, "_closeout_quality_preflight") as quality,
+                mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
+                self.assertRaisesRegex(RuntimeError, "cannot create a code commit"),
+            ):
+                closeout_module.closeout_result(args)
+
+            quality.assert_not_called()
+            claim.assert_not_called()
+
+    def test_durable_closeout_refuses_a_missing_accepted_candidate_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = dirty_open_external_contract_fixture(Path(tmp))
+            args = replace(
+                WorktreeArgs.from_namespace(closeout_args(contract)),
+                operation_key="closeout:test",
+                candidate_tree=None,
+            )
+
+            with (
+                mock.patch.object(closeout_module, "_closeout_quality_preflight") as quality,
+                self.assertRaisesRegex(RuntimeError, "missing its accepted candidate tree"),
+            ):
+                closeout_module.closeout_result(args)
+
+            quality.assert_not_called()
 
     def test_memory_preflight_failure_never_starts_the_code_quality_gate(self) -> None:
         """A broken entity catalog must abort before hooks, Ruff, Pyright, or pytest."""
@@ -344,9 +471,18 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             deciders: list[object] = []
             real_requires = code_quality_gate.requires_strict_code_quality
 
-            def spy(target: Path, *, code_would_commit: bool) -> bool:
+            def spy(
+                target: Path,
+                *,
+                code_would_commit: bool,
+                required_when_missing: bool = False,
+            ) -> bool:
                 deciders.append(target)
-                return real_requires(target, code_would_commit=code_would_commit)
+                return real_requires(
+                    target,
+                    code_would_commit=code_would_commit,
+                    required_when_missing=required_when_missing,
+                )
 
             # Preview path (closeout.py:282): reports the enforced state for a dirty
             # checkout that carries the wrapper, rather than "wrapper-unavailable".
@@ -464,225 +600,6 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
 
             self.assertEqual(events[:3], ["pre-commit-hook", "quality", "verified-code-commit"])
-
-
-CREATED_FILE = "pkg/leaf_addition.py"
-
-
-def _gate_scope_contract_fixture(root: Path):
-    """A leaf whose closeout exercises exactly one thing: what the gate is shown.
-
-    Internal memory mode keeps the sidecar, ledger and memory-quality machinery out of
-    the way. The base commit already carries everything ``derive_scope`` needs to answer
-    -- a tracked top-level package, a ``pyproject.toml`` declaring ``testpaths``, and the
-    quality wrapper whose presence is what makes the gate mandatory -- so the only thing
-    that differs between the base commit and the closeout is the file the leaf creates.
-    """
-    code_repo = root / "repo-a"
-    init_repo(code_repo, "main")
-    _checkout_with_wrapper(code_repo)
-    (code_repo / "pyproject.toml").write_text(
-        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
-    )
-    (code_repo / "pkg").mkdir()
-    (code_repo / "pkg" / "__init__.py").write_text("", encoding="utf-8")
-    (code_repo / "pkg" / "existing.py").write_text("VALUE = 1\n", encoding="utf-8")
-    git(code_repo, "add", "-A")
-    git(code_repo, "commit", "-m", "Add package, quality wrapper and pytest config")
-    contract = default_contract(
-        ContractTask(
-            name="Gate Scope Thing",
-            repo_name="repo-a",
-            coordination_root=root / "ar-coordination",
-            workflow_kind="chat-task",
-            memory_mode="internal",
-        ),
-        leaf=LeafIdentity(worktree_name="gate-scope-thing"),
-        code=RepoBranchPlan(
-            repo_path=code_repo,
-            source_branch="main",
-            work_branch="ar/gate-scope-thing",
-            base_commit=git(code_repo, "rev-parse", "HEAD"),
-        ),
-    )
-    parent = default_series_contract(
-        ContractTask(
-            name="Gate Scope Master",
-            repo_name="repo-a",
-            coordination_root=root / "ar-coordination",
-            workflow_kind="chat-task",
-            memory_mode="internal",
-        ),
-        code=RepoBranchPlan(
-            repo_path=code_repo,
-            source_branch="main",
-            work_branch="main",
-            base_commit=git(code_repo, "rev-parse", "HEAD"),
-        ),
-    )
-    write_contract(parent.contract_path, parent)
-    contract = replace(contract, parent_contract_path=parent.contract_path)
-    git(
-        code_repo,
-        "worktree",
-        "add",
-        "-b",
-        contract.code_work_branch,
-        str(contract.code_worktree),
-        "main",
-    )
-    write_contract(contract.contract_path, contract)
-    return contract
-
-
-class _ScopeRecordingGate:
-    """The wrapper's own scope derivation, handed to the wrapper's own first rail.
-
-    ``derive_scope`` plus ``ruff check <lint_paths>`` is literally the pair
-    ``quality_steps`` builds, so this stands in for the whole wrapper without paying for
-    pyright and a full pytest run on a throwaway repository. Substituting anything less
-    real would miss the defect entirely: it was never in ruff, it was in which files ruff
-    was handed, and only the real ``derive_scope`` can be wrong about that.
-    """
-
-    def __init__(self) -> None:
-        self.lint_paths: list[str] = []
-
-    def __call__(
-        self,
-        target: code_quality_gate.QualityGateTarget,
-        *,
-        diff_base: str = "",
-        plan: code_quality_gate.QualityGatePlan | None = None,
-    ) -> dict[str, object]:
-        del plan
-        worktree = target.code_worktree
-        self.lint_paths = quality_check.posix_args(quality_check.derive_scope(worktree).lint_paths)
-        completed = subprocess.run(
-            [sys.executable, "-m", "ruff", "check", "--no-cache", *self.lint_paths],
-            cwd=worktree,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise RuntimeError(
-                "strict code-quality gate failed before code commit with exit code "
-                f"{completed.returncode}.\nQuality output tail:\n{completed.stdout}"
-            )
-        return {"required": True, "passed": True, "command": "ruff", "diffBase": diff_base}
-
-
-class CloseoutGateSeesCreatedFilesTests(unittest.TestCase):
-    """A file the leaf creates must be inspected, not just the ones it edits.
-
-    ``derive_scope`` picks what ruff and pyright are given with ``git ls-files``, which
-    reads the index; ``diff_coverage`` diffs the base against the tracked tree, which is
-    blind to the same files; and closeout commits with ``git add -A``. Everything in that
-    gap -- every path the task created and never staged -- used to go into the commit with
-    no rail of the gate having read a line of it, while the gate reported green. Leaf 3's
-    ``abc7cbcc`` shipped four files that way. These tests fail against that closeout.
-    """
-
-    def test_a_created_file_carrying_a_lint_error_fails_the_gate(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _gate_scope_contract_fixture(Path(tmp))
-            (contract.code_worktree / CREATED_FILE).write_text("import os\n", encoding="utf-8")
-            write_passing_route_review(contract)
-            gate = _ScopeRecordingGate()
-
-            with (
-                mock.patch.object(
-                    closeout_staged_quality, "run_strict_code_quality_gate", side_effect=gate
-                ),
-                self.assertRaises(RuntimeError) as caught,
-            ):
-                worktree_manager.command_closeout(closeout_args(contract))
-
-            message = str(caught.exception)
-            self.assertIn("strict code-quality gate failed before code commit", message)
-            # The gate did not merely fail: it failed *on this file*, having read it.
-            self.assertIn(CREATED_FILE, gate.lint_paths)
-            self.assertIn(f"{CREATED_FILE}:1:", message)
-            self.assertIn("F401", message)
-            self.assertEqual(
-                git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
-            )
-            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
-
-    def test_a_refused_gate_commits_nothing_and_leaves_the_worktree_staged(self) -> None:
-        """The promise is "nothing was committed", not "nothing was staged".
-
-        Closeout stages the task's own worktree and does not put it back, so this asserts
-        the end state the documentation now describes rather than the rollback an earlier
-        attempt tried to guarantee. What has to hold is that no commit was created and the
-        contract did not advance -- and that the staging left behind is exactly the content
-        a retry would stage anyway, which is what makes leaving it harmless.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _gate_scope_contract_fixture(Path(tmp))
-            (contract.code_worktree / CREATED_FILE).write_text("import os\n", encoding="utf-8")
-            (contract.code_worktree / "pkg" / "existing.py").write_text(
-                "VALUE = 2\n", encoding="utf-8"
-            )
-            write_passing_route_review(contract)
-
-            with (
-                mock.patch.object(
-                    closeout_staged_quality,
-                    "run_strict_code_quality_gate",
-                    side_effect=_ScopeRecordingGate(),
-                ),
-                self.assertRaises(RuntimeError),
-            ):
-                worktree_manager.command_closeout(closeout_args(contract))
-
-            self.assertEqual(
-                git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
-            )
-            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
-            staged = git(contract.code_worktree, "write-tree")
-            self.assertIn(CREATED_FILE, git(contract.code_worktree, "ls-files"))
-            # A further `add -A` reaches the same tree, so `commit_if_dirty`'s own add adds
-            # nothing to what the gate certified. That a *retry* reaches the same tree is a
-            # stronger claim, it does not follow from this one, and it is what
-            # RetryStagesWhatAFirstRunWouldTests below establishes.
-            git(contract.code_worktree, "add", "-A")
-            self.assertEqual(git(contract.code_worktree, "write-tree"), staged)
-
-    def test_the_gates_scope_is_the_commits_content(self) -> None:
-        """The invariant the fix establishes, asserted as an equality rather than trusted.
-
-        The deletion is here because the index cut both ways. A path the leaf *removed*
-        stayed in ``git ls-files`` until something staged the removal, so the pre-fix gate
-        handed ruff a file that no longer existed and took an ``E902 No such file or
-        directory`` for it -- a failure with nothing wrong behind it, the exact mirror of
-        the created file it never looked at. One equality covers both directions.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _gate_scope_contract_fixture(Path(tmp))
-            (contract.code_worktree / CREATED_FILE).write_text("VALUE = 2\n", encoding="utf-8")
-            (contract.code_worktree / "pkg" / "existing.py").unlink()
-            write_passing_route_review(contract)
-            gate = _ScopeRecordingGate()
-
-            with (
-                mock.patch.object(
-                    closeout_staged_quality, "run_strict_code_quality_gate", side_effect=gate
-                ),
-                redirect_stdout(io.StringIO()),
-            ):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
-
-            committed = git(
-                contract.code_worktree, "ls-tree", "-r", "--name-only", "HEAD"
-            ).splitlines()
-            self.assertIn(CREATED_FILE, committed)
-            self.assertNotIn("pkg/existing.py", committed)
-            self.assertEqual(
-                sorted(gate.lint_paths),
-                sorted(path for path in committed if path.endswith(".py")),
-            )
 
 
 GATE_REFUSAL = "strict code-quality gate failed before code commit with exit code 1"

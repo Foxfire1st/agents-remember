@@ -76,52 +76,35 @@ must not treat a vague "looks good" or their own preference as authority.
 
 Approval remains outside and before apply: preview, relay, and the applicable explicit or delegated
 authority must be complete before `worktree_closeout_apply`. Once apply begins, it reruns its
-read-only validations and — when code would commit **and this checkout carries the project-owned
-quality wrapper** — resets the index, stages the whole task worktree, and runs the leaf
-change-set-scoped quality contract (`--targeted`) over exactly that staged content as the first
+read-only validations and — when code would commit **and repository policy configures an integrated
+acceptance adapter** — resets the index, stages the whole task worktree, and runs the leaf
+change-set-scoped acceptance contract over exactly that staged content as the first
 apply-time gate, before any code, memory, ledger, contract, or applied-gate **commit**. That index
 write is the one mutation that precedes the gate, and it is why the gate can see files the task
-created rather than only the ones it edited: every rail of the wrapper reads the index, and closeout
+created rather than only the ones it edited: the adapter receives that staged candidate, and closeout
 commits with `git add -A`, so anything not in the index was committed unread.
 
-**Quality altitude ladder (260731-EFA-L17).** Leaf-edge checks stay mandatory but are
-change-set-scoped: the pre-push tier and the closeout staged gate run the wrapper with
-`--targeted` (ruff over changed files, pyright over changed files plus the reverse-import closure,
-pytest over the derived test subset, coverage/CRAP over changed production modules, and the
-changed-lines coverage floor). The **full** wrapper runs exactly once per master, at the master
-integration gate, inside `worktree_integrate` itself, with host-managed RAM and swap by default.
-Constrained CI may opt into `orchestration.qualityGate.memoryCapBytes` (systemd MemoryMax scope or
-the rlimit fallback). It is
-not a leaf gate. `memory_quality_check` is explicitly carved out: it stays a per-leaf closeout
-gate. A leaf closeout that tries to skip its required checks — a changed production module with no
-derived test subset, a failed targeted run, or a missing wrapper — is refused loudly, never passed
-silently.
+**Quality altitude ladder.** Leaf acceptance stays mandatory and change-set-scoped: closeout runs
+the repository-prescribed acceptance implementation exactly once before creating the leaf code
+commit. Leaf integration lands that certified commit without rerunning acceptance. The
+repository-prescribed full check runs exactly once per master at the master integration gate;
+series/master closeout does not rerun it. `memory_quality_check` is explicitly carved out: it stays
+a per-leaf closeout gate. A missing or failed required acceptance implementation refuses loudly,
+never passes silently.
 
-For Agents Remember itself, acceptance is Dagger-only. The closeout gate invokes the
-pinned Ubuntu graph in `mode=targeted` with the contract's recorded code base as the
-mandatory `diff-base`; master integration invokes `mode=full` with the recorded super
-base. Host pytest and direct wrapper commands are diagnostics, not substitutes and not
-handoff evidence. Use `dagger call quality --help` when the public invocation needs to be
-inspected; do not reconstruct its arguments from memory.
+The concrete executor, permitted environment, command arguments, retry semantics, resource policy,
+and evidence contract belong to the resolved repository memory, especially
+`system/git-workflow.md`, `system/coding-guidelines.md`, and `system/tools.md`. Read those files and
+follow their one path. Do not infer an executor from this skill, substitute a familiar test runner,
+or add a compatibility fallback.
 
-The Python, Vitest, and Playwright harnesses fail closed outside that graph. Dagger mints a
-per-run nonce and writes a matching in-container attestation; missing or mismatched evidence
-refuses test startup. There is no host-test compatibility path or fallback.
+The durable evidence location, publication semantics, payload fields, and reclamation lifecycle
+belong to the repository's resolved acceptance policy. Relay exactly the evidence reference that
+policy requires; do not invent a universal filename or assume another repository's report store.
 
-Every completed strict wrapper invocation atomically replaces the enclosure-owned
-`reports/test-results.md` with its full output, including pytest. Passing closeout and integration
-payloads expose that path as `reportPath`; a failing gate writes it before refusing and includes the
-path in the refusal. The previous completed report remains until the next run completes, so an
-interrupted retry cannot erase the last usable evidence. Do not copy these operational reports into
-the code or memory worktree: cleanup and abandon remove the enclosure's whole `reports/` directory.
-
-The wrapper runs its cheap deterministic rails before pytest. When pytest itself passed but a
-coverage-derived rail refused, a retry may consume the wrapper's content-addressed proof: an
-exact tree skips pytest, while a test-only change reruns only the changed test modules after
-their old Coverage.py contexts are removed. This is automatic wrapper behavior. Source,
-configuration, selected-suite, runtime/environment, or artifact drift forces the ordinary
-derived suite, and an inconclusive delta automatically falls back to one full pytest selection.
-CI never reuses this local proof. `AR_QUALITY_NO_RETRY=1` forces a fresh diagnostic run.
+Any retry or proof-reuse behavior is repository policy, not seat discretion. A retry may consume
+only the evidence and conditions explicitly authorized by the repository's concrete acceptance
+implementation; otherwise rerun that implementation or fail closed.
 
 Staging is **not** undone if the gate refuses. The worktree stays fully staged, nothing is
 committed, and that is the intended end state rather than a gap: the checkout being staged is the
@@ -135,14 +118,14 @@ commit carries it. Resetting first recomputes what gets staged on every run unde
 in force at that moment, and `--mixed` is index-only, so no file content is touched.
 
 Two refusals guard that staging step, and because they guard it they run exactly where the gate
-runs. With the wrapper present, closeout refuses outright, before staging anything, when the code
+runs. With the integrated adapter present, closeout refuses outright, before staging anything, when the code
 checkout is **not** a task worktree (git reports the same `--git-dir` and `--git-common-dir`, which
 is what the repository's own checkout looks like; a series/master contract records that path), and
-when the code worktree has unresolved merge conflicts. A consuming repository carrying **no** wrapper runs
+when the code worktree has unresolved merge conflicts. A consuming repository carrying **no** adapter runs
 no gate, so neither refusal applies to it: its closeout stages nothing early and reaches the
 ordinary commit step's own `git add -A` exactly as it always has. The preview reports that state as
-`wrapper-unavailable` rather than passing it off as checked. At leaf altitude the CRAP threshold is
-mandatory over the changed production modules; at master altitude it binds over the whole diff.
+`wrapper-unavailable` rather than passing it off as checked. Repository memory owns the required
+scope, risk, and evidence thresholds at each altitude.
 
 For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
 preview/dry-run first, then call
@@ -258,8 +241,8 @@ updated during the curator's memory pass, not at the metadata-refresh step, and 
 during implementation.
 
 The change set also reads against the resolved memory layer's
-`system/coding-guidelines.md` (when present) before the closeout preview. The quality wrapper
-certifies lint, types, tests, coverage, and CRAP; it does not read for guideline adherence — a
+`system/coding-guidelines.md` (when present) before the closeout preview. The repository's
+acceptance implementation certifies its configured machine checks; it does not read for guideline adherence — a
 task identifier in a shipped comment, a new positional boolean flag, an `object`-typed boundary
 parameter, or an already-oversize file growing again all pass every rail. Read the change set's
 added lines against the guideline file- and function-size budgets, the responsibility and
@@ -297,18 +280,18 @@ closeout work resumes.
    separate curator seat create it directly)
 3. after preview and the applicable commit authority are complete, call
    `worktree_closeout_apply`; its initial checks are read-only
-4. the citation gate runs BEFORE the leaf targeted quality contract and the code commit: `range_resolution` and
+4. the citation gate runs BEFORE the leaf acceptance contract and the code commit: `range_resolution` and
    `claim_reopen` over the working tree — a changed construct whose citation is current is only
    the report-only review surface, while a stale pointer, an absent or ambiguous anchor, or
    unverifiable provenance refuses in seconds. The curator clears the same
    `memory_quality_check` during the leaf, so findings here are the exception, not the rule
-5. when code would commit and the checkout carries the wrapper, reset the index, stage the whole
-   task worktree, and run the leaf change-set-scoped quality contract (`--targeted`) over exactly
+5. when code would commit and repository policy configures integrated acceptance, reset the index, stage the whole
+   task worktree, and run the leaf change-set-scoped acceptance contract over exactly
    that staged content, before any commit; a refusal leaves the worktree staged and commits
-   nothing, and the next run's reset means it starts from the working tree either way; mandatory
-   CRAP enforcement fails every score at or above the configured threshold over the changed
-   production modules. The full wrapper is NOT a leaf gate — it runs once per master at the master
-   integration gate. A checkout with no wrapper runs no gate and commits as it always has.
+   nothing, and the next run's reset means it starts from the working tree either way. The full
+   repository check is NOT a leaf gate — it runs once per master at the master
+   integration gate. If policy requires an adapter, a missing adapter refuses; otherwise the
+   repository's documented no-adapter behavior applies and must be reported explicitly.
 6. commit code changes and capture `C2` plus its commit date
 7. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
 8. verify each changed source file's sidecar content was updated in this task (by the curator's pass
@@ -331,12 +314,12 @@ Before step 1, require the same current passing task-bound route review for ever
 1. run the same missing-onboarding and changed-sidecar preconditions before preview
 2. complete preview and the applicable explicit or delegated commit authority
 3. call `worktree_closeout_apply`; its initial validations are read-only
-4. when code would commit and the checkout carries the wrapper, reset the index, stage the whole
-   task worktree, and run the leaf change-set-scoped quality contract (`--targeted`) over exactly
+4. when code would commit and the checkout carries the integrated adapter, reset the index, stage the whole
+   task worktree, and run the leaf change-set-scoped acceptance contract over exactly
    that staged content, before any commit — a refusal leaves the worktree staged and commits
-   nothing, and the next run's reset restages from the working tree regardless — including
-   mandatory failure for every CRAP score at or above the configured threshold over the changed
-   production modules. A checkout with no wrapper runs no gate and commits as it always has.
+   nothing, and the next run's reset restages from the working tree regardless. A checkout with no
+   configured integrated adapter reports that state explicitly; repository policy decides whether
+   absence is permitted or must refuse.
 5. commit the code and internal-memory changes together
 6. update the task contract closeout state
 
@@ -370,27 +353,22 @@ verification metadata is missing, external memory is not resolved, the code and
 memory checkouts are on different selected branches, or no code or memory
 changes exist.
 
-For an Agents Remember code commit, closeout also fails without any commit when
-the leaf change-set-scoped quality contract cannot run or exits non-zero. This
-includes any CRAP score at or above the configured threshold over the changed
-production modules, and a changed production module with no derived test subset.
+For a repository whose policy requires integrated acceptance, closeout also fails without any
+commit when the leaf change-set-scoped acceptance contract is unavailable or exits non-zero.
 It is "without any
 commit" rather than "without mutation": closeout resets the index and stages the
 whole task worktree before the gate so the gate can see created files, and
 **leaves it staged** when the gate refuses. Nothing needs undoing — the next run
 resets and restages from the working tree, so it reaches the index a first run
 would have reached, and `commit_if_dirty` stages everything regardless. Fix the
-reported source, test, coverage, or environment issue, rerun the strict wrapper
+reported source, test, coverage, or environment issue, rerun the repository-prescribed acceptance
 and closeout preview, and only then retry apply; never bypass the failure with a
 direct commit.
 
-The next two refusals are preconditions of that staging step, so they run where
-the gate runs — that is, when code would commit and this checkout carries the
-wrapper at `mcp/src/agents_remember/code_quality/check.py`. They are not
-closeout-wide preconditions: a consuming repository that carries no wrapper runs
-no gate, is not staged early, and reaches the ordinary commit step's own
-`git add -A` exactly as it did before the gate existed. The preview reports that
-as `wrapper-unavailable`.
+The next two refusals are preconditions of that staging step, so they run where the integrated gate
+runs. A repository whose policy does not require or provide that adapter reaches the ordinary
+commit step. A repository that requires the adapter refuses if the candidate removes or disables
+   it; a candidate cannot turn required acceptance into an optional no-adapter result.
 
 Where the gate runs, closeout refuses before staging anything when the code
 checkout is not a task worktree. The test is git's own: in a linked worktree
@@ -438,14 +416,13 @@ curator seat runs that skill itself.
 4. The `c-12-closeout` skill must not commit without the applicable authority after a closeout
    preview: explicit developer commit approval for standalone/final work, or recorded delegated
    series authority for subordinate accepted-series work.
-5. The `c-12-closeout` skill must not create an Agents Remember code commit until the leaf
-   change-set-scoped quality contract (`--targeted`), including mandatory CRAP enforcement over
-   the changed production modules, passes in the current worktree. The full wrapper belongs to the
+5. The `c-12-closeout` skill must not create a code commit until the repository-prescribed leaf
+   change-set-scoped acceptance contract passes for the current candidate. The full check belongs to the
    master integration gate only.
 6. The `c-12-closeout` skill must not defer or skip `memory_quality_check`; it stays a per-leaf
-   closeout gate even though the full quality wrapper moved to the master integration gate.
+   closeout gate even though full repository acceptance belongs to the master integration gate.
 7. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
 8. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
 9. The `c-12-closeout` skill must not push automatically.
 10. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
-11. The `c-12-closeout` skill must not close out a change set that contradicts the memory layer's `system/coding-guidelines.md` without the contradiction being repaired in scope or named at the commit-approval relay; the wrapper's green rails are not evidence of guideline adherence.
+11. The `c-12-closeout` skill must not close out a change set that contradicts the memory layer's `system/coding-guidelines.md` without the contradiction being repaired in scope or named at the commit-approval relay; green acceptance evidence is not evidence of guideline adherence.

@@ -273,8 +273,9 @@ architect. This spawned backend seat does not run flat hat-collapse (see The Hat
 subordinate execution without repeated developer formality. Managers may close out and integrate
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
 manager/worker hat, finalize/cleanup subordinate edges, and integrate completed masters into the
-super branch under the accepted-series authority. Run the preview/checks (a code commit's quality
-evidence is the resolved `system/tools.md` wrapper, which closeout runs at the gate — relay its
+super branch under the accepted-series authority. Run the preview/checks (a code commit's acceptance
+evidence comes from the implementation resolved through `system/tools.md`, which closeout runs at
+the gate — relay its
 result with the edge) and record the authority
 source in the intent note or decision log; do not stop merely because the next operation creates a
 commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
@@ -330,27 +331,16 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    Setting `retirement.autoCloseCompletedSeats=false` restores landed/archive behavior for the
    three automatic leaf-altitude roles; it never makes manager/orchestrator automatic targets.
 
-**Quality altitude ladder (260731-EFA-L17).** The full quality wrapper is owned by the master
-integration gate: `worktree_integrate` on a master/series contract runs it exactly once, inside
-the integration step, with host-managed RAM/swap by default; constrained CI may opt into
-`orchestration.qualityGate.memoryCapBytes`. Leaf closeouts and leaf integrations run only the change-set-scoped
-contract (`--targeted`), and `memory_quality_check` stays a per-leaf closeout gate. Do not run a
-separate full wrapper per leaf — that is the waste the ladder removes.
+**Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
+acceptance exactly once. Leaf integration lands that certified commit without a rerun. The
+repository-prescribed full check runs exactly once per master at the master integration gate;
+series/master closeout does not spend it. `memory_quality_check` stays a per-leaf closeout gate.
+Do not run a separate full check per leaf or add integration-time reruns.
 
-For Agents Remember, both altitudes are accepted only from the pinned Dagger Ubuntu
-graph: `mode=targeted` with the recorded master base for leaf/focused work, then
-`mode=full` with the recorded super base at master integration. Host pytest and direct
-wrapper invocations are diagnostic only. Both Dagger calls require `diff-base`; use
-`dagger call quality --help` as the executable contract rather than a remembered command.
-
-The wrapper itself runs inexpensive rails first and pytest as its final subprocess; CRAP and
-changed-lines coverage then score the new pytest coverage artifact. If pytest passed and only a
-coverage-derived rail refused, a later local invocation may reuse the content-addressed proof:
-an exact tree skips pytest, while a test-only delta strips those tests' old contexts and reruns
-only those modules. Source/config/environment changes fail closed to the normal suite, and a
-delta that cannot prove the coverage rails automatically falls back to one full pytest run. This
-is pipeline behavior, not a manager/worker discretion or a reason to skip the wrapper. CI always
-runs fresh; `AR_QUALITY_NO_RETRY=1` is the explicit local diagnostic escape hatch.
+The concrete executor, permitted environment, command arguments, retry semantics, resource policy,
+and evidence contract belong to the repository's resolved `system/git-workflow.md`,
+`system/coding-guidelines.md`, and `system/tools.md`. Missing or failed required acceptance refuses;
+never replace it with a familiar local runner or compatibility fallback.
 
 **The topology (single home — this section owns it):**
 

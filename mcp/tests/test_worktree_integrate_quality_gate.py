@@ -399,7 +399,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             {"summary": "Sync before retrying integration.", **recovery},
         )
 
-    def test_leaf_integration_runs_the_targeted_contract(self) -> None:
+    def test_leaf_integration_reuses_closeout_acceptance_without_running_a_gate(self) -> None:
         contract = integration_contract(self.root, kind="leaf")
 
         with (
@@ -413,21 +413,56 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             result, blocked = integrate_mod._run_integration_quality_gate(contract)
 
         self.assertIsNone(blocked)
-        self.assertEqual(result, {"passed": True})
-        requires.assert_called_once_with(contract.code_worktree, code_would_commit=True)
-        (target,), kwargs = gate.call_args
-        self.assertEqual(
-            target,
-            QualityGateTarget(
-                code_worktree=contract.code_worktree,
-                worktree_group=contract.worktree_group,
+        self.assertFalse(result["required"])
+        self.assertEqual(result["status"], "certified-at-leaf-closeout")
+        self.assertEqual(result["mode"], GATE_TARGETED)
+        requires.assert_not_called()
+        gate.assert_not_called()
+
+    def test_agents_remember_master_integration_refuses_a_missing_self_owned_wrapper(
+        self,
+    ) -> None:
+        contract = integration_contract(self.root, kind="series")
+
+        with (
+            mock.patch.object(
+                integrate_mod,
+                "_integrated_code_commit",
+                return_value=("c1", None),
             ),
+            mock.patch.object(integrate_mod, "write_contract"),
+            mock.patch.object(integrate_mod, "_merge_integrated_commits") as merge,
+        ):
+            result = integrate_mod._apply_integration(
+                contract,
+                WorktreeArgs(strategy="ff-only"),
+                integrate_mod.IntegrationSources(
+                    current_code_source="c1",
+                    current_memory_source="",
+                    code_replay_required=False,
+                    memory_replay_required=False,
+                ),
+                handover_warning=None,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.payload["state"], "blocked-quality-gate")
+        self.assertIn("self-owned wrapper", str(result.payload["reason"]))
+        merge.assert_not_called()
+
+    def test_consumer_master_without_a_wrapper_reports_unavailable_without_blocking(
+        self,
+    ) -> None:
+        contract = replace(
+            integration_contract(self.root, kind="series"),
+            repo_name="consumer-repo",
         )
-        plan = kwargs["plan"]
-        assert isinstance(plan, QualityGatePlan)
-        self.assertEqual(plan.mode, GATE_TARGETED)
-        self.assertEqual(kwargs["invocation"], "leaf-integration")
-        self.assertEqual(kwargs["diff_base"], "c0")
+
+        result, blocked = integrate_mod._run_integration_quality_gate(contract)
+
+        self.assertIsNone(blocked)
+        self.assertFalse(result["required"])
+        self.assertEqual(result["status"], "wrapper-unavailable")
 
     def test_series_integration_runs_the_full_capped_gate(self) -> None:
         contract = integration_contract(self.root, kind="series")
@@ -461,7 +496,8 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         leaf = integration_contract(self.root, kind="leaf")
         series = integration_contract(self.root, kind="series")
 
-        self.assertEqual(integrate_mod.quality_gate_mode(leaf), GATE_TARGETED)
+        with self.assertRaisesRegex(ValueError, "reuses the exact leaf-closeout acceptance"):
+            integrate_mod.quality_gate_mode(leaf)
         self.assertEqual(integrate_mod.quality_gate_mode(series), GATE_FULL)
 
     def test_quality_gate_memory_cap_reads_the_settings_owned_value(self) -> None:
@@ -483,8 +519,8 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
         self.assertIsNone(integrate_mod._quality_gate_memory_cap(contract))
 
-    def test_a_refused_gate_blocks_integration_without_merging(self) -> None:
-        contract = integration_contract(self.root, kind="leaf")
+    def test_a_refused_master_gate_blocks_integration_without_merging(self) -> None:
+        contract = integration_contract(self.root, kind="series")
 
         def failing_gate(*_args: object, **_kwargs: object) -> dict[str, object]:
             raise RuntimeError("strict code-quality gate failed before code commit")

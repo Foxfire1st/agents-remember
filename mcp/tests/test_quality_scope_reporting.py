@@ -19,7 +19,6 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.code_quality import check, diff_coverage, scope, scope_reporting
-from agents_remember.worktrees.modules import code_quality_gate
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ESLINT_EXECUTABLE = REPOSITORY_ROOT / "dashboard/node_modules/.bin/eslint"
@@ -608,10 +607,7 @@ class CallerProvenanceTests(unittest.TestCase):
             scope_reporting.validate_invocation_environment(environment)
 
     def test_closeout_labels_the_already_staged_candidate(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            environment = code_quality_gate.quality_environment(
-                Path(tmp), reports_root=Path(tmp) / "enclosure" / "reports"
-            )
+        environment = {scope_reporting.INVOCATION_ENV: "closeout-staged"}
 
         self.assertEqual(environment[scope_reporting.INVOCATION_ENV], "closeout-staged")
         self.assertIn("staged candidate", scope_reporting.invocation_description(environment))
@@ -693,7 +689,7 @@ class CallerProvenanceTests(unittest.TestCase):
         ):
             self.assertIn(name, line)
 
-    def test_randomized_pytest_and_every_workflow_result_rail_share_the_contract(self) -> None:
+    def test_randomized_pytest_and_dagger_share_the_contract_while_ci_stays_non_test(self) -> None:
         line = scope_reporting.randomized_pytest_scope_line(REPOSITORY_ROOT, "260731")
         self.assertIn("scope: randomized-pytest", line)
         self.assertIn("seed=260731", line)
@@ -702,7 +698,8 @@ class CallerProvenanceTests(unittest.TestCase):
         workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("dagger/dagger-for-github", workflow)
+        self.assertNotIn("dagger/dagger-for-github", workflow)
+        self.assertIn("./.githooks/_gate.sh targeted", workflow)
         self.assertFalse(
             any(
                 "agents_remember.code_quality.check" in block

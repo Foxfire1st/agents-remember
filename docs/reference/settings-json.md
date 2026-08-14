@@ -433,18 +433,16 @@ passed smoke.
 ### orchestration.qualityGate
 
 `orchestration.qualityGate` selects the canonical executor and owns optional
-full-wrapper resource overrides (260731-EFA-L17, L23, L24). The full wrapper
-runs exactly once per master, at the master integration gate. Pytest keeps
-`-n=auto` in either executor. The default `dagger` executor uses the pinned clean Ubuntu
-tools, available RAM, and configured swap. The `dagger` executor reconstructs
-the exact staged candidate inside the pinned clean Ubuntu graph used by GitHub,
+full-wrapper resource overrides. The full wrapper runs exactly once per master, at the master
+integration gate. The only accepted executor is the pinned Dagger clean-Ubuntu graph; GitHub PR
+checks do not run it. Dagger reconstructs the exact staged candidate,
 including the real read-only Codex protocol probe, and exports its current and
 final evidence into the owning enclosure's self-overwriting `reports/` files.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `executor` | `"dagger"` | The only accepted value is `"dagger"`, which runs the canonical wrapper in the pinned clean Ubuntu graph. Host-local wrapper runs use the separately named diagnostic entry point and are not configured as lifecycle acceptance. An unavailable Dagger engine is an error, not a fallback to local execution. |
-| `memoryCapBytes` | omitted (host-managed) | Optional hard cap for constrained CI. On hosts with systemd the integration step uses `MemoryMax=<bytes>` but leaves swap under the host's normal policy. Otherwise it applies a POSIX `RLIMIT_AS` limit to the wrapper and its rail subprocesses. A capped failure names this policy key. Positive integer when present. |
+| `executor` | `"dagger"` | The only accepted value is `"dagger"`, which runs the canonical wrapper in the pinned clean Ubuntu graph. Host wrapper and test execution refuse; an unavailable Dagger engine is an error, not a fallback. |
+| `memoryCapBytes` | omitted (container runtime manages resources) | Optional positive hard cap applied by the Dagger container's inner wrapper. A capped kill fails and names this policy key; there is no host systemd/RLIMIT execution path. |
 
 ```jsonc
 "orchestration": {
@@ -455,11 +453,10 @@ final evidence into the owning enclosure's self-overwriting `reports/` files.
 }
 ```
 
-The executor applies to lifecycle-owned leaf and master quality runs. The memory
-cap remains a full-master resource policy; targeted pre-push, leaf-closeout, and
-leaf-integration selections do not turn it into a smaller test contract. An
-explicit cap is an opt-in restriction, not the default resource policy; the gate
-treats a capped kill as a failure, never a skip.
+The executor applies to lifecycle-owned leaf-closeout and master-integration acceptance. The
+memory cap remains a full-master resource policy; deterministic pre-push checks and leaf
+integration run no acceptance. An explicit cap is an opt-in restriction, not the default resource
+policy; the gate treats a capped kill as a failure, never a skip.
 
 ### orchestration.concurrency, orchestration.spawn
 

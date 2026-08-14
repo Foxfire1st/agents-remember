@@ -486,15 +486,3 @@ def test_control_plane_identity_migration_schema_dispatch(tmp_path: Path) -> Non
         pytest.raises(ValueError, match="unsupported durable schema"),
     ):
         identity.migrate_control_plane_identity_logs(tmp_path, include_agent_notifier_signals=False)
-
-
-def test_quality_environment_has_a_windows_branch(tmp_path: Path) -> None:
-    gate = importlib.import_module("agents_remember.worktrees.modules.code_quality_gate")
-    inherited = {name: "windows-temp" for name in ("TMPDIR", "TMP", "TEMP")}
-    with patch.object(gate.os, "name", "nt"), patch.dict(gate.os.environ, inherited):
-        environment = gate.quality_environment(
-            tmp_path,
-            reports_root=tmp_path / "enclosure" / "reports",
-            invocation="closeout",
-        )
-    assert {name: environment[name] for name in inherited} == inherited

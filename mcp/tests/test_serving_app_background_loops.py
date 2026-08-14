@@ -30,6 +30,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import tracemalloc
 import unittest
 from collections.abc import Callable
@@ -219,6 +220,39 @@ class MetricsLoopTests(unittest.IsolatedAsyncioTestCase):
         current = self.store.read_current()
         assert current is not None
         self.assertEqual(current["sampledAt"], "2026-07-31T00:00:02+00:00")
+
+    async def test_cancellation_drains_an_inflight_metrics_write_before_returning(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        original_record = self.store.record
+
+        def record(snapshot: MetricsSnapshot) -> None:
+            entered.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("test did not release the in-flight metrics write")
+            original_record(snapshot)
+
+        with (
+            mock.patch.object(
+                lifespan_module,
+                "sample_provider_containers",
+                return_value=self._snapshot("2026-08-14T00:00:00+00:00"),
+            ),
+            mock.patch.object(self.store, "record", side_effect=record),
+        ):
+            task = asyncio.create_task(_metrics_loop(_config(self.tmp), self.store))
+            await _until(entered.is_set, what="the metrics writer to enter its worker thread")
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        current = self.store.read_current()
+        assert current is not None
+        self.assertEqual(current["sampledAt"], "2026-08-14T00:00:00+00:00")
 
 
 class AgentNotifierLoopTests(unittest.IsolatedAsyncioTestCase):

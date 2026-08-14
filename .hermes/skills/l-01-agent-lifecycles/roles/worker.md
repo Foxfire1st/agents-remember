@@ -49,7 +49,7 @@ says otherwise. You edit nothing outside your named surfaces.
 - Read the memory layer's `system/coding-guidelines.md` (the brief names the path) **before your
   first edit** — the closeout chain judges your diff against it: file/function budgets,
   responsibility and anti-pattern rules, source-comment scope, typed-boundary (DTO) rules, and the
-  D1/D2/D3 stability doctrine. The quality wrapper does not read for any of this, so green rails
+  D1/D2/D3 stability doctrine. The acceptance implementation does not read for any of this, so green evidence
   prove nothing here. A conflict between the guidelines and the leaf plan is an escalation to the
   owning seat, never a silent choice.
 - Retrieval when the leaf needs it: `grepai_search` (semantics), `cgc_*` (relationships) — both
@@ -70,18 +70,16 @@ says otherwise. You edit nothing outside your named surfaces.
 
 ### 4 — Checks (green before you report)
 
-Run what the brief prescribes and record the exact commands + outcomes for the report. Under the
-quality altitude ladder (260731-EFA-L17), leaf checks are change-set-scoped: the pre-push tier and
-the closeout staged gate run `agents_remember.code_quality.check --targeted` (changed files +
-reverse-import closure + derived test subset), and `memory_quality_check` stays a per-leaf
-closeout gate. The **full** wrapper is not a leaf check: it runs once per master, at the master
-integration gate, with host-managed RAM/swap by default. A red check you cannot fix inside the leaf's scope is an
-escalation, not a workaround.
+Run what the brief prescribes and record the exact commands + outcomes for the report. The
+repository's resolved memory — especially `system/git-workflow.md`, `system/coding-guidelines.md`,
+and `system/tools.md` — owns the concrete test implementation, permitted environment, arguments,
+and evidence contract. Do not substitute a familiar runner or invent a fallback.
 
-In the Agents Remember repository, the prescribed focused/leaf check means Dagger
-`mode=targeted` with the recorded leaf base as `diff-base`. Direct host pytest or wrapper
-runs may diagnose a failure but never satisfy the check. Inspect
-`dagger call quality --help` if the invocation contract is unclear; do not guess it.
+Under the quality altitude ladder, leaf acceptance is change-set-scoped and runs exactly once at
+leaf closeout. Leaf integration lands that certified commit without rerunning acceptance. The
+full-repository check is not a leaf check: it runs exactly once per master at the master integration
+gate. `memory_quality_check` stays a per-leaf closeout gate. A red check you cannot fix inside the
+leaf's scope is an escalation, not a workaround.
 
 ### 5 — The Turn Report (mandatory, your last act)
 

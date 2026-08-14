@@ -77,6 +77,26 @@ def _route_review_contract(coord: Path):
 
 
 class ApplicationTests2(ApplicationTests):
+    def test_master_closeout_does_not_require_leaf_route_review(self) -> None:
+        contract = _route_review_contract(self.coord)
+        (contract.code_worktree / "changed.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+        with (
+            mock.patch(
+                "agents_remember.worktrees.route_review.code_change_present"
+            ) as candidate_probe,
+            mock.patch(
+                "agents_remember.worktrees.route_review.resolve_terminal_leaf_doc"
+            ) as leaf_probe,
+        ):
+            self.assertEqual(
+                require_current_route_review(replace(contract, kind="series", leaf_id="")),
+                {"required": False, "status": "not-required-master-altitude"},
+            )
+
+        candidate_probe.assert_not_called()
+        leaf_probe.assert_not_called()
+
     def test_route_review_is_plane_stamped_to_the_current_tree_and_rendered(self) -> None:
         contract = _route_review_contract(self.coord)
         created = task_doc_tool(

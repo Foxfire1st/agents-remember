@@ -11,10 +11,10 @@ memory cap (``--memory-cap-bytes`` / ``orchestration.qualityGate.memoryCapBytes`
 The wrapper reports relevant untracked files separately because the index and diff
 omit them.
 
-Local retries can reuse a content-addressed successful pytest proof when the exact tree
-is unchanged or only selected test modules changed. Test-delta reuse strips their prior
-Coverage.py contexts before appending fresh data; any ambiguity runs fresh, and CI never
-reuses local proof.
+Nonce-attested Dagger retries can reuse a content-addressed successful pytest proof when the exact
+tree is unchanged or only selected test modules changed. Test-delta reuse strips their prior
+Coverage.py contexts before appending fresh data; any ambiguity runs fresh. The wrapper itself
+refuses before scope or retry planning outside the graph.
 
 Each rail prints its actual input, config, nonzero population or result denominator, and
 explicit result. Missing/vacuous inputs and tool failures refuse. Findings are remediated
@@ -43,8 +43,10 @@ from agents_remember.code_quality import (
     scope_reporting,
     targeted,
 )
-from agents_remember.code_quality import (
-    scope as quality_scope,
+from agents_remember.code_quality import scope as quality_scope
+from agents_remember.code_quality.dagger_environment import (
+    DaggerEnvironmentError,
+    require_dagger_test_environment,
 )
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.platform_subprocess import native_subprocess_environment
@@ -854,8 +856,8 @@ def build_parser() -> argparse.ArgumentParser:
             "cyclomatic complexity and maintainability index are printed as a report "
             "only -- radon exits 0 whatever it finds, so it cannot fail this gate. Scope "
             "orders cheap deterministic subprocesses before pytest; CRAP and diff coverage "
-            "then consume pytest's branch data. Local exact/test-only retries are "
-            "content-addressed and fail closed; CI always runs fresh. Quality scope "
+            "then consume pytest's branch data. Dagger-owned exact/test-only retry proofs are "
+            "content-addressed and fail closed; AR_QUALITY_NO_RETRY disables reuse. Quality scope "
             "is derived from the index and configured roots, not from a flag: there is "
             "no way to narrow what the gate measures. Non-ignored untracked siblings are "
             "reported as outside that measurement. No baseline, allowlist or exemption "
@@ -986,6 +988,12 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        require_dagger_test_environment(subject="Agents Remember quality wrapper")
+    except DaggerEnvironmentError as error:
+        print_line(str(error))
+        print_line("result: quality-wrapper FAIL")
+        return 1
     parser = build_parser()
     args = parser.parse_args(argv)
     native_environment = native_subprocess_environment(os.environ, temp_root=QUALITY_TEMP_ROOT)

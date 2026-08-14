@@ -12,10 +12,9 @@
 #   pre-commit -> fast tier: certifies the STAGED content with the generated-copy
 #                 checks, ruff, `ruff format --check`, and Pyright. About 20
 #                 seconds.
-#   pre-push   -> full tier: records Git's ref-update stream, then runs the whole
-#                 quality wrapper over current-checkout bytes at index-known paths.
-#                 It does not stage or claim to certify the pushed commit tree.
-#                 Its Radon steps are reports and cannot fail it.
+#   pre-push   -> targeted tier: records Git's ref-update stream, then repeats the
+#                 deterministic non-test checks over current-checkout bytes. It does
+#                 not stage, run acceptance, or claim to certify the pushed tree.
 #
 # It also points local `git blame` at .git-blame-ignore-revs, so the whole-tree
 # reformat does not become the blame answer for a fifth of the repository.
@@ -24,10 +23,9 @@
 # `git push --no-verify`, remembering that the flag disables every check rather
 # than the one that annoyed you.
 #
-# Note: this is local fast feedback only. The non-bypassable backstop is the
-# GitHub Actions "Quality checks" workflow, which runs on every branch push and
-# every pull request and is required by the branch ruleset on main, regardless of
-# local setup.
+# Note: this is local fast feedback only. GitHub's non-bypassable deterministic
+# backstop runs on pull requests, not ordinary pushes. Acceptance is separate and
+# lifecycle-owned: targeted once at leaf closeout, full once at master integration.
 
 set -e
 
@@ -35,7 +33,7 @@ root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
 git config core.hooksPath .githooks
-echo "[setup-hooks] core.hooksPath -> .githooks (fast pre-commit and full pre-push gates enabled for this clone)"
+echo "[setup-hooks] core.hooksPath -> .githooks (fast pre-commit and targeted non-test pre-push checks enabled)"
 
 # GitHub and GitLab honour .git-blame-ignore-revs on their own; local `git blame`
 # needs to be told. Without this, `git blame` answers "the 2026-07-31 reformat"

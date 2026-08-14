@@ -1,4 +1,4 @@
-"""Content-addressed pytest proof reuse for local quality-gate retries.
+"""Content-addressed pytest proof reuse inside nonce-attested Dagger retries.
 
 A full pytest pass can still be followed by a CRAP or changed-lines coverage
 failure.  When the only subsequent repository changes are selected pytest test
@@ -12,9 +12,10 @@ and prepares either:
 
 Every other change refuses reuse.  The manifest fingerprints the repository
 bytes, selected tests, resolved diff base, Python/tool versions, invocation
-environment, and measurement settings.  CI is always fresh.  Cache corruption,
-missing context data, unsupported test arguments, or any ambiguity falls back
-to the ordinary suite.
+environment, and measurement settings. The production wrapper refuses before
+this module is reached unless Dagger's environment nonce matches its attestation
+file. Cache corruption, missing context data, unsupported test arguments, or any
+ambiguity runs the ordinary suite inside that same Dagger graph.
 """
 
 from __future__ import annotations

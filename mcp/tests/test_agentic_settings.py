@@ -949,7 +949,7 @@ class SeedTests(unittest.TestCase):
 
 
 class QualityGateSettingsTests(unittest.TestCase):
-    """``orchestration.qualityGate``: optional hard cap over host-managed memory."""
+    """``orchestration.qualityGate``: optional hard cap inside the Dagger graph."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

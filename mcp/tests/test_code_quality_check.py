@@ -73,40 +73,6 @@ class CodeQualityCheckTests(unittest.TestCase):
             self.assertEqual(check.subprocess_env(config)["COVERAGE_FILE"], str(coverage_data))
             self.assertFalse(pytest_events.exists())
 
-    def test_main_uses_the_report_environment_to_select_its_native_temp_root(self) -> None:
-        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
-            report = Path(tmp) / "reports" / "quality-progress.json"
-            environment = dict(os.environ)
-            environment[check.QUALITY_PROGRESS_REPORT_ENV] = report.as_posix()
-            with (
-                mock.patch.dict(os.environ, environment, clear=True),
-                mock.patch.object(
-                    check,
-                    "native_subprocess_environment",
-                    side_effect=lambda env, *, temp_root: {**env, "TMPDIR": str(temp_root)},
-                ) as native,
-                mock.patch.object(check, "config_from_args", return_value=mock.Mock()),
-                mock.patch.object(check, "run_quality_check", return_value=0),
-            ):
-                self.assertEqual(check.main([]), 0)
-
-            self.assertEqual(native.call_args.kwargs["temp_root"], check.QUALITY_TEMP_ROOT)
-
-    def test_main_without_a_report_uses_the_native_default_temp_root(self) -> None:
-        with (
-            mock.patch.dict(os.environ, {}, clear=True),
-            mock.patch.object(
-                check,
-                "native_subprocess_environment",
-                side_effect=lambda env, *, temp_root: {**env, "TMPDIR": str(temp_root)},
-            ) as native,
-            mock.patch.object(check, "config_from_args", return_value=mock.Mock()),
-            mock.patch.object(check, "run_quality_check", return_value=0),
-        ):
-            self.assertEqual(check.main([]), 0)
-
-        self.assertEqual(native.call_args.kwargs["temp_root"], check.QUALITY_TEMP_ROOT)
-
     def test_targeted_config_keeps_the_repository_file_size_arm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -262,7 +228,7 @@ class CodeQualityCheckTests(unittest.TestCase):
         self.assertNotIn("fail-on-crap-threshold", help_text)
         self.assertIn("mandatory CRAP threshold enforcement", help_text)
 
-    def test_repository_gates_use_one_strict_dagger_authority(self) -> None:
+    def test_repository_acceptance_has_no_ci_or_host_runner(self) -> None:
         hook = (REPOSITORY_ROOT / ".githooks" / "_gate.sh").read_text(encoding="utf-8")
         workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
             encoding="utf-8"
@@ -275,11 +241,51 @@ class CodeQualityCheckTests(unittest.TestCase):
         self.assertIn("tests are Dagger-only", hook)
         self.assertNotIn("for step in lint typecheck test", hook)
         self.assertNotIn('npm --prefix dashboard run "test"', hook)
-        self.assertIn("dagger/dagger-for-github", workflow)
+        self.assertNotIn("dagger/dagger-for-github", workflow)
+        self.assertIn("./.githooks/_gate.sh targeted", workflow)
+        self.assertNotIn("pytest", workflow)
+        self.assertNotIn("npm run test", workflow)
         self.assertNotIn("agents_remember.code_quality.check", workflow)
         self.assertIn("agents_remember.code_quality.check", dagger_module)
         for content in (hook, workflow, dagger_module):
             self.assertNotIn("fail-on-crap-threshold", content)
+
+    def test_workflows_preserve_the_pr_check_and_release_only_boundaries(self) -> None:
+        workflows = REPOSITORY_ROOT / ".github" / "workflows"
+        workflow_files = sorted(path.name for path in workflows.iterdir() if path.is_file())
+        quality = (workflows / "quality-checks.yml").read_text(encoding="utf-8")
+        publish = (workflows / "publish-mcp-to-pypi.yml").read_text(encoding="utf-8")
+
+        def trigger_lines(document: str) -> tuple[str, ...]:
+            match = re.search(r"(?ms)^on:\s*\n(?P<body>.*?)(?=^[^\s#])", document)
+            self.assertIsNotNone(match)
+            assert match is not None
+            return tuple(
+                line.strip()
+                for line in match.group("body").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            )
+
+        self.assertEqual(workflow_files, ["publish-mcp-to-pypi.yml", "quality-checks.yml"])
+        self.assertEqual(trigger_lines(quality), ("pull_request:",))
+        self.assertIn("./.githooks/_gate.sh targeted", quality)
+        self.assertEqual(trigger_lines(publish), ("push:", "tags:", '- "mcp-v*"'))
+        self.assertIn("git merge-base --is-ancestor HEAD origin/main", publish)
+        all_workflows = "\n".join(
+            (workflows / name).read_text(encoding="utf-8") for name in workflow_files
+        ).lower()
+        for forbidden_class in (
+            r"\bpytest\b",
+            r"\bvitest\b",
+            r"\bplaywright\b",
+            r"agents[_-]remember\.code_quality\.check",
+            r"dagger/dagger-for-github",
+            r"\bdagger\s+call\s+quality\b",
+            r"run-gated-integration",
+            r"\bnpm(?:\s+--prefix\s+\S+)?\s+(?:run\s+)?(?:test|e2e)(?::\S+)?\b",
+        ):
+            with self.subTest(forbidden_class=forbidden_class):
+                self.assertNotRegex(all_workflows, forbidden_class)
 
     def test_git_hooks_delegate_to_the_shared_tiered_gate(self) -> None:
         hook_tiers = {"pre-commit": "fast", "pre-push": "targeted"}
@@ -295,7 +301,7 @@ class CodeQualityCheckTests(unittest.TestCase):
         gate = (REPOSITORY_ROOT / ".githooks" / "_gate.sh").read_text(encoding="utf-8")
 
         self.assertIn("run_targeted_checks", gate)
-        self.assertIn("task closeout and CI own Dagger acceptance", gate)
+        self.assertIn("leaf closeout owns targeted Dagger acceptance", gate)
         self.assertNotIn("code_quality.check --targeted", gate)
         self.assertIn("refusing host full-suite execution", gate)
         self.assertIn("usage: _gate.sh <fast|targeted|full>", gate)

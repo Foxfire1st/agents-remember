@@ -64,8 +64,8 @@ KNOWN_HARNESS_ENTRY_FIELDS = frozenset(
 )
 KNOWN_GATE_DELEGATION_FIELDS = frozenset({"policy", "kinds", "requireReviewerVerdictAtSeams"})
 KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
-# Optional hard cap for the full quality gate. When absent, host RAM and swap own
-# pressure response; this scalar remains for constrained CI environments.
+# Optional hard cap for the full Dagger quality gate. When absent, the container runtime's
+# host RAM and swap own pressure response; this scalar remains for constrained lifecycle runs.
 KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes", "executor"})
 KNOWN_LOOPS_FIELDS = frozenset({"defaults", "perLevel", "perMaster"})
 KNOWN_LOOP_DEFAULTS_FIELDS = frozenset({"maxRounds", "reviewerReuse", "complexity"})
@@ -251,10 +251,9 @@ QualityExecutor = Literal["dagger"]
 class QualityGateSettings:
     """``orchestration.qualityGate`` -- the full quality gate's resource knobs.
 
-    ``memory_cap_bytes=None`` leaves the full wrapper host-managed, including the
-    host's normal swap policy. An explicit value wraps the run in a systemd
-    ``MemoryMax`` scope when available and otherwise uses a POSIX address-space
-    rlimit (see ``kernel.memory_cap``). Targeted leaf runs never use this knob.
+    ``memory_cap_bytes=None`` leaves the full Dagger container under its runtime's
+    host-managed RAM and swap policy. An explicit value is passed into the pinned graph's
+    inner wrapper. Targeted leaf runs never use this knob.
     """
 
     memory_cap_bytes: int | None = None

@@ -36,34 +36,30 @@ stale comments created by your change.
 Do not delete migration files, generated baselines, snapshots, lockfiles, or user
 data unless explicitly requested.
 
-### Linux, WSL, And Clean Quality Boundaries
+### Acceptance Execution Boundaries
 
-Treat the subprocess environment as part of the tested contract:
+Treat the execution environment as part of the repository's acceptance contract:
 
-- Linux and WSL jobs resolve native POSIX executables. Reject Windows command
-  shims, drive paths, UNC paths, and Windows-mounted executables rather than
-  handing them to a Linux child process.
-- Put `TMPDIR`, `TMP`, `TEMP`, coverage data, progress, and test reports on
-  native POSIX storage under the owning worktree enclosure. One current report
-  replaces its predecessor; do not accumulate per-run scratch artifacts.
+- Name the permitted executor and environment explicitly, and refuse execution
+  elsewhere before any test-capable or proof-reuse path begins.
+- Put temporary data, coverage or equivalent measurement data, progress, and reports
+  under storage owned by the configured executor or worktree enclosure. One current
+  report replaces its predecessor; do not accumulate per-run scratch artifacts.
 - Describe dry-run plans symbolically. Resolve and require an executable only
   when execution starts, so a plan does not depend on unrelated host tools.
-- Use `sys.executable` and explicit environment ownership in Python tests. Do
-  not assume a checkout-local `.venv` or inherit workflow-control variables that
-  the test did not declare.
-- Keep `pytest -n=auto` in repository configuration so parallel execution is the
-  default contract rather than an agent memory requirement.
+- Make subprocess, concurrency, retry, and environment inheritance rules explicit
+  in this repository's concrete policy. Do not inherit another repository's runner
+  assumptions.
 
-For Agents Remember acceptance proof, use only the pinned Dagger Ubuntu graph:
-`mode=targeted` for a leaf/focused run and `mode=full` once at master integration.
-Both modes require the recorded source commit as `diff-base`; never infer it from the
-container checkout. A direct host pytest or wrapper invocation is diagnostic only and
-must not be reported as acceptance. Discover the live public contract with
-`dagger call quality --help` rather than relying on a remembered command.
-Materialize the exact staged candidate and a separate Git ancestry bundle; do
-not mount the live coordination root, credentials, or container socket. Bundle
-Codex in that graph and exercise the real read-only app-server protocol without
-submitting prompts. Dagger owns container construction, caching, graph progress,
-and service composition; Agents Remember retains task identity, approval,
-candidate selection, lifecycle recovery, and durable report projection. Do not
-add a direct-Docker or local compatibility runner beside it.
+## Repository-specific acceptance policy
+
+Replace this section during repository onboarding with the concrete acceptance contract for this
+repository. Name the exact executor or command, permitted environment, leaf scope, full scope,
+required base/candidate inputs, resource policy, retry rules, durable evidence, and refusal
+behavior. The lifecycle cadence is fixed: one change-set-scoped acceptance run at leaf closeout,
+no rerun at leaf integration, and one full-repository acceptance run at master integration.
+
+Do not infer an executor from another repository, add a compatibility fallback, or leave a required
+gate dependent on a file that the candidate can delete to disable its own validation. Link the
+operational invocation from `system/tools.md` and the landing boundaries from
+`system/git-workflow.md`.
