@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { requireDaggerTestEnvironment } from "./scripts/require-dagger-test-environment.mjs";
+
+requireDaggerTestEnvironment();
 
 export default defineConfig({
   testDir: "./e2e-production",

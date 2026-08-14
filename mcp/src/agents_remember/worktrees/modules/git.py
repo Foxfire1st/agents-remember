@@ -67,6 +67,18 @@ def branch_exists(repo: Path, branch: str) -> bool:
     return run_git(repo, ["rev-parse", "--verify", "--quiet", branch]).returncode == 0
 
 
+def repository_identity(repo: Path | None) -> Path | None:
+    """Resolve Git's shared object-store identity for a checkout or linked worktree."""
+
+    if repo is None or not repo.is_dir():
+        return None
+    result = run_git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    common_dir = result.stdout.strip()
+    if result.returncode != 0 or not common_dir:
+        return None
+    return Path(common_dir).resolve()
+
+
 def has_changes(repo: Path) -> bool:
     return bool(require_git(repo, ["status", "--porcelain"]))
 

@@ -702,49 +702,54 @@ class CallerProvenanceTests(unittest.TestCase):
         workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
             encoding="utf-8"
         )
-        result_rails = [
-            block
-            for block in workflow_run_blocks(workflow)
-            if "agents_remember.code_quality.check" in block
-            or re.search(r"\bpython\s+-m\s+pytest\b", block)
-            or re.search(r"\bnpm\s+run\s+", block)
-        ]
-        self.assertTrue(result_rails)
-        for block in result_rails:
-            with self.subTest(block=block):
-                if "agents_remember.code_quality.check" in block:
-                    continue
-                self.assertIn("agents_remember.code_quality.scope_reporting", block)
-                self.assertRegex(block, r"result: [a-z-]+ PASS")
-                self.assertRegex(block, r"result: [a-z-]+ FAIL")
+        self.assertIn("dagger/dagger-for-github", workflow)
+        self.assertFalse(
+            any(
+                "agents_remember.code_quality.check" in block
+                or re.search(r"\bpython\s+-m\s+pytest\b", block)
+                or re.search(r"\bnpm\s+run\s+", block)
+                for block in workflow_run_blocks(workflow)
+            )
+        )
+        dagger_module = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("agents_remember.code_quality.check", dagger_module)
+        self.assertIn('("dashboard-lint", ["npm", "run", "lint"])', dagger_module)
+        self.assertIn('("dashboard-coverage", ["npm", "run", "test:coverage"])', dagger_module)
+        self.assertIn('"--fail-on-flaky-tests"', dagger_module)
 
-    @unittest.skipUnless(ESLINT_AVAILABLE, "dashboard-local ESLint executable is unavailable")
     def test_every_dashboard_ci_rail_uses_the_shared_provenance_path(self) -> None:
-        workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
+        dagger_module = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
             encoding="utf-8"
         )
 
-        for step in ("lint", "typecheck", "test", "build", "coverage", "diff-coverage"):
+        for step in ("typecheck", "test", "build", "coverage", "diff-coverage"):
             with self.subTest(step=step):
                 line = scope_reporting.dashboard_scope_line(REPOSITORY_ROOT, step)
                 self.assertIn(f"scope: dashboard-{step}", line)
                 self.assertIn(" | input=", line)
                 self.assertIn(" | config=", line)
                 self.assertRegex(line, r"units=.*[1-9][0-9]*")
-                self.assertIn(f"dashboard --step {step}", workflow)
-                self.assertIn(f"result: dashboard-{step} PASS", workflow)
+                command = {
+                    "test": "test:coverage",
+                    "coverage": "test:coverage",
+                    "diff-coverage": "coverage:diff",
+                }.get(step, step)
+                self.assertIn(f'["npm", "run", "{command}"]', dagger_module)
 
         e2e_line = scope_reporting.dashboard_scope_line(REPOSITORY_ROOT, "e2e")
         self.assertIn("scope: dashboard-e2e", e2e_line)
         self.assertIn(" | input=", e2e_line)
         self.assertIn(" | config=", e2e_line)
         self.assertRegex(e2e_line, r"units=.*[1-9][0-9]*")
-        self.assertIn("dashboard --step e2e", workflow)
-        self.assertIn("result: dashboard-playwright PASS", workflow)
+        self.assertIn('"dashboard-e2e"', dagger_module)
+        self.assertIn('"--fail-on-flaky-tests"', dagger_module)
 
         gate = (REPOSITORY_ROOT / ".githooks/_gate.sh").read_text(encoding="utf-8")
         self.assertIn("agents_remember.code_quality.scope_reporting", gate)
-        self.assertIn("agents_remember.code_quality.check", gate)
+        self.assertNotIn("agents_remember.code_quality.check", gate)
+        self.assertIn("tests are Dagger-only", gate)
 
     def test_vacuous_dashboard_project_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

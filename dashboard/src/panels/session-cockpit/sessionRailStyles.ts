@@ -117,6 +117,8 @@ export const masterBox = css({
   borderColor: "grid",
   background: "bgPanel",
   flexShrink: 0,
+  minWidth: "0",
+  maxWidth: "100%",
 });
 export const masterHead = css({
   display: "flex",
@@ -141,6 +143,8 @@ export const masterName = css({
 export const masterBody = css({
   padding: "0.3rem",
   display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  minWidth: "0",
   gap: "0.25rem",
 });
 // Leaf clusters: indented, separated by FINE hairlines + margins — never heavy boxes (RULED).
@@ -152,6 +156,8 @@ export const leafGroup = css({
   paddingTop: "0.28rem",
   marginTop: "0.15rem",
   display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  minWidth: "0",
   gap: "0.25rem",
 });
 export const leafCaption = css({
@@ -202,10 +208,14 @@ export const groupBox = css({
   borderColor: "grid",
   background: "bgPanel",
   flexShrink: 0,
+  minWidth: "0",
+  maxWidth: "100%",
 });
 export const groupRows = css({
   padding: "0.3rem",
   display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  minWidth: "0",
   gap: "0.25rem",
 });
 // Row anatomy (RULED): a LABEL group (dot | role | title | markers | chip) and an ACTION group.

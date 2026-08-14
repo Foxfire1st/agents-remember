@@ -4,6 +4,7 @@ import json
 import runpy
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
+    LifecycleOperationRecoveryCommits,
 )
 from agents_remember.worktrees import lifecycle_operations
 from agents_remember.worktrees.lifecycle_operation_store import (
@@ -360,11 +362,20 @@ def test_cancel_before_boundary_is_task_addressed_and_kills_private_worker_group
         )
     )
 
-    with patch("agents_remember.worktrees.lifecycle_operations.os.killpg") as kill:
-        projection = cancel_operation(contract.contract_path, "closeout")
+    with (
+        patch("agents_remember.worktrees.lifecycle_operations.os.killpg") as kill,
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        projections = list(
+            pool.map(
+                lambda _: cancel_operation(contract.contract_path, "closeout"),
+                range(2),
+            )
+        )
 
-    assert projection.status == "cancelled"
-    assert not projection.cancellable
+    assert {projection.status for projection in projections} == {"cancelled"}
+    assert all(not projection.cancellable for projection in projections)
+    assert store.read().workerPid is None  # type: ignore[union-attr]
     kill.assert_called_once()
 
 
@@ -623,6 +634,44 @@ def test_operation_runtime_tracks_progress_reports_and_terminal_outcomes(
         },
     )
     assert store.read().approvalClaimed is True  # type: ignore[union-attr]
+    runtime.progress(
+        "code-commit",
+        {
+            "recovery_commits": {
+                "codeCommit": "a" * 40,
+                "memoryContentCommit": "",
+                "ledgerCommit": "",
+            }
+        },
+    )
+    runtime.progress(
+        "ledger-commit",
+        {
+            "recovery_commits": {
+                "codeCommit": "a" * 40,
+                "memoryContentCommit": "b" * 40,
+                "ledgerCommit": "c" * 40,
+            }
+        },
+    )
+    recorded = store.read()
+    assert recorded is not None and recorded.recoveryCommits is not None
+    assert recorded.recoveryCommits.codeCommit == "a" * 40
+    assert recorded.recoveryCommits.ledgerCommit == "c" * 40
+    with pytest.raises(RuntimeError, match="cannot be cleared"):
+        store.update(lambda record: record.model_copy(update={"recoveryCommits": None}))
+    with pytest.raises(RuntimeError, match="can only fill empty cells"):
+        store.update(
+            lambda record: record.model_copy(
+                update={
+                    "recoveryCommits": LifecycleOperationRecoveryCommits(
+                        codeCommit="d" * 40,
+                        memoryContentCommit="b" * 40,
+                        ledgerCommit="c" * 40,
+                    )
+                }
+            )
+        )
 
     quality = store.path.parent / lifecycle_operation_worker.QUALITY_PROGRESS_REPORT
     quality.write_text(
@@ -648,6 +697,7 @@ def test_operation_runtime_tracks_progress_reports_and_terminal_outcomes(
     recovery = store.read()
     assert recovery is not None and recovery.status == "input-required"
     assert recovery.phase == "contract-finalization"
+    assert recovery.workerPid is None
 
 
 def test_operation_runtime_heartbeat_updates_running_and_ignores_terminal_record(
@@ -680,16 +730,11 @@ def test_operation_runtime_failure_modes_and_cancelled_progress(tmp_path: Path) 
     runtime.start()
     runtime.finish({"developer_decision_required": True, "summary": "choose"}, ok=False)
     assert store.read().status == "input-required"  # type: ignore[union-attr]
-
-    store._write(
-        store.read().model_copy(  # type: ignore[union-attr]
-            update={
-                "status": "cancelled",
-                "phase": "cancelled",
-                "irreversibleBoundaryEntered": False,
-            }
-        )
-    )
+    assert store.read().workerPid is None  # type: ignore[union-attr]
+    with patch.object(lifecycle_operations, "_terminate_worker_group") as terminate:
+        cancelled = lifecycle_operations.cancel_operation(contract.contract_path, "closeout")
+    assert cancelled.status == "cancelled"
+    terminate.assert_not_called()
     with pytest.raises(lifecycle_operation_worker.OperationCancelled):
         runtime.progress("quality", {})
     runtime.finish({"ok": True}, ok=True)

@@ -11,7 +11,7 @@ reviewer has produced the verdict for the leaf, from `../templates/curator-brief
 FEEDS the curator three inputs — it never infers them from transcript memory: the leaf's **landed
 change set** (code diff over the leaf's base-to-head range, with counters/paths — the manager pulls
 this from the leaf contract's recorded range, not a guess), the **leaf task doc**, and **notes/**
-(the builder turn report and, when the leaf ran a loop, the reviewer verdict). It writes onboarding
+(the builder turn report and the mandatory candidate-bound route-review verdict). It writes onboarding
 only: file sidecars, route overviews when genuinely affected, route indexes, and the repo entity
 catalog when a real entity changed.
 
@@ -69,6 +69,11 @@ affected routes before replacing their account of current intent. Confirm the co
 memory worktree paths. If any side of the three-way comparison is missing or ambiguous enough that
 curation would become guesswork, ask the owning seat for one clarification row; do not infer a
 change set or design authority from transcript memory.
+
+Curator dispatch is admitted only after the control plane verifies the leaf's `routeReview` record
+against the exact current candidate tree and its durable evidence files. Treat that record and its
+route-coverage table as mandatory intake for every code-changing leaf, including direct and
+builder-verified tiers; loop posture changes round machinery, never this input.
 
 As the final intake action, run the full contract-scoped `memory_quality_check` and open the exact
 `reportPath` it returns. For a leaf this is the single current checklist at

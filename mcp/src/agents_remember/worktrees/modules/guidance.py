@@ -41,8 +41,17 @@ RecoveryOperation = Literal[
     "choose_stale_base_recovery",
     "choose_memory_sync_recovery",
     "sync_source_lineage",
+    "reopen_completed_task",
+    "apply_task_reopen",
+    "start_reopened_task",
+    "apply_worktree_start",
 ]
-RecoveryTool = Literal["worktree_start", "worktree_sync", "worktree_closeout_apply"]
+RecoveryTool = Literal[
+    "worktree_start",
+    "worktree_sync",
+    "worktree_closeout_apply",
+    "task_reopen",
+]
 
 
 class NextGuidance(TypedDict):

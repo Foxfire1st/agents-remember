@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
+import pytest
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -38,8 +40,12 @@ class TestClearFrozenLanding:
         contract = cast(
             WorktreeContract, SimpleNamespace(contract_path=tmp_path / "series-contract.md")
         )
-        with mock.patch.object(Path, "unlink", side_effect=OSError("nope")):
-            assert reopen._clear_frozen_landing(contract, dry_run=False) == "delete-failed"
+        with (
+            mock.patch.object(Path, "unlink", side_effect=OSError("nope")),
+            pytest.raises(OSError, match="nope"),
+        ):
+            reopen._clear_frozen_landing(contract, dry_run=False)
+        assert target.exists()
 
 
 class TestReopenBlockers:

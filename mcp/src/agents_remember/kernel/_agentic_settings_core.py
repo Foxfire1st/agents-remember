@@ -244,7 +244,7 @@ class AgentNotifierSettings:
     escalation_budget: int = DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
 
 
-QualityExecutor = Literal["local", "dagger"]
+QualityExecutor = Literal["dagger"]
 
 
 @dataclass(frozen=True)
@@ -258,7 +258,7 @@ class QualityGateSettings:
     """
 
     memory_cap_bytes: int | None = None
-    executor: QualityExecutor = "local"
+    executor: QualityExecutor = "dagger"
 
 
 @dataclass(frozen=True)

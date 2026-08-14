@@ -81,6 +81,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         decision: dict[str, Any] | None = None,
         subtask: dict[str, Any] | None = None,
         section: dict[str, Any] | None = None,
+        review: dict[str, Any] | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Author the JSON-primary task document (ar-task-document/v1) and re-render its
@@ -88,7 +89,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
-        'set_section' | 'append_decision' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        'set_section' | 'append_decision' | 'record_route_review' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
         title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
@@ -102,6 +103,9 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         file?, status?, scope?}; 'remove_subtask' (master) takes subtask={number, keep_file?} and drops that
         sub-task row AND deletes its leaf doc (json+md) unless keep_file=true; 'set_section' (master) takes
         section={heading, kind?, body?};
+        'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
+        evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
+        evidence path must be a real task-relative file. It overwrites the prior candidate's review.
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
         scalar/list updates; 'set_status' takes fields.status. Completed refuses while any declared
         step/substep (or master row) remains unresolved. dry_run=true builds + validates and
@@ -121,6 +125,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
                 decision=decision,
                 subtask=subtask,
                 section=section,
+                review=review,
             ),
             dry_run=dry_run,
         )

@@ -1,10 +1,12 @@
-"""Session-wide test setup that keeps the suite hermetic and safe to run anywhere.
+"""Dagger-only session setup that keeps the suite hermetic inside its clean graph.
 
 Fixtures commit in throwaway repositories but inherit the process environment. Git
 repo-pointer variables from a hook or shell can redirect those commands from their
 temporary ``cwd`` into a real repository and clobber it.
 
-Stripping those variables from ``os.environ`` here, at conftest import (before
+Before any of that setup, collection refuses unless the Dagger quality graph minted
+the process nonce and wrote the matching container-local attestation file. Stripping
+Git variables from ``os.environ`` here, at conftest import (before
 any test is collected or run), makes every fixture ``git`` call -- in any test
 module, via any helper -- operate on its intended temp repo no matter how or
 where the suite is launched. This is the single guard that prevents the
@@ -22,12 +24,45 @@ named and later tests are not poisoned.
 from __future__ import annotations
 
 import os
+import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from unittest import mock
 
 import pytest
+
+DAGGER_TEST_ATTESTATION_ENV = "AR_DAGGER_TEST_ATTESTATION"
+DAGGER_TEST_ATTESTATION_PATH = Path("/tmp/ar-quality/dagger-test-attestation")
+
+
+def dagger_test_environment_error(
+    environ: Mapping[str, str],
+    attestation_path: Path = DAGGER_TEST_ATTESTATION_PATH,
+) -> str | None:
+    """Return why this process is not the nonce-attested Dagger test container."""
+    token = environ.get(DAGGER_TEST_ATTESTATION_ENV, "")
+    if re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        return f"{DAGGER_TEST_ATTESTATION_ENV} is absent or invalid"
+    try:
+        recorded = attestation_path.read_text(encoding="utf-8")
+    except OSError as error:
+        return f"Dagger attestation file is unavailable: {error}"
+    if recorded != token:
+        return "Dagger environment and attestation-file nonces do not match"
+    return None
+
+
+def require_dagger_test_environment() -> None:
+    """Refuse collection outside the pinned Dagger quality graph."""
+    if error := dagger_test_environment_error(os.environ):
+        raise pytest.UsageError(
+            "Agents Remember tests are Dagger-only; refusing host execution: "
+            f"{error}. Run the pinned `dagger call quality ...` graph."
+        )
+
+
+require_dagger_test_environment()
 
 # Pin the checkout under test ahead of any editable-install ``.pth`` entry. Without this, invoking
 # the canonical ``pytest mcp/tests`` command from a worktree can import the main checkout instead of

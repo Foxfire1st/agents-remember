@@ -44,7 +44,7 @@ below, then stop.
 ## Task inputs
 - Leaf task doc: `<leaf-doc-path>` (read it first — objective, requirements, decision log).
 - notes/: `<series-notes-path>` — the builder turn report
-  (`notes/reports/<leaf-id>-worker-report.md`), the reviewer verdict when this leaf ran a loop, and
+  (`notes/reports/<leaf-id>-worker-report.md`), the mandatory route-review verdict, and
   any other task-local notes naming a factual current-state clarification.
 
 ## Three-way intent inputs
@@ -161,8 +161,8 @@ send a blocker report instead of a completion report.
 - Pull the change-set counters/paths from the leaf's actual landed range (the leaf contract's
   recorded base commit through the builder's current HEAD/worktree state) — do not hand the curator
   a stale or guessed diff.
-- Attach the builder turn report and (when the leaf ran a loop) the reviewer verdict as the notes/
+- Attach the builder turn report and the candidate-bound route-review verdict as the notes/
   inputs; the curator does not re-request evidence that already exists in `notes/reports/`.
 - Deliver as an echo-confirmed paste; only count delivery on a post-boot echo.
-- This brief runs strictly AFTER builder code exists and the reviewer verdict (when the leaf tier
-  requires one) is available — never before, and never in place of either.
+- This brief runs strictly AFTER builder code exists and `task_doc.record_route_review` has bound
+  the reviewer verdict to the current candidate tree — never before, and never in place of either.

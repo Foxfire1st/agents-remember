@@ -48,6 +48,11 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
         memory_mode is 'internal', 'external', or 'disabled'.
 
+        A leaf whose cleanup already completed must be reset explicitly through
+        task_reopen first. In that terminal state this tool returns reopen-required with
+        the exact task_reopen preview arguments instead of attempting descendant-lineage
+        checks against branches cleanup deliberately removed.
+
         Stale-base preflight (issue #54): start refuses when a source branch is behind or
         diverged from its remote tracking branch (a stale base produces wrong code and
         defeats the provider seed fast-path). On a blocked 'choose_stale_base_recovery'

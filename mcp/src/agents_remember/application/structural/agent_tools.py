@@ -20,6 +20,8 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxPoster,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.errors import AuthorityError
+from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.operator_inbox import AgentRole
@@ -42,7 +44,21 @@ from agents_remember.serving.structural_seats import StructuralSeatError, Struct
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.serving.terminal_paste import TerminalPaster
-from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.tasks.document_refs import (
+    ResolvedTaskDocument,
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
+from agents_remember.tasks.leaf_doc import (
+    TerminalLeafResolutionError,
+    resolve_terminal_leaf_doc,
+)
+from agents_remember.worktrees.modules.start_contract import (
+    MasterSeriesContractSpec,
+    ensure_master_series_contract,
+)
+from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
+from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
 @dataclass(frozen=True)
@@ -285,7 +301,8 @@ def dispatch_agent_tool(
 
     catalog, topology, resolver = _structural_context(config)
     try:
-        document = topology.resolve(request.task_document_ref).ref
+        resolved_document = topology.resolve(request.task_document_ref)
+        document = resolved_document.ref
         caller = resolve_ambient_seat(catalog, environ=runtime.environ)
         resolver.authorize_child(caller, document=document, role=request.role)
     except (AmbientSeatError, StructuralSeatError) as exc:
@@ -302,12 +319,12 @@ def dispatch_agent_tool(
             )
         )
 
-    spawned = _spawn_dispatch_child(
+    spawned = _admitted_dispatch_spawn(
         config,
         request,
         runtime,
         caller=caller,
-        document=document,
+        resolved_document=resolved_document,
     )
     if spawned.get("status") != "spawned-unbriefed":
         return _target_payload(
@@ -365,6 +382,133 @@ def dispatch_agent_tool(
             adapter_state,
         )
     )
+
+
+def _admitted_dispatch_spawn(
+    config: McpRuntimeConfig,
+    request: DispatchAgentRequest,
+    runtime: StructuralAgentRuntime,
+    *,
+    caller: TerminalCatalogEntry,
+    resolved_document: ResolvedTaskDocument,
+) -> dict[str, Any]:
+    if request.role == "manager":
+        refusal = _manager_series_bootstrap_refusal(config, resolved_document)
+        if refusal is not None:
+            return {"status": refusal.status, "detail": refusal.detail}
+    refusal = (
+        _curator_route_review_refusal(config, resolved_document)
+        if request.role == "curator"
+        else None
+    )
+    if refusal is not None:
+        return {"status": refusal.status, "detail": refusal.detail}
+    return _spawn_dispatch_child(
+        config,
+        request,
+        runtime,
+        caller=caller,
+        document=resolved_document.ref,
+    )
+
+
+def _manager_series_bootstrap_refusal(
+    config: McpRuntimeConfig, resolved: ResolvedTaskDocument
+) -> StructuralOutcome | None:
+    """Create the master identity edge before lineage admits its manager seat."""
+
+    try:
+        topology = TaskDocumentTopology(config.coordination_root)
+        if topology.altitude(resolved.ref) != "master":
+            raise ValueError("manager dispatch requires a canonical master task document")
+        parent_ref = cast(TaskDocumentRef, topology.parent(resolved.ref))
+        parent = topology.resolve(parent_ref)
+        if not parent.document.integrationBranch:
+            raise ValueError(
+                f"commanding sprint {parent.ref.path} does not declare integrationBranch; "
+                "the orchestrator must preview and apply "
+                "task_doc(operation='set_field', "
+                f"repo_id='{parent.ref.repository}', task_name='{parent.path.parent.name}', "
+                "fields={'integrationBranch': '<exact existing super branch>'}) before "
+                "manager dispatch"
+            )
+        repo = require_repo(config, resolved.ref.repository)
+        ensure_master_series_contract(
+            MasterSeriesContractSpec(
+                coordination_root=config.coordination_root,
+                repo_name=repo.repo_id,
+                code_repo=repo.path,
+                memory_root=repo.memory_root,
+                task_root=resolved.path.parent,
+                task_name=resolved.path.parent.name,
+                parent_task_name=parent.path.parent.name,
+                protected_branch=parent.document.integrationBranch,
+            )
+        )
+    except (AuthorityError, OSError, RuntimeError, TaskDocumentRefError, ValueError) as exc:
+        return StructuralOutcome(
+            "dispatch_agent",
+            False,
+            "series-bootstrap-refused",
+            resolved.ref,
+            "manager",
+            str(exc),
+        )
+    return None
+
+
+def _curator_route_review_refusal(
+    config: McpRuntimeConfig, resolved: ResolvedTaskDocument
+) -> StructuralOutcome | None:
+    """Admit a curator only after the plane proves review of the current code tree."""
+    enclosures = resolved.document.enclosures
+    if len(enclosures) != 1:
+        return StructuralOutcome(
+            "dispatch_agent",
+            False,
+            "route-review-contract-ambiguous",
+            resolved.ref,
+            "curator",
+            "curator dispatch requires exactly one leaf enclosure contract",
+        )
+    try:
+        contract_path = require_within_coordination(
+            config, enclosures[0].enclosurePath, "enclosure_path"
+        )
+        contract = load_contract(contract_path)
+        resolved_leaf = resolve_terminal_leaf_doc(
+            contract.task_root,
+            contract.leaf_id,
+            asserted_path=resolved.path,
+        )
+        if (
+            resolved_leaf is None
+            or resolved_leaf[0].resolve() != resolved.path.resolve()
+            or enclosures[0].leafId != contract.leaf_id
+            or contract.contract_path.resolve() != contract_path.resolve()
+        ):
+            raise ValueError("curator task document is not bound to its canonical leaf contract")
+        require_current_route_review(contract)
+    except RouteReviewError as exc:
+        return StructuralOutcome(
+            "dispatch_agent", False, exc.status, resolved.ref, "curator", str(exc)
+        )
+    except (
+        AuthorityError,
+        ContractError,
+        OSError,
+        TerminalLeafResolutionError,
+        ValueError,
+    ) as exc:
+        return StructuralOutcome(
+            "dispatch_agent",
+            False,
+            "route-review-contract-invalid",
+            resolved.ref,
+            "curator",
+            str(exc),
+        )
+    return None
 
 
 def _message_tool(

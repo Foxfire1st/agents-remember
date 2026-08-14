@@ -27,7 +27,8 @@ class CodeQualityGateTests(unittest.TestCase):
             self.assertEqual(preview["status"], code_quality_gate.GATE_ENFORCED)
             self.assertEqual(
                 preview["command"],
-                "python -m agents_remember.code_quality.check --targeted",
+                "dagger call quality '--source=<exact-staged-candidate>' "
+                "'--repository-bundle=<exact-git-ancestry-bundle>' --mode=targeted",
             )
             self.assertEqual(preview["mode"], code_quality_gate.GATE_TARGETED)
             self.assertIn("before the code commit", str(preview["reason"]))
@@ -73,7 +74,14 @@ class CodeQualityGateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "project-owned wrapper is missing"):
                 code_quality_gate.run_strict_code_quality_gate(_quality_target(worktree))
 
-    def test_gate_runs_current_worktree_source_with_default_strict_wrapper(self) -> None:
+    def test_local_diagnostic_refuses_when_the_wrapper_is_missing(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(RuntimeError, "local quality diagnostic wrapper is missing"),
+        ):
+            code_quality_gate.run_local_quality_diagnostic(_quality_target(Path(tmp)))
+
+    def test_host_wrapper_has_a_separate_non_acceptance_diagnostic_entry_point(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
             calls: list[tuple[list[str], Path, dict[str, str]]] = []
@@ -87,13 +95,12 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate, "quality_python", return_value=Path(sys.executable)
             ):
-                result = code_quality_gate.run_strict_code_quality_gate(
+                result = code_quality_gate.run_local_quality_diagnostic(
                     _quality_target(worktree),
                     runner=runner,
                 )
 
-            self.assertTrue(result["passed"])
-            self.assertEqual(result["status"], code_quality_gate.GATE_ENFORCED)
+            self.assertEqual(result.returncode, 0)
             command, cwd, env = calls[0]
             pytest_report = worktree / "enclosure" / "reports" / "pytest-events.jsonl"
             self.assertEqual(
@@ -121,12 +128,7 @@ class CodeQualityGateTests(unittest.TestCase):
             self.assertEqual(
                 env["AR_CODEX_PROBE_REPORT"], (reports / "codex-probe.json").as_posix()
             )
-            report = worktree / "enclosure" / "reports" / "test-results.md"
-            self.assertEqual(result["reportPath"], report.as_posix())
-            report_text = report.read_text(encoding="utf-8")
-            self.assertIn("# Strict Quality Test Results", report_text)
-            self.assertIn("- Status: **passed**", report_text)
-            self.assertIn("    passed", report_text)
+            self.assertFalse((worktree / "enclosure" / "reports" / "test-results.md").exists())
 
     def test_dagger_executor_uses_the_same_staged_candidate_and_never_runs_host_rails(
         self,
@@ -136,8 +138,6 @@ class CodeQualityGateTests(unittest.TestCase):
             worktree = _checkout_with_wrapper(root / "code")
             target = _quality_target(worktree, root / "enclosure")
             completed = subprocess.CompletedProcess(["dagger"], 0, stdout="dagger passed\n")
-            host_runner = mock.Mock()
-
             with (
                 mock.patch.object(
                     code_quality_gate, "run_clean_quality", return_value=completed
@@ -156,10 +156,8 @@ class CodeQualityGateTests(unittest.TestCase):
                         executor="dagger",
                         memory_cap_bytes=2_147_483_648,
                     ),
-                    runner=host_runner,
                 )
 
-            host_runner.assert_not_called()
             request = clean.call_args.args[0]
             self.assertEqual(request.code_worktree, worktree)
             self.assertEqual(request.worktree_group, root / "enclosure")
@@ -184,21 +182,18 @@ class CodeQualityGateTests(unittest.TestCase):
             report.write_text("obsolete run\n", encoding="utf-8")
 
             outputs = iter(("first completed run\n", "second completed run\n"))
-
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                del cwd, env
-                return subprocess.CompletedProcess(command, 0, stdout=next(outputs))
-
             with mock.patch.object(
-                code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                code_quality_gate,
+                "run_clean_quality",
+                side_effect=lambda _request: subprocess.CompletedProcess(
+                    ["dagger"], 0, stdout=next(outputs)
+                ),
             ):
                 code_quality_gate.run_strict_code_quality_gate(
-                    _quality_target(worktree, worktree_group), runner=runner
+                    _quality_target(worktree, worktree_group)
                 )
                 code_quality_gate.run_strict_code_quality_gate(
-                    _quality_target(worktree, worktree_group), runner=runner
+                    _quality_target(worktree, worktree_group)
                 )
 
             report_text = report.read_text(encoding="utf-8")
@@ -219,21 +214,14 @@ class CodeQualityGateTests(unittest.TestCase):
             report.parent.mkdir(parents=True)
             report.write_text("previous completed run\n", encoding="utf-8")
 
-            def interrupted_runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                del command, cwd, env
-                raise KeyboardInterrupt
-
             with (
                 mock.patch.object(
-                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                    code_quality_gate, "run_clean_quality", side_effect=KeyboardInterrupt
                 ),
                 self.assertRaises(KeyboardInterrupt),
             ):
                 code_quality_gate.run_strict_code_quality_gate(
-                    _quality_target(worktree, worktree_group),
-                    runner=interrupted_runner,
+                    _quality_target(worktree, worktree_group)
                 )
 
             self.assertEqual(report.read_text(encoding="utf-8"), "previous completed run\n")
@@ -248,38 +236,19 @@ class CodeQualityGateTests(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
-            calls: list[list[str]] = []
-
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                calls.append(command)
-                return subprocess.CompletedProcess(command, 0, stdout="passed\n")
-
             with mock.patch.object(
-                code_quality_gate, "quality_python", return_value=Path(sys.executable)
-            ):
+                code_quality_gate,
+                "run_clean_quality",
+                return_value=subprocess.CompletedProcess(["dagger"], 0, stdout="passed\n"),
+            ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
                     diff_base="c1dc5056",
-                    runner=runner,
                 )
 
-            self.assertEqual(
-                calls[0],
-                [
-                    sys.executable,
-                    "-m",
-                    "agents_remember.code_quality.check",
-                    "--pytest-report-log",
-                    (worktree / "enclosure" / "reports" / "pytest-events.jsonl").as_posix(),
-                    "--targeted",
-                    "--diff-base",
-                    "c1dc5056",
-                ],
-            )
+            self.assertEqual(clean.call_args.args[0].diff_base, "c1dc5056")
             self.assertEqual(result["diffBase"], "c1dc5056")
-            self.assertIn("--diff-base c1dc5056", str(result["command"]))
+            self.assertIn("--diff-base=c1dc5056", str(result["command"]))
 
     def test_gate_preview_reports_the_diff_base_it_will_use(self) -> None:
         """The preview names the exact command, so a reader can rerun what will run."""
@@ -289,7 +258,7 @@ class CodeQualityGateTests(unittest.TestCase):
                 worktree, code_would_commit=True, diff_base="c1dc5056"
             )
             self.assertEqual(preview["diffBase"], "c1dc5056")
-            self.assertIn("--targeted --diff-base c1dc5056", str(preview["command"]))
+            self.assertIn("--mode=targeted --diff-base=c1dc5056", str(preview["command"]))
 
     def test_gate_command_refuses_unknown_modes(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown quality gate mode"):
@@ -301,11 +270,11 @@ class CodeQualityGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
             invalid = code_quality_gate.QualityGatePlan(executor="docker")
-            with self.assertRaisesRegex(ValueError, "unknown quality gate executor"):
+            with self.assertRaisesRegex(ValueError, "pinned Dagger executor"):
                 code_quality_gate.code_quality_gate_preview(
                     worktree, code_would_commit=True, plan=invalid
                 )
-            with self.assertRaisesRegex(ValueError, "unknown quality gate executor"):
+            with self.assertRaisesRegex(ValueError, "pinned Dagger executor"):
                 code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree), plan=invalid
                 )
@@ -322,7 +291,7 @@ class CodeQualityGateTests(unittest.TestCase):
                     "",
                     "closeout-staged",
                 )
-        self.assertEqual(command[-1], "--targeted")
+        self.assertEqual(command[-1], "--mode=targeted")
         self.assertEqual(invocation, "closeout-staged")
         self.assertIsNone(cap)
         self.assertEqual(
@@ -365,11 +334,10 @@ class CodeQualityGateTests(unittest.TestCase):
         assert isinstance(memory_cap, dict)
         self.assertEqual(memory_cap["capBytes"], 4096)
 
-    def test_full_gate_command_is_host_managed_without_an_explicit_cap(self) -> None:
-        self.assertEqual(
-            code_quality_gate._gate_command("", mode=code_quality_gate.GATE_FULL),
-            "python -m agents_remember.code_quality.check",
-        )
+    def test_full_gate_command_is_pinned_dagger_without_an_explicit_cap(self) -> None:
+        command = code_quality_gate._gate_command("", mode=code_quality_gate.GATE_FULL)
+        self.assertIn("dagger call quality", command)
+        self.assertIn("--mode=full", command)
 
     def test_full_gate_preview_names_the_memory_cap_and_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -385,18 +353,18 @@ class CodeQualityGateTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(preview["mode"], code_quality_gate.GATE_FULL)
-            self.assertIn("--memory-cap-bytes 2147483648", str(preview["command"]))
+            self.assertIn("--memory-cap-bytes=2147483648", str(preview["command"]))
             memory_cap = preview["memoryCap"]
             assert isinstance(memory_cap, dict)
             self.assertEqual(memory_cap["capBytes"], 2147483648)
-            self.assertEqual(memory_cap["policy"], "orchestration.qualityGate.memoryCapBytes")
+            self.assertEqual(memory_cap["policy"], "dagger-inner-wrapper")
             policy = preview["memoryPolicy"]
             assert isinstance(policy, dict)
             self.assertEqual(policy["mode"], "explicit-cap")
             self.assertEqual(policy["pytestProcesses"], "auto")
-            self.assertEqual(policy["swap"], "host-managed")
+            self.assertEqual(policy["swap"], "container-host-managed")
 
-    def test_full_gate_preview_without_a_cap_is_host_managed(self) -> None:
+    def test_full_gate_preview_without_a_cap_is_container_host_managed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
@@ -409,86 +377,55 @@ class CodeQualityGateTests(unittest.TestCase):
             self.assertNotIn("memoryCap", preview)
             policy = preview["memoryPolicy"]
             assert isinstance(policy, dict)
-            self.assertEqual(policy["mode"], "host-managed")
+            self.assertEqual(policy["mode"], "container-host-managed")
             self.assertEqual(policy["pytestProcesses"], "auto")
-            self.assertEqual(policy["swap"], "host-managed")
+            self.assertEqual(policy["swap"], "container-host-managed")
 
-    def test_full_gate_without_a_cap_runs_with_host_memory_and_swap(self) -> None:
+    def test_full_gate_without_a_cap_uses_container_host_memory_and_swap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
-            calls: list[list[str]] = []
-
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                del cwd, env
-                calls.append(command)
-                return subprocess.CompletedProcess(command, 0, stdout="passed\n")
-
             with mock.patch.object(
                 code_quality_gate,
-                "quality_python",
-                return_value=Path(sys.executable),
-            ):
+                "run_clean_quality",
+                return_value=subprocess.CompletedProcess(["dagger"], 0, stdout="passed\n"),
+            ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
-                    runner=runner,
                 )
 
-            self.assertEqual(
-                calls,
-                [
-                    [
-                        sys.executable,
-                        "-m",
-                        "agents_remember.code_quality.check",
-                        "--pytest-report-log",
-                        (worktree / "enclosure" / "reports" / "pytest-events.jsonl").as_posix(),
-                    ]
-                ],
-            )
+            request = clean.call_args.args[0]
+            self.assertEqual(request.mode, code_quality_gate.GATE_FULL)
+            self.assertIsNone(request.memory_cap_bytes)
             self.assertNotIn("memoryCap", result)
             policy = result["memoryPolicy"]
             assert isinstance(policy, dict)
-            self.assertEqual(policy["mode"], "host-managed")
+            self.assertEqual(policy["mode"], "container-host-managed")
             report = worktree / "enclosure" / "reports" / "test-results.md"
             report_text = report.read_text(encoding="utf-8")
-            self.assertIn("- Memory policy: `host-managed`", report_text)
-            self.assertIn("- Swap policy: `host-managed`", report_text)
+            self.assertIn("- Memory policy: `container-host-managed`", report_text)
+            self.assertIn("- Swap policy: `container-host-managed`", report_text)
 
     def test_gate_run_refuses_unknown_modes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
             with (
-                mock.patch.object(
-                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
-                ),
                 self.assertRaisesRegex(ValueError, "unknown quality gate mode"),
             ):
                 code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
                     plan=code_quality_gate.QualityGatePlan(mode="bogus"),
-                    runner=lambda command, cwd, env: subprocess.CompletedProcess(
-                        command, 0, stdout=""
-                    ),
                 )
 
     def test_full_gate_run_uses_the_planned_cap_mechanism(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
-            calls: list[list[str]] = []
-
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                calls.append(command)
-                return subprocess.CompletedProcess(command, 0, stdout="passed\n")
-
             with mock.patch.object(
-                code_quality_gate, "quality_python", return_value=Path(sys.executable)
-            ):
+                code_quality_gate,
+                "run_clean_quality",
+                return_value=subprocess.CompletedProcess(["dagger"], 0, stdout="passed\n"),
+            ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
                     diff_base="c1dc5056",
@@ -497,30 +434,25 @@ class CodeQualityGateTests(unittest.TestCase):
                         memory_cap_bytes=1024,
                         systemd_run_available=False,
                     ),
-                    runner=runner,
                 )
 
             self.assertTrue(result["passed"])
-            self.assertIn("--memory-cap-bytes", calls[0])
-            self.assertIn("1024", calls[0])
+            request = clean.call_args.args[0]
+            self.assertEqual(request.memory_cap_bytes, 1024)
             self.assertEqual(result["mode"], code_quality_gate.GATE_FULL)
             memory_cap = result["memoryCap"]
             assert isinstance(memory_cap, dict)
-            self.assertEqual(memory_cap["mechanism"], "rlimit-address-space")
+            self.assertEqual(memory_cap["mechanism"], "container-wrapper")
 
     def test_full_gate_kill_names_the_policy_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                del cwd, env
-                return subprocess.CompletedProcess(command, 137, stdout="")
-
             with (
                 mock.patch.object(
-                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                    code_quality_gate,
+                    "run_clean_quality",
+                    return_value=subprocess.CompletedProcess(["dagger"], 137, stdout=""),
                 ),
                 self.assertRaisesRegex(RuntimeError, "killed by the memory cap") as caught,
             ):
@@ -531,24 +463,19 @@ class CodeQualityGateTests(unittest.TestCase):
                         memory_cap_bytes=1024,
                         systemd_run_available=False,
                     ),
-                    runner=runner,
                 )
 
-            self.assertIn("orchestration.qualityGate.memoryCapBytes", str(caught.exception))
+            self.assertIn("dagger-inner-wrapper", str(caught.exception))
 
     def test_gate_failure_names_the_cap_when_the_scope_is_sigkilled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                del cwd, env
-                return subprocess.CompletedProcess(command, -9, stdout="")
-
             with (
                 mock.patch.object(
-                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                    code_quality_gate,
+                    "run_clean_quality",
+                    return_value=subprocess.CompletedProcess(["dagger"], -9, stdout=""),
                 ),
                 self.assertRaisesRegex(RuntimeError, "killed by the memory cap") as caught,
             ):
@@ -559,26 +486,23 @@ class CodeQualityGateTests(unittest.TestCase):
                         memory_cap_bytes=1024,
                         systemd_run_available=False,
                     ),
-                    runner=runner,
                 )
 
-            self.assertIn("orchestration.qualityGate.memoryCapBytes", str(caught.exception))
+            self.assertIn("dagger-inner-wrapper", str(caught.exception))
 
     def test_gate_failure_includes_bounded_wrapper_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
-            def runner(
-                command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> subprocess.CompletedProcess[str]:
-                del cwd, env
-                return subprocess.CompletedProcess(
-                    command, 1, stdout="\n".join(f"line-{index}" for index in range(50))
-                )
-
             with (
                 mock.patch.object(
-                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                    code_quality_gate,
+                    "run_clean_quality",
+                    return_value=subprocess.CompletedProcess(
+                        ["dagger"],
+                        1,
+                        stdout="\n".join(f"line-{index}" for index in range(50)),
+                    ),
                 ),
                 self.assertRaisesRegex(
                     RuntimeError, "strict code-quality gate failed before code commit"
@@ -586,7 +510,6 @@ class CodeQualityGateTests(unittest.TestCase):
             ):
                 code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
-                    runner=runner,
                 )
 
             self.assertNotIn("line-0", str(caught.exception))

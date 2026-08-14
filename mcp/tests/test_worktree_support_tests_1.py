@@ -181,6 +181,22 @@ class WorktreeSupport1(WorktreeSupportTests):
             (coordination_root / "memory-repos" / "ar-repo-a" / "onboarding").mkdir()
             task_root = coordination_root / "tasks" / "repo-a" / "260624_master"
             write_task_doc(
+                coordination_root / "tasks" / "repo-a" / "260624_sprint",
+                TaskDocument.model_validate(
+                    {
+                        "id": "sprint",
+                        "slug": "task",
+                        "title": "Sprint",
+                        "kind": "master",
+                        "status": "inProgress",
+                        "repo": "repo-a",
+                        "createdAt": "2026-06-24T01:00",
+                        "orchestrates": ["260624_master"],
+                        "integrationBranch": "main",
+                    }
+                ),
+            )
+            write_task_doc(
                 task_root,
                 TaskDocument.model_validate(
                     {

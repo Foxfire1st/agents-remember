@@ -3,17 +3,50 @@
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import UTC, datetime
 from typing import Annotated
 
 import dagger
-from dagger import Doc, ReturnType, check, dag, field, function, object_type
+from dagger import Doc, ReturnType, dag, field, function, object_type
 
 PLAYWRIGHT_IMAGE = (
     "mcr.microsoft.com/playwright:v1.60.0-noble@"
     "sha256:83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9"
 )
 CODEX_VERSION = "0.147.0"
+
+
+async def _run_dashboard_quality(
+    container: dagger.Container,
+) -> tuple[dagger.Container, int, list[str]]:
+    """Run every frontend rail inside the same clean Dagger environment."""
+    container = container.with_env_variable("CI", "1")
+    steps = (
+        ("dashboard-install", ["npm", "ci"]),
+        ("dashboard-lint", ["npm", "run", "lint"]),
+        ("dashboard-typecheck", ["npm", "run", "typecheck"]),
+        ("dashboard-coverage", ["npm", "run", "test:coverage"]),
+        ("dashboard-diff-coverage", ["npm", "run", "coverage:diff"]),
+        (
+            "dashboard-e2e",
+            ["npm", "run", "e2e", "--", "--fail-on-flaky-tests"],
+        ),
+        ("dashboard-build", ["npm", "run", "build"]),
+    )
+    completed: list[str] = []
+    exit_code = 0
+    for step, command in steps:
+        container = (
+            await container.with_workdir("/workspace/dashboard")
+            .with_exec(command, expect=ReturnType.ANY)
+            .sync()
+        )
+        exit_code = await container.exit_code()
+        completed.append(step)
+        if exit_code != 0:
+            break
+    return container, exit_code, completed
 
 
 @object_type
@@ -66,6 +99,7 @@ class AgentsRememberQuality:
         if memory_cap_bytes < 0:
             raise ValueError("memory_cap_bytes cannot be negative")
         reports = "/reports"
+        attempt_nonce = secrets.token_hex(16)
         container = (
             dag.container()
             .from_(PLAYWRIGHT_IMAGE)
@@ -78,11 +112,20 @@ class AgentsRememberQuality:
             .with_env_variable("TEMP", "/tmp/ar-quality")
             .with_env_variable("AR_QUALITY_INVOCATION", "ci")
             .with_env_variable("AR_QUALITY_NO_RETRY", "1")
+            .with_env_variable("AR_DAGGER_TEST_ATTESTATION", attempt_nonce)
             .with_env_variable("AR_CODEX_PROBE_MODE", "real")
             .with_env_variable("AR_CODEX_PROBE_REPORT", f"{reports}/codex-probe.json")
             .with_env_variable("AR_QUALITY_PROGRESS_REPORT", f"{reports}/quality-progress.json")
             .with_env_variable("COVERAGE_FILE", f"{reports}/coverage.data")
             .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality", reports])
+            .with_exec(
+                [
+                    "sh",
+                    "-c",
+                    "umask 077; printf '%s' \"$AR_DAGGER_TEST_ATTESTATION\" "
+                    "> /tmp/ar-quality/dagger-test-attestation",
+                ]
+            )
             .with_exec(["apt-get", "update"])
             .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
             .with_exec(
@@ -149,6 +192,7 @@ class AgentsRememberQuality:
             )
         )
         container = await container.sync()
+        container = container.with_env_variable("AR_QUALITY_ATTEMPT_NONCE", attempt_nonce)
         exit_code = await container.exit_code()
         completed = ["environment"]
         if exit_code == 0:
@@ -187,6 +231,9 @@ class AgentsRememberQuality:
             container = await container.with_exec(command, expect=ReturnType.ANY).sync()
             exit_code = await container.exit_code()
             completed.append("quality-wrapper")
+        if exit_code == 0 and mode == "full":
+            container, exit_code, dashboard_completed = await _run_dashboard_quality(container)
+            completed.extend(dashboard_completed)
         result = {
             "status": "passed" if exit_code == 0 else "failed",
             "finishedAt": datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -198,48 +245,10 @@ class AgentsRememberQuality:
             "containerSocketMounted": False,
             "completedSteps": completed,
             "exitCode": exit_code,
+            "attemptNonce": attempt_nonce,
         }
         container = container.with_new_file(
             f"{reports}/clean-quality-results.json",
             contents=json.dumps(result, indent=2, sort_keys=True) + "\n",
         )
         return QualityResult(reports=container.directory(reports), exit_code=exit_code)
-
-    # Dagger documents this exact decorator stack. The 0.21.8 PyPI SDK types
-    # ``check`` as a decorator-or-factory union that Pyright cannot narrow here.
-    @function  # pyright: ignore[reportArgumentType]
-    @check
-    async def verify(
-        self,
-        source: Annotated[
-            dagger.Directory,
-            Doc("Exact candidate source tree already supplied to the quality call."),
-        ],
-        repository_bundle: Annotated[
-            dagger.File,
-            Doc("Git bundle containing the candidate commit and its ancestry."),
-        ],
-        diff_base: Annotated[
-            str,
-            Doc("The same explicit comparison commit supplied to the quality call."),
-        ],
-        mode: Annotated[
-            str,
-            Doc("The same 'targeted' or 'full' acceptance altitude supplied to quality."),
-        ] = "full",
-        memory_cap_bytes: Annotated[
-            int,
-            Doc("The same optional container memory cap supplied to quality."),
-        ] = 0,
-    ) -> str:
-        """Fail the caller when the cached canonical quality result is not green."""
-        result = await self.quality(
-            source=source,
-            repository_bundle=repository_bundle,
-            diff_base=diff_base,
-            mode=mode,
-            memory_cap_bytes=memory_cap_bytes,
-        )
-        if result.exit_code != 0:
-            raise RuntimeError(f"clean Ubuntu quality failed with exit code {result.exit_code}")
-        return "clean Ubuntu quality passed"

@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { requireDaggerTestEnvironment } from "./scripts/require-dagger-test-environment.mjs";
+
+requireDaggerTestEnvironment();
 
 // L8's explicit performance/fetch gate stays out of the ordinary e2e suite: frame timing must run
 // alone, on one worker. `npm run perf:cockpit` also runs the rail and inspector 50/51 + 100/101

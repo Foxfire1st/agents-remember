@@ -40,7 +40,11 @@ def _attach_lifecycle_tail(
         and tool_name != "lifecycle_turn_end_notification"
     ):
         amb.resume_from_await()
-    response.nextStep = next_step_for(amb, tool_name)
+    # A refusal/recovery producer may supply an explicit nextStep alongside its top-level
+    # recovery keys. Preserve that one authority instead of overwriting it with ambient phase
+    # guidance derived from a contract the operation intentionally refused or just rewrote.
+    if response.nextStep is None:
+        response.nextStep = next_step_for(amb, tool_name)
     banner = _agent_notifier_banner(amb)
     response.agentNotifierBanner = banner
     response.supervisorBanner = banner

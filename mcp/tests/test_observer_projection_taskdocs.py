@@ -11,6 +11,9 @@ from agents_remember.serving.projections.snapshots import (
     read_series_documents,
     read_task_documents,
 )
+from agents_remember.serving.projections.snapshots_impl._common import (
+    TASK_DOCUMENT_SUMMARY_LIMIT,
+)
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -105,6 +108,11 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         root = self.coord / "tasks" / "repo-a" / "demo"
         write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # no lifecycleId
         (root / "other.json").write_text('{"schema": "other/v1"}', encoding="utf-8")
+        notes = root / "notes"
+        write_task_doc(
+            notes,
+            self._doc(id="SUPERSEDED", slug="superseded-master", kind="master"),
+        )
         nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
         self.assertEqual(len(nodes), 1)
         self.assertIsNone(nodes[0].lifecycleId)
@@ -130,6 +138,47 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         by_id = {node.id: node for node in nodes}
         self.assertEqual(by_id["SPRINT-02"].orchestrates, ["260706_management-repo"])
         self.assertEqual(by_id["D"].orchestrates, [])
+
+    def test_summary_limit_never_evicts_task_root_grouping_authorities(self) -> None:
+        sprint_root = self.coord / "tasks" / "repo-a" / "sprint"
+        master_root = self.coord / "tasks" / "repo-a" / "master"
+        write_task_doc(
+            sprint_root,
+            self._doc(
+                id="SPRINT",
+                slug="task",
+                kind="master",
+                title="Sprint",
+                orchestrates=["master"],
+            ),
+        )
+        write_task_doc(
+            master_root,
+            self._doc(id="MASTER", slug="task", kind="master", title="Master"),
+        )
+        leaves_root = self.coord / "tasks" / "repo-a" / "leaves"
+        for index in range(TASK_DOCUMENT_SUMMARY_LIMIT + 1):
+            write_task_doc(
+                leaves_root,
+                self._doc(
+                    id=f"LEAF-{index:03d}",
+                    slug=f"leaf-{index:03d}",
+                    kind="subTask",
+                    title=f"Leaf {index:03d}",
+                ),
+            )
+
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+
+        by_id = {node.id: node for node in nodes}
+        self.assertEqual(len(nodes), TASK_DOCUMENT_SUMMARY_LIMIT)
+        self.assertIn("SPRINT", by_id)
+        self.assertIn("MASTER", by_id)
+        self.assertEqual(by_id["SPRINT"].orchestrates, ["master"])
+        self.assertEqual(
+            sum(node.id.startswith("LEAF-") for node in nodes),
+            TASK_DOCUMENT_SUMMARY_LIMIT - 2,
+        )
 
     def test_leaf_contract_alone_is_not_a_task_document(self) -> None:
         contract = default_contract(

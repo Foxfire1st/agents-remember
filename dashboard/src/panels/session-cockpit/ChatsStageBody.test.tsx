@@ -102,8 +102,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // TanStack Virtualizer owns a 150 ms scroll-observer debounce. Unmount while timers are still
+  // fake, then discard that orphaned callback before restoring real time; restoring first can
+  // promote it beyond jsdom teardown, where React no longer has a `window` to schedule against.
   cleanup();
-  vi.useRealTimers();
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
   sessionStore.getState().hydrate([]);
   activeConversationStore.getState().reset();
 });
@@ -659,61 +665,57 @@ describe("ChatsStageBody view-switch scroll restore (F-ac)", () => {
 
   it("a chat left at the bottom returns to the CURRENT end — items arrived while away included — and keeps following", async () => {
     vi.useFakeTimers();
-    try {
-      vi.mocked(hasWarmConversation).mockReturnValue(true);
-      const a = bootingSession("chat-a", "ready");
-      sessionStore.getState().hydrate([a]);
-      seedWarm("chat-a"); // 3 items
-      const { getByTestId, queryByTestId, rerender } = render(stageElement(a));
-      await flushEffects();
+    vi.mocked(hasWarmConversation).mockReturnValue(true);
+    const a = bootingSession("chat-a", "ready");
+    sessionStore.getState().hydrate([a]);
+    seedWarm("chat-a"); // 3 items
+    const { getByTestId, queryByTestId, rerender } = render(stageElement(a));
+    await flushEffects();
 
-      const viewport = getByTestId("conversation-viewport");
-      pinViewportGeometry(viewport, 2000, 600);
-      // jsdom's Element.scrollTo is undefined (tanstack-virtual optional-chains through it); give
-      // the viewport a working one so the follow's end-alignment stays observable.
-      const alignedTops: number[] = [];
-      viewport.scrollTo = (({ top }: { top?: number }) => {
-        alignedTops.push(top ?? 0);
-        viewport.scrollTop = top ?? 0;
-      }) as typeof viewport.scrollTo;
+    const viewport = getByTestId("conversation-viewport");
+    pinViewportGeometry(viewport, 2000, 600);
+    // jsdom's Element.scrollTo is undefined (tanstack-virtual optional-chains through it); give
+    // the viewport a working one so the follow's end-alignment stays observable.
+    const alignedTops: number[] = [];
+    viewport.scrollTo = (({ top }: { top?: number }) => {
+      alignedTops.push(top ?? 0);
+      viewport.scrollTop = top ?? 0;
+    }) as typeof viewport.scrollTo;
 
-      // Left at the very bottom (2000 - 600 ⇒ distance 0 ≤ the follow band).
-      scrollViewportTo(viewport, 1400);
-      expect(readConversationScroll("chat-a")).toEqual({ scrollTop: 1400, atBottom: true });
+    // Left at the very bottom (2000 - 600 ⇒ distance 0 ≤ the follow band).
+    scrollViewportTo(viewport, 1400);
+    expect(readConversationScroll("chat-a")).toEqual({ scrollTop: 1400, atBottom: true });
 
-      // Away: the offset is destroyed, and two items arrive while the chat is hidden.
-      rerender(stageElement(a, false));
-      await flushEffects();
-      viewport.scrollTop = 0;
-      act(() => {
-        activeConversationStore.getState().applyPage("chat-a", page("chat-a", 5), "initial");
-      });
-      await flushEffects();
+    // Away: the offset is destroyed, and two items arrive while the chat is hidden.
+    rerender(stageElement(a, false));
+    await flushEffects();
+    viewport.scrollTop = 0;
+    act(() => {
+      activeConversationStore.getState().applyPage("chat-a", page("chat-a", 5), "initial");
+    });
+    await flushEffects();
 
-      // Back: the armed atBottom restore re-drives the CURRENT DOM end across frames, never
-      // a "N new updates" pill — then consumes once the feed settles.
-      rerender(stageElement(a));
-      await flushEffects();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(250);
-      });
-      expect(queryByTestId("conversation-new-updates")).toBeNull();
-      expect(getByTestId("conversation-viewport").scrollTop).toBe(1400); // 2000 - 600, the pinned end
+    // Back: the armed atBottom restore re-drives the CURRENT DOM end across frames, never
+    // a "N new updates" pill — then consumes once the feed settles.
+    rerender(stageElement(a));
+    await flushEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(queryByTestId("conversation-new-updates")).toBeNull();
+    expect(getByTestId("conversation-viewport").scrollTop).toBe(1400); // 2000 - 600, the pinned end
 
-      // The follow is re-armed: the next arrival is followed quietly too, to the new end.
-      alignedTops.length = 0;
-      act(() => {
-        activeConversationStore.getState().applyPage("chat-a", page("chat-a", 6), "initial");
-      });
-      await flushEffects();
-      expect(queryByTestId("conversation-new-updates")).toBeNull();
-      expect(getByTestId("conversation-viewport").scrollTop).toBe(1400);
-      // This fixture keeps scrollHeight fixed, so the current end is already 1400. The follow stays
-      // armed without issuing TanStack's former no-op scroll/reconcile cycle.
-      expect(alignedTops).toEqual([]);
-    } finally {
-      vi.useRealTimers();
-    }
+    // The follow is re-armed: the next arrival is followed quietly too, to the new end.
+    alignedTops.length = 0;
+    act(() => {
+      activeConversationStore.getState().applyPage("chat-a", page("chat-a", 6), "initial");
+    });
+    await flushEffects();
+    expect(queryByTestId("conversation-new-updates")).toBeNull();
+    expect(getByTestId("conversation-viewport").scrollTop).toBe(1400);
+    // This fixture keeps scrollHeight fixed, so the current end is already 1400. The follow stays
+    // armed without issuing TanStack's former no-op scroll/reconcile cycle.
+    expect(alignedTops).toEqual([]);
   });
 
   it("never lets the display:none collapse clobber the memory — the browser fires a scroll event on the box-less element (live Playwright repro)", async () => {

@@ -98,15 +98,15 @@ stops belong to the orchestrator via the system-specialist protocol.
 ### 2 — Leaf dispatch loop (per leaf)
 
 - **Score the leaf's loop tier at dispatch** (loop doctrine: `../SKILL.md`, The Three-Party Loop):
-  blast radius · novelty · size → **direct** (NO loop machinery: the leaf's worker implements as
-  usual — worker self-check + checks ladder + this seat's ordinary artifact review; this seat
-  still dispatches per leaf and never grows a build surface) | **builder-verified** (the worker
-  implements; this seat additionally verifies its report claim-by-claim against the artifacts; no
-  reviewer) | **full loop** (worker + independent reviewer rounds). When an orchestration task
+  blast radius · novelty · size → **direct** (ordinary build plus one mandatory independent
+  route-partitioned review; no iterative loop machinery) | **builder-verified** (the worker
+  implements; this seat additionally verifies its report claim-by-claim; the independent route
+  review still runs) | **full loop** (worker + independent reviewer rounds, with route partitioning
+  as the scope floor). When an orchestration task
   exists, its **blast-radius register is the scoring input**. Record the mark (tier + scope:
   manager | orchestrator — the owning level runs the loop with ITS agent set) on the leaf doc with
-  a decision-log entry. **A master whose leaves all score `direct` is a workflow-free manager** —
-  no loop machinery, just the dispatch-review-integrate spine below.
+  a decision-log entry. A master whose leaves all score `direct` avoids iterative full-loop
+  machinery, but never the independent post-code review gate.
 - On a full-loop leaf, run the loop with this level's controls: a round = implement → review;
   **hard cap 3 full rounds** (delta-verifies by the SAME reviewer close rounds, they do not count;
   fix rounds resume the SAME builder); **every round must shrink the finding set** — a
@@ -134,8 +134,20 @@ stops belong to the orchestrator via the system-specialist protocol.
   leaf-level review; **this is not an adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
   (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
   genuinely new changes.
+- **Dispatch the mandatory independent route review after every stable code-change session.** Build
+  the major-route partition from changed architecture/control-plane ownership, governing route
+  overviews, and the import/call graph; then dispatch the leaf reviewer chair. Its brief requires
+  one independent reviewer sub-agent per affected major route, each reading the changed files and
+  surrounding code, tests, side effects, task requirements, and current onboarding. Require the
+  verdict's route-coverage table to account for every partitioned route. A block goes back to the
+  same worker; the same route reviewer delta-verifies the repair, and any newly touched route is
+  added before a passing verdict. Direct and builder-verified tiers change depth and round
+  machinery only; neither may skip this gate. After the durable verdict and route reports exist,
+  record them with `task_doc(operation="record_route_review", review={verdict, verdictRef,
+  routes:[{route, verdict, evidenceRef}]})`. The plane stamps the current candidate tree; do not
+  supply or remember a tree hash. Curator dispatch and closeout refuse if later code invalidates it.
 - **Curator coherence pass — mandatory, not skippable.** After builder code is ready and the reviewer
-  verdict is available (when the leaf tier ran one), call `worktree_status` for the canonical leaf
+  verdict is available, call `worktree_status` for the canonical leaf
   and require its complete task-derived code and external-memory `sourceLineage` to be `current`.
   This is the last manager-owned action before onboarding begins. If super has advanced beyond the
   master, or the master has advanced beyond the leaf, run the contract-addressed `worktree_sync`,

@@ -18,6 +18,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 
@@ -74,6 +75,8 @@ class WorktreeArgs:
     # the detached worker injects these after resolving the task-bound operation record.
     operation_key: str = ""
     candidate_tree: str | None = None
+    approval_claimed: bool = False
+    recovery_commits: LifecycleOperationRecoveryCommits | None = None
     operation_progress: Callable[[str, Mapping[str, object]], None] | None = None
 
     @classmethod

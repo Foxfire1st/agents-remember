@@ -34,6 +34,22 @@ _ALLOWED: dict[LifecycleOperationStatus, frozenset[LifecycleOperationStatus]] = 
 }
 
 
+def _validate_recovery_commits_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    current_commits = current.recoveryCommits
+    if current_commits is None:
+        return
+    if updated.recoveryCommits is None:
+        raise RuntimeError("recorded lifecycle recovery commits cannot be cleared")
+    for field in ("codeCommit", "memoryContentCommit", "ledgerCommit"):
+        before = getattr(current_commits, field)
+        after = getattr(updated.recoveryCommits, field)
+        if before and after != before:
+            raise RuntimeError("recorded lifecycle recovery commits can only fill empty cells")
+
+
 def operation_record_path(worktree_group: Path, operation_kind: LifecycleOperationKind) -> Path:
     return worktree_group / "reports" / f"{operation_kind}-operation.json"
 
@@ -154,6 +170,7 @@ class LifecycleOperationStore:
             )
         if current.approvalClaimed and not updated.approvalClaimed:
             raise RuntimeError("a claimed approval cannot become unclaimed")
+        _validate_recovery_commits_transition(current, updated)
         if current.irreversibleBoundaryEntered and not updated.irreversibleBoundaryEntered:
             raise RuntimeError("an entered irreversible boundary cannot be cleared")
         if updated.status == "cancelled" and current.irreversibleBoundaryEntered:

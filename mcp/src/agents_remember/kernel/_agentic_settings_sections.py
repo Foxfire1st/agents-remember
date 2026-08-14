@@ -400,14 +400,15 @@ def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
             "orchestration.qualityGate.memoryCapBytes",
             source,
         )
-    executor: QualityExecutor = "local"
+    executor: QualityExecutor = "dagger"
     if "executor" in block:
         raw_executor = _require_string(
             block["executor"], "orchestration.qualityGate.executor", source
         )
-        if raw_executor not in {"local", "dagger"}:
+        if raw_executor != "dagger":
             raise AgenticSettingsError(
-                "orchestration.qualityGate.executor must be 'local' or 'dagger': " + source
+                "orchestration.qualityGate.executor must be 'dagger'; host-local quality is "
+                "diagnostic only and cannot authorize lifecycle acceptance: " + source
             )
         executor = cast(QualityExecutor, raw_executor)
     return QualityGateSettings(memory_cap_bytes=memory_cap_bytes, executor=executor)

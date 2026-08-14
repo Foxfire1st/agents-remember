@@ -7,6 +7,7 @@
 import { ENGINE_ROOM_SCENARIOS } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
 import type { WorkspaceProjection } from "../types/projection";
+import { FLEET_TASK_DOCUMENTS } from "../test/fixtures/catalogRows";
 import { engineRoomProjection, GALLERY } from "./fixtures";
 import {
   COCKPIT_SCENARIOS,
@@ -212,12 +213,22 @@ const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
 
 const calmProjection = GALLERY.find((entry) => entry.name === "calm")!.projection;
 const cockpitScenarios: Scenario[] = COCKPIT_SCENARIOS.map((cockpit) => {
+  const cockpitProjection =
+    cockpit.kind === "fleet-12"
+      ? {
+          ...calmProjection,
+          analytics: {
+            ...calmProjection.analytics,
+            taskDocuments: FLEET_TASK_DOCUMENTS,
+          },
+        }
+      : calmProjection;
   const projection =
     cockpit.kind === "interaction-answer"
       ? {
-          ...calmProjection,
+          ...cockpitProjection,
           lifecycles: [
-            ...calmProjection.lifecycles,
+            ...cockpitProjection.lifecycles,
             {
               id: INTERACTION_SCENARIO_GATE.lifecycleId,
               state: "blocked" as const,
@@ -247,7 +258,7 @@ const cockpitScenarios: Scenario[] = COCKPIT_SCENARIOS.map((cockpit) => {
             },
           ],
         }
-      : calmProjection;
+      : cockpitProjection;
   return {
     name: cockpit.name,
     label: cockpit.label,

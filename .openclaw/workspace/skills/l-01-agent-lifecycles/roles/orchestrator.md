@@ -238,10 +238,16 @@ sanctioned a strategist skip, this seat authors and adopts the orchestration tas
 developer-ruled plan, recording that source and adoption in the decision log. A skipped Job P
 therefore never blocks Job O.
 
-**First act — the super-branch intent:** create the super integration branch off `main` so
-masters can base off it. **A branch, not a worktree** — this seat has nothing to build at creation
-time. (Interim: until a branch-without-worktree primitive lands, the manual git + contract edge is
-acceptable and recorded in durable notes.)
+**First act — publish the super edge before dispatch:** create the super integration branch off
+`main` so masters can base off it. **A branch, not a worktree** — this seat has nothing to build at
+creation time. Then use `task_doc(operation="set_field")` on the canonical sprint document to set
+`integrationBranch` to that exact branch. Preview the task write first; apply it atomically before
+dispatching or replacing any manager. A resumed or reopened sprint whose super branch already
+exists but whose task document lacks `integrationBranch` must be migrated through that same task
+operation before manager dispatch. The field is durable task identity consumed by structural
+bootstrap and lineage enforcement; it is never a branch name a manager is expected to remember.
+(Interim: until a branch-without-worktree primitive lands, the manual git creation is acceptable,
+but the task-document publication is not optional and is recorded in the decision log.)
 
 **Dispatch loop**, dependency-ordered — the dependency graph, not habit, decides sequencing.
 Dispatch independent ready masters in parallel by default up to
@@ -251,7 +257,7 @@ name a gate, a shared-file one-writer dependency, or an explicit ruling. For eac
 `dispatch_agent` on the canonical master document with role `manager`, compiling its complete brief
 from `../templates/manager-brief.md`; the manager occupies `(master document, manager)` and the
 brief carries the load-bearing base fact: master branches off
-the **current super**, never off main);
+the exact super branch published as the sprint document's `integrationBranch`, never off main);
 process and ack the pending signals the L2 agent-notifier sweep wakes you with — turn-report
 artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
 (**watcher ban, uniform-mechanism ruling 2026-07-07:** the agent-notifier sweep is the one mechanism,

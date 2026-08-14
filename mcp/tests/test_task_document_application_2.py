@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import subprocess
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 from agents_remember.application.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
+    _enforce_route_review_authority,
+    _record_route_review,
     task_doc_tool,
 )
-from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import RouteReviewRecord, TaskDocument, read_task_doc, write_task_doc
+from agents_remember.worktrees.route_review import (
+    RouteReviewError,
+    build_route_review,
+    code_candidate_tree,
+    require_current_route_review,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -20,7 +32,253 @@ from pydantic import ValidationError
 from test_task_document import ApplicationTests, _doc
 
 
+def _route_review_contract(coord: Path):
+    repo = coord / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, text=True, capture_output=True
+    ).stdout.strip()
+    contract = default_contract(
+        ContractTask(
+            name="review-x",
+            repo_name="agents-remember",
+            coordination_root=coord,
+            workflow_kind="chat-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="review-x", leaf_id="REVIEW-X", lifecycle_id="LC-REVIEW"),
+        code=RepoBranchPlan(
+            repo_path=repo, source_branch="main", work_branch="review-x", base_commit=base
+        ),
+    )
+    contract.code_worktree.parent.mkdir(parents=True)
+    subprocess.run(
+        [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            contract.code_work_branch,
+            contract.code_worktree.as_posix(),
+            contract.code_source_branch,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
+
+
 class ApplicationTests2(ApplicationTests):
+    def test_route_review_is_plane_stamped_to_the_current_tree_and_rendered(self) -> None:
+        contract = _route_review_contract(self.coord)
+        created = task_doc_tool(
+            self.cfg,
+            TaskDocTarget(
+                repo_id="agents-remember", contract_path=contract.contract_path.as_posix()
+            ),
+            operation="create",
+            edit=TaskDocEdit(
+                fields={
+                    "id": "REVIEW-X",
+                    "slug": "review-x",
+                    "title": "Review",
+                    "repo": "agents-remember",
+                    "createdAt": "2026-08-13T00:00:00+00:00",
+                }
+            ),
+        )
+        (contract.code_worktree / "changed.py").write_text("VALUE = 1\n", encoding="utf-8")
+        report = contract.task_root / "notes/reports/reviewer-verdict.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("# Verdict\n\nPass.\n", encoding="utf-8")
+        recorded = task_doc_tool(
+            self.cfg,
+            TaskDocTarget(
+                repo_id="agents-remember",
+                contract_path=contract.contract_path.as_posix(),
+                slug="review-x",
+            ),
+            operation="record_route_review",
+            edit=TaskDocEdit(
+                review={
+                    "verdict": "pass",
+                    "verdictRef": "notes/reports/reviewer-verdict.md",
+                    "routes": [
+                        {
+                            "route": "worktrees",
+                            "verdict": "pass",
+                            "evidenceRef": "notes/reports/reviewer-verdict.md",
+                        }
+                    ],
+                }
+            ),
+        )
+
+        document = read_task_doc(Path(str(created["docPath"])))
+        assert document.routeReview is not None
+        self.assertEqual(require_current_route_review(contract)["status"], "current")
+        self.assertIn(
+            f"**Candidate tree:** `{document.routeReview.candidateTree}`",
+            Path(str(recorded["renderedPath"])).read_text(encoding="utf-8"),
+        )
+        (contract.code_worktree / "changed.py").write_text("VALUE = 2\n", encoding="utf-8")
+        with self.assertRaisesRegex(RouteReviewError, "candidate changed"):
+            require_current_route_review(contract)
+
+    def test_route_review_fails_closed_for_every_untrusted_or_incomplete_state(self) -> None:
+        contract = _route_review_contract(self.coord)
+        self.assertEqual(
+            require_current_route_review(contract),
+            {"required": False, "status": "not-required-no-code-change"},
+        )
+        (contract.code_worktree / "committed.py").write_text("VALUE = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=contract.code_worktree, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "precommitted candidate"],
+            cwd=contract.code_worktree,
+            check=True,
+            capture_output=True,
+        )
+        with self.assertRaisesRegex(RouteReviewError, "no task document"):
+            require_current_route_review(contract)
+        (contract.code_worktree / "changed.py").write_text("VALUE = 1\n", encoding="utf-8")
+        with self.assertRaisesRegex(RouteReviewError, "no task document"):
+            require_current_route_review(contract)
+
+        bare = _doc(
+            id=contract.leaf_id,
+            slug=contract.leaf_id,
+            kind="subTask",
+            repo=contract.repo_name,
+            enclosures=[
+                {
+                    "leafId": contract.leaf_id,
+                    "enclosurePath": contract.contract_path.as_posix(),
+                }
+            ],
+        )
+        write_task_doc(contract.task_root, bare)
+        with self.assertRaisesRegex(RouteReviewError, "no independent route-review"):
+            require_current_route_review(contract)
+
+        report = contract.task_root / "notes/reports/verdict.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("# Verdict\n", encoding="utf-8")
+        valid = {
+            "verdict": "pass",
+            "verdictRef": "notes/reports/verdict.md",
+            "routes": [
+                {
+                    "route": "worktrees",
+                    "verdict": "pass",
+                    "evidenceRef": "notes/reports/verdict.md",
+                }
+            ],
+        }
+        for payload, message in (
+            ({**valid, "candidateTree": "0" * 40}, "plane owns candidateTree"),
+            ({**valid, "routes": []}, "at least 1 item"),
+            ({**valid, "verdictRef": "missing.md"}, "does not exist"),
+            ({**valid, "verdictRef": report.as_posix()}, "task-relative"),
+            ({**valid, "verdictRef": "../outside.md"}, "escapes the task root"),
+        ):
+            with self.subTest(message=message), self.assertRaisesRegex(RouteReviewError, message):
+                build_route_review(contract, contract.task_root, payload)
+        with self.assertRaisesRegex(RouteReviewError, "belongs to a leaf"):
+            build_route_review(replace(contract, kind="series"), contract.task_root, valid)
+
+        blocked_record = build_route_review(
+            contract,
+            contract.task_root,
+            {
+                **valid,
+                "verdict": "block",
+                "routes": [
+                    {
+                        "route": "worktrees",
+                        "verdict": "block",
+                        "evidenceRef": "notes/reports/verdict.md",
+                    }
+                ],
+            },
+            now=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        blocked_doc = bare.model_copy(update={"routeReview": blocked_record})
+        write_task_doc(contract.task_root, blocked_doc)
+        with self.assertRaisesRegex(RouteReviewError, "blocks this candidate"):
+            require_current_route_review(contract)
+
+    def test_route_review_schema_and_task_doc_authority_reject_forgery(self) -> None:
+        contract = _route_review_contract(self.coord)
+        report = contract.task_root / "notes/reports/verdict.md"
+        report.parent.mkdir(parents=True)
+        report.write_text("# Verdict\n", encoding="utf-8")
+        route = {
+            "route": "worktrees",
+            "verdict": "pass",
+            "evidenceRef": "notes/reports/verdict.md",
+        }
+        valid = {
+            "candidateTree": code_candidate_tree(contract),
+            "verdict": "pass",
+            "verdictRef": "notes/reports/verdict.md",
+            "reviewedAt": "2026-08-13T00:00:00+00:00",
+            "routes": [route],
+        }
+        for mutation in (
+            {**valid, "routes": [route, route]},
+            {**valid, "verdict": "block"},
+            {**valid, "routes": [{**route, "verdict": "block"}]},
+            {**valid, "verdictRef": " "},
+            {**valid, "routes": [{**route, "route": " "}]},
+        ):
+            with self.subTest(mutation=mutation), self.assertRaises(ValidationError):
+                RouteReviewRecord.model_validate(mutation)
+
+        bare = _doc(id="REVIEW-X", slug="REVIEW-X", kind="subTask")
+        reviewed = bare.model_copy(update={"routeReview": RouteReviewRecord.model_validate(valid)})
+        master = _doc(id="MASTER", slug="master", kind="master")
+        with self.assertRaisesRegex(TaskDocError, "only for a leaf"):
+            _record_route_review(master, {}, contract, contract.task_root, contract.task_artifact)
+        with self.assertRaisesRegex(TaskDocError, "requires the leaf worktree contract"):
+            _record_route_review(bare, {}, None, contract.task_root, contract.task_artifact)
+        with self.assertRaisesRegex(TaskDocError, "requires a review object"):
+            _record_route_review(bare, None, contract, contract.task_root, contract.task_artifact)
+        with self.assertRaises(TaskDocError):
+            _record_route_review(bare, {}, contract, contract.task_root, contract.task_artifact)
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_tools.resolve_terminal_leaf_doc",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(TaskDocError, "exact task document"),
+        ):
+            _record_route_review(bare, valid, contract, contract.task_root, contract.task_artifact)
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_tools.resolve_terminal_leaf_doc",
+                return_value=(contract.task_artifact, bare),
+            ),
+            mock.patch(
+                "agents_remember.application.task_doc_tools.build_route_review",
+                side_effect=RouteReviewError("route-review-invalid", "invalid review"),
+            ),
+            self.assertRaisesRegex(TaskDocError, "invalid review"),
+        ):
+            _record_route_review(bare, valid, contract, contract.task_root, contract.task_artifact)
+        with self.assertRaisesRegex(TaskDocError, "create cannot author"):
+            _enforce_route_review_authority("create", None, reviewed)
+        with self.assertRaisesRegex(TaskDocError, "replace cannot add"):
+            _enforce_route_review_authority("replace", bare, reviewed)
+
     def test_skip_step_refuses_blank_missing_wrong_parent_and_ambiguity(self) -> None:
         self._create(
             steps=[

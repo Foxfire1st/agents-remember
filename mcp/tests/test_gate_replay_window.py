@@ -60,6 +60,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_mod
+from agents_remember.worktrees.modules import closeout_staged_quality
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import HANDOVER_GATE_KIND
 from agents_remember.worktrees.worktree_contract import write_contract
@@ -630,7 +631,7 @@ class ClaimPrecedesTheIrreversibleWorkTests(unittest.TestCase):
             with (
                 mock.patch.object(closeout_mod, "requires_strict_code_quality", return_value=True),
                 mock.patch.object(
-                    closeout_mod,
+                    closeout_staged_quality,
                     "run_strict_code_quality_gate",
                     side_effect=RuntimeError("strict code-quality gate failed"),
                 ),

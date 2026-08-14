@@ -31,7 +31,6 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
-    contract_payload,
     next_guidance,
     recovery_guidance,
     status_payload,
@@ -41,6 +40,8 @@ from agents_remember.worktrees.modules.start_contract import (
     build_start_contract,
     memory_base_for_source,
 )
+from agents_remember.worktrees.modules.start_result import started_result
+from agents_remember.worktrees.reopen import reopen_required_start_result
 from agents_remember.worktrees.services import ProviderSetupRequestSpec, worktree_services
 from agents_remember.worktrees.source_lineage import (
     lineage_block_payload,
@@ -204,40 +205,6 @@ def _blocked_provider_start_result(
             "code_worktree": code_state,
             "memory": memory_state,
             "providers": provider_state,
-        },
-    )
-
-
-def _started_result(
-    contract: WorktreeContract,
-    code_state: str,
-    memory_state: dict[str, object],
-    provider_state: dict[str, object],
-) -> WorktreeCommandResult:
-    summary = "Worktree task started; continue the wrapped workflow before closeout."
-    if provider_state.get("state") == "starting":
-        summary = (
-            "Worktree task started; provider setup is running in the background — "
-            "poll worktree_status until its providers block reaches a terminal state."
-        )
-    return WorktreeCommandResult(
-        0,
-        {
-            "state": "started",
-            "summary": summary,
-            **next_guidance(
-                "continue_work",
-                tool="worktree_status",
-                args=contract_next_args(contract),
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-            "providers": provider_state,
-            "enclosure_path": contract.contract_path.as_posix(),
-            "contract_path": contract.contract_path.as_posix(),
-            "leaf_id": contract.leaf_id,
-            "task_artifact": contract.task_artifact.as_posix(),
-            "contract": contract_payload(contract),
         },
     )
 
@@ -498,6 +465,8 @@ def _existing_contract_result(
     existing = load_contract(contract.contract_path)
     if existing.cleanup in ("abandoned", "reopened"):
         return None
+    if existing.cleanup == "completed":
+        return reopen_required_start_result(existing)
     lineage = source_lineage_for_contract(existing)
     refusal = lineage_refusal(lineage)
     if refusal is not None:
@@ -518,7 +487,19 @@ def _preflighted_contract(
     A fast-forward recovery may move the source branches mid-preflight, so the contract
     is rebuilt on that path and the caller works from the returned one.
     """
-    lineage = parent_source_lineage(contract)
+    # A dry-run that is about to create a master's first leaf also plans the parent
+    # integration contract and branch without publishing either. That virtual parent was
+    # built from the protected source's current tip, so asking the ordinary lineage reader
+    # to load its deliberately absent contract would turn preview non-mutation into a false
+    # unavailable refusal. Only this in-process planned-parent case bypasses the filesystem
+    # projection; existing parent contracts still fail closed through the normal reader.
+    parent_is_planned = (
+        args.dry_run
+        and bool(contract.parent_task_name)
+        and contract.parent_contract_path is not None
+        and not contract.parent_contract_path.exists()
+    )
+    lineage = None if parent_is_planned else parent_source_lineage(contract)
     refusal = lineage_refusal(lineage)
     if refusal is not None:
         assert lineage is not None
@@ -624,7 +605,7 @@ def _create_start_enclosure(
         return _blocked_provider_start_result(
             context, args, code_state, memory_state, provider_state
         )
-    return _started_result(contract, code_state, memory_state, provider_state)
+    return started_result(contract, args, code_state, memory_state, provider_state)
 
 
 def prepare_providers_for_start(

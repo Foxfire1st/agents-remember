@@ -1,4 +1,6 @@
+import type { TaskDocNode } from "../../types/projection";
 import type { TerminalCatalogRow } from "../../types/terminalCatalog";
+import { taskDoc } from "./wire";
 
 // Catalog-row fixtures in the FULL wire shape (`TerminalCatalogEntry.to_json()`),
 // placed under src/test/fixtures so multiple test suites can import them. `catalogRow` builds one
@@ -29,6 +31,51 @@ export function catalogRow(overrides: Partial<TerminalCatalogRow> = {}): Termina
 const MASTER = "agents-remember/260714_own-adapter-capability";
 const MASTER_2 = "agents-remember/260715_react-tui-cockpit-frontend";
 const SPRINT = "agents-remember/260700_sprint";
+
+/** Canonical document identities for the fleet scenario's sprint/master/leaf hierarchy. */
+export const FLEET_TASK_DOCUMENTS: TaskDocNode[] = [
+  taskDoc({
+    id: "sprint",
+    repository: "agents-remember",
+    kind: "master",
+    title: "Sprint",
+    docPath: "/tasks/agents-remember/260700_sprint/task.json",
+    orchestrates: [
+      "260714_own-adapter-capability",
+      "260715_react-tui-cockpit-frontend",
+    ],
+  }),
+  taskDoc({
+    id: "adapter-master",
+    repository: "agents-remember",
+    kind: "master",
+    title: "Own adapter capability",
+    docPath: "/tasks/agents-remember/260714_own-adapter-capability/task.json",
+  }),
+  ...["01_protocol", "04_serving", "05_capabilities"].map((id) =>
+    taskDoc({
+      id,
+      repository: "agents-remember",
+      kind: "subTask",
+      title: id,
+      docPath: `/tasks/agents-remember/260714_own-adapter-capability/${id}.json`,
+    }),
+  ),
+  taskDoc({
+    id: "cockpit-master",
+    repository: "agents-remember",
+    kind: "master",
+    title: "React TUI cockpit frontend",
+    docPath: "/tasks/agents-remember/260715_react-tui-cockpit-frontend/task.json",
+  }),
+  taskDoc({
+    id: "01_view-shell",
+    repository: "agents-remember",
+    kind: "subTask",
+    title: "01_view-shell",
+    docPath: "/tasks/agents-remember/260715_react-tui-cockpit-frontend/01_view-shell.json",
+  }),
+];
 
 function taskRef(owner: string, file: string) {
   const [repository, folder] = owner.split("/");

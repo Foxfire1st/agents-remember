@@ -435,7 +435,7 @@ passed smoke.
 `orchestration.qualityGate` selects the canonical executor and owns optional
 full-wrapper resource overrides (260731-EFA-L17, L23, L24). The full wrapper
 runs exactly once per master, at the master integration gate. Pytest keeps
-`-n=auto` in either executor. The default `local` executor uses native Linux/WSL
+`-n=auto` in either executor. The default `dagger` executor uses the pinned clean Ubuntu
 tools, available RAM, and configured swap. The `dagger` executor reconstructs
 the exact staged candidate inside the pinned clean Ubuntu graph used by GitHub,
 including the real read-only Codex protocol probe, and exports its current and
@@ -443,7 +443,7 @@ final evidence into the owning enclosure's self-overwriting `reports/` files.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `executor` | `"local"` | `"local"` runs the canonical wrapper with native POSIX tools. `"dagger"` runs the same wrapper in the pinned clean Ubuntu Dagger graph. Selection is exact and fail closed: an unavailable Dagger engine is an error, not a fallback to local execution. |
+| `executor` | `"dagger"` | The only accepted value is `"dagger"`, which runs the canonical wrapper in the pinned clean Ubuntu graph. Host-local wrapper runs use the separately named diagnostic entry point and are not configured as lifecycle acceptance. An unavailable Dagger engine is an error, not a fallback to local execution. |
 | `memoryCapBytes` | omitted (host-managed) | Optional hard cap for constrained CI. On hosts with systemd the integration step uses `MemoryMax=<bytes>` but leaves swap under the host's normal policy. Otherwise it applies a POSIX `RLIMIT_AS` limit to the wrapper and its rail subprocesses. A capped failure names this policy key. Positive integer when present. |
 
 ```jsonc
@@ -538,15 +538,17 @@ Semantics, as the loop doctrine defines them
 - `defaults.complexity` maps the dispatch-time complexity score (blast radius ·
   novelty · size) to tiers: at/above `fullLoopAt` a leaf runs the full loop
   (builder + independent reviewer); at/above `builderAt` it runs
-  builder-verified (builder + owner report-vs-artifact check, no reviewer);
-  below both it is direct (the level's ordinary build channel implements —
-  no loop machinery).
+  builder-verified (builder + owner report-vs-artifact check + the mandatory independent
+  route review; no iterative full-loop rounds);
+  below both it is direct (ordinary build + the mandatory independent route review;
+  no iterative loop machinery).
 - `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
   dispatch. `perLevel.master.loop: "seam-required"` names the default loop
-  posture; `"none"` configures the workflow-free manager (a master whose
-  leaves all score direct carries no loop machinery). **This knob governs the
-  LOOP only (review rounds / workflow-free manager): the master-exit SEAM gate
-  is unconditional doctrine — no knob value touches it.** Loop posture names
+  posture; `"none"` configures a manager without iterative loop rounds (a master whose
+  leaves all score direct still runs candidate-bound route review on every code leaf).
+  **This knob governs the LOOP only (review rounds): it cannot disable leaf route review,
+  curator/closeout admission, or the master-exit SEAM gate.** The master-exit seam
+  is unconditional doctrine — no knob value touches it. Loop posture names
   are model-interpreted doctrine (validated as non-empty strings, not a closed
   set). Each level runs its loop with its own agent set
   (`orchestration.roles` knobs per role).

@@ -40,10 +40,12 @@ from agents_remember.worktrees.modules import sync as sync_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
     ContractError,
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
+    amend_contract,
     default_contract,
     default_series_contract,
     write_contract,
@@ -306,6 +308,32 @@ class StartPipelineTests(unittest.TestCase):
         self.assertIs(result, created)
         self.assertIs(create.call_args.args[1], contract)
 
+    def test_master_series_bootstrap_refuses_missing_identity_and_self_parenting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            init_repo(repo, "main")
+            task_root = root / "ar-coordination/tasks/repo/master"
+            spec = start_contract_module.MasterSeriesContractSpec(
+                coordination_root=root / "ar-coordination",
+                repo_name="repo",
+                code_repo=repo,
+                memory_root=None,
+                task_root=task_root,
+                task_name="master",
+                parent_task_name="sprint",
+                protected_branch="ar/master",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "master task document is missing"):
+                start_contract_module.ensure_master_series_contract(spec)
+
+            task_root.mkdir(parents=True)
+            (task_root / "task.md").write_text("# Master\n\n**Type:** Master\n", encoding="utf-8")
+            git(repo, "checkout", "-b", "ar/master")
+            with self.assertRaisesRegex(RuntimeError, "protected branch equals"):
+                start_contract_module.ensure_master_series_contract(spec)
+
 
 class MemoryDisabledStartTests(unittest.TestCase):
     """The memory-disabled recovery: a start that asked for external memory and could not get it.
@@ -424,6 +452,55 @@ class ExistingContractStartTests(unittest.TestCase):
             assert result is not None
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.payload["state"], "attached-existing-contract")
+
+    def test_cleaned_contract_routes_to_explicit_reopen_before_lineage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._written_contract(Path(tmp))
+            completed = amend_contract(
+                contract,
+                ContractCells(
+                    closeout_status="completed",
+                    integration_status="completed",
+                    cleanup="completed",
+                ),
+            )
+            write_contract(completed.contract_path, completed)
+
+            with (
+                mock.patch.object(start_module, "source_lineage_for_contract") as start_lineage,
+                mock.patch.object(
+                    guidance_module,
+                    "source_lineage_for_contract",
+                    side_effect=AssertionError("cleaned start touched descendant lineage"),
+                ) as guidance_lineage,
+            ):
+                result = start_module._existing_contract_result(
+                    Namespace(), completed, WorktreeArgs()
+                )
+
+            start_lineage.assert_not_called()
+            guidance_lineage.assert_not_called()
+            assert result is not None
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.payload["state"], "reopen-required")
+            self.assertEqual(result.payload["nextOperation"], "reopen_completed_task")
+            self.assertEqual(result.payload["nextTool"], "task_reopen")
+            self.assertEqual(
+                result.payload["nextArgs"],
+                {"contract_path": completed.contract_path.as_posix(), "dry_run": True},
+            )
+            self.assertEqual(
+                result.payload["nextStep"],
+                {
+                    "summary": result.payload["summary"],
+                    "nextOperation": "reopen_completed_task",
+                    "nextTool": "task_reopen",
+                    "nextArgs": {
+                        "contract_path": completed.contract_path.as_posix(),
+                        "dry_run": True,
+                    },
+                },
+            )
 
     def test_stale_lineage_blocks_existing_contract_before_reattach(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

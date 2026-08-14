@@ -31,6 +31,11 @@ rounds.
    sections rather than rewriting history.
 6. Once adopted, this artifact is the sprint's standing scope: in-sprint additions before
    implementation starts trigger re-evaluation; out-of-sprint additions wait for the next sprint.
+7. **The adopted sprint document owns the super edge.** Before any manager dispatch, the
+   orchestrator creates or resolves the super integration branch and publishes its exact name as
+   the sprint document's `integrationBranch` through a previewed `task_doc set_field` operation.
+   Resuming an older sprint requires the same migration first; prose or agent memory is not a
+   substitute for that task identity.
 
 ## Shape
 
@@ -41,6 +46,7 @@ rounds.
 | ---------------- | ------------------------------------------------ |
 | strategist seat  | <sprint task_doc path> + strategist             |
 | masters in scope | <master ids>                                     |
+| integrationBranch | <exact super integration branch persisted on the sprint task doc> |
 | status           | draft | in-review | round-<n> | adopted           |
 | round            | <n> (3-round cap; the drawing board is the escalation) |
 | written          | <YYYY-MM-DDTHH:MM>                                |

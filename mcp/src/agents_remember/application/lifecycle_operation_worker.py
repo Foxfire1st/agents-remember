@@ -33,6 +33,7 @@ from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationKind,
     LifecycleOperationRecord,
+    LifecycleOperationRecoveryCommits,
 )
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
@@ -98,6 +99,12 @@ class OperationRuntime:
 
     def progress(self, phase: str, evidence: Mapping[str, object]) -> None:
         stamp = _stamp()
+        recovery_value = evidence.get("recovery_commits")
+        recovery_commits = (
+            LifecycleOperationRecoveryCommits.model_validate(recovery_value)
+            if recovery_value is not None
+            else None
+        )
 
         def advance(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
             if record.cancelRequested or record.status == "cancelled":
@@ -115,6 +122,7 @@ class OperationRuntime:
                     "approvalClaimed": (
                         record.approvalClaimed or bool(evidence.get("approval_claimed"))
                     ),
+                    "recoveryCommits": (recovery_commits or record.recoveryCommits),
                 }
             )
 
@@ -185,6 +193,7 @@ class OperationRuntime:
                         "currentCommand": "operation completed",
                         "result": result,
                         "guidance": "Observe the task contract for the next lifecycle edge.",
+                        "workerPid": None,
                     }
                 )
             needs_recovery = record.irreversibleBoundaryEntered
@@ -211,6 +220,10 @@ class OperationRuntime:
                             else "Fix the reported preflight failure, then restart this task operation."
                         )
                     ),
+                    # This callback runs in the worker's final stack frame. Retaining its
+                    # numeric PID after this point lets a delayed cancellation signal an
+                    # unrelated process group if the kernel reuses that id.
+                    "workerPid": None,
                 }
             )
 
@@ -229,6 +242,8 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
         "gate_policy": _policy(operation_input),
         "operation_key": record.operationKey,
         "candidate_tree": record.candidateTree,
+        "approval_claimed": record.approvalClaimed,
+        "recovery_commits": record.recoveryCommits,
         "operation_progress": runtime.progress,
     }
     if isinstance(operation_input, CloseoutOperationInput):

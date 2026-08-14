@@ -269,6 +269,19 @@ class ApplicationTests1(ApplicationTests):
         self.assertEqual(updated["operation"], "task_doc.set_field")
         self.assertEqual(read_task_doc(Path(str(updated["docPath"]))).objective, "new")
 
+    def test_set_field_cannot_repoint_plane_owned_contract_identity(self) -> None:
+        self._create()
+        for fields in (
+            {"seriesContractPath": "tasks/other/series-contract.md"},
+            {
+                "enclosures": [
+                    {"leafId": "other", "enclosurePath": "tasks/other/series-contract.md"}
+                ]
+            },
+        ):
+            with self.subTest(fields=fields), self.assertRaises(TaskDocError):
+                self._call("set_field", fields=fields)
+
     def test_set_field_code_examples_note(self) -> None:
         self._create()
         updated = self._call("set_field", fields={"codeExamplesNote": "Drafted at the plan gate."})
@@ -295,6 +308,30 @@ class ApplicationTests1(ApplicationTests):
         self.assertEqual(doc.orchestrates, ["260706_management-repo"])
         rendered = Path(str(updated["renderedPath"])).read_text(encoding="utf-8")
         self.assertIn("**Orchestrates:** `260706_management-repo`", rendered)
+
+        preview = task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"integrationBranch": "ar/sprint-super"}),
+            dry_run=True,
+        )
+        self.assertTrue(preview["dryRun"])
+        self.assertIn("**Integration branch:** `ar/sprint-super`", preview["rendered"])
+        self.assertIsNone(read_task_doc(Path(str(updated["docPath"]))).integrationBranch)
+
+        applied = task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"integrationBranch": "ar/sprint-super"}),
+        )
+        sprint = read_task_doc(Path(str(applied["docPath"])))
+        self.assertEqual(sprint.integrationBranch, "ar/sprint-super")
+        self.assertIn(
+            "**Integration branch:** `ar/sprint-super`",
+            Path(str(applied["renderedPath"])).read_text(encoding="utf-8"),
+        )
 
     def test_set_field_orchestrates_rejected_on_leaf(self) -> None:
         self._create()

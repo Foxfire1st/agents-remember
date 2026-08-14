@@ -684,7 +684,7 @@ test("Chats scenario: same-page selector clears every transient cockpit authorit
   expect(authorityReads).toBe(2);
 });
 
-test("sessions scenario: interaction choice answers through the projected gate", async ({
+test("sessions scenario: interaction choice answers through the session-direct route", async ({
   page,
 }) => {
   await page.goto(scenarioUrl("sessions-interaction-answer"));
@@ -695,7 +695,7 @@ test("sessions scenario: interaction choice answers through the projected gate",
   const counts = await page.evaluate(
     () => window.__cockpitBench?.requestCounts ?? {},
   );
-  expect(counts["POST /api/actions/approve"]).toBe(1);
+  expect(counts["POST /api/terminal/interaction-1/interaction-response"]).toBe(1);
 });
 
 test("sessions scenario: 12-seat fleet keeps collapsed groups and live attention rollups", async ({
@@ -713,7 +713,7 @@ test("sessions scenario: 12-seat fleet keeps collapsed groups and live attention
   );
   await expect(
     page.getByTestId(
-      "rail-done-toggle-agents-remember/260714_own-adapter-capability",
+      "rail-done-toggle-agents-remember:260714_own-adapter-capability/task.json",
     ),
   ).toContainText("completed · 2");
   await expect(page.getByTestId("rail-row-landed-w1")).toHaveCount(0);
@@ -1024,9 +1024,9 @@ test("sessions scenario: loaded status-text tokens meet WCAG AA on both cockpit 
 // regressed the SAME row at ≤1100 into AMPUTATION: End laid out past the `overflow:hidden` aside
 // (unreachable at 1100), armed confirm/cancel invisible hundreds of px off the 900 overlay rail
 // (the destructive flow could not complete), cancel clipped ~20px even at 1440. The row is now a
-// wrap-capable label-group / action-group layout: the action group wraps whole BELOW the label at
-// narrow rails, the elidable title/copy yield, and the status chip is dropped while armed. This pins
-// the acceptance the leaf actually promised — "never crush at ANY rail width" — at four widths:
+// single-line label-group / action-group layout: every grid/flex ancestor can shrink, the elidable
+// title/copy yields, and the status chip is dropped while armed. This pins the acceptance the leaf
+// actually promised — "never crush at ANY rail width" — at four widths:
 // the confirm/cancel are ALWAYS single-line AND fully inside the aside (reachable), never clipped,
 // letter-wrapped, or overflowing.
 async function reopenRailIfCollapsed(page: import("@playwright/test").Page) {
@@ -1074,9 +1074,26 @@ async function assertArmedRowContained(
   // Single mono line (the crush blew these to 44-54px tall).
   expect(confirmBox.height, `${label}: confirm single-line`).toBeLessThanOrEqual(24);
   expect(cancelBox.height, `${label}: cancel single-line`).toBeLessThanOrEqual(24);
-  // Whole controls, never the ~28/14px letter columns.
-  expect(confirmBox.width, `${label}: confirm whole`).toBeGreaterThanOrEqual(40);
-  expect(cancelBox.width, `${label}: cancel whole`).toBeGreaterThanOrEqual(34);
+  // Whole controls: exact copy, one line, and no clipped text. Pixel-width thresholds are host-font
+  // magic; overflow is the actual contract the rail must preserve.
+  await expect(confirm).toHaveText("confirm");
+  await expect(cancel).toHaveText("cancel");
+  for (const [name, control] of [
+    ["confirm", confirm],
+    ["cancel", cancel],
+  ] as const) {
+    const layout = await control.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return {
+        nowrap: style.whiteSpace === "nowrap",
+        horizontalFits: element.scrollWidth <= element.clientWidth,
+        verticalFits: element.scrollHeight <= element.clientHeight,
+      };
+    });
+    expect(layout.nowrap, `${label}: ${name} nowrap`).toBe(true);
+    expect(layout.horizontalFits, `${label}: ${name} horizontally whole`).toBe(true);
+    expect(layout.verticalFits, `${label}: ${name} vertically whole`).toBe(true);
+  }
   // REACHABLE: fully inside the aside — never amputated past the overflow:hidden edge (RV-2).
   expect(confirmBox.x, `${label}: confirm left in rail`).toBeGreaterThanOrEqual(rail!.x - 1);
   expect(confirmBox.x + confirmBox.width, `${label}: confirm right in rail`).toBeLessThanOrEqual(railRight + 1);

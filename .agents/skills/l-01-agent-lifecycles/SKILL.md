@@ -202,18 +202,39 @@ section; they do not restate it.
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
 | Portfolio | the backend orchestrator (developer-facing decisions relayed through the architect) | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
 
+**Independent route review is mandatory after every code-change session.** Once implementation
+and its focused acceptance are stable, the owning seat partitions the changed surface by
+material major route (architecture/control-plane ownership boundary, informed by governing route
+overviews and the import/call graph). The reviewer chair fans out one independent reviewer per
+affected major route. Each route reviewer reads the diff and its surroundings, tests likely side
+effects, and reports source-backed findings; the chair records a route-coverage table and one
+verdict. One reviewer may not silently collapse several routes into a generic diff skim. No code
+change proceeds to curator, closeout, integration, or handover without this verdict. A fix returns
+to the same builder and the same route reviewer delta-verifies it; touching a new major route adds
+that route to the review partition. This mandatory post-code gate also applies to direct/solo work:
+independence requires another agent, never builder self-review.
+
+The chair persists the passing or blocking result through
+`task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})` after the
+durable verdict and every route evidence file exist. The control plane, not the chair or manager,
+stamps the exact current Git candidate tree and review time into the leaf document. Curator dispatch
+and closeout recompute that tree and refuse an absent, blocking, stale, or missing-artifact record.
+This is the executable post-code gate; prose, a chat claim, or an unbound evidence reference does
+not satisfy it.
+
 **Complexity-scored tiers (per leaf, at dispatch).** The owning seat scores three axes — blast
 radius (doctrine/enforcement/public surface vs leaf-local) · novelty (new subsystem vs
-pattern-following) · size (files × steps) — into three tiers: **direct** (no loop
-machinery — the level's ordinary build channel implements: hands-on at session scale, the leaf's
-worker under a manager; self-check + checks ladder only), **builder-verified** (builder
-implements; owner verifies report-vs-artifact; no reviewer), **full loop** (builder + independent
-reviewer rounds). The
+pattern-following) · size (files × steps) — into three tiers: **direct** (ordinary build channel
+plus the mandatory independent route review; no additional loop machinery),
+**builder-verified** (builder implements; owner additionally verifies report-vs-artifact; the
+mandatory route review still runs), **full loop** (builder + independent reviewer rounds, with the
+mandatory route partition as the review scope floor). The
 strategist's blast-radius register is the scoring input when an orchestration task exists. A
 leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
-agent set) is recorded on the leaf doc with a decision-log entry. **A master whose leaves all
-score `direct` is a workflow-free manager** — no loop machinery; the knobs make every loop
-optional per level, never mandatory ceremony.
+agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
+`direct` avoids iterative full-loop machinery, but its code leaves still receive independent
+route review. The knobs tune review depth and round machinery; they never disable the post-code
+independence gate.
 
 **Rounds and the HARD cap.** A round = implement → review. **Hard cap: 3 rounds per loop — and
 ONLY full end-to-end rounds count against it.** Residuals of a passing round are landed and

@@ -6,12 +6,15 @@ import { hydrateTerminalSessionsFromCatalog } from "../data/catalogPoll";
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { lifecycleNoticeStore } from "../data/sessionLifecycle";
 import { ptyHarvestStore } from "../data/ptyHarvest";
+import { attentionRollup } from "../data/railModel";
 import {
   fromTerminalSessionInfo,
   registerConnection,
   sendToSession,
   sessionStore,
+  type OpenSession,
 } from "../data/sessions";
+import { seatVisualState } from "../data/stateGrammar";
 import {
   readSubmissionAuthority,
   type SubmissionLifecycleTransport,
@@ -20,6 +23,7 @@ import {
 import { withdrawLastQueuedSubmission } from "../data/submissionWithdrawal";
 import { startSubmitRecord } from "../data/submitMachine";
 import { catalogRow } from "../test/fixtures/catalogRows";
+import { L5_BRIDGE_EPOCH } from "../test/fixtures/submitScenarios";
 import {
   openTerminalSession,
   type TerminalConnection,
@@ -27,11 +31,15 @@ import {
 import {
   COCKPIT_SCENARIOS,
   installCockpitScenarioFetch,
+  INTERACTION_SCENARIO_GATE,
   resetCockpitScenario,
 } from "./cockpitScenarios";
 
 const fleet = COCKPIT_SCENARIOS.find(
   (scenario) => scenario.kind === "fleet-12",
+)!;
+const interaction = COCKPIT_SCENARIOS.find(
+  (scenario) => scenario.kind === "interaction-answer",
 )!;
 const REUSED_SESSION = "scenario-reused-session";
 const OLD_REQUEST = "old-scenario-request";
@@ -138,6 +146,138 @@ describe("the scenario server answers only what the daemon could answer", () => 
       "state",
       "withdrawnAt",
     ]);
+  });
+
+  it("consumes one exact interaction and returns the complete production response", async () => {
+    const restore = installCockpitScenarioFetch(interaction);
+    try {
+      const body = {
+        interactionId: INTERACTION_SCENARIO_GATE.interactionId,
+        expectedBridgeEpoch: L5_BRIDGE_EPOCH,
+        response: "overwrite",
+      };
+      const response = await window.fetch(
+        `/api/terminal/${INTERACTION_SCENARIO_GATE.sessionId}/interaction-response`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        status: "accepted",
+        activity: "settling",
+        acceptance: "queued",
+        pendingInteraction: null,
+        pendingInteractions: [],
+      });
+      expect(window.__cockpitBench?.requests.at(-1)).toEqual({
+        method: "POST",
+        path: `/api/terminal/${INTERACTION_SCENARIO_GATE.sessionId}/interaction-response`,
+        body,
+      });
+
+      const catalog = await window.fetch("/api/terminal/sessions");
+      const catalogBody = (await catalog.json()) as {
+        sessions: Array<Record<string, unknown>>;
+      };
+      const answeredRow = catalogBody.sessions.find(
+        (row) => row.id === INTERACTION_SCENARIO_GATE.sessionId,
+      );
+      expect(answeredRow).toMatchObject({
+        id: INTERACTION_SCENARIO_GATE.sessionId,
+        controlActivity: "settling",
+        controlAcceptance: "queued",
+        turnState: "working",
+        turnStateChangedAt: "2026-07-18T00:00:03Z",
+      });
+      expect(answeredRow).not.toHaveProperty("controlPendingInteraction");
+      const answeredSession = answeredRow as unknown as OpenSession;
+      expect(seatVisualState(answeredSession)).toMatchObject({
+        key: "working",
+        chip: "working",
+      });
+      expect(attentionRollup([answeredSession]).needsInput).toEqual([]);
+
+      const replay = await window.fetch(
+        `/api/terminal/${INTERACTION_SCENARIO_GATE.sessionId}/interaction-response`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      expect(replay.status).toBe(409);
+      await expect(replay.json()).resolves.toEqual({
+        status: "not-pending",
+        detail: "scenario interaction is not pending",
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("refuses wrong address, stale epoch, and empty answers without consuming authority", async () => {
+    const restore = installCockpitScenarioFetch(interaction);
+    try {
+      const endpoint = (sessionId: string) =>
+        `/api/terminal/${sessionId}/interaction-response`;
+      const exact = {
+        interactionId: INTERACTION_SCENARIO_GATE.interactionId,
+        expectedBridgeEpoch: L5_BRIDGE_EPOCH,
+        response: "overwrite",
+      };
+      const refusals = [
+        {
+          path: endpoint("wrong-session"),
+          body: exact,
+          expected: "not-pending",
+        },
+        {
+          path: endpoint(INTERACTION_SCENARIO_GATE.sessionId),
+          body: { ...exact, interactionId: "wrong-interaction" },
+          expected: "not-pending",
+        },
+        {
+          path: endpoint(INTERACTION_SCENARIO_GATE.sessionId),
+          body: { ...exact, expectedBridgeEpoch: "stale-epoch" },
+          expected: "bridge-epoch-mismatch",
+        },
+        {
+          path: endpoint(INTERACTION_SCENARIO_GATE.sessionId),
+          body: { ...exact, response: "   " },
+          expected: "unsupported",
+        },
+      ];
+      for (const refusal of refusals) {
+        const response = await window.fetch(refusal.path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(refusal.body),
+        });
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({
+          status: refusal.expected,
+        });
+      }
+
+      const catalog = await window.fetch("/api/terminal/sessions");
+      const catalogBody = (await catalog.json()) as {
+        sessions: Array<Record<string, unknown>>;
+      };
+      expect(catalogBody.sessions).toContainEqual(
+        expect.objectContaining({
+          id: INTERACTION_SCENARIO_GATE.sessionId,
+          turnState: "awaiting-input",
+          controlPendingInteraction: expect.objectContaining({
+            interactionId: INTERACTION_SCENARIO_GATE.interactionId,
+          }),
+        }),
+      );
+    } finally {
+      restore();
+    }
   });
 });
 

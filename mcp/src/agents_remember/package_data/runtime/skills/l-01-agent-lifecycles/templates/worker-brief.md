@@ -21,6 +21,9 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
 `skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. Execute the leaf
 code completely, write your builder turn report, then stop. Leaf closeout uses the
 manager -> builder -> reviewer -> curator chain: builder code + reviewer verdict + curator coherence pass.
+After your stable code handoff, the manager dispatches an independent reviewer chair which fans
+out one reviewer per materially affected major route. Be precise about changed routes,
+surrounding owners, and likely side effects in your report so the review partition is complete.
 
 ## Worktrees (your code write area + memory context)
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`)

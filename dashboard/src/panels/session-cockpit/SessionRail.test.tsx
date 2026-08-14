@@ -18,7 +18,11 @@ import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { seatVisualState } from "../../data/stateGrammar";
 import { dashboardStore } from "../../data/store";
-import { catalogRow, FLEET } from "../../test/fixtures/catalogRows";
+import {
+  catalogRow,
+  FLEET,
+  FLEET_TASK_DOCUMENTS,
+} from "../../test/fixtures/catalogRows";
 import { agentPickup, analytics, lifecycleWithGate, taskDoc } from "../../test/fixtures/wire";
 import type { AgentNotifierHeartbeat, TaskDocNode } from "../../types/projection";
 import { HeaderStrip } from "./HeaderStrip";
@@ -26,50 +30,6 @@ import { LandedCleanupNotice } from "./LandedCleanupNotice";
 import { RAIL_VIRTUALIZE_THRESHOLD, SessionRail } from "./SessionRail";
 
 const fleet = () => sessionStore.getState().sessions;
-
-const FLEET_TASK_DOCS = [
-  taskDoc({
-    id: "sprint",
-    repository: "agents-remember",
-    kind: "master",
-    title: "Sprint",
-    docPath: "/tasks/agents-remember/260700_sprint/task.json",
-    orchestrates: [
-      "260714_own-adapter-capability",
-      "260715_react-tui-cockpit-frontend",
-    ],
-  }),
-  taskDoc({
-    id: "adapter-master",
-    repository: "agents-remember",
-    kind: "master",
-    title: "Own adapter capability",
-    docPath: "/tasks/agents-remember/260714_own-adapter-capability/task.json",
-  }),
-  ...["01_protocol", "04_serving", "05_capabilities"].map((id) =>
-    taskDoc({
-      id,
-      repository: "agents-remember",
-      kind: "subTask",
-      title: id,
-      docPath: `/tasks/agents-remember/260714_own-adapter-capability/${id}.json`,
-    }),
-  ),
-  taskDoc({
-    id: "cockpit-master",
-    repository: "agents-remember",
-    kind: "master",
-    title: "React TUI cockpit frontend",
-    docPath: "/tasks/agents-remember/260715_react-tui-cockpit-frontend/task.json",
-  }),
-  taskDoc({
-    id: "01_view-shell",
-    repository: "agents-remember",
-    kind: "subTask",
-    title: "01_view-shell",
-    docPath: "/tasks/agents-remember/260715_react-tui-cockpit-frontend/01_view-shell.json",
-  }),
-];
 
 const SPRINT_KEY = "agents-remember:260700_sprint/task.json";
 const ADAPTER_MASTER_KEY = "agents-remember:260714_own-adapter-capability/task.json";
@@ -80,7 +40,7 @@ function renderRail(
   overrides: { focusedSessionId?: string | null; taskDocuments?: TaskDocNode[] } = {},
 ) {
   const sessions = fleet();
-  const model = buildRailModel(sessions, overrides.taskDocuments ?? FLEET_TASK_DOCS);
+  const model = buildRailModel(sessions, overrides.taskDocuments ?? FLEET_TASK_DOCUMENTS);
   const rollup = attentionRollup(sessions);
   const onFocusSession = vi.fn();
   const view = render(
@@ -113,7 +73,7 @@ beforeEach(() => {
   });
   dashboardStore.setState({
     agentNotifierHeartbeat: HEARTBEAT,
-    analytics: analytics({ taskDocuments: FLEET_TASK_DOCS, agentPickups: [] }),
+    analytics: analytics({ taskDocuments: FLEET_TASK_DOCUMENTS, agentPickups: [] }),
     lifecycles: {},
   });
 });
@@ -276,7 +236,7 @@ describe("fleet attention strip (R12)", () => {
     const props = () => {
       const current = fleet();
       return {
-        model: buildRailModel(current, FLEET_TASK_DOCS),
+        model: buildRailModel(current, FLEET_TASK_DOCUMENTS),
         rollup: attentionRollup(current),
       };
     };
@@ -477,7 +437,7 @@ describe("freshness (R15) + bus-footer removal (F-c)", () => {
         <SessionRail
           onFocusSession={vi.fn()}
           focusedSessionId={null}
-          model={buildRailModel(sessions, FLEET_TASK_DOCS)}
+          model={buildRailModel(sessions, FLEET_TASK_DOCUMENTS)}
           rollup={attentionRollup(sessions)}
         />
       </Profiler>,

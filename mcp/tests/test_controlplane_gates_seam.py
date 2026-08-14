@@ -373,6 +373,33 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
         self.assertIn("handover-gate-blocked", str(payload["summary"]))
         self.assertNotIn("handover_gate_warning", payload)
 
+    def test_apply_refusal_routes_to_structural_gate_instead_of_integration_apply(self) -> None:
+        gate = self._seed_gate(enclosure=self.MASTER)
+        args = WorktreeArgs(
+            contract_path=self.contract.contract_path,
+            strategy="ff-only",
+            approved=True,
+            gate_policy=HANDOVER_SEAM_POLICY,
+        )
+        with (
+            mock.patch.object(integrate_mod, "load_contract", return_value=self.contract),
+            mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
+            mock.patch.object(integrate_mod, "_apply_integration") as apply,
+        ):
+            result = integrate_mod.integrate_result(args)
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.payload["state"], "handover-gate-blocked")
+        self.assertEqual(result.payload["gateId"], gate.id)
+        self.assertEqual(result.payload["nextOperation"], "review_handover_gate")
+        self.assertEqual(result.payload["nextTool"], "gate_list")
+        self.assertEqual(result.payload["nextArgs"], {})
+        next_step = result.payload["nextStep"]
+        assert isinstance(next_step, dict)
+        self.assertEqual(next_step["nextTool"], "gate_list")
+        apply.assert_not_called()
+
     def test_dry_run_gateless_reports_permitted(self) -> None:
         payload = self._dry_run()
         handover = payload["handover_gate"]

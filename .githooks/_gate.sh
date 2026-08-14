@@ -2,17 +2,15 @@
 # Shared body for this repository's git hooks, in two tiers.
 #
 #     _gate.sh fast      pre-commit: check staged/index content, cheaply.
-#     _gate.sh targeted  pre-push:   report the pushed refs, then run the leaf
-#                                    change-set-scoped quality wrapper.
-#     _gate.sh full      manual:     run the full wrapper (the master integration
-#                                    gate owns the once-per-master full run).
+#     _gate.sh targeted  pre-push:   report the pushed refs and repeat the
+#                                    deterministic non-test checks.
+#     _gate.sh full      manual:     refuse and point at the Dagger-only gate.
 #
 # Enable once per clone:  ./setup-hooks.sh
 # Prerequisite:           pip install -e "mcp[dev]"
 #
-# The fast tier runs staged/index checks before commit; the targeted tier runs the
-# leaf change-set contract before push. The full wrapper is owned by the master
-# integration gate and is available here only for manual runs. In linked worktrees,
+# The hook tiers run deterministic non-test checks only. Acceptance tests are owned
+# by the pinned Dagger graph at closeout, integration, and CI. In linked worktrees,
 # use the primary worktree's virtual environment when necessary and put the current
 # checkout's source first on PYTHONPATH.
 
@@ -123,9 +121,9 @@ report_untracked_scope() {
     --project-root "$root" untracked
 }
 
-# The frontend rail (L8): lint, typecheck, and the unit suite run from dashboard/ in BOTH hook
-# tiers, matching the dashboard CI job. A fresh checkout without node_modules fails with the
-# install instruction instead of skipping the gate.
+# The host frontend rail is intentionally non-test: codegen, lint, and typecheck.
+# Vitest and Playwright refuse outside the pinned Dagger graph. A fresh checkout
+# without node_modules fails with the install instruction instead of skipping the gate.
 dashboard_checks() {
   if [ ! -f "dashboard/package.json" ]; then
     echo "[$label] dashboard/package.json missing; skipping the frontend rail." >&2
@@ -149,7 +147,7 @@ dashboard_checks() {
     return 1
   fi
   echo "[$label] result: dashboard-codegen PASS"
-  for step in lint typecheck test; do
+  for step in lint typecheck; do
     echo "[$label] npm run $step (dashboard)..."
     if ! npm --prefix dashboard run "$step" --silent; then
       echo "[$label] result: dashboard-$step FAIL" >&2
@@ -194,7 +192,7 @@ run_fast_checks() {
     return 1
   fi
   dashboard_checks || return 1
-  echo "[$label] result: fast-tier PASS; the full suite (pytest + CRAP) runs on push."
+  echo "[$label] result: fast-tier PASS; acceptance tests run only in Dagger."
   return 0
 }
 
@@ -205,30 +203,15 @@ run_fast_checks() {
 # from a series branch: git cannot infer that fork point, and without it the floor
 # compares against the default branch and asks you to cover the series' lines too.
 run_targeted_checks() {
-  report_wrapper_tier || return 1
-  generated_copy_checks || return 1
-  echo "[$label] running change-set-scoped quality wrapper (cheap rails first; targeted pytest final; then CRAP + diff coverage from its artifact)..."
-  if "$py" -m agents_remember.code_quality.check --targeted; then
-    echo "[$label] result: targeted quality wrapper PASS"
-    return 0
-  fi
-  echo "[$label] result: targeted quality wrapper FAIL" >&2
-  return 1
+  run_fast_checks || return 1
+  echo "[$label] result: targeted hook PASS; task closeout and CI own Dagger acceptance."
+  return 0
 }
 
 run_full_checks() {
-  report_wrapper_tier || return 1
-  generated_copy_checks || return 1
-  echo "[$label] running full quality wrapper (cheap rails first; full pytest final; then CRAP + diff coverage from its artifact)..."
-  if "$py" -m agents_remember.code_quality.check; then
-    echo "[$label] result: full quality wrapper PASS"
-  else
-    echo "[$label] result: full quality wrapper FAIL" >&2
-    return 1
-  fi
-  dashboard_checks || return 1
-  echo "[$label] result: full-tier PASS"
-  return 0
+  echo "[$label] tests are Dagger-only; refusing host full-suite execution." >&2
+  echo "[$label] run the pinned 'dagger call quality ... --mode=full' graph." >&2
+  return 2
 }
 
 # --- staged-content isolation ------------------------------------------------

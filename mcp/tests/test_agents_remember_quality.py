@@ -7,14 +7,20 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
+from conftest import (
+    DAGGER_TEST_ATTESTATION_ENV,
+    dagger_test_environment_error,
+    require_dagger_test_environment,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DAGGER_MANIFEST = REPOSITORY_ROOT / "dagger.json"
 DAGGER_MODULE = REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py"
 DAGGER_MODULE_ID = "agents_remember_quality.main"
+VALID_DAGGER_NONCE = "0123456789abcdef0123456789abcdef"
 
 
 def load_dagger_module() -> ModuleType:
@@ -31,6 +37,7 @@ class FakeContainer:
         self.exit_codes = exit_codes
         self.commands: list[list[str]] = []
         self.files: dict[str, str] = {}
+        self.environment: list[tuple[object, ...]] = []
 
     def from_(self, _image: str) -> FakeContainer:
         return self
@@ -38,7 +45,8 @@ class FakeContainer:
     def with_mounted_cache(self, *_args: object) -> FakeContainer:
         return self
 
-    def with_env_variable(self, *_args: object) -> FakeContainer:
+    def with_env_variable(self, *args: object) -> FakeContainer:
+        self.environment.append(args)
         return self
 
     def with_exec(self, command: list[str], **_kwargs: object) -> FakeContainer:
@@ -100,15 +108,53 @@ def test_agents_remember_quality_module_is_pinned_and_parseable() -> None:
     assert "from dagger import Doc" in source
     assert "Required Git commit used for changed-line coverage" in source
     assert "'targeted' derives the changed leaf subset" in source
+    dagger_config = json.loads(DAGGER_MANIFEST.read_text(encoding="utf-8"))
+    assert dagger_config["disableDefaultFunctionCaching"] is True
 
 
-def test_agents_remember_quality_exports_failures_before_verify_refuses() -> None:
+def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path: Path) -> None:
+    attestation = tmp_path / "dagger-test-attestation"
+    assert "absent or invalid" in (dagger_test_environment_error({}, attestation) or "")
+    assert "unavailable" in (
+        dagger_test_environment_error(
+            {DAGGER_TEST_ATTESTATION_ENV: VALID_DAGGER_NONCE},
+            attestation,
+        )
+        or ""
+    )
+    attestation.write_text("f" * 32, encoding="utf-8")
+    assert "do not match" in (
+        dagger_test_environment_error(
+            {DAGGER_TEST_ATTESTATION_ENV: VALID_DAGGER_NONCE},
+            attestation,
+        )
+        or ""
+    )
+    with (
+        patch("conftest.dagger_test_environment_error", return_value="outside Dagger"),
+        pytest.raises(pytest.UsageError, match="refusing host execution"),
+    ):
+        require_dagger_test_environment()
+
+
+def test_python_suite_accepts_matching_dagger_attestation(tmp_path: Path) -> None:
+    attestation = tmp_path / "dagger-test-attestation"
+    attestation.write_text(VALID_DAGGER_NONCE, encoding="utf-8")
+    assert (
+        dagger_test_environment_error(
+            {DAGGER_TEST_ATTESTATION_ENV: VALID_DAGGER_NONCE},
+            attestation,
+        )
+        is None
+    )
+
+
+def test_agents_remember_quality_exports_failures_as_the_only_authoritative_result() -> None:
     source = DAGGER_MODULE.read_text(encoding="utf-8")
 
     assert "expect=ReturnType.ANY" in source
     assert "clean-quality-results.json" in source
-    assert "if result.exit_code != 0:" in source
-    assert "raise RuntimeError" in source
+    assert "async def verify" not in source
 
 
 @pytest.mark.parametrize(
@@ -140,7 +186,10 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
     module = load_dagger_module()
     fake_dag = FakeDag([0, 0, 0])
 
-    with patch.object(module, "dag", fake_dag):
+    with (
+        patch.object(module, "dag", fake_dag),
+        patch.object(module.secrets, "token_hex", return_value=VALID_DAGGER_NONCE),
+    ):
         result = asyncio.run(
             module.AgentsRememberQuality().quality(
                 object(),
@@ -162,6 +211,19 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
     assert wrapper[-4:] == ["--diff-base", "a" * 40, "--memory-cap-bytes", "1024"]
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
     assert payload["status"] == "passed"
+    assert payload["attemptNonce"] == VALID_DAGGER_NONCE
+    assert (
+        "AR_DAGGER_TEST_ATTESTATION",
+        VALID_DAGGER_NONCE,
+    ) in fake_dag.container_value.environment
+    assert (
+        "AR_QUALITY_ATTEMPT_NONCE",
+        VALID_DAGGER_NONCE,
+    ) in fake_dag.container_value.environment
+    assert any(
+        command[:2] == ["sh", "-c"] and "/tmp/ar-quality/dagger-test-attestation" in command[-1]
+        for command in commands
+    )
     assert payload["completedSteps"] == [
         "environment",
         "codex-read-only-probe",
@@ -171,7 +233,7 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
 
 def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() -> None:
     module = load_dagger_module()
-    fake_dag = FakeDag([0, 0, 0])
+    fake_dag = FakeDag([0] * 10)
 
     with patch.object(module, "dag", fake_dag):
         asyncio.run(
@@ -186,6 +248,32 @@ def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() ->
     assert "--targeted" not in wrapper
     assert wrapper[-2:] == ["--diff-base", "base-commit"]
     assert "--memory-cap-bytes" not in wrapper
+    commands = fake_dag.container_value.commands
+    assert ["npm", "ci"] in commands
+    assert ["npm", "run", "lint"] in commands
+    assert ["npm", "run", "typecheck"] in commands
+    assert ["npm", "run", "test:coverage"] in commands
+    assert ["npm", "run", "coverage:diff"] in commands
+    assert ["npm", "run", "e2e", "--", "--fail-on-flaky-tests"] in commands
+    assert ["npm", "run", "build"] in commands
+    assert ("CI", "1") in fake_dag.container_value.environment
+
+
+def test_dagger_quality_stops_at_the_first_failed_dashboard_rail() -> None:
+    module = load_dagger_module()
+    fake_dag = FakeDag([0, 0, 0, 0, 7])
+
+    with patch.object(module, "dag", fake_dag):
+        result = asyncio.run(
+            module.AgentsRememberQuality().quality(
+                object(), object(), mode="full", diff_base="base-commit"
+            )
+        )
+
+    payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
+    assert result.exit_code == 7
+    assert payload["completedSteps"][-2:] == ["dashboard-install", "dashboard-lint"]
+    assert ["npm", "run", "typecheck"] not in fake_dag.container_value.commands
 
 
 @pytest.mark.parametrize(
@@ -210,25 +298,3 @@ def test_dagger_quality_exports_failure_at_the_exact_completed_boundary(
     assert result.exit_code != 0
     assert payload["status"] == "failed"
     assert payload["completedSteps"] == completed
-
-
-def test_dagger_verify_returns_green_and_refuses_red_quality_results() -> None:
-    module = load_dagger_module()
-    quality = AsyncMock(return_value=module.QualityResult(reports=object(), exit_code=0))
-
-    with patch.object(module.AgentsRememberQuality, "quality", quality):
-        assert (
-            asyncio.run(
-                module.AgentsRememberQuality().verify(object(), object(), diff_base="base-commit")
-            )
-            == "clean Ubuntu quality passed"
-        )
-
-    quality.return_value = module.QualityResult(reports=object(), exit_code=4)
-    with (
-        patch.object(module.AgentsRememberQuality, "quality", quality),
-        pytest.raises(RuntimeError, match="exit code 4"),
-    ):
-        asyncio.run(
-            module.AgentsRememberQuality().verify(object(), object(), diff_base="base-commit")
-        )

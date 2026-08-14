@@ -262,22 +262,24 @@ class CodeQualityCheckTests(unittest.TestCase):
         self.assertNotIn("fail-on-crap-threshold", help_text)
         self.assertIn("mandatory CRAP threshold enforcement", help_text)
 
-    def test_repository_gates_use_default_strict_wrapper(self) -> None:
-        # The git hooks no longer inline the wrapper command: both delegate to the
-        # shared tiered body, and the pre-push tier runs the change-set-scoped wrapper.
-        # Follow the
-        # indirection rather than dropping the assertion -- every repository gate must
-        # still reach the wrapper with no threshold opt-out.
-        gate_files = [
-            REPOSITORY_ROOT / ".githooks" / "_gate.sh",
-            REPOSITORY_ROOT / ".github" / "workflows" / "quality-checks.yml",
-        ]
+    def test_repository_gates_use_one_strict_dagger_authority(self) -> None:
+        hook = (REPOSITORY_ROOT / ".githooks" / "_gate.sh").read_text(encoding="utf-8")
+        workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
+            encoding="utf-8"
+        )
+        dagger_module = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
+            encoding="utf-8"
+        )
 
-        for gate_file in gate_files:
-            content = gate_file.read_text(encoding="utf-8")
-            with self.subTest(gate_file=gate_file.as_posix()):
-                self.assertIn("agents_remember.code_quality.check", content)
-                self.assertNotIn("fail-on-crap-threshold", content)
+        self.assertNotIn("agents_remember.code_quality.check", hook)
+        self.assertIn("tests are Dagger-only", hook)
+        self.assertNotIn("for step in lint typecheck test", hook)
+        self.assertNotIn('npm --prefix dashboard run "test"', hook)
+        self.assertIn("dagger/dagger-for-github", workflow)
+        self.assertNotIn("agents_remember.code_quality.check", workflow)
+        self.assertIn("agents_remember.code_quality.check", dagger_module)
+        for content in (hook, workflow, dagger_module):
+            self.assertNotIn("fail-on-crap-threshold", content)
 
     def test_git_hooks_delegate_to_the_shared_tiered_gate(self) -> None:
         hook_tiers = {"pre-commit": "fast", "pre-push": "targeted"}
@@ -289,13 +291,13 @@ class CodeQualityCheckTests(unittest.TestCase):
                 self.assertIn(f'exec "$hook_dir/_gate.sh" {tier}', content)
                 self.assertNotIn("fail-on-crap-threshold", content)
 
-    def test_the_pre_push_tier_runs_the_targeted_contract(self) -> None:
+    def test_the_pre_push_tier_keeps_acceptance_inside_dagger(self) -> None:
         gate = (REPOSITORY_ROOT / ".githooks" / "_gate.sh").read_text(encoding="utf-8")
 
         self.assertIn("run_targeted_checks", gate)
-        self.assertIn("code_quality.check --targeted", gate)
-        # The full wrapper stays available only as a manual tier; the ladder moves it
-        # to the master integration gate.
+        self.assertIn("task closeout and CI own Dagger acceptance", gate)
+        self.assertNotIn("code_quality.check --targeted", gate)
+        self.assertIn("refusing host full-suite execution", gate)
         self.assertIn("usage: _gate.sh <fast|targeted|full>", gate)
 
     def test_run_fixed_checks_threads_checkout_source_onto_pythonpath(self) -> None:

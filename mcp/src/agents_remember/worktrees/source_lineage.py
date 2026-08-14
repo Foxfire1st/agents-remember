@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import (
@@ -17,7 +16,7 @@ from agents_remember.models.worktree import (
     SourceLineageSide,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.modules.git import branch_exists
+from agents_remember.worktrees.modules.git import branch_exists, repository_identity
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -253,20 +252,9 @@ def _linked_edge(
 
 
 def _same_repo(left: Path | None, right: Path | None) -> bool:
-    left_identity = _repository_identity(left)
-    right_identity = _repository_identity(right)
+    left_identity = repository_identity(left)
+    right_identity = repository_identity(right)
     return left_identity is not None and left_identity == right_identity
-
-
-def _repository_identity(repo: Path | None) -> Path | None:
-    """Resolve Git's shared identity so sibling worktree paths compare as one repo."""
-    if repo is None or not repo.is_dir():
-        return None
-    result = run_git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    common_dir = result.stdout.strip()
-    if result.returncode != 0 or not common_dir:
-        return None
-    return Path(common_dir).resolve()
 
 
 def _edge(edge: _EdgeInput) -> SourceLineageEdge:

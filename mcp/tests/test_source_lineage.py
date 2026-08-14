@@ -19,10 +19,10 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.git import repository_identity
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start import _preflighted_contract, attach_result
 from agents_remember.worktrees.source_lineage import (
-    _repository_identity,
     lineage_block_payload,
     lineage_refusal,
     parent_source_lineage,
@@ -44,11 +44,11 @@ class SourceLineageTests(unittest.TestCase):
     def test_repository_identity_rejects_absent_and_non_git_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.assertIsNone(_repository_identity(None))
-            self.assertIsNone(_repository_identity(root / "absent"))
+            self.assertIsNone(repository_identity(None))
+            self.assertIsNone(repository_identity(root / "absent"))
             plain = root / "plain"
             plain.mkdir()
-            self.assertIsNone(_repository_identity(plain))
+            self.assertIsNone(repository_identity(plain))
 
     def test_sprint_roles_have_no_single_master_lineage_edge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

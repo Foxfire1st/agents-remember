@@ -27,6 +27,15 @@ closeout failure — respawn/rerun the curator, do not patch onboarding from the
 distinction does not apply outside that chain (e.g. a solo flat session with no separate curator
 seat still runs `c-05-create-or-update-onboarding-files` itself before closing out).
 
+**Candidate-bound route-review gate:** every code-changing leaf reaches this skill only after an
+independent reviewer has written the verdict and per-major-route reports and the owner has called
+`task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})`. The plane
+stamps the exact current Git candidate tree and verifies the task-relative artifacts. Curator
+dispatch and both closeout preview/apply recompute that tree and refuse when the record is absent,
+blocking, stale, or points at missing evidence. Direct/solo and builder-verified tiers still require
+another agent's review; loop knobs change depth, not this gate. Never supply or remember the tree
+hash yourself, and never treat chat prose as a substitute for the task-bound record.
+
 ## MCP Tools
 
 Use the worktree closeout tools against the task contract:
@@ -94,6 +103,10 @@ mandatory `diff-base`; master integration invokes `mode=full` with the recorded 
 base. Host pytest and direct wrapper commands are diagnostics, not substitutes and not
 handoff evidence. Use `dagger call quality --help` when the public invocation needs to be
 inspected; do not reconstruct its arguments from memory.
+
+The Python, Vitest, and Playwright harnesses fail closed outside that graph. Dagger mints a
+per-run nonce and writes a matching in-container attestation; missing or mismatched evidence
+refuses test startup. There is no host-test compatibility path or fallback.
 
 Every completed strict wrapper invocation atomically replaces the enclosure-owned
 `reports/test-results.md` with its full output, including pytest. Passing closeout and integration
@@ -273,6 +286,10 @@ deliberately through the `c-05-create-or-update-onboarding-files` skill.
 
 External-memory closeout order is:
 
+Before step 1, require the current passing task-bound route review. Any code edit after review
+invalidates its candidate-tree binding and returns to the same route reviewer(s) before curator or
+closeout work resumes.
+
 1. run `check_missing_onboarding` against current additions (in the curator chain, this confirms the
    curator's pass already covered them — it is not the cue to author onboarding here)
 2. if onboarding is still missing, escalate to run/rerun the curator's memory pass through the
@@ -308,6 +325,8 @@ External-memory closeout order is:
 ## Internal-Memory Order
 
 Internal-memory closeout order is:
+
+Before step 1, require the same current passing task-bound route review for every code change.
 
 1. run the same missing-onboarding and changed-sidecar preconditions before preview
 2. complete preview and the applicable explicit or delegated commit authority

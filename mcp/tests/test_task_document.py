@@ -186,6 +186,16 @@ class SchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _master(lifecycleId="LC")
 
+    def test_integration_branch_is_master_only_and_nonblank(self) -> None:
+        sprint = _master(orchestrates=["master"], integrationBranch=" ar/super ")
+        self.assertEqual(sprint.integrationBranch, "ar/super")
+        with self.assertRaises(ValidationError):
+            _master(orchestrates=["master"], integrationBranch="   ")
+        with self.assertRaises(ValidationError):
+            _master(integrationBranch="ar/super")
+        with self.assertRaises(ValidationError):
+            _doc(integrationBranch="ar/super")
+
     def test_leaf_forbids_subtasks_and_non_freeform_sections(self) -> None:
         # the master series index stays master-only
         with self.assertRaises(ValidationError):
@@ -282,6 +292,12 @@ class RenderTests(unittest.TestCase):
                     "## Implementation Steps",
                     "",
                     "### S1 — Do",
+                    "",
+                    "---",
+                    "",
+                    "## Route Review",
+                    "",
+                    "_No candidate-bound route review recorded._",
                     "",
                     "---",
                     "",

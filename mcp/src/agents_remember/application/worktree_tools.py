@@ -23,6 +23,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
+from agents_remember.models.lifecycles.responses import TerminalState
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
@@ -98,6 +99,24 @@ def worktree_start_tool(
 ) -> dict[str, Any]:
     repo = require_repo(config, identity.repo_id)
     amb = ambient()
+    if amb is not None and amb.current is not None and not amb.current.fleeting:
+        return {
+            "ok": False,
+            "state": "lifecycle-switch-required",
+            "summary": (
+                "worktree_start refuses to repoint the active persistent lifecycle; switch "
+                "away from it to a fresh fleeting lifecycle, then retry worktree_start"
+            ),
+            "nextOperation": "switch_task_lifecycle",
+            "nextTool": "switch_lifecycle",
+            "nextArgs": {},
+            "nextStep": {
+                "summary": "Switch to a fresh fleeting lifecycle, then retry worktree_start.",
+                "nextOperation": "switch_task_lifecycle",
+                "nextTool": "switch_lifecycle",
+                "nextArgs": {},
+            },
+        }
     # worktree_start promotes the active lifecycle to persistent (design §1.3); with
     # no active lifecycle, mint a fresh anchor so the contract always carries one.
     lifecycle_id = amb.current.id if amb is not None and amb.current is not None else new_ulid()
@@ -484,17 +503,20 @@ def worktree_abandon_tool(
     # terminalized by the reader instead: the reducer projects `abandoned` from the
     # contract's cleanup field, honoring the store's single-writer invariant.
     if not dry_run and result.get("state") == "abandoned":
-        _end_ambient_lifecycle_if_anchored(str(result.get("lifecycle_id") or ""))
+        end_ambient_lifecycle_if_anchored(
+            str(result.get("lifecycle_id") or ""), outcome="abandoned"
+        )
     return result
 
 
-def _end_ambient_lifecycle_if_anchored(lifecycle_id: str) -> None:
+def end_ambient_lifecycle_if_anchored(lifecycle_id: str, *, outcome: TerminalState) -> None:
+    """End the process-owned ambient when one task transition retires its anchor."""
     amb = ambient()
     if not lifecycle_id or amb is None:
         return
     current = amb.current
     if current is not None and current.id == lifecycle_id:
-        amb.end("abandoned")
+        amb.end(outcome)
 
 
 @dataclass(frozen=True)

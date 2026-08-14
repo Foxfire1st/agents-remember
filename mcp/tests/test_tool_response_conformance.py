@@ -143,6 +143,27 @@ def _write_leaf_task(
             }
         ),
     )
+    sprint_root = coordination_root / "tasks" / repo / "sprint"
+    orchestrates = sorted(
+        path.name
+        for path in (coordination_root / "tasks" / repo).iterdir()
+        if path.is_dir() and path.name != sprint_root.name
+    )
+    write_task_doc(
+        sprint_root,
+        TaskDocument.model_validate(
+            {
+                "id": "SPRINT",
+                "slug": "task",
+                "title": "Sprint",
+                "kind": "master",
+                "repo": repo,
+                "createdAt": "2026-07-07T09:00",
+                "orchestrates": orchestrates,
+                "integrationBranch": "main",
+            }
+        ),
+    )
     write_task_doc(
         task_root,
         TaskDocument.model_validate(
@@ -309,6 +330,15 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     _write_leaf_task(config.coordination_root, master="abandon-task", doc_id="abandon-wt")
 
     payloads: dict[str, dict] = {}
+    abandon_start = tools.worktree_start_payload(
+        config,
+        TaskIdentity(repo_id=REPO, task_name="abandon-task", worktree_name="abandon-wt"),
+        bases=DISABLED_MEMORY_BASES,
+        execution=StartExecution(skip_provider_setup=True),
+    )
+    payloads["worktree_abandon"] = tools.worktree_abandon_payload(
+        config, abandon_start["contract_path"], dry_run=False, force=True
+    )
     payloads["worktree_start"] = tools.worktree_start_payload(
         config,
         TaskIdentity(repo_id=REPO, task_name="demo-task", worktree_name="demo-wt"),
@@ -352,15 +382,6 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     )
     payloads["lifecycle_finalize_task"] = tools.lifecycle_finalize_task_payload(
         config, contract_path, dry_run=True
-    )
-    abandon_start = tools.worktree_start_payload(
-        config,
-        TaskIdentity(repo_id=REPO, task_name="abandon-task", worktree_name="abandon-wt"),
-        bases=DISABLED_MEMORY_BASES,
-        execution=StartExecution(skip_provider_setup=True),
-    )
-    payloads["worktree_abandon"] = tools.worktree_abandon_payload(
-        config, abandon_start["contract_path"], dry_run=False, force=True
     )
     # Reopen the fully landed demo-task leaf (closeout+integrate+cleanup completed above) —
     # after the finalize preview so its landed-commit proof still saw the completed contract.

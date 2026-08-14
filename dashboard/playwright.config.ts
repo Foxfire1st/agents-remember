@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { requireDaggerTestEnvironment } from "./scripts/require-dagger-test-environment.mjs";
+
+requireDaggerTestEnvironment();
 
 // Playwright drives the real app against gallery + sim states (the mc2 red-pen loop
 // re-hosted, note 15). Effects are frozen via `?effects=off` (D5) so screenshots and

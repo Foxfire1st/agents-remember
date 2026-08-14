@@ -26,7 +26,9 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -404,7 +406,47 @@ def dirty_open_external_contract_fixture(root: Path):
         "feature.txt",
         contract.code_base_commit,
     )
+    write_passing_route_review(contract)
     return contract
+
+
+def write_passing_route_review(contract: WorktreeContract) -> None:
+    report = contract.task_root / "notes/reports/test-reviewer-verdict.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("# Test reviewer verdict\n\nPass.\n", encoding="utf-8")
+    write_task_doc(
+        contract.task_root,
+        TaskDocument.model_validate(
+            {
+                "id": contract.leaf_id,
+                "slug": contract.leaf_id,
+                "title": contract.task_name,
+                "kind": "subTask",
+                "repo": contract.repo_name,
+                "createdAt": "2026-08-13T00:00:00+00:00",
+                "lifecycleId": contract.lifecycle_id or None,
+                "enclosures": [
+                    {
+                        "leafId": contract.leaf_id,
+                        "enclosurePath": contract.contract_path.as_posix(),
+                    }
+                ],
+                "routeReview": {
+                    "candidateTree": code_candidate_tree(contract),
+                    "verdict": "pass",
+                    "verdictRef": "notes/reports/test-reviewer-verdict.md",
+                    "reviewedAt": "2026-08-13T00:00:00+00:00",
+                    "routes": [
+                        {
+                            "route": "test-fixture",
+                            "verdict": "pass",
+                            "evidenceRef": "notes/reports/test-reviewer-verdict.md",
+                        }
+                    ],
+                },
+            }
+        ),
+    )
 
 
 def claimed_external_contract_fixture(root: Path):
@@ -540,6 +582,7 @@ def committed_range_external_contract_fixture(root: Path):
     commit_file(contract.code_worktree, "raw.txt", "raw\n", "Add raw transport")
     contract = replace(contract, parent_contract_path=parent.contract_path)
     write_contract(contract.contract_path, contract)
+    write_passing_route_review(contract)
     return contract
 
 
@@ -633,6 +676,7 @@ def closed_external_contract_fixture(
         ledger_commit=ledger_commit,
     )
     write_contract(closed.contract_path, closed)
+    write_passing_route_review(closed)
     return closed
 
 

@@ -23,6 +23,7 @@ from agents_remember.serving.projections.landing_state import (
     LandingStateRefresher,
     _load_final,
 )
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.reopen import _clear_frozen_landing, reopen_task
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -89,6 +90,26 @@ def _landed_contract(root: Path, index: int) -> WorktreeContract:
     write_contract(contract.contract_path, contract)
     _stamp_contract(contract, NOW - timedelta(hours=1))
     return contract
+
+
+def _write_leaf_task_doc(contract: WorktreeContract) -> None:
+    """Give a landed enclosure the canonical identity required for a real reopen."""
+    write_task_doc(
+        contract.task_root,
+        TaskDocument.model_validate(
+            {
+                "id": contract.leaf_id,
+                "slug": contract.code_worktree.name,
+                "title": f"Leaf {contract.leaf_id}",
+                "kind": "subTask",
+                "status": "Completed",
+                "repo": contract.repo_name,
+                "createdAt": "2026-07-12T15:00",
+                "lifecycleId": contract.lifecycle_id,
+                "steps": [{"id": "S1", "title": "land the leaf", "status": "done"}],
+            }
+        ),
+    )
 
 
 def _observed(contract: WorktreeContract) -> list[dict[str, object]]:
@@ -541,6 +562,7 @@ class LandingFreezeResurrectionTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = _landed_contract(root, 0)
+            _write_leaf_task_doc(contract)
             final = contract.contract_path.parent / "landing-final.json"
 
             # A genuine freeze, produced by the real sweep — the exact file a reopen must clear.

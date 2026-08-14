@@ -145,15 +145,21 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 
 ## Code Quality Instructions
 
-After implementing Python code in this source checkout, run the quality wrapper from
-the `agents-remember/` source repository root:
+After implementing Python code in this source checkout, run acceptance only through the
+pinned Dagger module. Task-addressed worktree closeout builds the exact staged sandbox and
+invokes it automatically; a manual diagnostic invocation uses the same module from the
+candidate checkout:
 
 ```text
-python -m agents_remember.code_quality.check
+dagger call quality --source=. --repository-bundle=<candidate.bundle> --mode=<targeted|full> --diff-base=<commit> reports export --path=<enclosure>/reports
 ```
 
-That command is the gate. It is what the pre-push hook, CI, and closeout run, and it
-exits non-zero when any step it enforces fails. Four steps enforce — ruff (lint),
+The exported `clean-quality-results.json` is the single authoritative result. CI and
+closeout enforce it; no host-wrapper or second Dagger projection is an acceptance gate.
+The Python, Vitest, and Playwright harnesses also fail closed at startup unless the pinned
+Dagger graph supplies a matching per-run environment nonce and in-container attestation file.
+There is no host-test compatibility path: invoking those suites outside Dagger is an error.
+The graph runs the wrapper inside clean Ubuntu. Four steps enforce — ruff (lint),
 `ruff format --check`, Pyright, and the full pytest suite — followed by mandatory CRAP
 threshold enforcement. Take no path arguments to it: there are none, because its scope is
 `git ls-files '*.py'` and narrowing what a gate certifies is how a gate stops meaning

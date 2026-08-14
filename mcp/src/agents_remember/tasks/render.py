@@ -17,6 +17,7 @@ from __future__ import annotations
 from .document import (
     CodeExample,
     Decision,
+    RouteReviewRecord,
     Section,
     Step,
     StepDisposition,
@@ -36,6 +37,7 @@ def render_markdown(doc: TaskDocument) -> str:
     parts += _section("Requirements", _bullets(doc.requirements))
     parts += _section("Design", [doc.design or "No design reasoning needed."])
     parts += _section("Implementation Steps", _step_lines(doc.steps))
+    parts += _section("Route Review", _route_review_lines(doc.routeReview))
     parts += _section(
         "Proposed Code Examples",
         _code_example_lines(doc.codeExamples, doc.codeExamplesNote),
@@ -102,6 +104,8 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         lines.append(f"**Master:** `{doc.master}`")
     if doc.orchestrates:  # the orchestration-command relation (L14); master-only by schema
         lines.append("**Orchestrates:** " + ", ".join(f"`{name}`" for name in doc.orchestrates))
+    if doc.integrationBranch:
+        lines.append(f"**Integration branch:** `{doc.integrationBranch}`")
     lines += [
         f"**{note.label}:** {note.value}" for note in doc.headerNotes
     ]  # extra header lines (R4)
@@ -187,6 +191,25 @@ def _decision_lines(decisions: list[Decision]) -> list[str]:
         for item in decisions
     ]
     return ["| Date-Time | Decision | Rationale |", "| --- | --- | --- |", *rows]
+
+
+def _route_review_lines(review: RouteReviewRecord | None) -> list[str]:
+    if review is None:
+        return ["_No candidate-bound route review recorded._"]
+    rows = [
+        f"| {_cell(route.route)} | {route.verdict} | `{_cell(route.evidenceRef)}` |"
+        for route in review.routes
+    ]
+    return [
+        f"**Candidate tree:** `{review.candidateTree}`",
+        f"**Overall verdict:** {review.verdict}",
+        f"**Verdict artifact:** `{review.verdictRef}`",
+        f"**Reviewed:** {review.reviewedAt}",
+        "",
+        "| Major route | Verdict | Evidence |",
+        "| --- | --- | --- |",
+        *rows,
+    ]
 
 
 def _cell(text: str) -> str:

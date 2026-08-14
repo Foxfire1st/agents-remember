@@ -51,7 +51,7 @@ class QualityGatePlan:
     mode: str = GATE_TARGETED
     memory_cap_bytes: int | None = None
     systemd_run_available: bool | None = None
-    executor: str = "local"
+    executor: str = "dagger"
 
 
 @dataclass(frozen=True)
@@ -114,7 +114,7 @@ def _gate_command(
     mode: str = GATE_TARGETED,
     memory_cap_bytes: int | None = None,
     systemd_run_available: bool | None = None,
-    executor: str = "local",
+    executor: str = "dagger",
 ) -> str:
     """The command as reported, so a payload reader can rerun exactly what ran."""
     if mode not in {GATE_TARGETED, GATE_FULL}:
@@ -189,8 +189,11 @@ def code_quality_gate_preview(
             ),
         }
     plan = plan or QualityGatePlan()
-    if plan.executor not in {"local", "dagger"}:
-        raise ValueError(f"unknown quality gate executor: {plan.executor}")
+    if plan.executor != "dagger":
+        raise ValueError(
+            "lifecycle quality acceptance requires the pinned Dagger executor; "
+            f"received {plan.executor!r}"
+        )
     memory_cap_payload: dict[str, object] = {}
     if plan.mode == GATE_FULL:
         cap_bytes = plan.memory_cap_bytes
@@ -253,8 +256,11 @@ def _validated_quality_gate_plan(plan: QualityGatePlan | None) -> QualityGatePla
     resolved = plan or QualityGatePlan()
     if resolved.mode not in {GATE_TARGETED, GATE_FULL}:
         raise ValueError(f"unknown quality gate mode: {resolved.mode}")
-    if resolved.executor not in {"local", "dagger"}:
-        raise ValueError(f"unknown quality gate executor: {resolved.executor}")
+    if resolved.executor != "dagger":
+        raise ValueError(
+            "lifecycle quality acceptance requires the pinned Dagger executor; "
+            f"received {resolved.executor!r}"
+        )
     return resolved
 
 
@@ -264,7 +270,6 @@ def run_strict_code_quality_gate(
     diff_base: str = "",
     plan: QualityGatePlan | None = None,
     invocation: str = "closeout-staged",
-    runner: QualityRunner = run_subprocess,
 ) -> dict[str, object]:
     """Run the altitude-routed quality contract or refuse before the commit.
 
@@ -291,26 +296,15 @@ def run_strict_code_quality_gate(
     )
     started_at = datetime.now(UTC)
     started = time.monotonic()
-    if plan.executor == "dagger":
-        result = run_clean_quality(
-            CleanQualityRequest(
-                code_worktree=code_worktree,
-                worktree_group=target.worktree_group,
-                mode=plan.mode,
-                diff_base=diff_base,
-                memory_cap_bytes=plan.memory_cap_bytes,
-            )
+    result = run_clean_quality(
+        CleanQualityRequest(
+            code_worktree=code_worktree,
+            worktree_group=target.worktree_group,
+            mode=plan.mode,
+            diff_base=diff_base,
+            memory_cap_bytes=plan.memory_cap_bytes,
         )
-    else:
-        result = runner(
-            command,
-            code_worktree,
-            quality_environment(
-                code_worktree,
-                reports_root=target.worktree_group / REPORT_DIRECTORY_NAME,
-                invocation=invocation,
-            ),
-        )
+    )
     finished_at = datetime.now(UTC)
     report_path = test_results_report_path(target.worktree_group)
     _write_test_results_report(
@@ -330,7 +324,15 @@ def run_strict_code_quality_gate(
         )
     )
     if result.returncode != 0:
-        raise RuntimeError(_gate_failure_message(result, cap_plan, report_path))
+        raise RuntimeError(
+            _gate_failure_message(
+                result,
+                cap_plan,
+                report_path,
+                requested_memory_cap_bytes=plan.memory_cap_bytes,
+                executor=plan.executor,
+            )
+        )
     return {
         "required": True,
         "status": GATE_ENFORCED,
@@ -356,6 +358,42 @@ def run_strict_code_quality_gate(
             else {}
         ),
     }
+
+
+def run_local_quality_diagnostic(
+    target: QualityGateTarget,
+    *,
+    diff_base: str = "",
+    plan: QualityGatePlan | None = None,
+    runner: QualityRunner = run_subprocess,
+) -> subprocess.CompletedProcess[str]:
+    """Run the host wrapper as a diagnostic; never produce acceptance evidence."""
+    wrapper = quality_wrapper_path(target.code_worktree)
+    if not wrapper.is_file():
+        raise RuntimeError(f"local quality diagnostic wrapper is missing at {wrapper}")
+    requested = plan or QualityGatePlan()
+    diagnostic_plan = QualityGatePlan(
+        mode=requested.mode,
+        memory_cap_bytes=requested.memory_cap_bytes,
+        systemd_run_available=requested.systemd_run_available,
+        executor="local",
+    )
+    command, invocation, _ = _gate_command_parts(
+        target.code_worktree,
+        diagnostic_plan,
+        diff_base,
+        "local-diagnostic",
+        pytest_report=pytest_events_report_path(target.worktree_group),
+    )
+    return runner(
+        command,
+        target.code_worktree,
+        quality_environment(
+            target.code_worktree,
+            reports_root=target.worktree_group / REPORT_DIRECTORY_NAME,
+            invocation=invocation,
+        ),
+    )
 
 
 def _write_test_results_report(report: _QualityGateReport) -> None:
@@ -514,6 +552,9 @@ def _gate_failure_message(
     result: subprocess.CompletedProcess[str],
     cap_plan: memory_cap.MemoryCapPlan | None,
     report_path: Path,
+    *,
+    requested_memory_cap_bytes: int | None = None,
+    executor: str = "dagger",
 ) -> str:
     """One refusal message: nothing committed, plus cap policy when a cap ran."""
     details = _failure_output(result.stdout)
@@ -530,6 +571,17 @@ def _gate_failure_message(
             f"exit code {result.returncode}.{killed}"
             " Raise orchestration.qualityGate.memoryCapBytes only after the run itself "
             "is proven healthy."
+        )
+    elif executor == "dagger" and requested_memory_cap_bytes is not None:
+        killed = (
+            " The Dagger container scope was killed by the memory cap."
+            if result.returncode in (137, -9)
+            else ""
+        )
+        details += (
+            "\nfull gate memory policy: dagger-inner-wrapper; "
+            f"cap={requested_memory_cap_bytes} bytes; exit code {result.returncode}."
+            f"{killed}"
         )
     return (
         "strict code-quality gate failed before code commit"

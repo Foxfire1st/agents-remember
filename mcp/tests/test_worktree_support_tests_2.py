@@ -34,6 +34,7 @@ from test_worktree_support import (
     read_onboarding_field,
     write_entity_catalog,
     write_file_onboarding,
+    write_passing_route_review,
 )
 
 
@@ -124,6 +125,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             root = Path(tmp)
             contract = open_external_contract_fixture(root)
             (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
+            write_passing_route_review(contract)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,
@@ -246,6 +248,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 "second.txt",
                 contract.code_commit,
             )
+            write_passing_route_review(contract)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=False,
@@ -275,6 +278,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 "second.txt",
                 contract.code_commit,
             )
+            write_passing_route_review(contract)
 
             output = io.StringIO()
             with redirect_stdout(output):
@@ -378,6 +382,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             synced = replace(contract, code_base_commit=new_source)
             write_contract(synced.contract_path, synced)
+            write_passing_route_review(synced)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=False,
@@ -404,6 +409,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 )
             git(contract.code_worktree, "add", "-A")
             git(contract.code_worktree, "commit", "-m", "Bulk transport")
+            write_passing_route_review(contract)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=False,
@@ -473,6 +479,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 "def stable(value: int) -> int:\n    return value + 2\n",
                 encoding="utf-8",
             )
+            write_passing_route_review(contract)
 
             self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
 
@@ -491,6 +498,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 "def renamed(value: int) -> int:\n    return value + 2\n",
                 encoding="utf-8",
             )
+            write_passing_route_review(contract)
 
             with self.assertRaisesRegex(RuntimeError, "citation_anchor_absent_from_range"):
                 worktree_manager.command_closeout(closeout_args(contract))
@@ -509,6 +517,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 "    return 2\n",
                 encoding="utf-8",
             )
+            write_passing_route_review(contract)
             output = io.StringIO()
 
             with redirect_stdout(output):
@@ -558,6 +567,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 [("Feature", drift.GIT_BLOB_SET_ALGORITHM, seed_fingerprint, ["feature.txt"])],
             )
             (contract.code_worktree / "feature.txt").write_text("new\n", encoding="utf-8")
+            write_passing_route_review(contract)
             args = Namespace(
                 contract_path=contract.contract_path,
                 approved=True,

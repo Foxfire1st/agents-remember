@@ -46,6 +46,7 @@ from agents_remember.tasks.readiness import (
     missing_unresolved_master_rows,
 )
 from agents_remember.worktrees.reopen import reopen_task
+from agents_remember.worktrees.route_review import RouteReviewError, build_route_review
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
     is_enclosure_contract,
@@ -59,6 +60,8 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+from .worktree_tools import end_ambient_lifecycle_if_anchored
+
 VALID_OPERATIONS = (
     "create",
     "replace",
@@ -69,6 +72,7 @@ VALID_OPERATIONS = (
     "remove_subtask",
     "set_section",
     "append_decision",
+    "record_route_review",
     "set_field",
     "get",
 )
@@ -86,12 +90,11 @@ _MUTABLE_FIELDS = frozenset(
         "openQuestions",
         "references",
         "lifecycleId",
-        "seriesContractPath",
-        "enclosures",
         "master",
         "codeExamplesNote",
         "statusNote",
         "orchestrates",
+        "integrationBranch",
     }
 )
 
@@ -128,6 +131,7 @@ class TaskDocEdit:
     decision: dict[str, Any] | None = None
     subtask: dict[str, Any] | None = None
     section: dict[str, Any] | None = None
+    review: dict[str, Any] | None = None
 
 
 NO_EDIT = TaskDocEdit()
@@ -165,11 +169,16 @@ def task_doc_tool(
         json_path = _existing_json(task_root, slug)
         original = read_task_doc(json_path)
         doc = _replace(payload_fields, contract, task_root, json_path)
+    elif operation == "record_route_review":
+        json_path = _existing_json(task_root, slug)
+        original = read_task_doc(json_path)
+        doc = _record_route_review(original, edit.review, contract, task_root, json_path)
     else:
         original = read_task_doc(_existing_json(task_root, slug))
         doc = _apply(operation, original, edit, contract=contract)
 
     _enforce_disposition_authority(operation, original, doc)
+    _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
     _enforce_terminal_status(doc)
@@ -262,6 +271,40 @@ def _replace(
     return doc
 
 
+def _record_route_review(
+    doc: TaskDocument,
+    payload: dict[str, Any] | None,
+    contract: WorktreeContract | None,
+    task_root: Path,
+    selected_path: Path,
+) -> TaskDocument:
+    if doc.kind == "master":
+        raise TaskDocError("record_route_review is valid only for a leaf task document")
+    if contract is None:
+        raise TaskDocError("record_route_review requires the leaf worktree contract")
+    if payload is None:
+        raise TaskDocError("record_route_review requires a review object")
+    try:
+        resolved = resolve_terminal_leaf_doc(
+            task_root,
+            contract.leaf_id,
+            asserted_path=selected_path,
+        )
+    except TerminalLeafResolutionError as exc:
+        raise TaskDocError(str(exc)) from exc
+    if resolved is None or resolved[0].resolve() != selected_path.resolve():
+        raise TaskDocError(
+            "record_route_review target is not the exact task document bound to the leaf contract"
+        )
+    try:
+        review = build_route_review(contract, task_root, payload)
+    except (RouteReviewError, ValidationError) as exc:
+        raise TaskDocError(str(exc)) from exc
+    data = doc.model_dump(by_alias=True)
+    data["routeReview"] = review.model_dump(mode="json")
+    return _validate(data)
+
+
 def _build_doc(
     fields: dict[str, Any],
     contract: WorktreeContract | None,
@@ -283,17 +326,14 @@ def _build_doc(
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
         if contract.kind == "leaf" and contract.lifecycle_id and data.get("kind") != "master":
             data.setdefault("lifecycleId", contract.lifecycle_id)
-        data.setdefault("seriesContractPath", series_contract_path(task_root).as_posix())
+        data["seriesContractPath"] = series_contract_path(task_root).as_posix()
         if contract.kind == "leaf":
-            data.setdefault(
-                "enclosures",
-                [
-                    {
-                        "leafId": contract.leaf_id,
-                        "enclosurePath": contract.contract_path.as_posix(),
-                    }
-                ],
-            )
+            data["enclosures"] = [
+                {
+                    "leafId": contract.leaf_id,
+                    "enclosurePath": contract.contract_path.as_posix(),
+                }
+            ]
     return _validate(data)
 
 
@@ -529,6 +569,28 @@ def _enforce_disposition_authority(
         raise TaskDocError(
             "replace cannot add, remove, or change intentional-skip disposition; "
             "use task_doc.skip_step or set_step with an explicit status"
+        )
+
+
+def _enforce_route_review_authority(
+    operation: str,
+    original: TaskDocument | None,
+    candidate: TaskDocument,
+) -> None:
+    candidate_review = candidate.routeReview.model_dump_json() if candidate.routeReview else None
+    original_review = (
+        original.routeReview.model_dump_json()
+        if original is not None and original.routeReview is not None
+        else None
+    )
+    if operation == "create" and candidate_review is not None:
+        raise TaskDocError(
+            "create cannot author route-review evidence; use task_doc.record_route_review"
+        )
+    if operation == "replace" and candidate_review != original_review:
+        raise TaskDocError(
+            "replace cannot add, remove, or change route-review evidence; "
+            "use task_doc.record_route_review"
         )
 
 
@@ -879,8 +941,12 @@ def task_reopen_tool(
     job. The response keeps the worktree-command shape (contract state fields), so it
     validates against a ``WorktreeCommandResponse`` subclass in the registry.
     """
-    result = reopen_task(
-        require_within_coordination(config, contract_path, "contract_path"),
-        dry_run=dry_run,
-    )
+    confined_contract_path = require_within_coordination(config, contract_path, "contract_path")
+    lifecycle_id = load_contract(confined_contract_path).lifecycle_id
+    result = reopen_task(confined_contract_path, dry_run=dry_run)
+    if not dry_run and result.returncode == 0 and result.payload.get("state") == "reopened":
+        # Reopen retires the completed task's attribution. Ending that exact ambient
+        # anchor makes the next worktree_start mint a fresh lifecycle instead of
+        # silently promoting and restamping the completed lifecycle id.
+        end_ambient_lifecycle_if_anchored(lifecycle_id, outcome="completed")
     return {**result.payload, "ok": result.returncode == 0, "operation": "task_reopen"}

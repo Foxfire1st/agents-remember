@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { requireDaggerTestEnvironment } from "./scripts/require-dagger-test-environment.mjs";
+
+requireDaggerTestEnvironment();
 
 // 260718-CHATS-L5F R7 (FB5): the durable, opt-in Chats end-to-end suite. Unlike e2e-production
 // (route-mocked bundle) this drives the REAL composed app against the REAL installed harnesses —

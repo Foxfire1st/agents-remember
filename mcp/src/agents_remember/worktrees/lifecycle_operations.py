@@ -160,8 +160,10 @@ def cancel_operation(
 ) -> LifecycleOperationProjection:
     contract = load_contract(contract_path)
     store = _store(contract, kind)
+    worker_pid: int | None = None
 
     def request(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
+        nonlocal worker_pid
         if record.status in {"completed", "failed", "cancelled"}:
             return record
         if record.irreversibleBoundaryEntered:
@@ -169,6 +171,7 @@ def cancel_operation(
                 f"{kind} has entered its irreversible boundary; cancellation is refused and "
                 "recovery must reconcile or complete the same task-bound operation"
             )
+        worker_pid = record.workerPid
         return record.model_copy(
             update={
                 "status": "cancelled",
@@ -176,12 +179,13 @@ def cancel_operation(
                 "cancelRequested": True,
                 "finishedAt": now_iso(),
                 "guidance": "The task-bound operation was cancelled before approval claim.",
+                "workerPid": None,
             }
         )
 
     current = store.update(request)
-    if current.status == "cancelled" and current.workerPid is not None:
-        _terminate_worker_group(current.workerPid)
+    if worker_pid is not None:
+        _terminate_worker_group(worker_pid)
     return operation_projection(current)
 
 

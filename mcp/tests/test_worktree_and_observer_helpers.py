@@ -30,6 +30,7 @@ from agents_remember.serving.projections.snapshots import (
     _inspect_containers,
     _inspect_containers_individually,
 )
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import delete_branch_if_merged
 from agents_remember.worktrees.modules.models import VerifiedChange
@@ -827,8 +828,43 @@ class ParentSeriesContractTests(unittest.TestCase):
     def _task_root(self, root: Path) -> Path:
         return root / "tasks" / self.REPO / self.TASK
 
+    def _write_sprint_topology(self, root: Path) -> None:
+        write_task_doc(
+            root / "tasks" / self.REPO / "demo-sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "DEMO-SPRINT",
+                    "slug": "task",
+                    "title": "Demo Sprint",
+                    "kind": "master",
+                    "status": "inProgress",
+                    "repo": self.REPO,
+                    "createdAt": "2026-08-01T09:00",
+                    "orchestrates": [self.TASK],
+                    "integrationBranch": "main",
+                }
+            ),
+        )
+
     def _write_task_artifact(self, root: Path, body: str) -> Path:
         task_root = self._task_root(root)
+        if "**Type:** Master" in body:
+            self._write_sprint_topology(root)
+            write_task_doc(
+                task_root,
+                TaskDocument.model_validate(
+                    {
+                        "id": "DEMO-MASTER",
+                        "slug": "task",
+                        "title": "Demo Master",
+                        "kind": "master",
+                        "status": "inProgress",
+                        "repo": self.REPO,
+                        "createdAt": "2026-08-01T10:00",
+                    }
+                ),
+            )
+            return task_root
         task_root.mkdir(parents=True, exist_ok=True)
         (task_root / "task.md").write_text(body, encoding="utf-8")
         return task_root
@@ -945,7 +981,7 @@ class ParentSeriesContractTests(unittest.TestCase):
             root = Path(tmp)
             code_repo = root / "repo"
             head = init_repo(code_repo)
-            task_root = self._task_root(root)
+            task_root = self._write_task_artifact(root, "# Demo\n\n**Type:** Master\n")
             existing = default_series_contract(
                 ContractTask(
                     name=self.TASK,
@@ -957,7 +993,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                 code=RepoBranchPlan(
                     repo_path=code_repo,
                     source_branch="main",
-                    work_branch="ar/already-there",
+                    work_branch=f"ar/{self.TASK}",
                     base_commit=head,
                 ),
                 task_root=task_root,
@@ -970,8 +1006,8 @@ class ParentSeriesContractTests(unittest.TestCase):
 
             assert contract is not None
             self.assertEqual(contract.kind, "series")
-            self.assertEqual(contract.code_work_branch, "ar/already-there")
-            # Adoption must not touch the repo: no `ar/<task>` branch is invented.
+            self.assertEqual(contract.code_work_branch, f"ar/{self.TASK}")
+            # Adoption must not touch the repo: the recorded branch is not invented.
             self.assertNotIn(f"ar/{self.TASK}", self._branches(code_repo))
 
     def test_an_unreadable_parent_contract_is_reported_as_such(self) -> None:
@@ -979,8 +1015,7 @@ class ParentSeriesContractTests(unittest.TestCase):
             root = Path(tmp)
             code_repo = root / "repo"
             init_repo(code_repo)
-            task_root = self._task_root(root)
-            task_root.mkdir(parents=True)
+            task_root = self._write_task_artifact(root, "# Demo\n\n**Type:** Master\n")
             series_contract_path(task_root).write_text("no front matter here\n", encoding="utf-8")
 
             with self.assertRaises(RuntimeError) as caught:
@@ -993,8 +1028,7 @@ class ParentSeriesContractTests(unittest.TestCase):
             root = Path(tmp)
             code_repo = root / "repo"
             head = init_repo(code_repo)
-            task_root = self._task_root(root)
-            task_root.mkdir(parents=True)
+            task_root = self._write_task_artifact(root, "# Demo\n\n**Type:** Master\n")
             leaf = default_contract(
                 ContractTask(
                     name=self.TASK,

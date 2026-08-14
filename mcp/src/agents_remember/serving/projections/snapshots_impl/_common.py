@@ -65,9 +65,23 @@ def _iter_task_document_payloads(
 def _bounded_task_document_payloads(
     docs: list[tuple[Path, dict[str, object]]], *, limit: int
 ) -> list[tuple[Path, dict[str, object]]]:
+    """Keep every task-root authority, then fill the bounded leaf window.
+
+    ``task.json`` is the canonical document for one active task root and therefore
+    owns sprint/master grouping.  Age-based eviction may trim leaf summaries, but it
+    must never flatten the hierarchy by dropping an older root authority.
+    """
     if len(docs) <= limit:
         return docs
-    return sorted(docs, key=lambda item: (-_stat_mtime_ns(item[0]), item[0].as_posix()))[:limit]
+    root_docs = [item for item in docs if item[0].name == "task.json"]
+    remaining = [item for item in docs if item[0].name != "task.json"]
+    remaining_limit = max(limit - len(root_docs), 0)
+    newest_remaining = sorted(
+        remaining,
+        key=lambda item: (-_stat_mtime_ns(item[0]), item[0].as_posix()),
+    )[:remaining_limit]
+    selected = {path for path, _payload in [*root_docs, *newest_remaining]}
+    return [item for item in docs if item[0] in selected]
 
 
 def _stat_mtime_ns(path: Path) -> int:  # pragma: no cover
@@ -78,10 +92,18 @@ def _stat_mtime_ns(path: Path) -> int:  # pragma: no cover
 
 
 def _iter_task_json(tasks_root: Path) -> list[Path]:
+    """Enumerate only canonical task documents directly inside one task root.
+
+    A task root is exactly ``tasks/<repository>/<task>/``. Recursive discovery used
+    to admit valid-schema historical copies under ``notes/`` as live masters, which
+    duplicated and flattened the dashboard hierarchy.
+    """
     return [
         path
         for path in sorted(tasks_root.rglob("*.json"))
-        if ARCHIVE_DIR not in path.parts and ENCLOSURES_DIR not in path.parts
+        if ARCHIVE_DIR not in path.parts
+        and ENCLOSURES_DIR not in path.parts
+        and len(path.relative_to(tasks_root).parts) == 3
     ]
 
 

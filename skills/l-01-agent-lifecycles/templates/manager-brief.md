@@ -25,10 +25,13 @@ master's leaf loop to the master-exit seam, then hand over.
 - Trust facts (compiled by the orchestrator — do not re-run the checkpoint): providers <state /
   stack key or NONE>, drift <count>, freshness <state>.
 
-## The branch base (load-bearing)
-- Your master integration branch: `<branch-name>`, based off the CURRENT super branch
-  `<super-branch>` @ `<super-tip-commit>` — master branches base off super, never off main.
-- Leaf worktrees base off your master branch (normal `worktree_start` per leaf).
+## The source edge (plane-owned, load-bearing)
+- Structural admission has created or validated this master edge from the canonical sprint
+  document's `integrationBranch`. Branch names and commit ids stay in the task/contract plane;
+  they are not inputs this manager retains or reconciles from its prompt.
+- Before dispatching a leaf, use the task-bound `worktree_status` / `worktree_start` route. If the
+  source moved, follow its contract-addressed `worktree_sync` recovery and re-read status; never
+  infer a source branch from the checkout and never carry a prior super tip forward yourself.
 
 ## Dispatch defaults
 - Worker dispatches: `templates/worker-brief.md`, with each canonical leaf document and role
@@ -36,6 +39,11 @@ master's leaf loop to the master-exit seam, then hand over.
   <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
+- Every stable code-change session receives an independent route review before curator handoff.
+  Partition the changed surface into material major routes from architectural ownership,
+  governing route overviews, and the import/call graph. The reviewer chair fans out one
+  independent reviewer per route and returns a verdict with a complete route-coverage table;
+  direct/builder-verified tiers may reduce loop machinery, never remove this gate.
 - Quality altitude ladder (260731-EFA-L17): leaf closeout and leaf integration run the
   pinned Dagger graph in `mode=targeted` with the recorded leaf base; the FULL Dagger
   `mode=full` wrapper runs exactly once per master inside `worktree_integrate` with the
@@ -89,6 +97,6 @@ master's leaf loop to the master-exit seam, then hand over.
 **Compiler notes for the orchestrator.**
 
 - Fill every `<placeholder>`; an unresolved placeholder is not dispatchable.
-- The super-tip commit you write here is the reconciliation anchor if a sibling master lands
-  first — state it explicitly.
+- Do not compile branch names, commit ids, or private contract/session ids into this brief. The
+  canonical sprint/master documents and their structural admission are the reconciliation anchor.
 - Deliver as an echo-confirmed paste; only count delivery on a post-boot echo.

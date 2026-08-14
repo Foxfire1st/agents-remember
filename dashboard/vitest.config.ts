@@ -1,5 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { requireDaggerTestEnvironment } from "./scripts/require-dagger-test-environment.mjs";
+
+requireDaggerTestEnvironment();
 
 // Standalone Vitest config so vite.config.ts keeps pure Vite types: the project's Vite and
 // Vitest's bundled Vite are distinct instances, and sharing one `defineConfig` clashes on

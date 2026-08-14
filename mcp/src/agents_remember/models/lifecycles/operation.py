@@ -34,6 +34,16 @@ LifecycleOperationPhase = Literal[
 ]
 
 
+class LifecycleOperationRecoveryCommits(BaseModel):
+    """Exact irreversible outputs persisted before contract finalization."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    codeCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    memoryContentCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+    ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+
+
 class GatePolicyRuleSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -101,6 +111,7 @@ class LifecycleOperationRecord(BaseModel):
     cancelRequested: bool = False
     irreversibleBoundaryEntered: bool = False
     approvalClaimed: bool = False
+    recoveryCommits: LifecycleOperationRecoveryCommits | None = None
     attempt: int = Field(default=1, ge=1)
     workerPid: int | None = Field(default=None, ge=1)
 
