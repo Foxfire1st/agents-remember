@@ -228,8 +228,10 @@ class MetricsLoopTests(unittest.IsolatedAsyncioTestCase):
 
         def record(snapshot: MetricsSnapshot) -> None:
             entered.set()
-            if not release.wait(timeout=5):
-                raise AssertionError("test did not release the in-flight metrics write")
+            self.assertTrue(
+                release.wait(timeout=5),
+                "test did not release the in-flight metrics write",
+            )
             original_record(snapshot)
 
         with (
