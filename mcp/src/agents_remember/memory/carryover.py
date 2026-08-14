@@ -9,10 +9,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     MemoryLedger,
@@ -26,6 +27,7 @@ from agents_remember.kernel.onboarding_doc import (
     route_contains_changed_path,
 )
 from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.memory.carryover_authority import required_official_storage
 from agents_remember.memory_quality.integrity.onboarding_drift_check.entities import (
     parse_entity_fingerprint_rows,
 )
@@ -84,25 +86,6 @@ def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
         source_memory=args.source_memory,
         code_repository_name=args.code_repository_name,
         replace_existing=args.replace_existing,
-    )
-
-
-def run_git(
-    repo: Path, args: list[str], *, input_text: str | None = None
-) -> subprocess.CompletedProcess[str]:
-    # stdin must never inherit the parent's descriptor: under the stdio MCP
-    # transport that descriptor IS the protocol request pipe, and a child
-    # holding or reading it wedges the tool call (GitHub #49).
-    stdin_kwargs: dict[str, object] = (
-        {"input": input_text} if input_text is not None else {"stdin": subprocess.DEVNULL}
-    )
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=False,
-        **stdin_kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -264,22 +247,46 @@ def onboarding_path(memory_root: Path, source_path: str) -> Path:
     return memory_root / "onboarding" / f"{source_path}.md"
 
 
+@dataclass(frozen=True)
+class CarryoverRefs:
+    """The two states of the world a carryover compares, and the base they diverged from.
+
+    The code repository plus the official and source refs inside it, and the official and
+    source memory trees. Every candidate builder judges one path against exactly this pair of
+    sides; the pair is constant for a whole plan, so it is the plan's frame, not per-call
+    arguments that could be assembled from two different plans.
+    """
+
+    code_repository_root: Path
+    official_ref: str
+    source_ref: str
+    old_base: str
+    official_memory: Path
+    source_memory: Path
+
+
+@dataclass(frozen=True)
+class MemoryOnlyDoc:
+    """One onboarding doc that changed only in branch memory: the branch copy, its official
+    counterpart, its path relative to the onboarding root, and the source path it documents."""
+
+    branch_doc: Path
+    official_file: Path
+    rel: str
+    source_path: str
+
+
 def candidate_for_path(
-    *,
-    code_repository_root: Path,
-    old_base: str,
-    official_ref: str,
-    source_ref: str,
-    official_memory: Path,
-    source_memory: Path,
+    refs: CarryoverRefs,
     source_path: str,
+    *,
     replace_existing: bool,
 ) -> CarryoverCandidate:
-    branch_onboarding = onboarding_path(source_memory, source_path)
-    official_onboarding = onboarding_path(official_memory, source_path)
+    branch_onboarding = onboarding_path(refs.source_memory, source_path)
+    official_onboarding = onboarding_path(refs.official_memory, source_path)
     official_exists = official_onboarding.exists()
     evidence, reason = evidence_for_path(
-        code_repository_root, old_base, official_ref, source_ref, source_path
+        refs.code_repository_root, refs.old_base, refs.official_ref, refs.source_ref, source_path
     )
     decision = (
         "auto-carry"
@@ -383,17 +390,18 @@ def memory_merge_base(official_memory: Path, source_memory: Path) -> str | None:
 
 
 def _memory_only_evidence(
-    *,
-    code_repository_root: Path,
-    official_ref: str,
-    official_memory: Path,
-    branch_doc: Path,
-    official_file: Path,
-    rel: str,
-    source_path: str,
+    refs: CarryoverRefs,
+    doc: MemoryOnlyDoc,
     mem_base: str | None,
 ) -> tuple[str, str, str]:
     """(evidence, decision, reason) for one memory-only doc candidate."""
+    code_repository_root = refs.code_repository_root
+    official_ref = refs.official_ref
+    official_memory = refs.official_memory
+    branch_doc = doc.branch_doc
+    official_file = doc.official_file
+    rel = doc.rel
+    source_path = doc.source_path
     if object_id_at_ref(code_repository_root, official_ref, source_path) is None:
         return "not-landed", "reject", "source path is not present on official code ref"
     verified = verified_commit_of(branch_doc)
@@ -418,12 +426,8 @@ def _memory_only_evidence(
             "source content changed between the branch verification commit and the "
             "official ref; model re-review required",
         )
-    base_blob = (
-        blob_at_ref(official_memory, mem_base, f"onboarding/{rel}") if mem_base else None
-    )
-    official_text = (
-        official_file.read_text(encoding="utf-8") if official_file.exists() else None
-    )
+    base_blob = blob_at_ref(official_memory, mem_base, f"onboarding/{rel}") if mem_base else None
+    official_text = official_file.read_text(encoding="utf-8") if official_file.exists() else None
     if mem_base is None or base_blob != official_text:
         return (
             "official-memory-moved",
@@ -440,11 +444,8 @@ def _memory_only_evidence(
 
 
 def memory_only_doc_candidates(
+    refs: CarryoverRefs,
     *,
-    code_repository_root: Path,
-    official_ref: str,
-    official_memory: Path,
-    source_memory: Path,
     existing: set[str],
 ) -> list[CarryoverCandidate]:
     """Candidates for onboarding docs changed only in branch memory.
@@ -456,13 +457,12 @@ def memory_only_doc_candidates(
     official ref, and official memory must not have changed the doc since the
     memory merge-base — a parallel official change is always review-required.
     """
-    source_onboarding = source_memory / "onboarding"
+    official_memory = refs.official_memory
+    source_onboarding = refs.source_memory / "onboarding"
     if not source_onboarding.is_dir():
         return []
-    route_by_rel = {
-        rel: route for route, rel in discover_route_overviews(source_onboarding)
-    }
-    mem_base = memory_merge_base(official_memory, source_memory)
+    route_by_rel = {rel: route for route, rel in discover_route_overviews(source_onboarding)}
+    mem_base = memory_merge_base(official_memory, refs.source_memory)
     candidates: list[CarryoverCandidate] = []
     for branch_doc in sorted(source_onboarding.rglob("*.md")):
         if not branch_doc.is_file():
@@ -479,14 +479,14 @@ def memory_only_doc_candidates(
         ) == branch_doc.read_text(encoding="utf-8"):
             continue
         evidence, decision, reason = _memory_only_evidence(
-            code_repository_root=code_repository_root,
-            official_ref=official_ref,
-            official_memory=official_memory,
-            branch_doc=branch_doc,
-            official_file=official_file,
-            rel=rel,
-            source_path=source_path,
-            mem_base=mem_base,
+            refs,
+            MemoryOnlyDoc(
+                branch_doc=branch_doc,
+                official_file=official_file,
+                rel=rel,
+                source_path=source_path,
+            ),
+            mem_base,
         )
         candidates.append(
             CarryoverCandidate(
@@ -518,9 +518,9 @@ def entity_catalog_candidate(
         return None
     official_catalog = official_memory / "onboarding" / ENTITY_CATALOG_REL
     official_exists = official_catalog.exists()
-    if official_exists and official_catalog.read_text(
+    if official_exists and official_catalog.read_text(encoding="utf-8") == branch_catalog.read_text(
         encoding="utf-8"
-    ) == branch_catalog.read_text(encoding="utf-8"):
+    ):
         return None
     return CarryoverCandidate(
         source_path=ENTITY_CATALOG_KEY,
@@ -547,17 +547,16 @@ def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
     old_base = head_commit(code_repository_root, request.old_base)
     official_changed = changed_paths(code_repository_root, old_base, request.official_code_ref)
     source_changed = changed_paths(code_repository_root, old_base, request.source_code_ref)
+    refs = CarryoverRefs(
+        code_repository_root=code_repository_root,
+        official_ref=request.official_code_ref,
+        source_ref=request.source_code_ref,
+        old_base=old_base,
+        official_memory=official_memory,
+        source_memory=source_memory,
+    )
     candidates = [
-        candidate_for_path(
-            code_repository_root=code_repository_root,
-            old_base=old_base,
-            official_ref=request.official_code_ref,
-            source_ref=request.source_code_ref,
-            official_memory=official_memory,
-            source_memory=source_memory,
-            source_path=source_path,
-            replace_existing=request.replace_existing,
-        )
+        candidate_for_path(refs, source_path, replace_existing=request.replace_existing)
         for source_path in sorted(source_changed)
         if source_path in official_changed
     ]
@@ -587,11 +586,7 @@ def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
     )
     candidates.extend(
         memory_only_doc_candidates(
-            code_repository_root=code_repository_root,
-            official_ref=request.official_code_ref,
-            official_memory=official_memory,
-            source_memory=source_memory,
-            existing={candidate.source_path for candidate in candidates},
+            refs, existing={candidate.source_path for candidate in candidates}
         )
     )
     catalog_candidate = entity_catalog_candidate(
@@ -656,15 +651,17 @@ def selected_candidates(
 
 
 def _refresh_official_route_indexes(
-    request: CarryoverRequest, official_head: str
+    request: CarryoverRequest,
+    official_head: str,
+    storage: StorageSettings,
 ) -> dict[str, object]:
     """Regenerate official-side route indexes after carrying onboarding.
 
     ``overview.index.json`` files are derived artifacts: they are regenerated on
     the official side, never copied from the branch. ``build_route_indexes``
-    scans the code working tree, so regeneration only runs when the code
-    repository is a clean checkout of the official ref; otherwise the skip is
-    reported instead of silently baking wrong coverage into official memory.
+    uses Git and configured path-rule authority. Regeneration only runs when
+    the code repository is a clean checkout of the official ref; otherwise the
+    skip is reported instead of indexing a different code state.
     """
     code_root = request.code_repository_root.resolve()
     if head_commit(code_root, "HEAD") != official_head or has_changes(code_root):
@@ -684,6 +681,7 @@ def _refresh_official_route_indexes(
         code_root=code_root,
         onboarding_root=onboarding_root,
         repository=request.code_repository_name,
+        storage=storage,
         dry_run=False,
     )
     return {"state": "refreshed", **result.to_dict()}
@@ -704,7 +702,9 @@ def _validate_entity_fingerprints(
     rows = parse_entity_fingerprint_rows(catalog)
     for row in rows:
         if row.algorithm != GIT_BLOB_SET_ALGORITHM:
-            errors.append({"entity": row.entity, "reason": f"unsupported algorithm {row.algorithm!r}"})
+            errors.append(
+                {"entity": row.entity, "reason": f"unsupported algorithm {row.algorithm!r}"}
+            )
             continue
         try:
             computed = compute_git_blob_set_fingerprint(
@@ -721,16 +721,25 @@ def _validate_entity_fingerprints(
     return {"state": state, "rows": len(rows), "mismatches": mismatches, "errors": errors}
 
 
+@dataclass(frozen=True)
+class OfficialLedger:
+    """The official memory ledger as carryover writes it: the loaded ledger, the file it was
+    read from, the memory tree that must stage and commit that file, and the message to commit
+    it with. A ledger without its path and tree cannot be persisted, so they are one handle."""
+
+    ledger: MemoryLedger
+    path: Path
+    memory_root: Path
+    commit_message: str
+
+
 def _nothing_to_carry_result(
-    *,
     plan: dict[str, object],
+    official_ledger: OfficialLedger,
+    *,
     cleaned_note: str,
     carried: list[dict[str, object]],
-    ledger: MemoryLedger,
-    ledger_path: Path,
-    official_memory: Path,
     official_head: str,
-    ledger_commit_message: str,
 ) -> dict[str, object]:
     """Result when no onboarding was carried over.
 
@@ -742,16 +751,17 @@ def _nothing_to_carry_result(
     worktree can base off the merged branch without a manual reconciliation.
     Otherwise there is genuinely nothing to record.
     """
+    ledger = official_ledger.ledger
     counts = plan.get("counts", {})
     assert isinstance(counts, dict)
     pending = bool(counts.get("auto-carry", 0)) or bool(counts.get("review-required", 0))
     if not pending and find_mapping(ledger, official_head) is None:
         write_ledger(
-            ledger_path,
+            official_ledger.path,
             prepend_mapping(ledger, official_head, ledger.last_memory_content_commit),
         )
-        require_git(official_memory, ["add", "memory.md"])
-        ledger_commit = commit_if_dirty(official_memory, ledger_commit_message)
+        require_git(official_ledger.memory_root, ["add", "memory.md"])
+        ledger_commit = commit_if_dirty(official_ledger.memory_root, official_ledger.commit_message)
         return {
             **plan,
             "state": "ledger-mapped-head",
@@ -777,6 +787,7 @@ def apply_carryover_for_request(
     plan = build_plan_for_request(request)
     official_memory = request.official_memory.resolve()
     ensure_clean(official_memory, "official memory")
+    official_storage = required_official_storage(official_memory)
     ledger_path = official_memory / "memory.md"
     ledger = load_ledger(ledger_path)
     official_head = str(plan["official_code_head"])
@@ -812,18 +823,24 @@ def apply_carryover_for_request(
         "reason": "no onboarding was carried over",
     }
     if carried:
-        route_index_refresh = _refresh_official_route_indexes(request, official_head)
+        route_index_refresh = _refresh_official_route_indexes(
+            request,
+            official_head,
+            official_storage,
+        )
     if not carried or not has_changes(official_memory):
         return {
             **_nothing_to_carry_result(
-                plan=plan,
+                plan,
+                OfficialLedger(
+                    ledger=ledger,
+                    path=ledger_path,
+                    memory_root=official_memory,
+                    commit_message=ledger_commit_message,
+                ),
                 cleaned_note=cleaned_note,
                 carried=carried,
-                ledger=ledger,
-                ledger_path=ledger_path,
-                official_memory=official_memory,
                 official_head=official_head,
-                ledger_commit_message=ledger_commit_message,
             ),
             "route_index_refresh": route_index_refresh,
             "memory_main_advance": _advance_memory_main(official_memory),

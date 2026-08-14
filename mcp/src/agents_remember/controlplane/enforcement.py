@@ -7,7 +7,7 @@ kept free of I/O so mutating tools share one policy and it is unit-testable
 without a store.
 
 The load-bearing rule is the **anti-self-approval** invariant: the agent's own
-``gate_decide`` is attributed ``decidedBy="model"`` (see ``mcp/tools/gates.py``),
+``gate_decide`` is attributed ``decidedBy="model"`` (see ``application/gate_tools.py``),
 so a model-decided ``approved`` snapshot does **not** satisfy enforcement. A
 human approval is always binding; a non-human orchestration approval is binding
 only when the policy explicitly delegates that gate kind to the deciding role and
@@ -22,13 +22,20 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    GatePolicy,
     approval_failure_reason,
 )
-from agents_remember.controlplane.records import GateKind, GateRecord
+from agents_remember.controlplane.records import (
+    GateRecord,
+)
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+)
+from agents_remember.models.structural.gates import (
+    GateKind,
+)
 
-CLOSEOUT_GATE_KIND = "closeout-approval"
+CLOSEOUT_GATE_KIND: GateKind = "closeout-approval"
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,7 @@ def evaluate_gate(
     *,
     kind: GateKind,
     policy: GatePolicy = DEFAULT_GATE_POLICY,
+    operation_key: str | None = None,
 ) -> GateGuard:
     """Decide whether a lifecycle's current gate set permits a gate kind. Pure.
 
@@ -80,10 +88,15 @@ def evaluate_gate(
             gate.id,
         )
     if gate.state == "applied":
+        recovering = operation_key is not None and gate.appliedOperation == operation_key
         return GateGuard(
             kind,
-            False,
-            f"{kind} gate {gate.id} was already applied; open a fresh gate for a new mutation",
+            recovering,
+            (
+                f"{kind} gate {gate.id} is already bound to this recovering operation"
+                if recovering
+                else f"{kind} gate {gate.id} was already applied; open a fresh gate for a new mutation"
+            ),
             gate.id,
         )
     return GateGuard(
@@ -97,6 +110,7 @@ def evaluate_gate(
 def evaluate_closeout_gate(
     gates: Mapping[str, GateRecord],
     policy: GatePolicy = DEFAULT_GATE_POLICY,
+    operation_key: str | None = None,
 ) -> CloseoutGuard:
     """Compatibility wrapper for closeout enforcement."""
-    return evaluate_gate(gates, kind=CLOSEOUT_GATE_KIND, policy=policy)
+    return evaluate_gate(gates, kind=CLOSEOUT_GATE_KIND, policy=policy, operation_key=operation_key)

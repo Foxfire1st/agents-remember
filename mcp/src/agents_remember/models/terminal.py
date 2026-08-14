@@ -2,39 +2,56 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.worktree import SourceLineageProjection
 
-LeafAssignmentStatus = Literal[
+# These three vocabularies are declared here rather than beside the payload builders that write
+# them, and the direction is deliberate: `application.terminal_tools` imports them, not the reverse.
+# `mcp.tools.base` -> `models.tool_registry` -> `models.terminal` is an existing import edge, so
+# a `models.terminal` -> `application.terminal_tools` import would close a cycle. The invariant
+# is ONE declaration, not a particular module owning it: `application.terminal_tools` annotates
+# its status seams with these aliases, so a refusal status the tool invents is a pyright error
+# at the tool rather than a ValidationError escaping the MCP handler. `Literal` flattens nested
+# aliases, so the published enum is unchanged.
+LeafRefStatus = Literal["leaf-ref-not-found", "leaf-ref-ambiguous"]
+
+TaskAssignmentStatus = Literal[
     "attached",
-    "leaf-taken",
+    "seat-taken",
     "unknown-session",
     "role-required",
-    "leaf-ref-not-found",
-    "leaf-ref-ambiguous",
+    "task-binding-invalid",
+    "task-document-not-found",
+    "task-document-invalid",
+    "task-document-repo-mismatch",
+    "source-lineage-stale",
+    "source-lineage-unavailable",
 ]
 
 
-class AttachTerminalSessionToLeafResponse(ToolResponse):
-    """``attach_terminal_session_to_leaf``: move one hosted session to a leaf."""
+class AttachTerminalSessionToTaskResponse(ToolResponse):
+    """Trusted administration: move one hosted session to a document-owned role seat."""
 
-    operation: Literal["attach_terminal_session_to_leaf"] = "attach_terminal_session_to_leaf"
-    status: LeafAssignmentStatus
+    operation: Literal["attach_terminal_session_to_task"] = "attach_terminal_session_to_task"
+    status: TaskAssignmentStatus
     session: str
-    leafKey: str
-    previousLeafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef
+    previousTaskDocumentRef: TaskDocumentRef | None = None
     ownerSession: str | None = None
     role: Literal["chat", "terminal"] | None = None
     seatRole: str | None = None
     previousSeatRole: str | None = None
     detail: str | None = None
+    sourceLineage: SourceLineageProjection | None = None
 
 
 SpawnAgentSessionStatus = Literal[
     "spawned-unbriefed",
     "brief-delivery-separate",
-    "leaf-taken",
+    "seat-taken",
     "harness-unknown",
     "harness-not-detected",
     # 260703-L16: the effort value is outside the resolved harness's known vocabulary (or a
@@ -44,6 +61,9 @@ SpawnAgentSessionStatus = Literal[
     # 260703-L16: a settings-defined harness with no declared modelFlag got a model knob -- refused
     # with guidance (declare the flag or use launchArgs); explicit over guessing.
     "model-invalid",
+    # ACPUI L2: a role launch omitted model/effort before spawn. Unknown or model-gated values
+    # pass this structural gate and are refused by the runner's dynamic catalog validation.
+    "launch-selection-invalid",
     # 260707-HFX2-L10: ordinary spawn callers cannot choose spend knobs. Removed/legacy caller
     # harness/model/effort fields, direct free-form launch/session controls, AR_SPAWN_MODEL/
     # AR_SPAWN_EFFORT, and harness-native spend/endpoint env keys refuse before spawning; settings
@@ -51,10 +71,21 @@ SpawnAgentSessionStatus = Literal[
     "spend-override-unsupported",
     # 260703-L16 (ruling 2026-07-07T08:15): the dispatch level is outside leaf|master|portfolio.
     "level-invalid",
-    "leaf-ref-not-found",
-    "leaf-ref-ambiguous",
+    "task-binding-required",
+    "task-binding-invalid",
+    "task-document-not-found",
+    "task-document-invalid",
+    "task-document-repo-mismatch",
     "bad-kind",
+    "source-lineage-stale",
+    "source-lineage-unavailable",
 ]
+
+# The runtime half of each alias, derived from it rather than retyped beside it, so a member can
+# only ever be added in one place.
+VALID_SPAWN_AGENT_SESSION_STATUSES: frozenset[SpawnAgentSessionStatus] = frozenset(
+    get_args(SpawnAgentSessionStatus)
+)
 
 
 class SpawnAgentSessionResponse(ToolResponse):
@@ -65,9 +96,9 @@ class SpawnAgentSessionResponse(ToolResponse):
     session: str
     harness: str | None = None
     kind: Literal["harness", "terminal"] | None = None
-    leafKey: str | None = None
+    taskDocumentRef: TaskDocumentRef | None = None
     seatRole: str | None = None
-    replacementForLeaf: str | None = None
+    replacementForTaskDocumentRef: TaskDocumentRef | None = None
     label: str | None = None
     cwd: str | None = None
     tmuxName: str | None = None
@@ -83,21 +114,24 @@ class SpawnAgentSessionResponse(ToolResponse):
     spawnLevelSource: str | None = None
     resolvedModel: str | None = None
     resolvedEffort: str | None = None
-    # Free-form spawn provenance (260703-L16): launchArgs rode the resolved launch argv verbatim;
-    # sessionCommands were applied as launch-phase configuration (a session-vocabulary effort like
-    # claude's ultracode arrives here as "/effort ultracode"); promptKeywords remain provenance for
-    # the later post-readiness dispatch brief. Never validated.
+    # Free-form spawn provenance (260703-L16): launchArgs rode the base launch argv verbatim;
+    # sessionCommands were applied as explicit launch-phase configuration; model/effort are never
+    # synthesized into session commands. promptKeywords remain provenance for the later brief.
     launchArgs: list[str] | None = None
     promptKeywords: list[str] | None = None
     sessionCommands: list[str] | None = None
     # Settings-owned launch/session commands remain spawn-phase configuration. Without a bound
     # brief log, ``False`` means their application was not proven; it is never a brief-delivery claim.
     sessionCommandsDelivered: bool | None = None
-    # Set on ``leaf-taken``: the running same-role session that already owns the leaf.
+    # Set internally on ``seat-taken``: the running occupant of the document+role seat.
     ownerSession: str | None = None
     # Failure-only launch-command evidence. Task instructions are delivered by dispatch-brief.
     deliveryCapture: str | None = None
+    controlState: str | None = None
+    controlEndpoint: str | None = None
+    controlProtocol: str | None = None
     detail: str | None = None
+    sourceLineage: SourceLineageProjection | None = None
 
 
 HostedSessionReadinessStatus = Literal[
@@ -116,6 +150,11 @@ class HostedSessionReadinessResponse(ToolResponse):
     session: str
     harness: str | None = None
     tmuxName: str | None = None
+    controlState: str | None = None
+    activity: str | None = None
+    acceptance: str | None = None
+    vendorSessionId: str | None = None
+    pendingInteraction: dict[str, object] | None = None
     detail: str | None = None
 
 
@@ -126,6 +165,10 @@ SessionRetireStatus = Literal[
     "unknown-actor",
     "retire-refused",
 ]
+
+VALID_SESSION_RETIRE_STATUSES: frozenset[SessionRetireStatus] = frozenset(
+    get_args(SessionRetireStatus)
+)
 
 
 class SessionRetireResponse(ToolResponse):
@@ -148,6 +191,10 @@ class SessionRetireResponse(ToolResponse):
 
 
 SessionRenameStatus = Literal["renamed", "unknown-session"]
+
+VALID_SESSION_RENAME_STATUSES: frozenset[SessionRenameStatus] = frozenset(
+    get_args(SessionRenameStatus)
+)
 
 
 class SessionRenameResponse(ToolResponse):

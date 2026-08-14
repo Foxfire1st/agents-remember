@@ -15,6 +15,10 @@
   <i>Note: caches and search snippets may serve an outdated copy of this README — the docs site above is canonical and always current.</i>
 </p>
 
+<p align="center">
+  <img src="./agents-remember-welcome.png" alt="Agents Remember mission-control welcome screen: Agents orchestrate attention, Tasks commit intent, and Memory preserves truth." width="833">
+</p>
+
 ##
 
 ## Table of Contents
@@ -129,7 +133,7 @@ That is the normal first-run path. `skills_install()` remains available as a
 maintenance/manual MCP tool, but the starter packages already provide the
 initial skills and harness files.
 
-After that, normal work runs through the `l-01-agent-lifecycles` skill: a developer-facing session is the architect; spawned backend orchestrators and other role seats follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and launches a sprint-bound architect after the durable sprint and first leaf exist; spawned backend seats follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Run The Dashboard
 
@@ -162,8 +166,8 @@ upgrade is picked up by the next session
 ([Settings Reference](docs/reference/settings-json.md)).
 
 Pinning a version is the debugging/repro path, not the default: `uv tool
-install 'agents-remember-mcp==3.0.0rc6'`, or one-shot without installing,
-`uvx --from 'agents-remember-mcp==3.0.0rc6' agents-remember dashboard`.
+install 'agents-remember-mcp==3.0.0rc7'`, or one-shot without installing,
+`uvx --from 'agents-remember-mcp==3.0.0rc7' agents-remember dashboard`.
 
 > **Pre-release note (until 3.0.0 final):** the dashboard currently ships in
 > `3.0.0rcN` pre-releases, which default version resolution skips. Install with
@@ -194,6 +198,8 @@ agents-remember/
   skills/                           # canonical skill source tree
   scripts/sync-skills.py            # sync skills into package/harness copies
   scripts/sync-runtime.py           # sync runtime assets into package data
+  scripts/sync-harness.py           # generate the nine harness configuration trees
+  scripts/harness/                  # canonical source for those trees
   agents-md-files/                  # canonical installed AGENTS.md templates
   benchmarks/                       # canonical optional benchmark package source
   providers/                        # canonical provider runtime assets
@@ -218,6 +224,54 @@ and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
 data only. The pre-commit and pre-push hooks run
 `python3 scripts/sync-runtime.py --check`.
 
+Edit the self-hosted harness configuration in root `scripts/harness/`, then run
+`python3 scripts/sync-harness.py` to regenerate the nine `.claude/`, `.codex/`,
+`.cursor/`, `.github-vscode/`, `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/` and
+`.agents/` trees. The pre-commit and pre-push hooks run
+`python3 scripts/sync-harness.py --check`, and `mcp/tests/test_sync_harness.py`
+runs the same check inside the suite.
+
+The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
+pre-commit runs the fast tier over the **staged** content: the generated-copy
+checks above, plus Ruff, `ruff format --check`, Pyright, and deterministic dashboard
+checks. pre-push repeats those non-test checks against current-checkout bytes and
+records the pushed refs. It does not run acceptance. GitHub runs its deterministic
+non-test checks once per pull request, not once again for every branch push. A
+pinned Dagger v0.21.8 graph rebuilds the exact Git candidate
+in a clean Ubuntu container, installs from scratch, runs a bundled real Codex
+read-only protocol probe, and executes the accepting wrapper. Targeted Dagger runs
+once when each leaf closeout creates its commit. Leaf integration lands that exact
+certified commit without a rerun. Full Dagger runs once when each master integrates
+into super. PR validation, tagging, and publishing do not rerun acceptance. See
+CONTRIBUTING.md for the tier table and staged-content contract.
+
+Agents Remember acceptance runs only through that Dagger graph. Keep
+`orchestration.qualityGate.executor` set to `"dagger"`; a direct host invocation of
+pytest or the Python wrapper is refused, not treated as diagnostic evidence.
+Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
+full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
+`diff-base`; the public Dagger function refuses an empty base instead of comparing
+the candidate to Git's empty tree. Run `dagger call quality --help` to see the
+current modes and argument contract. There is no direct-Docker or host fallback:
+an unavailable Dagger engine fails explicitly.
+The graph receives a separate Git ancestry bundle plus the exact staged source,
+never the live coordination root, credentials, or container socket. Its live
+trace and final pytest, coverage, Codex-probe, and result artifacts replace the
+corresponding files under the task enclosure's `reports/` directory.
+
+Inside the nonce-attested Dagger graph, the wrapper orders cheap deterministic rails before the
+expensive test rail: Ruff, formatting, file size, Pyright, Radon reports, then pytest. CRAP and
+changed-lines coverage score that run's branch-coverage artifact last. Content-addressed exact or
+test-only retry proof is an internal Dagger optimization; any source, configuration, selected-suite,
+runtime, environment, or artifact drift runs the ordinary selection in the same graph. There is no
+host retry path or fallback. Lifecycle acceptance disables proof reuse by default with
+`AR_QUALITY_NO_RETRY=1`.
+
+Every Dagger rail prints one provenance line naming its actual input, resolved config, and unit
+count. The deterministic pre-push hook separately forwards Git's ref updates and checks
+current-checkout bytes at index-known paths; it runs no tests and never claims acceptance for the
+pushed commit range.
+
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The
 `c-13-install-and-onboard` skill shows this and every other install path as a workspace-first
@@ -239,7 +293,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `3.0.0rc6` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `3.0.0rc7` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
 

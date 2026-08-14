@@ -3,6 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, NotRequired, TypedDict
+
+from agents_remember.models.drift import DriftStatus
+
+
+class DriftSummaryPacket(TypedDict):
+    """What `summary.py` hands to a wire model: a status, plus whatever that status carries."""
+
+    status: DriftStatus
+    count: NotRequired[int]
+    actionableCount: NotRequired[int]
+    reportPath: NotRequired[str]
+    actionableSample: NotRequired[list[dict[str, Any]]]
+    rows: NotRequired[list[dict[str, Any]]]
+    error: NotRequired[str]
+
 
 CLASSIFICATIONS = (
     "up to date",

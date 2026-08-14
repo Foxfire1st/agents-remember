@@ -4,7 +4,8 @@ The agentic settings family -- everything under the top-level ``orchestration``
 key: gate delegation, the three-party-loop knobs, per-role knob overrides,
 concurrency caps, the spawn harness preference, and the harness-definition
 extension/override table (``orchestration.harnesses``, 260703-L16) -- lives in
-TWO JSON files that are merged on every read:
+TWO JSON files that are merged on every read; the full quality gate's optional
+hard-cap override is ``orchestration.qualityGate``:
 
 - GLOBAL: ``<coordination_root>/system/settings.json``
 - LOCAL:  ``<code_repo>/system/settings.json`` (optional; merged OVER global)
@@ -25,420 +26,184 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
   overrides, no concurrency caps, no spawn harness preference.
 - Read PER-USE: consumers call :func:`load_agentic_settings` at each use so a
   settings edit takes effect on the next use without a server restart. The ONE
-  boot-snapshot consumer is ``mcp/config.py``'s ``gateDelegation`` (enforcement
+  boot-snapshot consumer is the runtime-config loader's ``gateDelegation`` (enforcement
   plumbing keeps its boot-cached shape; a change needs a restart -- documented).
+
+- Compatibility window (260713-TES-L1): ``orchestration.supervisor`` is an
+  explicit alias for ``orchestration.agentNotifier`` (the deterministic sweep's
+  knobs). The alias is accepted with a loud deprecation warning, never silently;
+  a file setting BOTH keys is refused. The alias and the legacy key are removed
+  with the window.
 
 Doctrine floors are NOT knobs: no key here touches the master-exit seam gate or
 the strategist's mandatory pre-run (L12 ruling; restated in the schema doc).
+
+The typed models, constants, validators, and the per-section parsers live in
+responsibility-split sibling modules; this module owns the loader and the
+orchestration block assembly and re-exports the public surface.
 """
 
 from __future__ import annotations
 
 import json
-import string
-from dataclasses import dataclass, field, replace
+import warnings
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.gate_policy import (
-    DEFAULT_GATE_POLICY,
-    GatePolicy,
-    GatePolicyRule,
-    apply_seam_verdict_requirement,
-    coerce_decision_role,
-    make_gate_policy,
-    named_gate_policy,
+from agents_remember.kernel._agentic_settings_core import (
+    COMPLEXITY_SCALE,
+    DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
+    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
+    DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
+    DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
+    DEFAULT_EXPECTATION_SLA_SECONDS,
+    DEFAULT_LOOP_MAX_ROUNDS,
+    DEFAULT_LOOP_PER_LEVEL,
+    DEFAULT_REVIEWER_REUSE,
+    HARNESS_IDS,
+    KNOWN_AGENT_NOTIFIER_FIELDS,
+    KNOWN_CONCURRENCY_FIELDS,
+    KNOWN_EXPECTATION_KINDS,
+    KNOWN_EXPECTATIONS_FIELDS,
+    KNOWN_GATE_DELEGATION_FIELDS,
+    KNOWN_GATE_POLICY_KIND_FIELDS,
+    KNOWN_HARNESS_ENTRY_FIELDS,
+    KNOWN_LOOP_COMPLEXITY_FIELDS,
+    KNOWN_LOOP_DEFAULTS_FIELDS,
+    KNOWN_LOOP_LEVEL_FIELDS,
+    KNOWN_LOOP_LEVELS,
+    KNOWN_LOOPS_FIELDS,
+    KNOWN_ORCHESTRATION_FIELDS,
+    KNOWN_QUALITY_GATE_FIELDS,
+    KNOWN_ROLE_KNOB_FIELDS,
+    KNOWN_ROLES,
+    KNOWN_SPAWN_FIELDS,
+    AgenticSettings,
+    AgenticSettingsError,
+    AgentNotifierSettings,
+    ConcurrencySettings,
+    ExpectationSettings,
+    LoopComplexity,
+    LoopDefaults,
+    LoopSettings,
+    QualityGateSettings,
+    RoleKnobs,
+    _refuse_unknown,
+    _require_bool,
+    _require_harness_id,
+    _require_object,
+    _require_positive_int,
+    _require_positive_number,
+    _require_string,
+    _require_string_list,
+    agentic_settings_path,
+    default_agentic_settings_seed,
+    default_agentic_settings_seed_text,
+    merge_settings,
 )
-from agents_remember.controlplane.inbox_backoff import (
-    DEFAULT_RATE_LIMIT_SECONDS,
-    MIN_REDELIVERY_INTERVAL_SECONDS,
+from agents_remember.kernel._agentic_settings_harness import (
+    _entry_string,
+    _entry_string_list,
+    _HarnessEntry,
+    _merged_harness,
+    _parse_harness_entry,
+    _parse_harnesses,
+    _refuse_bad_effort_template,
+    _refuse_unpaired_vehicles,
+    _resolved_launch,
 )
-from agents_remember.controlplane.records import GateKind, coerce_gate_kind
-from agents_remember.errors import AgentsRememberError
-from agents_remember.serving.harnesses import HARNESSES, Harness
-
-
-class AgenticSettingsError(AgentsRememberError):
-    """Raised when an agentic settings file is malformed or carries unknown ``orchestration.*`` keys."""
-
-
-# The fail-loud key families. Every set names the complete schema of its level;
-# anything else raises AgenticSettingsError with the offending file's path.
-KNOWN_ORCHESTRATION_FIELDS = frozenset(
-    {
-        "gateDelegation",
-        "loops",
-        "roles",
-        "rolesPerLevel",
-        "concurrency",
-        "spawn",
-        "harnesses",
-        "expectations",
-        "supervisor",
-        "escalation",
-    }
+from agents_remember.kernel._agentic_settings_policy import (
+    _parse_gate_policy_rule,
+    parse_gate_delegation,
 )
-# One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
-# builtin's defaults. Schema + worked example: ``docs/reference/harnesses.md`` (THE manual).
-KNOWN_HARNESS_ENTRY_FIELDS = frozenset(
-    {
-        "name",
-        "command",
-        "argv",
-        "modelFlag",
-        "effortFlag",
-        "effortFlagValues",
-        "effortSessionValues",
-        "effortSessionCommand",
-    }
+from agents_remember.kernel._agentic_settings_sections import (
+    _parse_agent_notifier,
+    _parse_concurrency,
+    _parse_expectations,
+    _parse_loop_complexity,
+    _parse_loop_defaults,
+    _parse_loop_levels,
+    _parse_loops,
+    _parse_quality_gate,
+    _parse_roles,
+    _parse_roles_per_level,
+    _parse_spawn,
+    _require_agent_notifier_floor_seconds,
 )
-KNOWN_GATE_DELEGATION_FIELDS = frozenset({"policy", "kinds", "requireReviewerVerdictAtSeams"})
-KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
-KNOWN_LOOPS_FIELDS = frozenset({"defaults", "perLevel", "perMaster"})
-KNOWN_LOOP_DEFAULTS_FIELDS = frozenset({"maxRounds", "reviewerReuse", "complexity"})
-KNOWN_LOOP_COMPLEXITY_FIELDS = frozenset({"fullLoopAt", "builderAt"})
-KNOWN_LOOP_LEVELS = frozenset({"leaf", "master", "portfolio"})
-KNOWN_LOOP_LEVEL_FIELDS = frozenset({"loop"})
-# The dispatch-time complexity scale (blast radius x novelty x size) the loop
-# thresholds are expressed on (l-01 The Three-Party Loop).
-COMPLEXITY_SCALE = ("low", "medium", "high")
-# The nine portable role lifecycles the l-01 registry defines.
-KNOWN_ROLES = frozenset(
-    {
-        "architect",
-        "orchestrator",
-        "designer",
-        "strategist",
-        "manager",
-        "worker",
-        "curator",
-        "reviewer",
-        "system-specialist",
-    }
-)
-KNOWN_ROLE_KNOB_FIELDS = frozenset(
-    {"harness", "model", "effort", "launchArgs", "promptKeywords", "sessionCommands"}
-)
-KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
-KNOWN_SPAWN_FIELDS = frozenset({"harness"})
-# R1/R5 (260707-HFX2-L2): the deterministic supervisor sweep's own knobs -- interval, enable
-# flag, self-liveness staleness cutoff, inbox redelivery rate limit, and owner-signal cooldown.
-KNOWN_SUPERVISOR_FIELDS = frozenset(
-    {
-        "enabled",
-        "intervalSeconds",
-        "staleCutoffSeconds",
-        "redeliverRateLimitSeconds",
-        "signalCooldownSeconds",
-        "redeliverBudget",
-        "escalationBudget",
-    }
-)
-# R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-kind ack SLA, per-rung timings,
-# the renudge rate limit (reusing the OrchestrationNudgeStore rate-limit pattern), and the rung a
-# silent seat is marked suspect-for-respawn at (R3).
-KNOWN_ESCALATION_FIELDS = frozenset(
-    {"slaSeconds", "rungSeconds", "nudgeRateLimitSeconds", "respawnAfterRung"}
-)
-DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
-DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
-DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 1
-# CS-6 D1 (260707-HFX2-L12): per-sweep cap on escalation-rung emission, the twin of the redeliver
-# budget. Bounds the synchronous hosted pastes + escalation.rung event appends one sweep can do;
-# deferred rows re-fire next sweep (rung_due is level-triggered) so nothing is lost.
-DEFAULT_SUPERVISOR_ESCALATION_BUDGET = 250
-# R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
-# what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
-# Orchestration Expectations). Kept as a plain string set here (not imported from
-# controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle; the two must be kept
-# in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition.
-KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "turn-report-by", "verdict-by", "ack-by"})
-KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
-DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
-    "briefed-by": 120.0,
-    "turn-report-by": 3600.0,
-    "verdict-by": 1800.0,
-    # Mirrors AGENT_PICKUP_TTL_SECONDS (interaction_retention.py) -- the existing dashboard
-    # pickup-staleness convention for an unacked signal.
-    "ack-by": 300.0,
-}
 
-# R1 (260707-HFX2-L4): the escalation ladder's own per-``message_kind`` ack SLA -- how long a
-# PENDING operator-inbox row sits unacked, past HFX2-L2's own redelivery attempts, before the
-# ladder walker (``controlplane/escalation_ladder.py``) fires rung 1. Kept as a plain string set
-# (not imported from operator_inbox_records) for the same kernel<->controlplane cycle reason as
-# ``KNOWN_EXPECTATION_KINDS``; the two must be kept in sync with ``InboxMessageKind``.
-KNOWN_ESCALATION_MESSAGE_KINDS = frozenset(
-    {
-        "message",
-        "gate-response",
-        "turn-report",
-        "master-handover",
-        "nudge",
-        "escalation",
-        "degradation-alert",
-        "decision-item",
-        "decision-ruling",
-        "dispatch-brief",
-    }
-)
-DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
-    "message": 600.0,
-    "gate-response": 600.0,
-    "turn-report": 1800.0,
-    "master-handover": 1800.0,
-    "nudge": 300.0,
-    "escalation": 300.0,
-    "degradation-alert": 300.0,
-    "decision-item": 900.0,
-    "decision-ruling": 900.0,
-    "dispatch-brief": 300.0,
-}
-# Conservative-by-default rung timings (R1): seconds a row may sit at its CURRENT rung, past its
-# ``escalatedAt`` anchor, before the walker advances it to the next one. Rung 1 = renudge; rung 2 =
-# skip-level; rung 3 = developer attention (terminal -- the walker re-surfaces at this cadence but
-# never advances past it, R5).
-DEFAULT_ESCALATION_RUNG_SECONDS: dict[int, float] = {1: 300.0, 2: 900.0, 3: 1800.0}
-KNOWN_ESCALATION_RUNGS = (1, 2, 3)
-# R3: a seat addressed by a row that reaches this rung with no ack and no catalog turn-state
-# change is marked suspect for respawn -- rung 2 (skip-level failed to raise it) per the leaf spec.
-DEFAULT_RESPAWN_AFTER_RUNG = 2
-
-# The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
-# spawn.harness) are validated against the EFFECTIVE id set -- these plus any
-# orchestration.harnesses-defined ids -- so a settings value can never inject argv through a
-# reference; argv is definable only through the explicit harnesses family (260703-L16).
-HARNESS_IDS = tuple(harness.id for harness in HARNESSES)
-
-# The L12 loop defaults (docs/reference/settings-json.md, Orchestration Loops).
-DEFAULT_LOOP_MAX_ROUNDS = 3
-DEFAULT_REVIEWER_REUSE = "delta-verify"
-DEFAULT_LOOP_PER_LEVEL: dict[str, str] = {
-    "leaf": "scored",
-    "master": "seam-required",
-    "portfolio": "strategist",
-}
-
-
-@dataclass(frozen=True)
-class LoopComplexity:
-    """The complexity thresholds mapping the dispatch-time score to loop tiers."""
-
-    full_loop_at: str = "high"
-    builder_at: str = "medium"
-
-
-@dataclass(frozen=True)
-class LoopDefaults:
-    """``orchestration.loops.defaults`` -- round cap, reviewer reuse, tier thresholds."""
-
-    max_rounds: int = DEFAULT_LOOP_MAX_ROUNDS
-    reviewer_reuse: str = DEFAULT_REVIEWER_REUSE
-    complexity: LoopComplexity = field(default_factory=LoopComplexity)
-
-
-@dataclass(frozen=True)
-class LoopSettings:
-    """``orchestration.loops`` -- the three-party-loop knobs (L12 schema).
-
-    ``per_level`` maps level -> loop posture (loop postures are model-interpreted
-    doctrine names, validated as non-empty strings, not a closed set);
-    ``per_master`` maps a master task name -> sparse per-level overrides.
-    The knobs govern the LOOP only: the master-exit SEAM gate is unconditional.
-    """
-
-    defaults: LoopDefaults = field(default_factory=LoopDefaults)
-    per_level: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_LOOP_PER_LEVEL))
-    per_master: dict[str, dict[str, str]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class RoleKnobs:
-    """One role's knob overrides (``orchestration.roles.<role>``); ``None`` = role-file default.
-
-    ``harness`` must be a registry id; ``model``/``effort`` are free strings HERE -- the per-harness
-    effort vocabulary is enforced at DISPATCH time by the spawn path (the harness is only known
-    then), refusing loudly instead of letting the CLI warn-and-silently-degrade (260703-L16). The
-    free-form escape hatch (``launch_args``/``prompt_keywords``/``session_commands``, JSON keys
-    ``launchArgs``/``promptKeywords``/``sessionCommands``) is shape-checked only (a list of
-    non-empty strings) and NEVER content-validated; the spawn path records it in spawn provenance.
-    Empty tuple = not configured.
-    """
-
-    harness: str | None = None
-    model: str | None = None
-    effort: str | None = None
-    launch_args: tuple[str, ...] = ()
-    prompt_keywords: tuple[str, ...] = ()
-    session_commands: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ConcurrencySettings:
-    """``orchestration.concurrency`` caps; ``None`` = uncapped (the default)."""
-
-    max_parallel_masters: int | None = None
-    max_parallel_leaves: int | None = None
-    max_sub_agents: int | None = None
-
-
-@dataclass(frozen=True)
-class ExpectationSettings:
-    """``orchestration.expectations`` -- per-kind default SLA seconds (R2, 260707-HFX2-L1).
-
-    Every dispatch surface (spawn, leaf dispatch, gate open, signal post) writes a durable
-    expectation row at write time; the SLA (seconds until ``dueAt``) is configurable per kind
-    here, defaulting to :data:`DEFAULT_EXPECTATION_SLA_SECONDS`.
-    """
-
-    sla_seconds: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_EXPECTATION_SLA_SECONDS)
-    )
-
-    def sla_for(self, kind: str) -> float:
-        return self.sla_seconds.get(kind, DEFAULT_EXPECTATION_SLA_SECONDS[kind])
-
-
-@dataclass(frozen=True)
-class SupervisorSettings:
-    """``orchestration.supervisor`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
-
-    ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
-    own default. ``signal_cooldown_seconds`` controls supervisor pane/seat-liveness signal posts.
-    """
-
-    enabled: bool = True
-    interval_seconds: float = DEFAULT_SUPERVISOR_INTERVAL_SECONDS
-    stale_cutoff_seconds: float = DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
-    redeliver_rate_limit_seconds: float | None = None
-    signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
-    redeliver_budget: int = DEFAULT_SUPERVISOR_REDELIVER_BUDGET
-    escalation_budget: int = DEFAULT_SUPERVISOR_ESCALATION_BUDGET
-
-
-@dataclass(frozen=True)
-class EscalationSettings:
-    """``orchestration.escalation`` -- the P-15 tier-3 ladder's own knobs (R1, 260707-HFX2-L4).
-
-    ``sla_seconds`` gates rung 1 (how long a pending row sits unacked, past ``escalatedAt``,
-    before the first renudge); ``rung_seconds`` gates every rung's OWN dwell time thereafter
-    (keyed 1/2/3, re-anchored at every transition -- see ``OperatorInboxStore.advance_rung``).
-    """
-
-    sla_seconds: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_ESCALATION_SLA_SECONDS)
-    )
-    rung_seconds: dict[int, float] = field(
-        default_factory=lambda: dict(DEFAULT_ESCALATION_RUNG_SECONDS)
-    )
-    nudge_rate_limit_seconds: int = 900
-    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
-
-    def sla_for(self, message_kind: str) -> float:
-        return self.sla_seconds.get(
-            message_kind, DEFAULT_ESCALATION_SLA_SECONDS.get(message_kind, 300.0)
-        )
-
-    def rung_dwell(self, rung: int) -> float:
-        return self.rung_seconds.get(rung, DEFAULT_ESCALATION_RUNG_SECONDS.get(rung, 900.0))
-
-
-@dataclass(frozen=True)
-class AgenticSettings:
-    """The merged, typed agentic settings for one read (global <- local)."""
-
-    gate_policy: GatePolicy = DEFAULT_GATE_POLICY
-    require_reviewer_verdict_at_seams: bool = False
-    # Whether a settings file (not the default) set gateDelegation -- the
-    # boot-snapshot consumer uses this to decide legacy-fallback handling.
-    gate_delegation_configured: bool = False
-    loops: LoopSettings = field(default_factory=LoopSettings)
-    roles: dict[str, RoleKnobs] = field(default_factory=dict)
-    # 260703-L16 (ruling 2026-07-07T08:15): per-LEVEL role-knob overrides -- the L12 doctrine's
-    # per-level agent sets, expressible at last. ``roles`` stays the flat DEFAULTS; each
-    # ``roles_per_level[level][role]`` deep-merges over the flat default at leaf-key granularity
-    # (see :meth:`resolved_role_knobs`). Level vocabulary matches ``loops.perLevel``.
-    roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
-    concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
-    expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
-    supervisor: SupervisorSettings = field(default_factory=SupervisorSettings)
-    escalation: EscalationSettings = field(default_factory=EscalationSettings)
-    spawn_harness: str | None = None
-    # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
-    # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
-    # The spawn path resolves harness ids against THIS set, never the builtin table directly.
-    harnesses: tuple[Harness, ...] = HARNESSES
-    # The settings files that existed and were merged, global first.
-    sources: tuple[Path, ...] = ()
-
-    def role_knobs(self, role: str) -> RoleKnobs:
-        return self.roles.get(role, RoleKnobs())
-
-    def resolved_role_knobs(self, role: str, level: str = "leaf") -> RoleKnobs:
-        """The effective knobs for ``role`` dispatched at ``level`` (260703-L16).
-
-        The per-level override deep-merges over the flat role default at leaf-key granularity: an
-        unset override field inherits the default (harness inherited unless overridden), a set one
-        replaces it (the free-form lists REPLACE, never concatenate -- the array rule). Because
-        both families were already merged local-over-global per file layer, this realizes the full
-        dispatch chain: repo-local level override > global level override > repo-local role
-        default > global role default.
-        """
-        base = self.roles.get(role, RoleKnobs())
-        override = self.roles_per_level.get(level, {}).get(role)
-        if override is None:
-            return base
-        return RoleKnobs(
-            harness=override.harness or base.harness,
-            model=override.model or base.model,
-            effort=override.effort or base.effort,
-            launch_args=override.launch_args or base.launch_args,
-            prompt_keywords=override.prompt_keywords or base.prompt_keywords,
-            session_commands=override.session_commands or base.session_commands,
-        )
-
-    def find_harness(self, harness_id: str) -> Harness | None:
-        """The effective :class:`Harness` for ``harness_id`` (builtin merged with settings)."""
-        return next((harness for harness in self.harnesses if harness.id == harness_id), None)
-
-
-def agentic_settings_path(root: Path) -> Path:
-    """The agentic settings file under ``root`` (coordination root or code repo)."""
-    return root / "system" / "settings.json"
-
-
-def default_agentic_settings_seed() -> dict[str, Any]:
-    """The seeded global-file content: every agentic knob at its documented default.
-
-    ``runtime_install`` writes this copy-if-missing; the c-13 install interview
-    then edits it with the developer. No spawn harness preference is seeded --
-    the spawn seam stays detection-gated until a preference is configured.
-    """
-    return {
-        "$comment": (
-            "Agentic orchestration settings (GLOBAL layer). Schema: agents-remember "
-            "docs/reference/settings-json.md (Agentic Settings). Repo-local overrides: "
-            "<code-repo>/system/settings.json. Unknown orchestration.* keys fail loud."
-        ),
-        "version": 1,
-        "orchestration": {
-            "gateDelegation": {"policy": "all-human"},
-            "loops": {
-                "defaults": {
-                    "maxRounds": DEFAULT_LOOP_MAX_ROUNDS,
-                    "reviewerReuse": DEFAULT_REVIEWER_REUSE,
-                    "complexity": {"fullLoopAt": "high", "builderAt": "medium"},
-                },
-                "perLevel": {
-                    level: {"loop": posture} for level, posture in DEFAULT_LOOP_PER_LEVEL.items()
-                },
-            },
-        },
-    }
-
-
-def default_agentic_settings_seed_text() -> str:
-    return json.dumps(default_agentic_settings_seed(), indent=2) + "\n"
+__all__ = [
+    "COMPLEXITY_SCALE",
+    "DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET",
+    "DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS",
+    "DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET",
+    "DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS",
+    "DEFAULT_EXPECTATION_SLA_SECONDS",
+    "DEFAULT_LOOP_MAX_ROUNDS",
+    "DEFAULT_LOOP_PER_LEVEL",
+    "DEFAULT_REVIEWER_REUSE",
+    "HARNESS_IDS",
+    "KNOWN_AGENT_NOTIFIER_FIELDS",
+    "KNOWN_CONCURRENCY_FIELDS",
+    "KNOWN_EXPECTATIONS_FIELDS",
+    "KNOWN_EXPECTATION_KINDS",
+    "KNOWN_GATE_DELEGATION_FIELDS",
+    "KNOWN_GATE_POLICY_KIND_FIELDS",
+    "KNOWN_HARNESS_ENTRY_FIELDS",
+    "KNOWN_LOOPS_FIELDS",
+    "KNOWN_LOOP_COMPLEXITY_FIELDS",
+    "KNOWN_LOOP_DEFAULTS_FIELDS",
+    "KNOWN_LOOP_LEVELS",
+    "KNOWN_LOOP_LEVEL_FIELDS",
+    "KNOWN_QUALITY_GATE_FIELDS",
+    "KNOWN_ROLES",
+    "KNOWN_ROLE_KNOB_FIELDS",
+    "KNOWN_SPAWN_FIELDS",
+    "AgentNotifierSettings",
+    "AgenticSettings",
+    "AgenticSettingsError",
+    "ConcurrencySettings",
+    "ExpectationSettings",
+    "LoopComplexity",
+    "LoopDefaults",
+    "LoopSettings",
+    "QualityGateSettings",
+    "RoleKnobs",
+    "_HarnessEntry",
+    "_entry_string",
+    "_entry_string_list",
+    "_merged_harness",
+    "_parse_agent_notifier",
+    "_parse_concurrency",
+    "_parse_expectations",
+    "_parse_gate_policy_rule",
+    "_parse_harness_entry",
+    "_parse_harnesses",
+    "_parse_loop_complexity",
+    "_parse_loop_defaults",
+    "_parse_loop_levels",
+    "_parse_loops",
+    "_parse_quality_gate",
+    "_parse_roles",
+    "_parse_roles_per_level",
+    "_parse_spawn",
+    "_refuse_bad_effort_template",
+    "_refuse_unpaired_vehicles",
+    "_require_agent_notifier_floor_seconds",
+    "_require_bool",
+    "_require_harness_id",
+    "_require_object",
+    "_require_positive_int",
+    "_require_positive_number",
+    "_require_string",
+    "_require_string_list",
+    "_resolved_launch",
+    "agentic_settings_path",
+    "default_agentic_settings_seed",
+    "default_agentic_settings_seed_text",
+    "load_agentic_settings",
+    "merge_settings",
+    "parse_gate_delegation",
+]
 
 
 def load_agentic_settings(
@@ -479,19 +244,6 @@ def load_agentic_settings(
     return _parse_orchestration(merged, source=source, sources=sources)
 
 
-def merge_settings(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Deep merge at leaf-key granularity: object leaves recurse, everything else
-    (scalars AND arrays) is REPLACED by the override."""
-    merged = dict(base)
-    for key, value in override.items():
-        prior = merged.get(key)
-        if isinstance(prior, dict) and isinstance(value, dict):
-            merged[key] = merge_settings(prior, value)
-        else:
-            merged[key] = value
-    return merged
-
-
 def _read_settings_file(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -506,7 +258,10 @@ def _read_settings_file(path: Path) -> dict[str, Any] | None:
     return data
 
 
-def _validated_orchestration_block(data: dict[str, Any], path: Path) -> dict[str, Any]:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/agentic_settings.py:179).
+def _validated_orchestration_block(
+    data: dict[str, Any], path: Path
+) -> dict[str, Any]:  # pragma: no cover
     """One file's ``orchestration`` block, fully validated so errors name ``path``.
 
     Top-level keys other than ``orchestration`` are tolerated-not-parsed (other
@@ -519,11 +274,46 @@ def _validated_orchestration_block(data: dict[str, Any], path: Path) -> dict[str
     if not isinstance(raw, dict):
         raise AgenticSettingsError(f"orchestration settings must be an object: {source}")
     _refuse_null_families(raw, source)
+    raw = _resolve_agent_notifier_alias(raw, source)
     # strict=False: one LAYER may legitimately be partial (a repo-local file overriding a single
     # leaf of a globally-defined harness entry, or referencing a harness id the OTHER layer
     # declares), so per-file validation checks shapes/keys only; cross-reference and completeness
     # rules run on the MERGED block in load_agentic_settings.
     _parse_orchestration(raw, source=source, sources=(path,), strict=False)
+    return raw
+
+
+def _resolve_agent_notifier_alias(raw: dict[str, Any], source: str) -> dict[str, Any]:
+    """Normalize the legacy ``orchestration.supervisor`` key to ``agentNotifier``.
+
+    The rename window (260713-TES-L1) accepts the legacy key as an EXPLICIT alias:
+    a file that uses it loads correctly but warns loudly, and a file that sets BOTH
+    keys is refused as ambiguous. Once the live settings file uses the new key and
+    the window closes, remove the legacy key from ``KNOWN_ORCHESTRATION_FIELDS``,
+    this resolver, and the warning.
+    """
+    legacy = raw.get("supervisor")
+    current = raw.get("agentNotifier")
+    if legacy is not None and current is not None:
+        raise AgenticSettingsError(
+            "orchestration.supervisor and orchestration.agentNotifier are both set; "
+            "the legacy key is a temporary alias during the agent-notifier rename "
+            "window -- keep orchestration.agentNotifier and remove "
+            f"orchestration.supervisor: {source}"
+        )
+    if legacy is not None:
+        warnings.warn(
+            "orchestration.supervisor is a deprecated alias for "
+            "orchestration.agentNotifier (supervisor renamed to agent-notifier); "
+            f"update {source} to orchestration.agentNotifier before the "
+            "compatibility window closes",
+            UserWarning,
+            stacklevel=3,
+        )
+        normalized = dict(raw)
+        normalized["agentNotifier"] = legacy
+        del normalized["supervisor"]
+        return normalized
     return raw
 
 
@@ -554,90 +344,6 @@ def _source_label(sources: tuple[Path, ...]) -> str:
     if not sources:
         return "agentic settings defaults (no settings file present)"
     return " merged with ".join(str(path) for path in sources)
-
-
-def _refuse_unknown(raw: dict[str, Any], known: frozenset[str], owner: str, source: str) -> None:
-    unknown = sorted(set(raw) - known)
-    if unknown:
-        unknown_text = ", ".join(unknown)
-        allowed = ", ".join(sorted(known))
-        raise AgenticSettingsError(
-            f"unsupported {owner} setting(s): {unknown_text}; allowed: {allowed}; "
-            f"offending file: {source}"
-        )
-
-
-def _require_object(raw: object, owner: str, source: str) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise AgenticSettingsError(f"{owner} must be an object: {source}")
-    return raw
-
-
-def _require_string(raw: object, owner: str, source: str) -> str:
-    if not isinstance(raw, str) or not raw:
-        raise AgenticSettingsError(f"{owner} must be a non-empty string: {source}")
-    return raw
-
-
-def _require_positive_int(raw: object, owner: str, source: str) -> int:
-    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
-        raise AgenticSettingsError(f"{owner} must be a positive integer: {source}")
-    return raw
-
-
-def _require_positive_number(raw: object, owner: str, source: str) -> float:
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw <= 0:
-        raise AgenticSettingsError(f"{owner} must be a positive number: {source}")
-    return float(raw)
-
-
-def _require_bool(raw: object, owner: str, source: str) -> bool:
-    if not isinstance(raw, bool):
-        raise AgenticSettingsError(f"{owner} must be a boolean: {source}")
-    return raw
-
-
-def _require_string_list(raw: object, owner: str, source: str) -> tuple[str, ...]:
-    """A free-form list of non-empty strings (shape-checked only; content never validated).
-
-    An EMPTY list is refused (PR #100 review, Codex P2): ``RoleKnobs`` cannot distinguish
-    "absent" from "explicitly cleared" (empty tuple = not configured), so a per-level ``[]``
-    meant to clear a flat default would silently INHERIT it instead — the same silent-degrade
-    shape as a ``null`` family key (260703-L18 finding 6). Omit the key to inherit; list
-    values to override.
-    """
-    if not isinstance(raw, list):
-        raise AgenticSettingsError(f"{owner} must be a list of non-empty strings: {source}")
-    if not raw:
-        raise AgenticSettingsError(
-            f"{owner} must not be an empty list (omit the key to inherit, or list the values "
-            f"to override): {source}"
-        )
-    values: list[str] = []
-    for item in raw:
-        if not isinstance(item, str) or not item:
-            raise AgenticSettingsError(f"{owner} must be a list of non-empty strings: {source}")
-        values.append(item)
-    return tuple(values)
-
-
-def _require_harness_id(
-    raw: object, owner: str, source: str, harness_ids: tuple[str, ...] | None
-) -> str:
-    """A harness reference: shape-checked always, membership-checked against the EFFECTIVE id set.
-
-    ``harness_ids`` is the effective registry (builtin merged with ``orchestration.harnesses``);
-    ``None`` skips membership -- the per-file (non-strict) pass, where the other layer may declare
-    the id.
-    """
-    value = _require_string(raw, owner, source)
-    if harness_ids is not None and value not in harness_ids:
-        allowed = ", ".join(harness_ids)
-        raise AgenticSettingsError(
-            f"{owner} must be a harness registry id or an orchestration.harnesses-defined id "
-            f"({allowed}), got {value!r}: {source} (see docs/reference/harnesses.md)"
-        )
-    return value
 
 
 def _parse_orchestration(
@@ -671,681 +377,9 @@ def _parse_orchestration(
         ),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
         expectations=_parse_expectations(raw.get("expectations"), source=source),
-        supervisor=_parse_supervisor(raw.get("supervisor"), source=source),
-        escalation=_parse_escalation(raw.get("escalation"), source=source),
+        agent_notifier=_parse_agent_notifier(raw.get("agentNotifier"), source=source),
+        quality_gate=_parse_quality_gate(raw.get("qualityGate"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,
     )
-
-
-def _parse_harnesses(raw: object, *, source: str, strict: bool) -> tuple[Harness, ...]:
-    """``orchestration.harnesses`` (260703-L16): the effective registry, builtin merged with settings.
-
-    Entries merge over the builtin table BY ID: a new id ADDS a harness (it must resolve a
-    ``command`` and/or ``argv``; ``command`` defaults to ``argv[0]``, ``argv`` to ``(command,)``);
-    a builtin id OVERRIDES the curated defaults per field (its ``argv`` array REPLACES ours -- the
-    user launches the harness exactly the way they would run it themselves). Vocabulary fields come
-    in delivery-vehicle pairs and must resolve together post-merge: ``effortFlag`` with
-    ``effortFlagValues``, ``effortSessionValues`` with ``effortSessionCommand``. Detection still
-    applies downstream (the command is probed on PATH at dispatch). ``strict=False`` checks shapes
-    and unknown keys only (a single layer may be partial); the merged pass enforces completeness.
-    """
-    if raw is None:
-        return HARNESSES
-    block = _require_object(raw, "orchestration.harnesses", source)
-    effective: dict[str, Harness] = {harness.id: harness for harness in HARNESSES}
-    order: list[str] = [harness.id for harness in HARNESSES]
-    for harness_id, value in block.items():
-        if not isinstance(harness_id, str) or not harness_id:
-            raise AgenticSettingsError(
-                f"orchestration.harnesses keys must be non-empty harness ids: {source}"
-            )
-        parsed = _parse_harness_entry(harness_id, value, source)
-        if not strict:
-            continue
-        base = effective.get(harness_id)
-        merged = _merged_harness(harness_id, parsed, base, source)
-        if base is None:
-            order.append(harness_id)
-        effective[harness_id] = merged
-    if not strict:
-        return HARNESSES
-    return tuple(effective[harness_id] for harness_id in order)
-
-
-@dataclass(frozen=True)
-class _HarnessEntry:
-    """One raw ``orchestration.harnesses.<id>`` entry, shape-validated; ``None`` = not declared."""
-
-    name: str | None
-    command: str | None
-    argv: tuple[str, ...] | None
-    model_flag: str | None
-    effort_flag: str | None
-    effort_flag_values: tuple[str, ...] | None
-    effort_session_values: tuple[str, ...] | None
-    effort_session_command: str | None
-
-
-def _entry_string(entry: dict[str, Any], key: str, owner: str, source: str) -> str | None:
-    if key not in entry:
-        return None
-    return _require_string(entry[key], f"{owner}.{key}", source)
-
-
-def _entry_string_list(
-    entry: dict[str, Any], key: str, owner: str, source: str
-) -> tuple[str, ...] | None:
-    if key not in entry:
-        return None
-    return _require_string_list(entry[key], f"{owner}.{key}", source)
-
-
-def _parse_harness_entry(harness_id: str, value: object, source: str) -> _HarnessEntry:
-    """Shape-validate one harness entry (both passes run this; errors name the owner + file)."""
-    owner = f"orchestration.harnesses.{harness_id}"
-    entry = _require_object(value, owner, source)
-    _refuse_unknown(entry, KNOWN_HARNESS_ENTRY_FIELDS, owner, source)
-    argv = _entry_string_list(entry, "argv", owner, source)
-    if argv is not None and not argv:
-        raise AgenticSettingsError(f"{owner}.argv must be a non-empty command array: {source}")
-    return _HarnessEntry(
-        name=_entry_string(entry, "name", owner, source),
-        command=_entry_string(entry, "command", owner, source),
-        argv=argv,
-        model_flag=_entry_string(entry, "modelFlag", owner, source),
-        effort_flag=_entry_string(entry, "effortFlag", owner, source),
-        effort_flag_values=_entry_string_list(entry, "effortFlagValues", owner, source),
-        effort_session_values=_entry_string_list(entry, "effortSessionValues", owner, source),
-        effort_session_command=_entry_string(entry, "effortSessionCommand", owner, source),
-    )
-
-
-def _resolved_launch(
-    parsed: _HarnessEntry, base: Harness | None, owner: str, source: str
-) -> tuple[str, tuple[str, ...]]:
-    """The merged ``(command, argv)``: entry over builtin, each derivable from the other."""
-    if base is None and parsed.command is None and parsed.argv is None:
-        raise AgenticSettingsError(
-            f"{owner} defines a new harness and must declare command and/or argv "
-            f"(see docs/reference/harnesses.md): {source}"
-        )
-    argv = parsed.argv if parsed.argv is not None else (base.argv if base else None)
-    command = parsed.command if parsed.command is not None else (base.command if base else None)
-    if command is None and argv is not None:
-        command = argv[0]
-    if argv is None and command is not None:
-        argv = (command,)
-    assert command is not None and argv is not None
-    return command, argv
-
-
-def _merged_harness(
-    harness_id: str, parsed: _HarnessEntry, base: Harness | None, source: str
-) -> Harness:
-    """One effective harness: the entry's declared fields over the builtin defaults (or fresh)."""
-    owner = f"orchestration.harnesses.{harness_id}"
-    command, argv = _resolved_launch(parsed, base, owner, source)
-    fallback = (
-        base
-        if base is not None
-        else Harness(
-            id=harness_id, name=harness_id, command=command, argv=argv, defined_in="settings"
-        )
-    )
-    overrides: dict[str, Any] = {"command": command, "argv": argv}
-    declared = {
-        "name": parsed.name,
-        "model_flag": parsed.model_flag,
-        "effort_flag": parsed.effort_flag,
-        "effort_flag_values": parsed.effort_flag_values,
-        "effort_session_values": parsed.effort_session_values,
-        "effort_session_command": parsed.effort_session_command,
-    }
-    for field_name, declared_value in declared.items():
-        if declared_value is not None:
-            overrides[field_name] = declared_value
-    if (
-        base is not None
-        and parsed.effort_flag is not None
-        and parsed.effort_flag != base.effort_flag
-    ):
-        # The Codex builtin's value template belongs to its ``--config`` vehicle. Replacing that
-        # flag through settings restores the ordinary two-argv-element mapping instead of leaking
-        # ``model_reasoning_effort=...`` into an unrelated custom flag.
-        overrides["effort_flag_value_template"] = None
-    merged = replace(fallback, **overrides)
-    _refuse_unpaired_vehicles(merged, owner, source)
-    _refuse_bad_effort_template(merged, owner, source)
-    return merged
-
-
-def _refuse_unpaired_vehicles(merged: Harness, owner: str, source: str) -> None:
-    """Post-merge pair rules: every declared vocabulary must resolve its delivery vehicle."""
-    if bool(merged.effort_flag) != bool(merged.effort_flag_values):
-        raise AgenticSettingsError(
-            f"{owner}: effortFlag and effortFlagValues must be declared together "
-            f"(a flag without a vocabulary reintroduces the silent-degrade risk): {source}"
-        )
-    if bool(merged.effort_session_values) != bool(merged.effort_session_command):
-        raise AgenticSettingsError(
-            f"{owner}: effortSessionValues and effortSessionCommand must be declared "
-            f"together (session values need their delivery command): {source}"
-        )
-
-
-def _refuse_bad_effort_template(merged: Harness, owner: str, source: str) -> None:
-    """The ``effortSessionCommand`` template must render with ONLY ``{value}`` (260703-L18 finding 4).
-
-    ``serving.harnesses.effort_session_commands`` renders it via ``.format(value=…)`` at spawn; a stray
-    replacement field (``/set {mode}={value}``), a positional ``{}``, or an unmatched brace raises a
-    RAW ``KeyError``/``ValueError``/``IndexError`` there instead of the structured refusal every other
-    bad knob gets. A builtin override may supply JUST the command (merged over the builtin's session
-    values), so the check lives post-merge next to the pairing rule -- once validated here, the raw
-    error at ``serving/harnesses.py`` is unreachable from settings. Only checked when a template is
-    present (an absent one has already passed the pairing rule)."""
-    template = merged.effort_session_command
-    if template is None:
-        return
-    try:
-        field_names = [name for _, name, _, _ in string.Formatter().parse(template)]
-    except ValueError as error:  # an unmatched / stray brace: not a parseable format template
-        raise AgenticSettingsError(
-            f"{owner}: effortSessionCommand {template!r} is not a valid format template "
-            f"({error}); it may contain no replacement field other than {{value}}: {source}"
-        ) from error
-    unexpected = sorted({name for name in field_names if name is not None and name != "value"})
-    if unexpected:
-        shown = ", ".join(repr(name) for name in unexpected)
-        raise AgenticSettingsError(
-            f"{owner}: effortSessionCommand {template!r} may reference only the {{value}} field; "
-            f"unexpected replacement field(s): {shown}: {source}"
-        )
-    try:
-        template.format(value="probe")
-    except (KeyError, IndexError, ValueError) as error:
-        raise AgenticSettingsError(
-            f"{owner}: effortSessionCommand {template!r} failed to render with value=… "
-            f"({error!r}): {source}"
-        ) from error
-
-
-def parse_gate_delegation(raw: object, *, source: str) -> tuple[GatePolicy, bool]:
-    """Parse ``orchestration.gateDelegation`` into ``(policy, requireReviewerVerdictAtSeams)``.
-
-    Shared by the agentic loader (the key's home) and ``mcp/config.py``'s
-    one-cycle legacy authority-file fallback. ``None`` means the all-human
-    default. Errors name ``source`` (the offending file).
-    """
-    if raw is None:
-        return DEFAULT_GATE_POLICY, False
-    delegation = _require_object(raw, "orchestration.gateDelegation", source)
-    _refuse_unknown(
-        delegation,
-        KNOWN_GATE_DELEGATION_FIELDS,
-        "orchestration.gateDelegation",
-        source,
-    )
-    policy_name = delegation.get("policy", "all-human")
-    policy_name = _require_string(policy_name, "orchestration.gateDelegation.policy", source)
-    try:
-        policy = named_gate_policy(policy_name)
-    except ValueError as error:
-        raise AgenticSettingsError(f"{error}; offending file: {source}") from error
-    require_verdict_at_seams = delegation.get("requireReviewerVerdictAtSeams", False)
-    if not isinstance(require_verdict_at_seams, bool):
-        raise AgenticSettingsError(
-            "orchestration.gateDelegation.requireReviewerVerdictAtSeams must be a "
-            f"boolean: {source}"
-        )
-    kinds = _require_object(
-        delegation.get("kinds", {}), "orchestration.gateDelegation.kinds", source
-    )
-    rules = {rule.kind: rule for rule in policy.rules}
-    for raw_kind, raw_rule in kinds.items():
-        if not isinstance(raw_kind, str) or not raw_kind:
-            raise AgenticSettingsError(
-                f"gate policy kind names must be non-empty strings: {source}"
-            )
-        try:
-            kind = coerce_gate_kind(raw_kind)
-            rules[kind] = _parse_gate_policy_rule(
-                kind, raw_rule, prior=rules.get(kind), source=source
-            )
-        except AgenticSettingsError:
-            raise
-        except ValueError as error:
-            raise AgenticSettingsError(f"{error}; offending file: {source}") from error
-    try:
-        policy = make_gate_policy(list(rules.values()))
-    except ValueError as error:
-        raise AgenticSettingsError(f"{error}; offending file: {source}") from error
-    if require_verdict_at_seams:
-        policy = apply_seam_verdict_requirement(policy)
-    return policy, require_verdict_at_seams
-
-
-def _parse_gate_policy_rule(
-    kind: GateKind,
-    raw_rule: object,
-    *,
-    prior: GatePolicyRule | None,
-    source: str,
-) -> GatePolicyRule:
-    if isinstance(raw_rule, str):
-        return GatePolicyRule(kind=kind, delegated_role=coerce_decision_role(raw_rule))
-    rule = _require_object(raw_rule, f"orchestration.gateDelegation.kinds.{kind}", source)
-    _refuse_unknown(
-        rule,
-        KNOWN_GATE_POLICY_KIND_FIELDS,
-        f"orchestration.gateDelegation.kinds.{kind}",
-        source,
-    )
-    role_raw = rule.get("role")
-    delegated_role = prior.delegated_role if prior is not None else None
-    if role_raw is not None:
-        role_value = _require_string(
-            role_raw, f"orchestration.gateDelegation.kinds.{kind}.role", source
-        )
-        delegated_role = coerce_decision_role(role_value)
-    require_verdict = rule.get(
-        "requireReviewerVerdict",
-        prior.require_reviewer_verdict if prior is not None else False,
-    )
-    if not isinstance(require_verdict, bool):
-        raise AgenticSettingsError(
-            f"orchestration.gateDelegation.kinds.{kind}.requireReviewerVerdict "
-            f"must be a boolean: {source}"
-        )
-    return GatePolicyRule(
-        kind=kind,
-        delegated_role=delegated_role,
-        require_reviewer_verdict=require_verdict,
-    )
-
-
-def _parse_loops(raw: object, *, source: str) -> LoopSettings:
-    if raw is None:
-        return LoopSettings()
-    loops = _require_object(raw, "orchestration.loops", source)
-    _refuse_unknown(loops, KNOWN_LOOPS_FIELDS, "orchestration.loops", source)
-    defaults = _parse_loop_defaults(loops.get("defaults"), source=source)
-    per_level = dict(DEFAULT_LOOP_PER_LEVEL)
-    per_level.update(
-        _parse_loop_levels(
-            loops.get("perLevel"), owner="orchestration.loops.perLevel", source=source
-        )
-    )
-    per_master: dict[str, dict[str, str]] = {}
-    raw_per_master = loops.get("perMaster")
-    if raw_per_master is not None:
-        masters = _require_object(raw_per_master, "orchestration.loops.perMaster", source)
-        for master, levels in masters.items():
-            if not isinstance(master, str) or not master:
-                raise AgenticSettingsError(
-                    f"orchestration.loops.perMaster keys must be non-empty master "
-                    f"task names: {source}"
-                )
-            per_master[master] = _parse_loop_levels(
-                levels,
-                owner=f"orchestration.loops.perMaster.{master}",
-                source=source,
-            )
-    return LoopSettings(defaults=defaults, per_level=per_level, per_master=per_master)
-
-
-def _parse_loop_defaults(raw: object, *, source: str) -> LoopDefaults:
-    if raw is None:
-        return LoopDefaults()
-    defaults = _require_object(raw, "orchestration.loops.defaults", source)
-    _refuse_unknown(defaults, KNOWN_LOOP_DEFAULTS_FIELDS, "orchestration.loops.defaults", source)
-    max_rounds = DEFAULT_LOOP_MAX_ROUNDS
-    if "maxRounds" in defaults:
-        max_rounds = _require_positive_int(
-            defaults["maxRounds"], "orchestration.loops.defaults.maxRounds", source
-        )
-    reviewer_reuse = DEFAULT_REVIEWER_REUSE
-    if "reviewerReuse" in defaults:
-        reviewer_reuse = _require_string(
-            defaults["reviewerReuse"],
-            "orchestration.loops.defaults.reviewerReuse",
-            source,
-        )
-    complexity = _parse_loop_complexity(defaults.get("complexity"), source=source)
-    return LoopDefaults(max_rounds=max_rounds, reviewer_reuse=reviewer_reuse, complexity=complexity)
-
-
-def _parse_loop_complexity(raw: object, *, source: str) -> LoopComplexity:
-    if raw is None:
-        return LoopComplexity()
-    complexity = _require_object(raw, "orchestration.loops.defaults.complexity", source)
-    _refuse_unknown(
-        complexity,
-        KNOWN_LOOP_COMPLEXITY_FIELDS,
-        "orchestration.loops.defaults.complexity",
-        source,
-    )
-    parsed = LoopComplexity()
-    values: dict[str, str] = {
-        "full_loop_at": parsed.full_loop_at,
-        "builder_at": parsed.builder_at,
-    }
-    for json_key, attr in (("fullLoopAt", "full_loop_at"), ("builderAt", "builder_at")):
-        if json_key not in complexity:
-            continue
-        owner = f"orchestration.loops.defaults.complexity.{json_key}"
-        value = _require_string(complexity[json_key], owner, source)
-        if value not in COMPLEXITY_SCALE:
-            allowed = ", ".join(COMPLEXITY_SCALE)
-            raise AgenticSettingsError(
-                f"{owner} must be one of: {allowed}; got {value!r}: {source}"
-            )
-        values[attr] = value
-    return LoopComplexity(**values)
-
-
-def _parse_loop_levels(raw: object, *, owner: str, source: str) -> dict[str, str]:
-    if raw is None:
-        return {}
-    levels = _require_object(raw, owner, source)
-    _refuse_unknown(levels, KNOWN_LOOP_LEVELS, owner, source)
-    parsed: dict[str, str] = {}
-    for level, value in levels.items():
-        entry = _require_object(value, f"{owner}.{level}", source)
-        _refuse_unknown(entry, KNOWN_LOOP_LEVEL_FIELDS, f"{owner}.{level}", source)
-        # Loop postures are model-interpreted doctrine names (scored,
-        # seam-required, none, strategist, ...), deliberately not a closed set.
-        parsed[level] = _require_string(entry.get("loop"), f"{owner}.{level}.loop", source)
-    return parsed
-
-
-def _parse_roles(
-    raw: object,
-    *,
-    source: str,
-    harness_ids: tuple[str, ...] | None,
-    owner: str = "orchestration.roles",
-) -> dict[str, RoleKnobs]:
-    if raw is None:
-        return {}
-    roles = _require_object(raw, owner, source)
-    _refuse_unknown(roles, KNOWN_ROLES, owner, source)
-    parsed: dict[str, RoleKnobs] = {}
-    for role, value in roles.items():
-        knobs = _require_object(value, f"{owner}.{role}", source)
-        _refuse_unknown(knobs, KNOWN_ROLE_KNOB_FIELDS, f"{owner}.{role}", source)
-        harness = None
-        if "harness" in knobs:
-            harness = _require_harness_id(
-                knobs["harness"],
-                f"{owner}.{role}.harness",
-                source,
-                harness_ids,
-            )
-        model = None
-        if "model" in knobs:
-            model = _require_string(knobs["model"], f"{owner}.{role}.model", source)
-        effort = None
-        if "effort" in knobs:
-            # Deliberately a free string here: the per-harness effort vocabulary (flag values +
-            # session values) is enforced at DISPATCH, where the harness is known (260703-L16).
-            effort = _require_string(knobs["effort"], f"{owner}.{role}.effort", source)
-        # The free-form escape hatch (260703-L16): shape-checked, never content-validated.
-        launch_args: tuple[str, ...] = ()
-        if "launchArgs" in knobs:
-            launch_args = _require_string_list(
-                knobs["launchArgs"], f"{owner}.{role}.launchArgs", source
-            )
-        prompt_keywords: tuple[str, ...] = ()
-        if "promptKeywords" in knobs:
-            prompt_keywords = _require_string_list(
-                knobs["promptKeywords"],
-                f"{owner}.{role}.promptKeywords",
-                source,
-            )
-        session_commands: tuple[str, ...] = ()
-        if "sessionCommands" in knobs:
-            session_commands = _require_string_list(
-                knobs["sessionCommands"],
-                f"{owner}.{role}.sessionCommands",
-                source,
-            )
-        parsed[role] = RoleKnobs(
-            harness=harness,
-            model=model,
-            effort=effort,
-            launch_args=launch_args,
-            prompt_keywords=prompt_keywords,
-            session_commands=session_commands,
-        )
-    return parsed
-
-
-def _parse_roles_per_level(
-    raw: object, *, source: str, harness_ids: tuple[str, ...] | None
-) -> dict[str, dict[str, RoleKnobs]]:
-    """``orchestration.rolesPerLevel`` (260703-L16, ruling 2026-07-07T08:15): per-level role knobs.
-
-    ``{leaf|master|portfolio: {role: knob-overrides}}`` -- the level vocabulary matches
-    ``loops.perLevel`` so the two per-level families stay congruent; each override deep-merges over
-    the flat ``orchestration.roles`` default at dispatch (:meth:`AgenticSettings.resolved_role_knobs`).
-    Additive: absent key = no per-level overrides (existing files unchanged).
-    """
-    if raw is None:
-        return {}
-    levels = _require_object(raw, "orchestration.rolesPerLevel", source)
-    _refuse_unknown(levels, KNOWN_LOOP_LEVELS, "orchestration.rolesPerLevel", source)
-    parsed: dict[str, dict[str, RoleKnobs]] = {}
-    for level, value in levels.items():
-        parsed[level] = _parse_roles(
-            value,
-            source=source,
-            harness_ids=harness_ids,
-            owner=f"orchestration.rolesPerLevel.{level}",
-        )
-    return parsed
-
-
-def _parse_concurrency(raw: object, *, source: str) -> ConcurrencySettings:
-    if raw is None:
-        return ConcurrencySettings()
-    concurrency = _require_object(raw, "orchestration.concurrency", source)
-    _refuse_unknown(concurrency, KNOWN_CONCURRENCY_FIELDS, "orchestration.concurrency", source)
-    parsed: dict[str, int | None] = {
-        "max_parallel_masters": None,
-        "max_parallel_leaves": None,
-        "max_sub_agents": None,
-    }
-    for json_key, attr in (
-        ("maxParallelMasters", "max_parallel_masters"),
-        ("maxParallelLeaves", "max_parallel_leaves"),
-        ("maxSubAgents", "max_sub_agents"),
-    ):
-        if json_key in concurrency:
-            parsed[attr] = _require_positive_int(
-                concurrency[json_key], f"orchestration.concurrency.{json_key}", source
-            )
-    return ConcurrencySettings(**parsed)
-
-
-def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:
-    """``orchestration.expectations.defaults``: per-kind SLA seconds, hyphenated kind keys
-    (matching the expectation-row kind vocabulary), overriding :data:`DEFAULT_EXPECTATION_SLA_SECONDS`
-    entry-by-entry -- an omitted kind keeps its documented default."""
-    if raw is None:
-        return ExpectationSettings()
-    block = _require_object(raw, "orchestration.expectations", source)
-    _refuse_unknown(block, KNOWN_EXPECTATIONS_FIELDS, "orchestration.expectations", source)
-    sla_seconds = dict(DEFAULT_EXPECTATION_SLA_SECONDS)
-    raw_defaults = block.get("defaults")
-    if raw_defaults is not None:
-        defaults = _require_object(raw_defaults, "orchestration.expectations.defaults", source)
-        for kind, value in defaults.items():
-            if kind not in KNOWN_EXPECTATION_KINDS:
-                allowed = ", ".join(sorted(KNOWN_EXPECTATION_KINDS))
-                raise AgenticSettingsError(
-                    f"orchestration.expectations.defaults key {kind!r} is not a known "
-                    f"expectation kind; allowed: {allowed}: {source}"
-                )
-            owner = f"orchestration.expectations.defaults.{kind}"
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-                raise AgenticSettingsError(
-                    f"{owner} must be a positive number of seconds: {source}"
-                )
-            sla_seconds[kind] = float(value)
-    return ExpectationSettings(sla_seconds=sla_seconds)
-
-
-def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
-    """``orchestration.supervisor``: the deterministic sweep's own knobs (R1/R5).
-
-    Absent -> the documented defaults (enabled, 10s interval, 60s staleness cutoff, inbox-store
-    redelivery rate limit inherited).
-    """
-    if raw is None:
-        return SupervisorSettings()
-    block = _require_object(raw, "orchestration.supervisor", source)
-    _refuse_unknown(block, KNOWN_SUPERVISOR_FIELDS, "orchestration.supervisor", source)
-    enabled = (
-        _require_bool(block["enabled"], "orchestration.supervisor.enabled", source)
-        if "enabled" in block
-        else True
-    )
-    interval_seconds = (
-        _require_positive_number(
-            block["intervalSeconds"], "orchestration.supervisor.intervalSeconds", source
-        )
-        if "intervalSeconds" in block
-        else DEFAULT_SUPERVISOR_INTERVAL_SECONDS
-    )
-    stale_cutoff_seconds = (
-        _require_positive_number(
-            block["staleCutoffSeconds"], "orchestration.supervisor.staleCutoffSeconds", source
-        )
-        if "staleCutoffSeconds" in block
-        else DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
-    )
-    redeliver_rate_limit_seconds = (
-        _require_supervisor_floor_seconds(
-            block["redeliverRateLimitSeconds"],
-            "orchestration.supervisor.redeliverRateLimitSeconds",
-            source,
-        )
-        if "redeliverRateLimitSeconds" in block
-        else None
-    )
-    signal_cooldown_seconds = (
-        _require_supervisor_floor_seconds(
-            block["signalCooldownSeconds"],
-            "orchestration.supervisor.signalCooldownSeconds",
-            source,
-        )
-        if "signalCooldownSeconds" in block
-        else DEFAULT_RATE_LIMIT_SECONDS
-    )
-    redeliver_budget = (
-        _require_positive_int(
-            block["redeliverBudget"], "orchestration.supervisor.redeliverBudget", source
-        )
-        if "redeliverBudget" in block
-        else DEFAULT_SUPERVISOR_REDELIVER_BUDGET
-    )
-    escalation_budget = (
-        _require_positive_int(
-            block["escalationBudget"], "orchestration.supervisor.escalationBudget", source
-        )
-        if "escalationBudget" in block
-        else DEFAULT_SUPERVISOR_ESCALATION_BUDGET
-    )
-    return SupervisorSettings(
-        enabled=enabled,
-        interval_seconds=interval_seconds,
-        stale_cutoff_seconds=stale_cutoff_seconds,
-        redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
-        signal_cooldown_seconds=signal_cooldown_seconds,
-        redeliver_budget=redeliver_budget,
-        escalation_budget=escalation_budget,
-    )
-
-
-def _require_supervisor_floor_seconds(raw: object, owner: str, source: str) -> float:
-    value = _require_positive_number(raw, owner, source)
-    if value < MIN_REDELIVERY_INTERVAL_SECONDS:
-        raise AgenticSettingsError(
-            f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds: {source}"
-        )
-    return value
-
-
-def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
-    """``orchestration.escalation`` (R1, 260707-HFX2-L4): per-``message_kind`` ack SLAs, per-rung
-    dwell timings, the renudge rate limit, and the respawn-after-rung threshold. Absent -> the
-    documented conservative defaults."""
-    if raw is None:
-        return EscalationSettings()
-    block = _require_object(raw, "orchestration.escalation", source)
-    _refuse_unknown(block, KNOWN_ESCALATION_FIELDS, "orchestration.escalation", source)
-    sla_seconds = dict(DEFAULT_ESCALATION_SLA_SECONDS)
-    raw_sla = block.get("slaSeconds")
-    if raw_sla is not None:
-        sla_block = _require_object(raw_sla, "orchestration.escalation.slaSeconds", source)
-        for kind, value in sla_block.items():
-            if kind not in KNOWN_ESCALATION_MESSAGE_KINDS:
-                allowed = ", ".join(sorted(KNOWN_ESCALATION_MESSAGE_KINDS))
-                raise AgenticSettingsError(
-                    f"orchestration.escalation.slaSeconds key {kind!r} is not a known "
-                    f"message kind; allowed: {allowed}: {source}"
-                )
-            owner = f"orchestration.escalation.slaSeconds.{kind}"
-            sla_seconds[kind] = _require_positive_number(value, owner, source)
-    rung_seconds = dict(DEFAULT_ESCALATION_RUNG_SECONDS)
-    raw_rungs = block.get("rungSeconds")
-    if raw_rungs is not None:
-        rung_block = _require_object(raw_rungs, "orchestration.escalation.rungSeconds", source)
-        for raw_rung, value in rung_block.items():
-            try:
-                rung = int(raw_rung)
-            except (TypeError, ValueError):
-                rung = -1
-            if rung not in KNOWN_ESCALATION_RUNGS:
-                allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
-                raise AgenticSettingsError(
-                    f"orchestration.escalation.rungSeconds key {raw_rung!r} must be one of: "
-                    f"{allowed}: {source}"
-                )
-            owner = f"orchestration.escalation.rungSeconds.{rung}"
-            rung_seconds[rung] = _require_positive_number(value, owner, source)
-    nudge_rate_limit_seconds = 900
-    if "nudgeRateLimitSeconds" in block:
-        nudge_rate_limit_seconds = _require_positive_int(
-            block["nudgeRateLimitSeconds"],
-            "orchestration.escalation.nudgeRateLimitSeconds",
-            source,
-        )
-    respawn_after_rung = DEFAULT_RESPAWN_AFTER_RUNG
-    if "respawnAfterRung" in block:
-        respawn_after_rung = _require_positive_int(
-            block["respawnAfterRung"], "orchestration.escalation.respawnAfterRung", source
-        )
-        if respawn_after_rung not in KNOWN_ESCALATION_RUNGS:
-            allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
-            raise AgenticSettingsError(
-                f"orchestration.escalation.respawnAfterRung must be one of: {allowed}: {source}"
-            )
-    return EscalationSettings(
-        sla_seconds=sla_seconds,
-        rung_seconds=rung_seconds,
-        nudge_rate_limit_seconds=nudge_rate_limit_seconds,
-        respawn_after_rung=respawn_after_rung,
-    )
-
-
-def _parse_spawn(raw: object, *, source: str, harness_ids: tuple[str, ...] | None) -> str | None:
-    if raw is None:
-        return None
-    spawn = _require_object(raw, "orchestration.spawn", source)
-    _refuse_unknown(spawn, KNOWN_SPAWN_FIELDS, "orchestration.spawn", source)
-    if "harness" not in spawn:
-        return None
-    return _require_harness_id(spawn["harness"], "orchestration.spawn.harness", source, harness_ids)

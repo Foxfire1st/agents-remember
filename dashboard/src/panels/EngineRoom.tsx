@@ -1,5 +1,6 @@
 import { motion } from "motion/react";
-import { type ReactNode, useState } from "react";
+import { memo, type ReactNode, useMemo, useRef, useState } from "react";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 
 import { css } from "../../styled-system/css";
 import {
@@ -8,14 +9,16 @@ import {
   engineState as engineRuntime,
   selectQueue,
 } from "../data/selectors";
-import { useDashboard } from "../data/store";
+import { stableEquals } from "../data/servedAges";
+import { dashboardStore, useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
-import type { EngineProcessNode, ProviderNode } from "../types/projection";
+import type { EngineProcessNode, LedgerNode, ProviderNode } from "../types/projection";
 import { BootTimeline } from "./engine-room/BootTimeline";
 import { buildEngineRoomModel } from "./engine-room/buildEngineRoomModel";
 import { DiagnosticsPanel } from "./engine-room/DiagnosticsPanel";
 import { EnclosureProcessMap } from "./engine-room/EnclosureProcessMap";
 import { EnclosureStackList } from "./engine-room/EnclosureStackList";
+import { useElementVisible } from "./engine-room/useElementVisible";
 import { useShouldAnimate } from "./engine-room/useShouldAnimate";
 import {
   emptyState,
@@ -34,7 +37,7 @@ import {
   roomStage,
   roomZone,
   sectionLabel,
-} from "./engine-room/engineRoomStyles";
+} from "./engine-room/styles";
 
 const sizing = css({ flex: "1" });
 const engineChip = css({ display: "flex", alignItems: "center", gap: "0.35rem" });
@@ -129,17 +132,21 @@ function OfficialStrip({ engines }: { engines: ProviderNode[] }) {
 }
 
 // §4.2 header: the selected enclosure's identity + health + phase + next action, plus the
-// master-caution mirror. Slice 5f S5: the phase chip pulses while a human-gated lifecycle beat
+// master-caution mirror. Slice 5f: the phase chip pulses while a human-gated lifecycle beat
 // (sync / closeout / integration / cleanup, T12–T18) is in flight — gated, instant under data-effects=off.
 function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
   const animate = useShouldAnimate();
   const queue = useDashboard(selectQueue);
   const sev = queue[0]?.severity ?? "clear";
   const phaseActive = LIFECYCLE_PHASES.has(node.phase);
-  const pulse = animate && phaseActive;
+  // Stilled while the room's cockpit layer is display:none (kept mounted): an infinite Motion
+  // pulse on a hidden subtree would keep the frameloop + per-frame style writes alive for nothing.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const visible = useElementVisible(headerRef);
+  const pulse = animate && phaseActive && visible;
   const label = node.leafId || node.taskName;
   return (
-    <div className={roomHeader} data-testid="engine-room-header" data-phase-active={phaseActive}>
+    <div ref={headerRef} className={roomHeader} data-testid="engine-room-header" data-phase-active={phaseActive}>
       <span className={roomHeaderName}>{label}</span>
       <span className={roomHeaderMeta}>
         <span className={healthDot({ health: node.health })} aria-hidden="true" />
@@ -188,8 +195,26 @@ function FallbackStacks({ stacks }: { stacks: EngineStack[] }) {
   );
 }
 
-export function EngineRoom() {
-  const analytics = useDashboard((state) => state.analytics);
+// Stable empty references so the analytics slice selectors never hand back a fresh `[]` (a new
+// identity per call would churn the zustand snapshot — the Cockpit shell uses the same pattern).
+const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
+const EMPTY_LEDGERS: LedgerNode[] = [];
+
+function EngineRoomImpl() {
+  // Slice selectors, NOT the whole analytics object: analytics deltas are wholesale
+  // replacements, so the old whole-object subscription re-rendered the room (~580 DOM nodes) on ANY
+  // analytics change. stableEquals — the change gate's own equality (data/servedAges) — keeps the
+  // previous slice's identity when a delta left it untouched: no re-render, no model rebuild.
+  const engineProcesses = useStoreWithEqualityFn(
+    dashboardStore,
+    (state) => state.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES,
+    stableEquals,
+  );
+  const ledgers = useStoreWithEqualityFn(
+    dashboardStore,
+    (state) => state.analytics?.ledgers ?? EMPTY_LEDGERS,
+    stableEquals,
+  );
   const providers = useDashboard((state) => state.providers);
   const lifecycles = useDashboard((state) => state.lifecycles);
   // store generation — bumped by reset() (dev-bench scenario switch). Keying the canvas by it forces a clean
@@ -197,17 +222,20 @@ export function EngineRoom() {
   const gen = useDashboard((state) => state.gen);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
-  const model = buildEngineRoomModel(
-    analytics?.engineProcesses ?? [],
-    Object.values(providers),
-    Object.values(lifecycles),
+  // The model is a pure join of the three slices — rebuild only when one of them actually changes,
+  // not on every render. Keyed on the identity-stable records/slices (mergeKeyed preserves the
+  // records; the stableEquals selectors above preserve the slices); Object.values allocates inside.
+  const model = useMemo(
+    () =>
+      buildEngineRoomModel(engineProcesses, Object.values(providers), Object.values(lifecycles)),
+    [engineProcesses, providers, lifecycles],
   );
   const selected =
     model.processes.find((view) => view.node.worktreeGroup === selectedGroup) ??
     model.processes[0];
   // the OFFICIAL coupler popover reads the repo's main ledger (5h); the worktree coupler reads node.ledgerRows
   const officialLedger = selected
-    ? analytics?.ledgers.find((ledger) => ledger.repository === selected.node.repoName)
+    ? ledgers.find((ledger) => ledger.repository === selected.node.repoName)
     : undefined;
 
   let body: ReactNode;
@@ -264,3 +292,8 @@ export function EngineRoom() {
     </Panel>
   );
 }
+
+// Memoized (tab-switch CPU): the room is a keep-alive cockpit layer — the shell re-renders
+// on every view switch with unchanged (here: no) props, and the memo gate skips this whole subtree
+// then; the room's own slice selectors still drive its updates.
+export const EngineRoom = memo(EngineRoomImpl);

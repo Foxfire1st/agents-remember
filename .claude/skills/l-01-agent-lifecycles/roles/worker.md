@@ -27,7 +27,7 @@ work, and it never absorbs curator/onboarding-writer work.
 ## The Worker Loop
 
 ```
-brief -> orient -> build code -> checks green -> turn report -> curator memory pass by separate seat
+brief -> orient -> build code -> checks green -> turn report -> curator coherence pass by separate seat
                         |
                         +-- blocked or plan delta beyond blank-filling -> escalate to the owning seat
 ```
@@ -46,6 +46,12 @@ says otherwise. You edit nothing outside your named surfaces.
 - Read the files you will touch **paired with their onboarding** — via the `read_ar_files` MCP tool
   (note: it serves the official baseline, not your worktree) and native reads inside the worktree
   for current state. Native read is your edit precondition.
+- Read the memory layer's `system/coding-guidelines.md` (the brief names the path) **before your
+  first edit** — the closeout chain judges your diff against it: file/function budgets,
+  responsibility and anti-pattern rules, source-comment scope, typed-boundary (DTO) rules, and the
+  D1/D2/D3 stability doctrine. The acceptance implementation does not read for any of this, so green evidence
+  prove nothing here. A conflict between the guidelines and the leaf plan is an escalation to the
+  owning seat, never a silent choice.
 - Retrieval when the leaf needs it: `grepai_search` (semantics), `cgc_*` (relationships) — both
   read-only, with whatever stack key the brief names. Keep the evidence tally your brief asks for
   (calls made, files inspected, gaps remaining).
@@ -55,7 +61,8 @@ says otherwise. You edit nothing outside your named surfaces.
 - Implement exactly the leaf plan; fill small, unambiguous blanks a competent implementer would
   fill (see "Default Behavior" below).
 - Produce the builder input the downstream curator needs: changed paths, code-diff summary, tests,
-  and any route/onboarding observations that would help the memory pass. The curator, not the
+  and any route/onboarding observations that would help the coherence pass. Mark observations as
+  evidence or candidates rather than declaring them current truth. The curator, not the
   worker, writes onboarding in the official manager -> builder -> reviewer -> curator closeout
   chain.
 - **Never `git commit`.** Leave all changes uncommitted in both worktrees — the owning seat commits
@@ -63,9 +70,16 @@ says otherwise. You edit nothing outside your named surfaces.
 
 ### 4 — Checks (green before you report)
 
-Run what the brief prescribes — typically the focused suite over your changed paths plus the full
-`system/tools.md` wrapper from the code worktree root — and record the exact commands + outcomes for
-the report. A red check you cannot fix inside the leaf's scope is an escalation, not a workaround.
+Run what the brief prescribes and record the exact commands + outcomes for the report. The
+repository's resolved memory — especially `system/git-workflow.md`, `system/coding-guidelines.md`,
+and `system/tools.md` — owns the concrete test implementation, permitted environment, arguments,
+and evidence contract. Do not substitute a familiar runner or invent a fallback.
+
+Under the quality altitude ladder, leaf acceptance is change-set-scoped and runs exactly once at
+leaf closeout. Leaf integration lands that certified commit without rerunning acceptance. The
+full-repository check is not a leaf check: it runs exactly once per master at the master integration
+gate. `memory_quality_check` stays a per-leaf closeout gate. A red check you cannot fix inside the
+leaf's scope is an escalation, not a workaround.
 
 ### 5 — The Turn Report (mandatory, your last act)
 
@@ -74,7 +88,7 @@ Write `templates/turn-report.md` to the path the brief names (convention:
 is left · changed paths for the curator · checks with commands · retrieval evidence · escalations ·
 respawn state. The report is the leaf's builder artifact of record and how a
 respawned successor onboards — write it even when blocked (with the Escalations section filled),
-then end your turn. **A missing report gets nudged by the supervisor sweep (HFX2-L2), never by a
+then end your turn. **A missing report gets nudged by the agent-notifier sweep (HFX2-L2), never by a
 seat-local watcher** — no owning seat, and no worker, hand-rolls its own polling loop over this
 artifact; ending your turn once the report is written is safe, not a risk you have to cover for.
 
@@ -85,8 +99,9 @@ artifact; ending your turn once the report is written is safe, not a risk you ha
 - **Read-only AR retrieval:** `read_ar_files`, `grepai_search`, `cgc_*`, `context_packet`.
 - **Shell** for the prescribed checks (use the interpreter paths the brief names — do not assume a
   `python` shim exists).
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) for receiving context and raising
-  escalations, when the brief wires it.
+- **Structural parent message** (`message_parent`) for a clarification or escalation. Initial
+  context arrives through the plane-owned dispatch brief; completion is relayed from terminal/
+  finalizer truth after the durable turn report exists, never from a model-authored completion post.
 
 Everything else — `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_*`,
 `route_index_refresh` — is the owning seat's machinery, not yours. A worker that never touches
@@ -128,12 +143,12 @@ leaf well, ask when the leaf itself is in question" default.
 
 - **Inbox** — receive dispatch/context; post escalations; agent-to-agent rows carry role metadata
   and a `messageKind` (`turn-report`, `nudge`, `escalation`, …), durable + dashboard-visible.
-- **Stdin push** — the L2 supervisor sweep's injector (HFX2-L3) delivers nudges/messages into this
+- **Stdin push** — the L2 agent-notifier sweep's injector (HFX2-L3) delivers nudges/messages into this
   hosted session on its own mechanical tick, in the owning seat's name — never the owning seat (or
   you) watching/polling by hand. Your replies are inbox rows or the turn report — never an untracked
   side channel.
 - **Idle is safe** — once your turn report is written, ending your turn is correct; silence is
-  supervised (HFX2-L2 sweep + HFX2-L4 escalation ladder), not a gap you must cover by lingering or
+  supervised (HFX2-L2 sweep + the state-signal relay), not a gap you must cover by lingering or
   self-nudging. **Watcher ban (uniform-mechanism ruling 2026-07-07):** never hand-roll your own
   watcher — one mechanism, no per-seat variance.
 - **Escalation** — one rung up, always: **worker → owning seat (manager/orchestrator/architect in

@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.memory_tools import (
+from agents_remember.application.memory_tools import (
+    DEFAULT_CARRYOVER_MESSAGES,
+    DEFAULT_CITATION_OPERATION_SCOPE,
+    DEFAULT_MEMORY_BRANCHES,
+    CarryoverCommitMessages,
+    CarryoverSelection,
+    CitationOperationScope,
+    MemoryBranches,
+    citation_fix_tool,
     drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
@@ -14,9 +22,9 @@ from agents_remember.controllers.memory_tools import (
     memory_quality_check_tool,
     route_index_refresh_tool,
 )
-from agents_remember.mcp.tool_reports import write_tool_report
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.tool_reports import write_tool_report
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 
@@ -25,10 +33,16 @@ def drift_check_payload(
     repo_id: str,
     *,
     detail_limit: int = 50,
+    contract_path: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "drift_check",
-        drift_check_tool(config, repo_id=repo_id, detail_limit=detail_limit),
+        drift_check_tool(
+            config,
+            repo_id=repo_id,
+            detail_limit=detail_limit,
+            contract_path=contract_path,
+        ),
     )
 
 
@@ -38,6 +52,7 @@ def memory_quality_check_payload(
     *,
     checks: list[str] | None = None,
     detail_limit: int = 50,
+    contract_path: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "memory_quality_check",
@@ -46,6 +61,27 @@ def memory_quality_check_payload(
             repo_id=repo_id,
             checks=checks,
             detail_limit=detail_limit,
+            contract_path=contract_path,
+        ),
+    )
+
+
+def citation_fix_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    *,
+    contract_path: str,
+    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "citation_fix",
+        citation_fix_tool(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            dry_run=dry_run,
+            operation_scope=operation_scope,
         ),
     )
 
@@ -55,10 +91,16 @@ def route_index_refresh_payload(
     repo_id: str,
     *,
     dry_run: bool = False,
+    contract_path: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "route_index_refresh",
-        route_index_refresh_tool(config, repo_id=repo_id, dry_run=dry_run),
+        route_index_refresh_tool(
+            config,
+            repo_id=repo_id,
+            dry_run=dry_run,
+            contract_path=contract_path,
+        ),
     )
 
 
@@ -92,8 +134,7 @@ def memory_baseline_adopt_payload(
     repo_id: str,
     *,
     accept_drift: bool = False,
-    source_branch: str | None = None,
-    work_branch: str | None = None,
+    branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -102,8 +143,7 @@ def memory_baseline_adopt_payload(
             config,
             repo_id=repo_id,
             accept_drift=accept_drift,
-            source_branch=source_branch,
-            work_branch=work_branch,
+            branches=branches,
             dry_run=dry_run,
         ),
     )
@@ -134,9 +174,7 @@ def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[st
         decisions.setdefault(str(candidate.get("decision")), []).append(
             str(candidate.get("source_path"))
         )
-    compact["decisions"] = {
-        decision: _capped_paths(paths) for decision, paths in decisions.items()
-    }
+    compact["decisions"] = {decision: _capped_paths(paths) for decision, paths in decisions.items()}
     if "carried" in full:
         compact["carriedPaths"] = _capped_paths(
             [str(candidate.get("source_path")) for candidate in full["carried"]]
@@ -147,23 +185,9 @@ def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[st
 
 def memory_carryover_plan_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
-    *,
-    replace_existing: bool = False,
+    selection: CarryoverSelection,
 ) -> dict[str, Any]:
-    full = memory_carryover_plan_tool(
-        config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
-        replace_existing=replace_existing,
-    )
+    full = memory_carryover_plan_tool(config, selection)
     report_path = write_tool_report(
         config.coordination_root, "memory_carryover_plan", full, label="plan"
     )
@@ -175,30 +199,18 @@ def memory_carryover_plan_payload(
 
 def memory_carryover_apply_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
-    intent_note: str,
+    selection: CarryoverSelection,
     *,
-    replace_existing: bool = False,
+    intent_note: str,
     include_review_required: list[str] | None = None,
-    memory_commit_message: str = "Carry over landed branch memory",
-    ledger_commit_message: str = "Record branch memory carryover",
+    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
     full = memory_carryover_apply_tool(
         config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
+        selection,
         intent_note=intent_note,
-        replace_existing=replace_existing,
         include_review_required=include_review_required,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
+        messages=messages,
     )
     report_path = write_tool_report(
         config.coordination_root, "memory_carryover_apply", full, label="apply"

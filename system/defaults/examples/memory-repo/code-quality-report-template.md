@@ -22,9 +22,16 @@ that they were executed.
 | Ruff            | `<passed / failed / not run>`            | `<lint/import/format findings, or "no findings">`        |
 | Pytest          | `<passed / failed / not run>`            | `<passed/skipped/failed counts and notable failures>`    |
 | Coverage        | `<reported / not reported>`              | `<total coverage and important uncovered touched areas>` |
-| Radon CC        | `<passed / reported / failed / not run>` | `<average complexity plus high-complexity functions>`    |
-| Radon MI        | `<passed / reported / failed / not run>` | `<files with maintainability pressure>`                  |
-| CRAP-Calculator | `<passed / reported / failed / not run>` | `<threshold count and highest-risk functions>`           |
+| Radon CC        | `<reported / not run>`                   | `<average complexity plus high-complexity functions>`    |
+| Radon MI        | `<reported / not run>`                   | `<files with maintainability pressure>`                  |
+| CRAP-Calculator | `<passed / failed / not run>`            | `<threshold count and highest-risk functions>`           |
+
+Give each row only the results its tool can actually produce. `passed` is not
+one of Radon's: `radon cc` and `radon mi` exit 0 whatever they find, so a Radon
+run reports and never passes or fails. Offering `passed` invites a report to be
+recorded as a verdict, which is how a suite ends up looking greener than it is.
+The same test applies to every row you add — if a tool cannot fail, do not give
+it a result that says it did not.
 
 Adjust this table for the project. For example, a TypeScript project might use
 ESLint, TypeScript, Vitest, Playwright, and bundle checks instead of the Python

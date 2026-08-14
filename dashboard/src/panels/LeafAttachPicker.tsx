@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { css } from "../../styled-system/css";
@@ -34,14 +40,13 @@ const trigger = css({
 });
 // The popover: dark panel rendered in a PORTAL to <body> with FIXED positioning, so it escapes the rail's
 // `overflow: hidden` (which was clipping it mid-air) and any ancestor stacking/transform context. `align`
-// decides which edge it pins to so it never runs off-screen (the rail sits at the right edge → pin right;
-// the Chats strip is on the left → pin left). Position is measured from the trigger on open.
+// decides which trigger edge it pins to; vertical placement uses the actual room above/below instead of
+// an arbitrary screen-height cap. Position is measured from the trigger on open and on viewport movement.
 const menu = css({
   position: "fixed",
   zIndex: "1000",
   minWidth: "15rem",
   maxWidth: "min(24rem, 82vw)",
-  maxHeight: "min(50vh, 22rem)",
   overflowY: "auto",
   background: "bgPanel",
   borderWidth: "1px",
@@ -162,25 +167,187 @@ export function LeafAttachPicker({
   seatRole?: string;
   roleOptions?: readonly string[];
 }) {
+  const {
+    open,
+    coords,
+    selectedRole,
+    here,
+    level,
+    triggerRef,
+    menuRef,
+    toggle,
+    setSelectedRole,
+    drillInto,
+    back,
+    pick,
+  } = useLeafAttachMenu({
+    tree,
+    contextMaster,
+    seatRole,
+    align,
+    onPick,
+  });
+
+  return (
+    <div className={wrap}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={trigger}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid={testId}
+        onClick={toggle}
+      >
+        {label} ▾
+      </button>
+      {open && coords ? (
+        <LeafMenu
+          coords={coords}
+          menuRef={menuRef}
+          label={label}
+          testId={testId}
+          selectedRole={selectedRole}
+          roleOptions={roleOptions}
+          here={here}
+          level={level}
+          onSelectRole={setSelectedRole}
+          onBack={back}
+          onDrill={drillInto}
+          onPick={pick}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function useLeafAttachMenu({
+  tree,
+  contextMaster,
+  seatRole,
+  align,
+  onPick,
+}: {
+  tree: TaskTreeNode[];
+  contextMaster?: string;
+  seatRole?: string;
+  align: "left" | "right";
+  onPick: (leafKey: string, seatRole: string) => void;
+}): {
+  open: boolean;
+  coords: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
+  } | null;
+  selectedRole: string | undefined;
+  here: TaskTreeNode | undefined;
+  level: TaskTreeNode[];
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  menuRef: RefObject<HTMLDivElement | null>;
+  toggle: () => void;
+  setSelectedRole: (role: string | undefined) => void;
+  drillInto: (node: TaskTreeNode) => void;
+  back: () => void;
+  pick: (leafKey: string) => void;
+} {
   const [open, setOpen] = useState(false);
   // The drilled path of master nodes (breadcrumb). Current level = the last node's children, or the roots.
   const [path, setPath] = useState<TaskTreeNode[]>([]);
   const [selectedRole, setSelectedRole] = useState<string | undefined>(seatRole);
   // The fixed-position anchor for the portaled menu, measured from the trigger (null until opened).
-  const [coords, setCoords] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const [coords, setCoords] = useState<{
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
+  } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const measure = useLeafAttachMeasure(triggerRef, align, setCoords);
+  useLeafAttachOverlay(open, measure, triggerRef, menuRef, setOpen);
 
-  const measure = () => {
+  const toggle = () => {
+    if (!open) {
+      // Opening pre-drills to the in-context master so its leaves show first ("pre-selection via master").
+      setPath(contextMaster ? findMasterPath(tree, contextMaster) : []);
+      setSelectedRole(seatRole);
+      measure();
+    }
+    setOpen((value) => !value);
+  };
+  const here = path.length ? path[path.length - 1] : undefined;
+  const level = here ? here.children : tree;
+  const drillInto = (node: TaskTreeNode) => setPath((current) => [...current, node]);
+  const back = () => setPath((current) => current.slice(0, -1));
+  const pick = (leafKey: string) => {
+    if (!selectedRole) return;
+    setOpen(false);
+    setPath([]);
+    onPick(leafKey, selectedRole);
+  };
+  return {
+    open,
+    coords,
+    selectedRole,
+    here,
+    level,
+    triggerRef,
+    menuRef,
+    toggle,
+    setSelectedRole,
+    drillInto,
+    back,
+    pick,
+  };
+}
+
+function useLeafAttachMeasure(
+  triggerRef: RefObject<HTMLButtonElement | null>,
+  align: "left" | "right",
+  setCoords: (coords: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
+  } | null) => void,
+): () => void {
+  return useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const viewportPadding = 8;
+    const triggerGap = 4;
+    const availableBelow = window.innerHeight - rect.bottom - triggerGap - viewportPadding;
+    const availableAbove = rect.top - triggerGap - viewportPadding;
+    const openAbove = availableBelow < 240 && availableAbove > availableBelow;
+    const vertical = openAbove
+      ? { bottom: window.innerHeight - rect.top + triggerGap, maxHeight: availableAbove }
+      : { top: rect.bottom + triggerGap, maxHeight: availableBelow };
     setCoords(
       align === "right"
-        ? { top: rect.bottom + 4, right: Math.max(4, window.innerWidth - rect.right) }
-        : { top: rect.bottom + 4, left: rect.left },
+        ? {
+            ...vertical,
+            right: Math.max(viewportPadding, window.innerWidth - rect.right),
+          }
+        : {
+            ...vertical,
+            left: Math.max(viewportPadding, rect.left),
+          },
     );
-  };
+  }, [align, setCoords, triggerRef]);
+}
 
+function useLeafAttachOverlay(
+  open: boolean,
+  measure: () => void,
+  triggerRef: RefObject<HTMLButtonElement | null>,
+  menuRef: RefObject<HTMLDivElement | null>,
+  setOpen: (open: boolean) => void,
+): void {
   // Re-measure while open (cover scroll/resize of any container) and wire click-outside + Escape. The
   // menu is portaled out of `ref`, so the outside check spans BOTH the trigger and the portaled menu.
   useLayoutEffect(() => {
@@ -205,120 +372,177 @@ export function LeafAttachPicker({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, measure, triggerRef, menuRef, setOpen]);
+}
 
-  const toggle = () => {
-    if (!open) {
-      // Opening pre-drills to the in-context master so its leaves show first ("pre-selection via master").
-      setPath(contextMaster ? findMasterPath(tree, contextMaster) : []);
-      setSelectedRole(seatRole);
-      measure();
-    }
-    setOpen((value) => !value);
+function LeafMenu({
+  coords,
+  menuRef,
+  label,
+  testId,
+  selectedRole,
+  roleOptions,
+  here,
+  level,
+  onSelectRole,
+  onBack,
+  onDrill,
+  onPick,
+}: {
+  coords: {
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
   };
-  const here = path.length ? path[path.length - 1] : undefined;
-  const level = here ? here.children : tree;
-  const drillInto = (node: TaskTreeNode) => setPath((current) => [...current, node]);
-  const back = () => setPath((current) => current.slice(0, -1));
-  const pick = (leafKey: string) => {
-    if (!selectedRole) return;
-    setOpen(false);
-    setPath([]);
-    onPick(leafKey, selectedRole);
-  };
+  menuRef: RefObject<HTMLDivElement | null>;
+  label: string;
+  testId: string;
+  selectedRole: string | undefined;
+  roleOptions: readonly string[];
+  here: TaskTreeNode | undefined;
+  level: TaskTreeNode[];
+  onSelectRole: (role: string | undefined) => void;
+  onBack: () => void;
+  onDrill: (node: TaskTreeNode) => void;
+  onPick: (leafKey: string) => void;
+}) {
+  return createPortal(
+    <div
+      ref={menuRef}
+      className={menu}
+      style={{
+        top: coords.top,
+        bottom: coords.bottom,
+        left: coords.left,
+        right: coords.right,
+        maxHeight: coords.maxHeight,
+      }}
+      role="menu"
+      aria-label={label}
+      data-testid={`${testId}-menu`}
+    >
+      <RolePicker
+        testId={testId}
+        roleOptions={roleOptions}
+        selectedRole={selectedRole}
+        onSelectRole={onSelectRole}
+      />
+      <LeafMenuItems
+        testId={testId}
+        here={here}
+        level={level}
+        selectedRole={selectedRole}
+        onBack={onBack}
+        onDrill={onDrill}
+        onPick={onPick}
+      />
+    </div>,
+    document.body,
+  );
+}
 
+function RolePicker({
+  testId,
+  roleOptions,
+  selectedRole,
+  onSelectRole,
+}: {
+  testId: string;
+  roleOptions: readonly string[];
+  selectedRole: string | undefined;
+  onSelectRole: (role: string | undefined) => void;
+}) {
   return (
-    <div className={wrap}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={trigger}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        data-testid={testId}
-        onClick={toggle}
-      >
-        {label} ▾
-      </button>
-      {open && coords
-        ? createPortal(
-            <div
-              ref={menuRef}
-              className={menu}
-              style={{ top: coords.top, left: coords.left, right: coords.right }}
-              role="menu"
-              aria-label={label}
-              data-testid={`${testId}-menu`}
-            >
-          <div className={rolePicker} aria-label="Seat role" data-testid={`${testId}-roles`}>
-            {roleOptions.map((role) => (
-              <button
-                key={role}
-                type="button"
-                className={roleButton}
-                aria-pressed={selectedRole === role}
-                data-selected={selectedRole === role ? "true" : undefined}
-                data-testid={`${testId}-role-${role}`}
-                onClick={() => setSelectedRole(role)}
-              >
-                {role}
-              </button>
-            ))}
-          </div>
-          {here ? (
-            <button
-              type="button"
-              className={backRow}
-              onClick={back}
-              data-testid={`${testId}-back`}
-              title={here.title}
-            >
-              ‹ {here.title}
-            </button>
-          ) : null}
-          {level.length === 0 ? (
-            <div className={emptyNote} data-testid={`${testId}-empty`}>
-              {here ? "No sub-tasks here." : "No tasks available yet."}
-            </div>
-          ) : (
-            level.map((node) =>
-              node.leafKey ? (
-                <button
-                  key={node.key}
-                  type="button"
-                  role="menuitem"
-                  className={row}
-                  title={node.title}
-                  data-testid={`${testId}-leaf`}
-                  data-leaf-key={node.leafKey}
-                  disabled={!selectedRole}
-                  onClick={() => pick(node.leafKey as string)}
-                >
-                  <span className={rowText}>{node.title}</span>
-                </button>
-              ) : (
-                <button
-                  key={node.key}
-                  type="button"
-                  role="menuitem"
-                  className={row}
-                  title={node.title}
-                  data-testid={`${testId}-master`}
-                  data-master={node.master}
-                  onClick={() => drillInto(node)}
-                >
-                  <span className={rowText}>{node.title}</span>
-                  <span className={chevron} aria-hidden>
-                    ▸
-                  </span>
-                </button>
-              ),
-            )
-          )}
-            </div>,
-            document.body,
-          )
-        : null}
+    <div className={rolePicker} aria-label="Seat role" data-testid={`${testId}-roles`}>
+      {roleOptions.map((role) => (
+        <button
+          key={role}
+          type="button"
+          className={roleButton}
+          aria-pressed={selectedRole === role}
+          data-selected={selectedRole === role ? "true" : undefined}
+          data-testid={`${testId}-role-${role}`}
+          onClick={() => onSelectRole(role)}
+        >
+          {role}
+        </button>
+      ))}
     </div>
+  );
+}
+
+function LeafMenuItems({
+  testId,
+  here,
+  level,
+  selectedRole,
+  onBack,
+  onDrill,
+  onPick,
+}: {
+  testId: string;
+  here: TaskTreeNode | undefined;
+  level: TaskTreeNode[];
+  selectedRole: string | undefined;
+  onBack: () => void;
+  onDrill: (node: TaskTreeNode) => void;
+  onPick: (leafKey: string) => void;
+}) {
+  if (level.length === 0) {
+    return (
+      <div className={emptyNote} data-testid={`${testId}-empty`}>
+        {here ? "No sub-tasks here." : "No tasks available yet."}
+      </div>
+    );
+  }
+  return (
+    <>
+      {here ? (
+        <button
+          type="button"
+          className={backRow}
+          onClick={onBack}
+          data-testid={`${testId}-back`}
+          title={here.title}
+        >
+          ‹ {here.title}
+        </button>
+      ) : null}
+      {level.map((node) =>
+        node.leafKey ? (
+          <button
+            key={node.key}
+            type="button"
+            role="menuitem"
+            className={row}
+            title={node.title}
+            data-testid={`${testId}-leaf`}
+            data-leaf-key={node.leafKey}
+            disabled={!selectedRole}
+            onClick={() => onPick(node.leafKey as string)}
+          >
+            <span className={rowText}>{node.title}</span>
+          </button>
+        ) : (
+          <button
+            key={node.key}
+            type="button"
+            role="menuitem"
+            className={row}
+            title={node.title}
+            data-testid={`${testId}-master`}
+            data-master={node.master}
+            onClick={() => onDrill(node)}
+          >
+            <span className={rowText}>{node.title}</span>
+            <span className={chevron} aria-hidden>
+              ▸
+            </span>
+          </button>
+        ),
+      )}
+    </>
   );
 }

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -23,6 +24,7 @@ from agents_remember.providers.grepai.lifecycle.compose import (
 from agents_remember.providers.grepai.lifecycle.core import *
 from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
+    BackendStartReconciliation,
     compose_plan,
     remove_unmanaged_compose_container,
     remove_unmanaged_compose_network,
@@ -157,17 +159,33 @@ def docker_verify_pgvector(backend: dict[str, Any], *, cwd: Path, timeout: int) 
     )
 
 
+@dataclass(frozen=True)
+class GrepaiBackendContext:
+    """The GrepAI backend resolved from one lifecycle invocation's settings.
+
+    Which settings file the invocation read, the provider entry it found, the
+    runtime layout, the resolved backend settings, and the docker network the
+    backend joins. Every backend command needs all of it.
+    """
+
+    settings_path: Path
+    provider_settings: dict[str, Any]
+    layout: GrepaiRuntimeLayout
+    backend: dict[str, Any]
+    network_name: str
+
+
 def grepai_backend_state(
-    layout: GrepaiRuntimeLayout,
-    backend: dict[str, Any],
+    context: GrepaiBackendContext,
     *,
-    settings_path: Path,
     status: str,
-    postgres_host: str,
     postgres_port: int,
     image_digest: str | None,
     container_id: str | None,
 ) -> dict[str, Any]:
+    layout = context.layout
+    backend = context.backend
+    postgres_host = backend["postgresHost"]
     return {
         "provider": "grepai",
         "backend": {
@@ -190,7 +208,7 @@ def grepai_backend_state(
                 },
             },
         },
-        "settingsFile": settings_path.as_posix(),
+        "settingsFile": context.settings_path.as_posix(),
         "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
@@ -323,16 +341,20 @@ def grepai_backend_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def grepai_backend_start_context(
-    args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout, dict[str, Any], str]:
+def grepai_backend_start_context(args: argparse.Namespace) -> GrepaiBackendContext:
     settings_path, provider_settings, layout = grepai_layout_from_args(args)
     if not args.dry_run:
         ensure_grepai_runtime_layout(layout)
     backend = grepai_backend_settings(provider_settings, layout)
     if backend["type"] != "postgres" or backend["mode"] != "docker":
         raise ContextProviderError("managed GrepAI backend must be postgres docker")
-    return settings_path, provider_settings, layout, backend, grepai_network_name(provider_settings)
+    return GrepaiBackendContext(
+        settings_path=settings_path,
+        provider_settings=provider_settings,
+        layout=layout,
+        backend=backend,
+        network_name=grepai_network_name(provider_settings),
+    )
 
 
 def grepai_backend_remove_mismatched_container(
@@ -352,12 +374,16 @@ def grepai_backend_remove_mismatched_container(
         timeout=args.timeout,
     )
     if result["returncode"] != 0:
-        return inspect_data, result, {
-            "provider": "grepai",
-            "action": "backend-start",
-            "ok": False,
-            "command": result,
-        }
+        return (
+            inspect_data,
+            result,
+            {
+                "provider": "grepai",
+                "action": "backend-start",
+                "ok": False,
+                "command": result,
+            },
+        )
     return None, result, None
 
 
@@ -384,28 +410,27 @@ def grepai_backend_host_port(
 
 
 def grepai_backend_dry_run_result(
+    context: GrepaiBackendContext,
+    reconciliation: BackendStartReconciliation,
     *,
-    settings_path: Path,
-    layout: GrepaiRuntimeLayout,
-    backend: dict[str, Any],
-    network_result: dict[str, Any],
     commands: list[dict[str, Any]],
     postgres_port: int,
     compose: dict[str, Any] | None = None,
-    migration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    layout = context.layout
+    backend = context.backend
     return {
         "provider": "grepai",
         "action": "backend-start",
         "ok": True,
         "dryRun": True,
-        "settingsFile": settings_path.as_posix(),
+        "settingsFile": context.settings_path.as_posix(),
         "commands": commands,
         "compose": compose,
-        "migration": migration,
+        "migration": reconciliation.migration,
         "backendRuntimeRoot": layout.backend_root.as_posix(),
         "backendDataRoot": layout.backend_data_root.as_posix(),
-        "network": network_result,
+        "network": reconciliation.network,
         "ports": {
             "postgres": {
                 "bindHost": backend["postgresHost"],
@@ -417,11 +442,9 @@ def grepai_backend_dry_run_result(
 
 
 def grepai_backend_start(args: argparse.Namespace) -> dict[str, Any]:
-    settings_path, provider_settings, layout, backend, network_name = grepai_backend_start_context(
-        args
-    )
-    network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
-    migration = grepai_project_migration(args, provider_settings, layout, backend)
+    context = grepai_backend_start_context(args)
+    layout, backend = context.layout, context.backend
+    migration = grepai_project_migration(args, context.provider_settings, layout, backend)
     inspect_data = grepai_backend_inspect(args, layout, backend)
     inspect_data, forced_remove_result, error = grepai_backend_remove_mismatched_container(
         args, layout, backend, inspect_data
@@ -430,14 +453,13 @@ def grepai_backend_start(args: argparse.Namespace) -> dict[str, Any]:
         return error
     return grepai_backend_create_start_result(
         args,
-        settings_path=settings_path,
-        provider_settings=provider_settings,
-        layout=layout,
-        backend=backend,
+        context,
+        BackendStartReconciliation(
+            network={"ok": True, "name": context.network_name, "managedBy": "docker-compose"},
+            migration=migration,
+            forced_remove=forced_remove_result,
+        ),
         inspect_data=inspect_data,
-        network_result=network_result,
-        forced_remove_result=forced_remove_result,
-        migration=migration,
     )
 
 
@@ -453,16 +475,14 @@ def grepai_backend_inspect(
 
 def grepai_backend_create_start_result(
     args: argparse.Namespace,
+    context: GrepaiBackendContext,
+    reconciliation: BackendStartReconciliation,
     *,
-    settings_path: Path,
-    provider_settings: dict[str, Any],
-    layout: GrepaiRuntimeLayout,
-    backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
-    network_result: dict[str, Any],
-    forced_remove_result: dict[str, Any] | None,
-    migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    layout = context.layout
+    backend = context.backend
+    provider_settings = context.provider_settings
     postgres_port = grepai_backend_host_port(args, backend, inspect_data)
     runner = grepai_runner_settings(provider_settings, layout)
     render = grepai_compose_render(
@@ -470,21 +490,20 @@ def grepai_backend_create_start_result(
         layout,
         runner,
         backend,
-        postgres_port=postgres_port,
+        GrepaiServicePorts(postgres=postgres_port),
     )
     command_args = ["up", "-d", "postgres"]
     if args.dry_run:
         return grepai_backend_dry_run_result(
-            settings_path=settings_path,
-            layout=layout,
-            backend=backend,
-            network_result=network_result,
+            context,
+            reconciliation,
             commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
             postgres_port=postgres_port,
             compose=grepai_compose_summary(render),
-            migration=migration,
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     if up_result["returncode"] != 0:
         return {
             "provider": "grepai",
@@ -492,7 +511,7 @@ def grepai_backend_create_start_result(
             "ok": False,
             "command": up_result,
             "compose": grepai_compose_summary(render),
-            "migration": migration,
+            "migration": reconciliation.migration,
         }
     ping = docker_wait_for_postgres(backend, cwd=layout.coordination_root, timeout=args.timeout)
     extension = docker_ensure_pgvector(backend, cwd=layout.coordination_root, timeout=args.timeout)
@@ -500,13 +519,12 @@ def grepai_backend_create_start_result(
         backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
     )
     backend_state = grepai_backend_state(
-        layout,
-        backend,
-        settings_path=settings_path,
+        context,
         status="running",
-        postgres_host=backend["postgresHost"],
         postgres_port=postgres_port,
-        image_digest=docker_repo_digest(backend["image"], cwd=layout.coordination_root, timeout=args.timeout),
+        image_digest=docker_repo_digest(
+            backend["image"], cwd=layout.coordination_root, timeout=args.timeout
+        ),
         container_id=str(inspect_data.get("Id", "")) if inspect_data else None,
     )
     write_json(layout.backend_state_file, backend_state)
@@ -516,11 +534,11 @@ def grepai_backend_create_start_result(
         "action": "backend-start",
         "ok": extension["returncode"] == 0,
         "containerName": backend["containerName"],
-        "network": network_result,
+        "network": reconciliation.network,
         "ports": backend_state["backend"]["ports"],
         "commands": {
-            "forcedRemove": forced_remove_result,
-            "migration": migration,
+            "forcedRemove": reconciliation.forced_remove,
+            "migration": reconciliation.migration,
             "up": up_result,
         },
         "compose": grepai_compose_summary(render),

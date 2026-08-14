@@ -60,9 +60,7 @@ class SetupProgressFileTests(unittest.TestCase):
 
             progress.phase_start("codegraphcontext", "seed")
             clock.advance(3)
-            progress.phase_done(
-                {"ok": False, "skipped": True, "reason": "HEAD commits differ"}
-            )
+            progress.phase_done({"ok": False, "skipped": True, "reason": "HEAD commits differ"})
 
             data = read_setup_progress(progress.path)
             assert data is not None
@@ -215,9 +213,7 @@ class ReadAndProjectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             progress = progress_file(Path(tmp), clock)
             progress.phase_start("codegraphcontext", "seed")
-            progress.phase_done(
-                {"ok": False, "skipped": True, "reason": "HEAD commits differ"}
-            )
+            progress.phase_done({"ok": False, "skipped": True, "reason": "HEAD commits differ"})
             progress.finish(state="ok")
             data = read_setup_progress(progress.path)
             assert data is not None

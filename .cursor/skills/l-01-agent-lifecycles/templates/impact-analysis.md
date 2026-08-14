@@ -24,7 +24,7 @@ the spawning agent's main loop.
 | Field     | Value                                        |
 | --------- | -------------------------------------------- |
 | for       | orchestrator (portfolio) | reviewer (<seam>) |
-| author    | <sub-agent id>                               |
+| author    | <analysis role / bounded fan-out label>      |
 | subject   | <what was analyzed>                          |
 | written   | <YYYY-MM-DDTHH:MM>                            |
 

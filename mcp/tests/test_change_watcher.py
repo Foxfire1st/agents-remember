@@ -22,16 +22,20 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.serving import change_watcher as change_watcher_module
 from agents_remember.serving.change_watcher import (
     ChangePacer,
     ProjectionInputWatcher,
     WakeTarget,
     is_projection_input_event,
+    projection_domains_for_paths,
     projection_input_roots,
 )
-from agents_remember.serving.projector import Projector
+from agents_remember.serving.projections.projection_inputs import ProjectionDomain
+from agents_remember.serving.projector import ProjectionCadence, ProjectionRefreshers, Projector
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -116,13 +120,17 @@ class InputEventFilterTests(unittest.TestCase):
             "/c/logs/observer/latest-metrics.json",
             "/c/logs/observer/latest-state.json.01HZX.tmp",
             "/c/tasks/agents-remember/task.json.01HZX.tmp",
-            # workspace/ non-inputs: raw river + cursor/locks, supervisor heartbeat.
+            # workspace/ non-inputs: raw river + cursor/locks, agent-notifier heartbeat.
             "/c/logs/observer/workspace/events.jsonl",
             "/c/logs/observer/workspace/events.cursor.json",
             "/c/logs/observer/workspace/events.lock",
             # Created "a+b" by every inbox access (incl. each tick's read_agent_pickups):
             # its boot-time creation must not cost a spurious change-tick (review F1).
-            "/c/logs/observer/workspace/operator-inbox.lock",
+            # Named by durable_store.lock_path_for, i.e. the whole log name plus ".lock".
+            "/c/logs/observer/workspace/operator-inbox.jsonl.lock",
+            # The same rule outside workspace/: gates.jsonl (and its lock) exist once per
+            # lifecycle, which a workspace-scoped name list could not have excluded.
+            "/c/logs/observer/lifecycles/L1/gates.jsonl.lock",
             "/c/logs/observer/workspace/supervisor-heartbeat.json",
             "/c/logs/observer/workspace/.events.cursor.json.123.tmp",
         ):
@@ -131,6 +139,37 @@ class InputEventFilterTests(unittest.TestCase):
     def test_lifecycle_events_are_not_confused_with_the_workspace_river(self) -> None:
         # Same basename as the river, different (input) directory.
         self.assertTrue(is_projection_input_event("/c/logs/observer/lifecycles/L1/events.jsonl"))
+
+
+class ProjectionDomainMappingTests(unittest.TestCase):
+    def test_paths_map_to_their_reader_domains_and_coalesce(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            paths = {
+                str(tmp / "tasks" / "repo" / "leaf.json"),
+                str(tmp / "logs" / "observer" / "lifecycles" / "L1" / "events.jsonl"),
+                str(tmp / "logs" / "observer" / "workspace" / "gates.jsonl"),
+            }
+            self.assertEqual(
+                projection_domains_for_paths(_config(tmp), paths),
+                frozenset(
+                    {
+                        ProjectionDomain.TASKS,
+                        ProjectionDomain.LIFECYCLES,
+                        ProjectionDomain.WORKSPACE,
+                    }
+                ),
+            )
+
+    def test_unknown_accepted_path_fails_open_to_every_domain(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            self.assertEqual(
+                projection_domains_for_paths(
+                    _config(tmp), {str(tmp / "unexpected" / "input.json")}
+                ),
+                frozenset(ProjectionDomain),
+            )
 
 
 class ChangePacerDeadlineTests(unittest.TestCase):
@@ -201,9 +240,9 @@ class _FakeWatcher:
         finally:
             self.stopped.set()
 
-    def emit(self) -> None:
+    def emit(self, domain: ProjectionDomain = ProjectionDomain.TASKS) -> None:
         assert self.pacer is not None
-        self.pacer.notify_change()
+        self.pacer.notify_change(frozenset({domain}))
 
 
 class _CrashingWatcher:
@@ -216,9 +255,7 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
-
-    def tearDown(self) -> None:
-        self._dir.cleanup()
+        self.addCleanup(self._dir.cleanup)
 
     async def _run_projector(self, projector: Projector) -> asyncio.Task[None]:
         task = asyncio.create_task(projector.run())
@@ -242,7 +279,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_quiet_world_projects_only_at_heartbeat_cadence(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=0.02, heartbeat=0.2, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=0.02, heartbeat=0.2),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await self._run_projector(projector)
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -258,7 +297,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_single_change_projects_within_the_debounce_bound(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=0.02, heartbeat=30.0, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=0.02, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await self._run_projector(projector)
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -270,13 +311,16 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
         await self._wait_for(lambda: projector.projection_count > baseline, timeout=2.0)
         latency = time.monotonic() - emitted_at
         self.assertEqual(projector.last_wake_reason, "change")
+        self.assertEqual(projector.last_invalidated_domains, frozenset({"tasks"}))
         # debounce (clamped to interval=0.02) + one projection + generous CI slack.
         self.assertLess(latency, 1.0)
 
     async def test_burst_coalesces_to_a_bounded_projection_count(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=0.15, heartbeat=30.0, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=0.15, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await self._run_projector(projector)
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -296,7 +340,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_watchfiles_degrades_loudly_to_fixed_interval(self) -> None:
         config = _config(self.tmp)
         projector = Projector(
-            config, interval=0.05, heartbeat=30.0, change_watcher=ProjectionInputWatcher(config)
+            config,
+            cadence=ProjectionCadence(interval=0.05, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=ProjectionInputWatcher(config)),
         )
         with (
             mock.patch.object(change_watcher_module, "watchfiles", None),
@@ -311,9 +357,8 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_crashed_watcher_task_degrades_loudly_to_fixed_interval(self) -> None:
         projector = Projector(
             _config(self.tmp),
-            interval=0.05,
-            heartbeat=30.0,
-            change_watcher=_CrashingWatcher(),
+            cadence=ProjectionCadence(interval=0.05, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=_CrashingWatcher()),
         )
         with self.assertLogs("agents_remember.serving.projector", level="ERROR") as logs:
             await self._run_projector(projector)
@@ -334,7 +379,11 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
                 self.health: list[bool] = []
                 self.changes = 0
 
-            def notify_change(self) -> None:
+            def notify_change(
+                self,
+                domains: frozenset[ProjectionDomain] = frozenset(ProjectionDomain),
+            ) -> None:
+                _ = domains
                 self.changes += 1
 
             def set_watcher_healthy(self, healthy: bool) -> None:
@@ -370,7 +419,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_owns_the_watcher_task_lifecycle(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=100, heartbeat=100, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=100, heartbeat=100),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         task = asyncio.create_task(projector.run())
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -382,7 +433,7 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_without_a_watcher_the_legacy_interval_pacing_is_kept(self) -> None:
         # The sim/replay and injected-now() path: no watcher, no pacer -- the loop must
         # keep ticking unconditionally every interval exactly as before this change.
-        projector = Projector(_config(self.tmp), interval=0.05)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=0.05))
         self.assertIsNone(projector._pacer)
         await self._run_projector(projector)
         await asyncio.sleep(0.4)
@@ -407,9 +458,8 @@ class RealWatchfilesIntegrationTests(unittest.IsolatedAsyncioTestCase):
         (self.tmp / "tasks").mkdir()
         projector = Projector(
             config,
-            interval=0.05,
-            heartbeat=60.0,
-            change_watcher=ProjectionInputWatcher(config),
+            cadence=ProjectionCadence(interval=0.05, heartbeat=60.0),
+            refreshers=ProjectionRefreshers(change_watcher=ProjectionInputWatcher(config)),
         )
         task = asyncio.create_task(projector.run())
         try:
@@ -428,6 +478,7 @@ class RealWatchfilesIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "a write under tasks/ did not wake the projector within 5s",
             )
             self.assertEqual(projector.last_wake_reason, "change")
+            self.assertEqual(projector.last_invalidated_domains, frozenset({"tasks"}))
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

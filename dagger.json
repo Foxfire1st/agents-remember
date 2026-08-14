@@ -1,0 +1,9 @@
+{
+  "name": "agents-remember-quality",
+  "engineVersion": "v0.21.8",
+  "disableDefaultFunctionCaching": true,
+  "sdk": {
+    "source": "python"
+  },
+  "source": ".dagger"
+}

@@ -7,18 +7,24 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
-
-DriftCheckStatus = Literal["notChecked", "checked", "error"]
+from agents_remember.models.drift import DriftStatus
 
 
 class DriftCheckResponse(ToolResponse):
     operation: Literal["drift_check"] = "drift_check"
-    status: DriftCheckStatus
+    # The last hand-copy of the drift vocabulary. `run_drift_summary` produces every member and
+    # `models.drift.DriftSummary` already reads `DriftStatus` from its declaration; this model
+    # kept a third, identical copy, which is one more place for the next member to not arrive.
+    status: DriftStatus
     count: int | None = Field(default=None, ge=0)
     actionableCount: int | None = Field(default=None, ge=0)
     reportPath: str | None = None
     actionableSample: list[dict[str, Any]] | None = None
     error: str | None = None
+    # WHICH tree was measured. `repo_id` alone means the official memory repo and a
+    # `contract_path` means a leaf's memory worktree, and nothing else in this response
+    # distinguishes them -- a caller that got the wrong one could not tell.
+    onboardingRoot: str | None = None
 
 
 class MemoryQualityCheckResponse(FlexibleToolResponse):
@@ -26,12 +32,40 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     repoId: str | None = None
     onboardingRoot: str | None = None
     checks: dict[str, Any] | list[dict[str, Any]] | None = None
+    reportPath: str | None = Field(
+        default=None,
+        description=(
+            "For a full contract-scoped check, the single enclosure-local curator checklist "
+            "that this invocation atomically replaced."
+        ),
+    )
+    checklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
+    curatorActionableCount: int | None = Field(default=None, ge=0)
+    memoryRepairCount: int | None = Field(default=None, ge=0)
+    missingOnboardingCount: int | None = Field(default=None, ge=0)
+    staleRouteIndexCount: int | None = Field(default=None, ge=0)
+    sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
+    closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
+    noteworthyFindingCount: int | None = Field(default=None, ge=0)
+
+
+class CitationFixResponse(FlexibleToolResponse):
+    operation: Literal["citation_fix"] = "citation_fix"
+    repoId: str | None = None
+    dryRun: bool | None = None
 
 
 class RouteIndexRefreshResponse(FlexibleToolResponse):
     operation: Literal["route_index_refresh"] = "route_index_refresh"
     repoId: str | None = None
+    # The tree the indexes were WRITTEN into, declared because this tool mutates: a
+    # caller has to be able to see whether it just wrote its leaf or the official repo.
+    onboardingRoot: str | None = None
     dryRun: bool | None = None
+    staleIndexes: list[str] | None = Field(
+        default=None,
+        description="Route-index paths whose rendered bytes differ from the onboarding census.",
+    )
 
 
 class MemoryInitResponse(FlexibleToolResponse):
@@ -86,7 +120,5 @@ class MemoryCarryoverApplyResponse(FlexibleToolResponse):
     )
     reportPath: str | None = Field(
         default=None,
-        description=(
-            "Temp report file holding the full candidate and carried records."
-        ),
+        description=("Temp report file holding the full candidate and carried records."),
     )

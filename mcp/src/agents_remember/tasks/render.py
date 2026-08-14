@@ -14,7 +14,16 @@ normalization that would corrupt blank lines inside code fences).
 
 from __future__ import annotations
 
-from .document import CodeExample, Decision, Section, Step, SubTaskRef, TaskDocument
+from .document import (
+    CodeExample,
+    Decision,
+    RouteReviewRecord,
+    Section,
+    Step,
+    StepDisposition,
+    SubTaskRef,
+    TaskDocument,
+)
 
 
 def render_markdown(doc: TaskDocument) -> str:
@@ -28,6 +37,7 @@ def render_markdown(doc: TaskDocument) -> str:
     parts += _section("Requirements", _bullets(doc.requirements))
     parts += _section("Design", [doc.design or "No design reasoning needed."])
     parts += _section("Implementation Steps", _step_lines(doc.steps))
+    parts += _section("Route Review", _route_review_lines(doc.routeReview))
     parts += _section(
         "Proposed Code Examples",
         _code_example_lines(doc.codeExamples, doc.codeExamplesNote),
@@ -94,7 +104,11 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         lines.append(f"**Master:** `{doc.master}`")
     if doc.orchestrates:  # the orchestration-command relation (L14); master-only by schema
         lines.append("**Orchestrates:** " + ", ".join(f"`{name}`" for name in doc.orchestrates))
-    lines += [f"**{note.label}:** {note.value}" for note in doc.headerNotes]  # extra header lines (R4)
+    if doc.integrationBranch:
+        lines.append(f"**Integration branch:** `{doc.integrationBranch}`")
+    lines += [
+        f"**{note.label}:** {note.value}" for note in doc.headerNotes
+    ]  # extra header lines (R4)
     return lines
 
 
@@ -127,13 +141,24 @@ def _step_lines(steps: list[Step]) -> list[str]:
         # The heading is the step title; the checkbox carries the distinct outcome (R2). A bare step
         # (no outcome, no substeps) is just its heading -- no redundant title echo.
         block = [f"### {step.id} — {step.title}"]
-        if step.outcome or step.substeps:
-            block += ["", f"- [{_checkbox(step.status)}] {step.outcome or step.title}"]
+        if step.outcome or step.substeps or step.disposition:
+            block += [
+                "",
+                f"- [{_checkbox(step.status)}] {step.outcome or step.title}"
+                f"{_disposition_suffix(step.disposition)}",
+            ]
             for sub in step.substeps:
                 suffix = f" — {sub.note}" if sub.note else ""
-                block.append(f"  - [{_checkbox(sub.status)}] {sub.title}{suffix}")
+                block.append(
+                    f"  - [{_checkbox(sub.status)}] {sub.title}{suffix}"
+                    f"{_disposition_suffix(sub.disposition)}"
+                )
         blocks.append(block)
     return _join_blocks(blocks)
+
+
+def _disposition_suffix(disposition: StepDisposition | None) -> str:
+    return f" — SKIPPED: {disposition.reason}" if disposition is not None else ""
 
 
 def _code_example_lines(examples: list[CodeExample], note: str | None = None) -> list[str]:
@@ -166,6 +191,25 @@ def _decision_lines(decisions: list[Decision]) -> list[str]:
         for item in decisions
     ]
     return ["| Date-Time | Decision | Rationale |", "| --- | --- | --- |", *rows]
+
+
+def _route_review_lines(review: RouteReviewRecord | None) -> list[str]:
+    if review is None:
+        return ["_No candidate-bound route review recorded._"]
+    rows = [
+        f"| {_cell(route.route)} | {route.verdict} | `{_cell(route.evidenceRef)}` |"
+        for route in review.routes
+    ]
+    return [
+        f"**Candidate tree:** `{review.candidateTree}`",
+        f"**Overall verdict:** {review.verdict}",
+        f"**Verdict artifact:** `{review.verdictRef}`",
+        f"**Reviewed:** {review.reviewedAt}",
+        "",
+        "| Major route | Verdict | Evidence |",
+        "| --- | --- | --- |",
+        *rows,
+    ]
 
 
 def _cell(text: str) -> str:

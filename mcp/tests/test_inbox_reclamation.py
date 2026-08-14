@@ -1,4 +1,4 @@
-"""Regressions for confirmed-gone supervisor inbox reclamation (260712-TRH-L5)."""
+"""Regressions for confirmed-gone agent-notifier inbox reclamation (260712-TRH-L5)."""
 
 from __future__ import annotations
 
@@ -13,26 +13,37 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
+from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxMessageKind,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
     OperatorInboxEntry,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
-from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer.store import EventStore
+from agents_remember.serving.agent_notifier import run_agent_notifier_sweep
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
+from agents_remember.serving.agent_notifier_models import AgentNotifierContext
 from agents_remember.serving.inbox_reclamation import (
     CONFIRMED_GONE_REASON,
     TmuxSessionNameSnapshot,
     plan_confirmed_gone_reclamation,
     snapshot_tmux_session_names,
 )
-from agents_remember.serving.supervisor import run_supervisor_sweep
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
-from agents_remember.serving.supervisor_models import SupervisorContext
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+)
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
@@ -59,21 +70,21 @@ def _inbox_entry(
     entry_id: str,
     *,
     subject: str | None = "subject-1",
-    kind: str = "nudge",
+    kind: InboxMessageKind = "nudge",
     created_by: str = "supervisor",
     created_at: datetime = NOW,
 ) -> OperatorInboxEntry:
     return create_operator_inbox_entry(
+        InboxMessage(
+            ask=f"ask-{entry_id}",
+            response=f"body-{entry_id}",
+            message_kind=kind,
+            subject=InboxSubject(agent_id=subject),
+        ),
         entry_id=entry_id,
         now=created_at.isoformat(),
-        lifecycle_id=None,
-        agent_id="manager-1",
-        ask=f"ask-{entry_id}",
-        response=f"body-{entry_id}",
-        created_by=created_by,
-        created_via="cli",
-        message_kind=kind,  # type: ignore[arg-type]
-        subject_agent_id=subject,
+        routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="manager-1")),
+        poster=InboxPoster(created_by=created_by, created_via="cli"),
     )
 
 
@@ -162,9 +173,7 @@ class ConfirmedGonePolicyTests(unittest.TestCase):
             "decision-ruling",
             "dispatch-brief",
         )
-        rows = {
-            f"kind-{kind}": _inbox_entry(f"kind-{kind}", kind=kind) for kind in protected
-        }
+        rows = {f"kind-{kind}": _inbox_entry(f"kind-{kind}", kind=kind) for kind in protected}
         rows["subjectless"] = _inbox_entry("subjectless", subject=None)
         rows["model"] = _inbox_entry("model", created_by="model")
         plan = plan_confirmed_gone_reclamation(
@@ -185,12 +194,19 @@ class ReconcileAndCompactTests(unittest.TestCase):
     def test_terminal_fold_dominates_a_physically_later_stale_pending_snapshot(self) -> None:
         pending = _inbox_entry("n1")
         self.store.append(pending)
-        self.store.mark_ladder_resolved(
-            "n1",
-            now=(NOW + timedelta(seconds=1)).isoformat(),
-            reason=CONFIRMED_GONE_REASON,
+        self.store.append(
+            pending.model_copy(
+                update={
+                    "ts": (NOW + timedelta(seconds=1)).isoformat(),
+                    "state": "ladder-resolved",
+                    "ladderResolvedAt": (NOW + timedelta(seconds=1)).isoformat(),
+                    "nextAttemptAt": None,
+                }
+            )
         )
-        self.store.append(pending.model_copy(update={"ts": (NOW + timedelta(seconds=2)).isoformat()}))
+        self.store.append(
+            pending.model_copy(update={"ts": (NOW + timedelta(seconds=2)).isoformat()})
+        )
 
         _removed, current, resolved = self.store.reconcile_and_compact(
             now=NOW + timedelta(seconds=3),
@@ -200,29 +216,31 @@ class ReconcileAndCompactTests(unittest.TestCase):
         self.assertEqual(resolved, ())
         self.assertEqual(self.store.read(), [])
 
-    def test_consumed_snapshot_remains_authoritative_when_resolver_targets_same_id(self) -> None:
+    def test_landed_snapshot_remains_authoritative_when_resolver_targets_same_id(self) -> None:
         self.store.append(_inbox_entry("n1"))
-        self.store.consume(
+        inbox_transitions.mark_landed(
+            self.store,
             "n1",
             now=(NOW + timedelta(seconds=1)).isoformat(),
-            consumed_by="model",
-            consumed_via="cli",
+            reason="adapter-accepted-at-turn-boundary",
         )
         _removed, current, resolved = self.store.reconcile_and_compact(
             now=NOW + timedelta(seconds=2),
             reconcile=lambda _current: {"n1": CONFIRMED_GONE_REASON},
         )
         self.assertEqual(resolved, ())
-        self.assertEqual(current["n1"].state, "consumed")
+        self.assertEqual(current["n1"].state, "landed")
 
-    def test_existing_pending_ttl_fallback_is_unchanged(self) -> None:
+    def test_pending_ttl_is_a_sweep_resolution_boundary_not_silent_compaction(self) -> None:
         self.store.append(_inbox_entry("ancient", subject=None, created_at=NOW - timedelta(days=3)))
         self.store.append(_inbox_entry("fresh", subject=None, created_at=NOW - timedelta(hours=1)))
         _removed, current, _resolved = self.store.reconcile_and_compact(
             now=NOW,
             reconcile=lambda _current: {},
         )
-        self.assertEqual(set(current), {"fresh"})
+        # Compaction keeps both: the sweep stamps the ancient row ``expired`` (visible and
+        # counted) before any retention event may drop it.
+        self.assertEqual(set(current), {"ancient", "fresh"})
 
     def test_removed_count_is_persisted_folded_id_delta_not_transient_snapshot_count(self) -> None:
         self.store.append(_inbox_entry("n1"))
@@ -241,7 +259,7 @@ class ReconcileAndCompactTests(unittest.TestCase):
         self.assertEqual(self.store.read(), [])
 
 
-class SupervisorReclamationIntegrationTests(unittest.TestCase):
+class AgentNotifierReclamationIntegrationTests(unittest.TestCase):
     def test_sweep_compacts_before_redelivery_and_emits_one_body_free_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -263,29 +281,35 @@ class SupervisorReclamationIntegrationTests(unittest.TestCase):
                 def paste(self, *_args: object, **_kwargs: object) -> PasteResult:
                     raise AssertionError("reclaimed row must not be redelivered")
 
-            ctx = SupervisorContext(
+            ctx = AgentNotifierContext(
                 catalog=catalog,
                 host=cast(TerminalHost, _Host()),
                 paster=cast(TerminalPaster, _Paster()),
                 inbox_store=inbox_store,
                 expectation_store=ExpectationRowStore(observer_root),
-                nudge_store=OrchestrationNudgeStore(observer_root),
-                signal_cooldown_store=SupervisorSignalCooldownStore(observer_root),
+                signal_cooldown_store=AgentNotifierSignalCooldownStore(observer_root),
                 event_store=event_store,
-                heartbeat_store=SupervisorHeartbeatStore(observer_root),
+                heartbeat_store=AgentNotifierHeartbeatStore(observer_root),
                 coordination_root=root,
                 tmux_name_snapshotter=lambda: self.fail("terminal proof must not probe tmux"),
             )
-            result = run_supervisor_sweep(ctx, now=NOW)
+            result = run_agent_notifier_sweep(ctx, now=NOW)
 
             self.assertEqual(inbox_store.read(), [])
             self.assertFalse(any(f.source_id == "n1" for f in result.findings))
             events = [
                 event
                 for event in event_store.read(None)
+                if event.kind == "orchestration.agent-notifier.inbox-compacted"
+            ]
+            legacy_events = [
+                event
+                for event in event_store.read(None)
                 if event.kind == "orchestration.supervisor.inbox-compacted"
             ]
             self.assertEqual(len(events), 1)
+            # The rename window emits every agent-notifier event under the legacy name too.
+            self.assertEqual(len(legacy_events), 1)
             self.assertEqual(events[0].data["removed"], 1)
             self.assertEqual(events[0].data["resolvedRowCount"], 1)
             self.assertEqual(events[0].data["uniqueSubjectCount"], 1)
@@ -318,28 +342,27 @@ class SupervisorReclamationIntegrationTests(unittest.TestCase):
                 def paste(self, *_args: object, **_kwargs: object) -> PasteResult:
                     raise AssertionError("future-backoff row must not be redelivered")
 
-            ctx = SupervisorContext(
+            ctx = AgentNotifierContext(
                 catalog=catalog,
                 host=cast(TerminalHost, _Host()),
                 paster=cast(TerminalPaster, _Paster()),
                 inbox_store=inbox_store,
                 expectation_store=ExpectationRowStore(observer_root),
-                nudge_store=OrchestrationNudgeStore(observer_root),
-                signal_cooldown_store=SupervisorSignalCooldownStore(observer_root),
+                signal_cooldown_store=AgentNotifierSignalCooldownStore(observer_root),
                 event_store=event_store,
-                heartbeat_store=SupervisorHeartbeatStore(observer_root),
+                heartbeat_store=AgentNotifierHeartbeatStore(observer_root),
                 coordination_root=root,
                 tmux_name_snapshotter=lambda: self.fail("catalog-present subject must not probe"),
             )
 
             for offset in (0, 10, 20):
-                run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=offset))
+                run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=offset))
 
             self.assertEqual(set(inbox_store.current()), {"n1"})
             events = [
                 event
                 for event in event_store.read(None)
-                if event.kind == "orchestration.supervisor.inbox-compacted"
+                if event.kind == "orchestration.agent-notifier.inbox-compacted"
             ]
             self.assertEqual(events, [])
 

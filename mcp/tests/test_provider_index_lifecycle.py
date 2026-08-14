@@ -39,9 +39,7 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    )
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -80,7 +78,9 @@ class SeedDivergenceTests(unittest.TestCase):
             _init_repo(repo)
             head = _commit_file(repo, "a.py", "one", "base")
             divergence = cgc_seed.seed_commit_divergence(
-                repo, head, "0" * 40  # commit that does not exist anywhere
+                repo,
+                head,
+                "0" * 40,  # commit that does not exist anywhere
             )
         self.assertIsNone(divergence)
 
@@ -124,9 +124,7 @@ class SeedMismatchTests(unittest.TestCase):
             _init_repo(repo)
             head = _commit_file(repo, "a.py", "one", "base")
             args = self._args()
-            refusal = cgc_seed._seed_commit_mismatch(
-                args, repo, repo / "wt", head, "0" * 40
-            )
+            refusal = cgc_seed._seed_commit_mismatch(args, repo, repo / "wt", head, "0" * 40)
         assert refusal is not None
         self.assertFalse(refusal["ok"])
         self.assertIn("unrelated", refusal["reason"])
@@ -298,18 +296,14 @@ class WatcherReadinessTests(unittest.TestCase):
             "providers": {
                 "codegraphcontext-code": {
                     "enabled": True,
-                    "runtime": {
-                        "runner": {"containerNameTemplate": "ar-cgc-watch-i1-<repoId>"}
-                    },
+                    "runtime": {"runner": {"containerNameTemplate": "ar-cgc-watch-i1-<repoId>"}},
                 }
             },
         }
     }
 
     def _args(self) -> argparse.Namespace:
-        return argparse.Namespace(
-            cgc_seed_repo_id="repo-a", coordination_root=Path("/tmp")
-        )
+        return argparse.Namespace(cgc_seed_repo_id="repo-a", coordination_root=Path("/tmp"))
 
     def test_container_name_expands_the_template(self) -> None:
         name = _cgc_watcher_container_name(self._args(), self._SETTINGS)
@@ -337,9 +331,7 @@ class WatcherReadinessTests(unittest.TestCase):
                 },
             ),
         ):
-            result = _wait_for_cgc_watcher_ready(
-                self._args(), self._SETTINGS, timeout_seconds=1
-            )
+            result = _wait_for_cgc_watcher_ready(self._args(), self._SETTINGS, timeout_seconds=1)
         self.assertTrue(result["ready"])
 
     def test_not_ready_times_out_without_marker(self) -> None:
@@ -353,9 +345,7 @@ class WatcherReadinessTests(unittest.TestCase):
                 return_value={"returncode": 0, "stdout": "booting...", "stderr": ""},
             ),
         ):
-            result = _wait_for_cgc_watcher_ready(
-                self._args(), self._SETTINGS, timeout_seconds=0
-            )
+            result = _wait_for_cgc_watcher_ready(self._args(), self._SETTINGS, timeout_seconds=0)
         self.assertFalse(result["ready"])
         self.assertIn("no watch-ready marker", result["reason"])
 
@@ -367,9 +357,7 @@ class WatcherReadinessTests(unittest.TestCase):
             "agents_remember.providers.provider_setup.docker_command",
             side_effect=ContextProviderError("docker command not found"),
         ):
-            result = _wait_for_cgc_watcher_ready(
-                self._args(), self._SETTINGS, timeout_seconds=0
-            )
+            result = _wait_for_cgc_watcher_ready(self._args(), self._SETTINGS, timeout_seconds=0)
         self.assertFalse(result["ready"])
 
 
@@ -458,9 +446,7 @@ class IntegrationCycleReproTests(unittest.TestCase):
                 cgc_seed_delta_max_files=0,
                 cgc_seed_repo_id="repo",
             )
-            refusal = cgc_seed._seed_commit_mismatch(
-                args, repo, worktree, source_head, target_head
-            )
+            refusal = cgc_seed._seed_commit_mismatch(args, repo, worktree, source_head, target_head)
             self.assertIsNone(refusal)  # the seed proceeds — no crash-out
 
             # leaf-2 is BEHIND: the cloned graph carries integrated.py while

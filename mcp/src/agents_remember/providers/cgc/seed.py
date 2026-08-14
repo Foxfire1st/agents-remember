@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
 from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.setup_common import (
+    LifecycleCommand,
     expand_template,
     load_settings,
     provider_settings,
@@ -199,22 +200,9 @@ def git_head_or_none(repo_root: Path) -> str | None:
 
     if not repo_root.exists():
         return None
-    result = subprocess.run(
-        [
-            "git",
-            "-c",
-            f"safe.directory={repo_root.as_posix()}",
-            "-C",
-            repo_root.as_posix(),
-            "rev-parse",
-            "HEAD",
-        ],
-        text=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    # The one runner: an inherited GIT_DIR would return another repository's HEAD and
+    # the seed would then be declared fresh against a commit this repo never had.
+    result = run_git(repo_root, ["rev-parse", "HEAD"])
     if result.returncode != 0:
         return None
     return result.stdout.strip()
@@ -243,20 +231,59 @@ def cgc_seed_bundle(args: Any, settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_seed_context(args: Any, settings: dict[str, Any]) -> CgcSeedContext | dict[str, Any]:
+    refusal = _seed_precondition_skip(args, settings)
+    if refusal is not None:
+        return refusal
+    source_coordination_root = args.cgc_seed_source_coordination_root
+    source_settings = _load_seed_source_settings(args, source_coordination_root)
+    if _is_seed_skip(source_settings):
+        return source_settings
+
+    located = _seed_locations(args, settings, source_settings, source_coordination_root)
+    if isinstance(located, dict):
+        return located
+    target, source, target_runtime, source_runtime = located
+    return _validated_seed_context(
+        args,
+        _CgcSeedEnd(
+            coordination_root=source_coordination_root,
+            repo_id=source[0],
+            repo_root=source[1],
+            runtime_root=source_runtime,
+        ),
+        _CgcSeedEnd(
+            coordination_root=args.coordination_root,
+            repo_id=target[0],
+            repo_root=target[1],
+            runtime_root=target_runtime,
+        ),
+    )
+
+
+def _seed_precondition_skip(args: Any, settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Reasons to skip before any source settings are read, or None to go ahead."""
     # Benchmarks are hermetic (see grepai/seed.py): a benchmark-scoped target never seeds
     # from another stack, so it cannot reach into the live workspace cgc backend.
     target_cfg = provider_settings(settings, CGC_PROVIDER_ID)
     target_instance = target_cfg.get("instance") if isinstance(target_cfg, dict) else None
     if isinstance(target_instance, dict) and target_instance.get("scope") == "benchmark":
         return _seed_skip("benchmark codegraphcontext is hermetic; seeding is disabled")
-    source_coordination_root = args.cgc_seed_source_coordination_root
-    if source_coordination_root is None:
+    if args.cgc_seed_source_coordination_root is None:
         return _seed_skip("no seed source coordination root configured")
+    return None
 
-    source_settings = _load_seed_source_settings(args, source_coordination_root)
-    if _is_seed_skip(source_settings):
-        return source_settings
 
+def _seed_locations(
+    args: Any,
+    settings: dict[str, Any],
+    source_settings: dict[str, Any],
+    source_coordination_root: Path,
+) -> tuple[tuple[str, Path], tuple[str, Path], Path, Path] | dict[str, Any]:
+    """Repo root and runtime root for both ends, or the first side's skip payload.
+
+    Every one of these four lookups reports its own failure the same way, so the first
+    payload wins and the caller never sees a half-resolved pair.
+    """
     target, source = _seed_roots(args, settings, source_settings, source_coordination_root)
     if isinstance(target, dict):
         return target
@@ -268,14 +295,7 @@ def _resolve_seed_context(args: Any, settings: dict[str, Any]) -> CgcSeedContext
     source_runtime = _seed_runtime_root(source_coordination_root, source_settings, source[0])
     if isinstance(source_runtime, dict):
         return source_runtime
-    return _validated_seed_context(
-        args,
-        source_coordination_root,
-        target,
-        source,
-        target_runtime,
-        source_runtime,
-    )
+    return target, source, target_runtime, source_runtime
 
 
 def _load_seed_source_settings(
@@ -331,37 +351,41 @@ def _seed_repo_root(
     return _seed_skip(f"{side} CGC root is not configured")
 
 
+@dataclass(frozen=True)
+class _CgcSeedEnd:
+    """One end of a CGC graph seed: a coordination root and the repo it indexes.
+
+    Source and target are symmetric — each is a coordination root, the repo id
+    and checkout it covers, and the CGC runtime root holding its graph. Naming
+    the end makes the seed read as source → target instead of four interleaved
+    pairs whose order is the only thing keeping them straight.
+    """
+
+    coordination_root: Path
+    repo_id: str
+    repo_root: Path
+    runtime_root: Path
+
+
 def _validated_seed_context(
     args: Any,
-    source_coordination_root: Path,
-    target: tuple[str, Path],
-    source: tuple[str, Path],
-    target_runtime_root: Path,
-    source_runtime_root: Path,
+    source: _CgcSeedEnd,
+    target: _CgcSeedEnd,
 ) -> CgcSeedContext | dict[str, Any]:
-    target_repo_id, target_repo_root = target
-    source_repo_id, source_repo_root = source
-    source_head = git_head_or_none(source_repo_root)
-    target_head = git_head_or_none(target_repo_root)
-    failure = _seed_validation_failure(
-        args,
-        source_coordination_root,
-        source_repo_root,
-        target_repo_root,
-        source_head,
-        target_head,
-    )
+    source_head = git_head_or_none(source.repo_root)
+    target_head = git_head_or_none(target.repo_root)
+    failure = _seed_validation_failure(args, source, target, source_head, target_head)
     if failure is not None:
         return failure
     return CgcSeedContext(
-        target_coordination_root=args.coordination_root,
-        source_coordination_root=source_coordination_root,
-        target_repo_id=target_repo_id,
-        source_repo_id=source_repo_id,
-        target_repo_root=target_repo_root,
-        source_repo_root=source_repo_root,
-        target_runtime_root=target_runtime_root,
-        source_runtime_root=source_runtime_root,
+        target_coordination_root=target.coordination_root,
+        source_coordination_root=source.coordination_root,
+        target_repo_id=target.repo_id,
+        source_repo_id=source.repo_id,
+        target_repo_root=target.repo_root,
+        source_repo_root=source.repo_root,
+        target_runtime_root=target.runtime_root,
+        source_runtime_root=source.runtime_root,
         target_head=target_head,
         source_head=source_head,
     )
@@ -369,19 +393,18 @@ def _validated_seed_context(
 
 def _seed_validation_failure(
     args: Any,
-    source_coordination_root: Path,
-    source_repo_root: Path,
-    target_repo_root: Path,
+    source: _CgcSeedEnd,
+    target: _CgcSeedEnd,
     source_head: str | None,
     target_head: str | None,
 ) -> dict[str, Any] | None:
     mismatch = _seed_commit_mismatch(
-        args, source_repo_root, target_repo_root, source_head, target_head
+        args, source.repo_root, target.repo_root, source_head, target_head
     )
     if mismatch is not None:
         return mismatch
     return _seed_same_coordination_root_failure(
-        args, source_coordination_root, source_repo_root, target_repo_root
+        args, source.coordination_root, source.repo_root, target.repo_root
     )
 
 
@@ -391,6 +414,11 @@ def _seed_validation_failure(
 # the clone still serves — stale, surfaced — and a from-zero rebuild stays an
 # explicit `cgc refresh` only.
 DEFAULT_SEED_DELTA_MAX_FILES = 200
+
+# The catch-up diff is bounded well under the runner's general local bound: it runs
+# during provider setup, and a repo whose diff has not answered in a minute is not one
+# a per-file touch pass was going to catch up anyway.
+_CATCH_UP_DIFF_TIMEOUT_SECONDS = 60
 
 
 def seed_commit_divergence(
@@ -408,14 +436,10 @@ def seed_commit_divergence(
     deletions and rename-sources leave phantom graph nodes no touch can fix —
     those are reported as residual staleness, never blessed as caught up.
     """
-    result = subprocess.run(
-        ["git", "diff", "--name-status", source_head, target_head],
-        cwd=source_repo_root,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+    result = run_git(
+        source_repo_root,
+        ["diff", "--name-status", source_head, target_head],
+        timeout=_CATCH_UP_DIFF_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         return None
@@ -516,45 +540,51 @@ def _seed_bundle_root(args: Any, runtime_root: Path, side: str) -> Path:
 def _seed_source_backend(args: Any, context: CgcSeedContext) -> dict[str, Any]:
     return run_lifecycle(
         context.source_coordination_root,
-        "cgc",
-        "backend-start",
+        LifecycleCommand(
+            provider="cgc",
+            action="backend-start",
+            extra_args=tuple(
+                cgc_seed_source_extra_args(
+                    args, context.source_coordination_root, context.target_coordination_root
+                )
+            ),
+        ),
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=cgc_seed_source_extra_args(
-            args, context.source_coordination_root, context.target_coordination_root
-        ),
     )
 
 
 def _seed_export(args: Any, context: CgcSeedContext, source_bundle: Path) -> dict[str, Any]:
     return run_lifecycle(
         context.source_coordination_root,
-        "cgc",
-        "run",
+        LifecycleCommand(
+            provider="cgc",
+            action="run",
+            extra_args=(
+                *cgc_seed_source_extra_args(
+                    args, context.source_coordination_root, context.target_coordination_root
+                ),
+                "--repo-id",
+                str(context.source_repo_id),
+            ),
+            # Everything after "--" executes inside the Linux runner container; host paths
+            # must be rendered in container form (drive letter stripped on Windows) or the
+            # export dies on a nonexistent C:/ path and start silently pays the full
+            # reindex fallback (GitHub #58).
+            native_args=(
+                "--",
+                "export",
+                to_container_path(source_bundle),
+                "--repo",
+                to_container_path(context.source_repo_root),
+                "--no-stats",
+            ),
+        ),
         # Bounded by the provider-setup cap (timeoutCaps.providerSetupSeconds):
         # an unbounded export let a wedged docker exec hang worktree_start
         # indefinitely (GitHub #49 family). Raise the cap for huge graphs.
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=[
-            *cgc_seed_source_extra_args(
-                args, context.source_coordination_root, context.target_coordination_root
-            ),
-            "--repo-id",
-            str(context.source_repo_id),
-        ],
-        # Everything after "--" executes inside the Linux runner container; host paths
-        # must be rendered in container form (drive letter stripped on Windows) or the
-        # export dies on a nonexistent C:/ path and start silently pays the full
-        # reindex fallback (GitHub #58).
-        native_args=[
-            "--",
-            "export",
-            to_container_path(source_bundle),
-            "--repo",
-            to_container_path(context.source_repo_root),
-            "--no-stats",
-        ],
     )
 
 
@@ -580,14 +610,16 @@ def _seed_rewrite(
 def _seed_load(args: Any, context: CgcSeedContext, rewritten_bundle: Path) -> dict[str, Any]:
     return run_lifecycle(
         context.target_coordination_root,
-        "cgc",
-        "run",
+        LifecycleCommand(
+            provider="cgc",
+            action="run",
+            extra_args=(*cgc_extra_args(args), "--repo-id", str(context.target_repo_id)),
+            # Container-form path for the in-container import; see _seed_export (GitHub #58).
+            native_args=("--", "bundle", "import", to_container_path(rewritten_bundle)),
+        ),
         # Bounded by the provider-setup cap; see _seed_export.
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=[*cgc_extra_args(args), "--repo-id", str(context.target_repo_id)],
-        # Container-form path for the in-container import; see _seed_export (GitHub #58).
-        native_args=["--", "bundle", "import", to_container_path(rewritten_bundle)],
     )
 
 

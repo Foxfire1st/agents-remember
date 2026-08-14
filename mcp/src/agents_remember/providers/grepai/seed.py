@@ -8,7 +8,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from agents_remember.providers.grepai.context.layout import (
     grepai_runtime_layout_from_provider_settings,
@@ -16,6 +16,7 @@ from agents_remember.providers.grepai.context.layout import (
 from agents_remember.providers.grepai.lifecycle.core import grepai_backend_settings
 from agents_remember.providers.lifecycle.docker_runtime import docker_command
 from agents_remember.providers.setup_common import (
+    LifecycleCommand,
     load_settings,
     provider_settings,
     run_lifecycle,
@@ -78,7 +79,9 @@ def grepai_seed_source_extra_args(
     source_coordination_root: Path,
     target_coordination_root: Path,
 ) -> list[str]:
-    path = grepai_seed_source_settings_path(args, source_coordination_root, target_coordination_root)
+    path = grepai_seed_source_settings_path(
+        args, source_coordination_root, target_coordination_root
+    )
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
@@ -98,7 +101,49 @@ def grepai_clone_bundle(args: Any, target_settings: dict[str, Any]) -> dict[str,
     return _clone_success_payload(context, source_start, target_start, clone)
 
 
-def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> GrepaiCloneContext | dict[str, Any]:
+def _resolve_clone_context(
+    args: Any, target_settings: dict[str, Any]
+) -> GrepaiCloneContext | dict[str, Any]:
+    inputs = _clone_inputs(args, target_settings)
+    if isinstance(inputs, dict):
+        return inputs
+    source_settings_path = grepai_seed_source_settings_path(
+        args, inputs.source_coordination_root, args.coordination_root
+    )
+    source_settings = load_settings(source_settings_path)
+    if source_settings is None:
+        return _clone_skip(f"source settings missing: {settings_path(source_settings_path)}")
+    source_provider = _grepai_provider(source_settings)
+    target_provider = _grepai_provider(target_settings)
+    if source_provider is None:
+        return _clone_skip("source grepai-memory provider is not configured")
+    if target_provider is None:
+        return _clone_skip("target grepai-memory provider is not configured")
+    return _clone_context_from_providers(
+        _GrepaiCloneEnd(
+            coordination_root=inputs.source_coordination_root,
+            settings_path=settings_path(source_settings_path),
+            provider=source_provider,
+        ),
+        _GrepaiCloneEnd(
+            coordination_root=args.coordination_root,
+            settings_path=inputs.target_settings_path,
+            provider=target_provider,
+        ),
+        project_id=stable_provider_id(inputs.project_id),
+    )
+
+
+class _CloneInputs(NamedTuple):
+    """The caller-supplied coordinates of a clone, once each is known to be present."""
+
+    source_coordination_root: Path
+    target_settings_path: Path
+    project_id: str
+
+
+def _clone_inputs(args: Any, target_settings: dict[str, Any]) -> _CloneInputs | dict[str, Any]:
+    """The clone's coordinates, or the skip payload naming the first one that is missing."""
     # Benchmarks are hermetic: a benchmark-scoped target must never clone from another
     # stack. This is what stopped the benchmark from starting the live workspace backend
     # as a clone source and cascading a full re-embed across main + every worktree.
@@ -119,28 +164,7 @@ def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> Grepai
     project_id = getattr(args, "grepai_seed_project_id", None)
     if not project_id:
         return _clone_skip("no GrepAI seed project id configured")
-
-    source_settings_path = grepai_seed_source_settings_path(
-        args, source_coordination_root, args.coordination_root
-    )
-    source_settings = load_settings(source_settings_path)
-    if source_settings is None:
-        return _clone_skip(f"source settings missing: {settings_path(source_settings_path)}")
-    source_provider = _grepai_provider(source_settings)
-    target_provider = _grepai_provider(target_settings)
-    if source_provider is None:
-        return _clone_skip("source grepai-memory provider is not configured")
-    if target_provider is None:
-        return _clone_skip("target grepai-memory provider is not configured")
-    return _clone_context_from_providers(
-        args,
-        source_coordination_root=source_coordination_root,
-        source_settings_path=settings_path(source_settings_path),
-        target_settings_path=target_settings_path,
-        project_id=stable_provider_id(project_id),
-        source_provider=source_provider,
-        target_provider=target_provider,
-    )
+    return _CloneInputs(source_coordination_root, target_settings_path, project_id)
 
 
 def _grepai_provider(settings: dict[str, Any]) -> dict[str, Any] | None:
@@ -150,32 +174,43 @@ def _grepai_provider(settings: dict[str, Any]) -> dict[str, Any] | None:
     return provider if provider is not None and provider.get("enabled") is True else None
 
 
+@dataclass(frozen=True)
+class _GrepaiCloneEnd:
+    """One end of a GrepAI seed clone: a coordination root and its provider entry.
+
+    Source and target are symmetric — each is a coordination root, the settings
+    file that describes it, and the enabled grepai-memory provider found there.
+    Naming the end makes the clone read as source → target instead of six
+    interleaved parameters.
+    """
+
+    coordination_root: Path
+    settings_path: Path
+    provider: dict[str, Any]
+
+
 def _clone_context_from_providers(
-    args: Any,
+    source: _GrepaiCloneEnd,
+    target: _GrepaiCloneEnd,
     *,
-    source_coordination_root: Path,
-    source_settings_path: Path,
-    target_settings_path: Path,
     project_id: str,
-    source_provider: dict[str, Any],
-    target_provider: dict[str, Any],
 ) -> GrepaiCloneContext | dict[str, Any]:
     source_layout = grepai_runtime_layout_from_provider_settings(
-        coordination_root=source_coordination_root,
-        provider_settings=source_provider,
+        coordination_root=source.coordination_root,
+        provider_settings=source.provider,
     )
     target_layout = grepai_runtime_layout_from_provider_settings(
-        coordination_root=args.coordination_root,
-        provider_settings=target_provider,
+        coordination_root=target.coordination_root,
+        provider_settings=target.provider,
     )
-    source_backend = grepai_backend_settings(source_provider, source_layout)
-    target_backend = grepai_backend_settings(target_provider, target_layout)
+    source_backend = grepai_backend_settings(source.provider, source_layout)
+    target_backend = grepai_backend_settings(target.provider, target_layout)
     if source_backend["containerName"] == target_backend["containerName"]:
         return _clone_skip("source and target GrepAI backend containers are the same")
     return GrepaiCloneContext(
         project_id=project_id,
-        source_coordination_root=source_coordination_root,
-        target_coordination_root=args.coordination_root,
+        source_coordination_root=source.coordination_root,
+        target_coordination_root=target.coordination_root,
         source_container=source_backend["containerName"],
         target_container=target_backend["containerName"],
         source_database=source_backend["postgresDatabase"],
@@ -184,32 +219,38 @@ def _clone_context_from_providers(
         target_user=target_backend["postgresUser"],
         source_password=source_backend["postgresPassword"],
         target_password=target_backend["postgresPassword"],
-        source_settings_path=source_settings_path,
-        target_settings_path=target_settings_path,
+        source_settings_path=source.settings_path,
+        target_settings_path=target.settings_path,
     )
 
 
 def _source_backend_start(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
     return run_lifecycle(
         context.source_coordination_root,
-        "grepai",
-        "backend-start",
+        LifecycleCommand(
+            provider="grepai",
+            action="backend-start",
+            extra_args=tuple(
+                grepai_seed_source_extra_args(
+                    args, context.source_coordination_root, context.target_coordination_root
+                )
+            ),
+        ),
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=grepai_seed_source_extra_args(
-            args, context.source_coordination_root, context.target_coordination_root
-        ),
     )
 
 
 def _target_backend_start(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
     return run_lifecycle(
         context.target_coordination_root,
-        "grepai",
-        "backend-start",
+        LifecycleCommand(
+            provider="grepai",
+            action="backend-start",
+            extra_args=tuple(grepai_extra_args(args)),
+        ),
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=grepai_extra_args(args),
     )
 
 
@@ -234,11 +275,13 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
     with tempfile.NamedTemporaryFile(prefix="agents-remember-grepai-", suffix=".sql") as dump_file:
         dump = _run_with_stall_watchdog(
             commands["dump"],
+            _StallWatchdog(
+                progress=lambda: os.fstat(dump_file.fileno()).st_size,
+                stall_seconds=stall_seconds,
+            ),
             cwd=context.target_coordination_root,
             stdout=dump_file,
             stdin=subprocess.DEVNULL,
-            progress=lambda: os.fstat(dump_file.fileno()).st_size,
-            stall_seconds=stall_seconds,
         )
         if dump is None:
             return _clone_stall_result("dump", started, stall_seconds, commands)
@@ -248,11 +291,13 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
         dump_file.seek(0)
         restore = _run_with_stall_watchdog(
             commands["restore"],
+            _StallWatchdog(
+                progress=lambda: _target_database_size(context),
+                stall_seconds=stall_seconds,
+            ),
             cwd=context.target_coordination_root,
             stdout=subprocess.PIPE,
             stdin=dump_file,
-            progress=lambda: _target_database_size(context),
-            stall_seconds=stall_seconds,
         )
         if restore is None:
             return _clone_stall_result("restore", started, stall_seconds, commands)
@@ -265,41 +310,60 @@ def _clone_database(args: Any, context: GrepaiCloneContext) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class _StallWatchdog:
+    """The no-progress detector that guards an uncapped clone command.
+
+    A wedge's signature is silence, not duration, so the three settings are one
+    rule: how to sample progress, how often to sample it, and how long zero
+    movement is allowed before the child is killed.
+    """
+
+    progress: Any
+    stall_seconds: int
+    poll_seconds: float = GREPAI_CLONE_POLL_SECONDS
+
+
 def _run_with_stall_watchdog(
     command: list[str],
+    watchdog: _StallWatchdog,
     *,
     cwd: Path,
     stdout: Any,
     stdin: Any,
-    progress: Any,
-    stall_seconds: int,
-    poll_seconds: float = GREPAI_CLONE_POLL_SECONDS,
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a command without a total-time cap, killing it only after
     ``stall_seconds`` of zero progress. Returns None when killed for stalling.
 
     stderr goes to a temp file (not a pipe) so an unread pipe buffer can never
-    deadlock the child while the watchdog waits."""
-    with tempfile.TemporaryFile() as stderr_file:
-        process = subprocess.Popen(
+    deadlock the child while the watchdog waits.
+
+    ``Popen`` is entered as a context manager because a ``stdout=PIPE`` caller gets a
+    read end this function owns: both exits below (the stall kill and the normal return)
+    leave the ``Popen`` unreferenced, so without ``__exit__`` closing it the pipe is
+    finalised by GC instead of by the code that opened it."""
+    with (
+        tempfile.TemporaryFile() as stderr_file,
+        subprocess.Popen(
             command,
             cwd=cwd,
             stdout=stdout,
             stderr=stderr_file,
             stdin=stdin,
-        )
-        last_progress = progress()
+        ) as process,
+    ):
+        last_progress = watchdog.progress()
         last_change = time.monotonic()
         while True:
             try:
-                returncode = process.wait(timeout=poll_seconds)
+                returncode = process.wait(timeout=watchdog.poll_seconds)
                 break
             except subprocess.TimeoutExpired:
-                current = progress()
+                current = watchdog.progress()
                 if current != last_progress:
                     last_progress = current
                     last_change = time.monotonic()
-                elif time.monotonic() - last_change >= stall_seconds:
+                elif time.monotonic() - last_change >= watchdog.stall_seconds:
                     process.kill()
                     process.wait()
                     return None

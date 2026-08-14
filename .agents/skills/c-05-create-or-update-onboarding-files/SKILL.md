@@ -139,6 +139,17 @@ Use (`route_index_refresh` applies by default; preview first with
 route_index_refresh(repo_id="<repo-id>")
 ```
 
+**In a worktree-backed leaf, pass the leaf's enclosure contract path.** This tool WRITES, and
+`repo_id` alone resolves the official memory repo — so an unscoped call from inside a leaf
+generates indexes into a repository the session does not own, leaves it dirty (which blocks the
+next `worktree_start`), and leaves the leaf's own memory worktree stale:
+
+```text
+route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")
+```
+
+Check `onboardingRoot` in the response: it is the tree that was written.
+
 The generator:
 
 1. discovers every `overview.md` under the resolved onboarding root

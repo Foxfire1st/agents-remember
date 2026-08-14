@@ -19,6 +19,7 @@ See ``docs/design/observable-lifecycle.md`` for the full design.
 
 from __future__ import annotations
 
+from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.observer.ambient import (
     AmbientLifecycle,
     install_ambient,
@@ -39,7 +40,6 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
-from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
     ActionAvailability,
     AgentPickupNode,
@@ -71,6 +71,7 @@ from agents_remember.observer.reducer import (
 )
 from agents_remember.observer.served_store import (
     SERVED_RECORD_SCHEMA,
+    ServedLedger,
     ServedRecord,
     ServedStore,
     served_key,
@@ -81,7 +82,6 @@ from agents_remember.observer.timeutil import (
     STALE_AFTER_SECONDS,
     TTL_SECONDS,
     Clock,
-    age_seconds,
 )
 from agents_remember.observer.ulid import new_ulid
 
@@ -112,6 +112,7 @@ __all__ = [
     "ProviderNode",
     "RouteCoverageNode",
     "SeriesNode",
+    "ServedLedger",
     "ServedRecord",
     "ServedStore",
     "SetupProgressNode",
@@ -123,7 +124,6 @@ __all__ = [
     "ToolReportNode",
     "Trust",
     "WorkspaceProjection",
-    "age_seconds",
     "build_analytics",
     "enclosure_actions",
     "install_ambient",

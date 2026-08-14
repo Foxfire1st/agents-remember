@@ -7,7 +7,13 @@
 import { ENGINE_ROOM_SCENARIOS } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
 import type { WorkspaceProjection } from "../types/projection";
+import { FLEET_TASK_DOCUMENTS } from "../test/fixtures/catalogRows";
 import { engineRoomProjection, GALLERY } from "./fixtures";
+import {
+  COCKPIT_SCENARIOS,
+  INTERACTION_SCENARIO_GATE,
+  type CockpitScenarioDefinition,
+} from "./cockpitScenarios";
 
 export interface ScenarioFrame {
   caption: string;
@@ -20,6 +26,7 @@ export interface Scenario {
   name: string;
   label: string;
   frames: ScenarioFrame[];
+  cockpit?: CockpitScenarioDefinition;
 }
 
 // A frame built from a named engine-room scenario (wrapped into a full projection). Throws on a bad name
@@ -89,7 +96,7 @@ const reindexReroute: Scenario = {
     erFrame("engine-boot-1-code-worktree", "R1 · code worktree copies in from main (branch-copy)"),
     erFrame("engine-boot-2-memory-contract", "R2 · memory worktree copies in; the contract coupler binds"),
     erFrame("engine-boot-3-providers-dim", "R3 · provider runtime — engines materialise dim; clone conduits seed from main"),
-    erFrame("engine-cgc-seed-refused", "R4 · CGC seed REFUSED → reindex — the seed arrow flashes AMBER and CGC reindexes in place (a fallback, not a failure); GrepAI seeds normally", 2000),
+    erFrame("engine-cgc-seed-refused", "R4 · CGC seed STALE → reindex reroute — the seed arrow flashes AMBER and CGC reindexes in place (a fallback, not a failure); GrepAI seeds normally", 2000),
     erFrame("engine-cgc-fallback", "R5 · indexing completes — the amber reindex finishes (not terminal); engine ready to lock"),
     erFrame("engine-boot-5-nominal", "R6 · running — recovered via reindex; both engines green → nominal"),
   ],
@@ -204,6 +211,62 @@ const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
   frames: [{ caption: entry.name, projection: entry.projection, events: entry.events }],
 }));
 
+const calmProjection = GALLERY.find((entry) => entry.name === "calm")!.projection;
+const cockpitScenarios: Scenario[] = COCKPIT_SCENARIOS.map((cockpit) => {
+  const cockpitProjection =
+    cockpit.kind === "fleet-12"
+      ? {
+          ...calmProjection,
+          analytics: {
+            ...calmProjection.analytics,
+            taskDocuments: FLEET_TASK_DOCUMENTS,
+          },
+        }
+      : calmProjection;
+  const projection =
+    cockpit.kind === "interaction-answer"
+      ? {
+          ...cockpitProjection,
+          lifecycles: [
+            ...cockpitProjection.lifecycles,
+            {
+              id: INTERACTION_SCENARIO_GATE.lifecycleId,
+              state: "blocked" as const,
+              phase: "build" as const,
+              fleeting: false,
+              tokens: 0,
+              startedAt: "2026-07-18T00:00:00Z",
+              lastEventTs: "2026-07-18T00:00:00Z",
+              stateEnteredAt: "2026-07-18T00:00:00Z",
+              inferred: false,
+              actions: [],
+              tokenSeries: [],
+              gate: {
+                id: INTERACTION_SCENARIO_GATE.gateId,
+                kind: "agent-question",
+                state: "open",
+                evidenceRefs: [],
+                decisions: [],
+                packet: {
+                  adapterInteraction: {
+                    sessionId: INTERACTION_SCENARIO_GATE.sessionId,
+                    interactionId: INTERACTION_SCENARIO_GATE.interactionId,
+                  },
+                },
+                ts: "2026-07-18T00:00:00Z",
+              },
+            },
+          ],
+        }
+      : cockpitProjection;
+  return {
+    name: cockpit.name,
+    label: cockpit.label,
+    cockpit,
+    frames: [{ caption: cockpit.caption, projection }],
+  };
+});
+
 // Timelines first (build-up · tear-down · the 8 failure modes), then the folded-in resting frames.
 export const SCENARIOS: Scenario[] = [
   buildUp,
@@ -216,5 +279,6 @@ export const SCENARIOS: Scenario[] = [
   liveSync,
   integrationConflict,
   abandon,
+  ...cockpitScenarios,
   ...restingScenarios,
 ];

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+    provider_ownership_labels,
+    scoped_name,
+)
 from agents_remember.providers.cgc.seed import (
     CGC_PROVIDER_ID,
     cgc_extra_args,
@@ -16,12 +21,8 @@ from agents_remember.providers.context import (
     CGC_NETWORK_NAME,
     CGC_WATCHER_CONTAINER_PREFIX,
 )
-from agents_remember.providers.identity import (
-    provider_instance_id,
-    provider_ownership_labels,
-    scoped_name,
-)
 from agents_remember.providers.setup_common import (
+    LifecycleCommand,
     provider_settings,
     run_lifecycle,
     selected_provider_enabled,
@@ -173,12 +174,7 @@ def _isolated_cgc_backend(
     backend.update(
         {
             "runtimeRoot": (
-                isolated_root
-                / "providers"
-                / "data"
-                / "codegraphcontext"
-                / instance_id
-                / "falkordb"
+                isolated_root / "providers" / "data" / "codegraphcontext" / instance_id / "falkordb"
             ).as_posix(),
             "dataRoot": "<backendRuntimeRoot>/data",
             "imageLockFile": (
@@ -195,10 +191,7 @@ def _isolated_cgc_backend(
 
 
 def _isolated_cgc_container_name(args: Any, instance_id: str, repo_id: str) -> str:
-    return (
-        args.cgc_isolated_container_name
-        or scoped_name("ar-cgc-falkordb", instance_id, repo_id)
-    )
+    return args.cgc_isolated_container_name or scoped_name("ar-cgc-falkordb", instance_id, repo_id)
 
 
 def write_isolated_cgc_settings(
@@ -233,11 +226,13 @@ def install_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[s
     progress.phase_start("codegraphcontext", "install-all")
     result = run_lifecycle(
         args.coordination_root,
-        "cgc",
-        "install-all",
+        LifecycleCommand(
+            provider="cgc",
+            action="install-all",
+            extra_args=tuple(cgc_extra_args(args)),
+        ),
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=cgc_extra_args(args),
     )
     progress.phase_done(result)
     return [result]
@@ -264,9 +259,7 @@ def _seed_failure_reason(seed: dict[str, Any]) -> str:
     return f"seed failed at {stage}" if stage else "seed failed"
 
 
-def _refresh_after_seed(
-    args: Any, seed: dict[str, Any], progress: SetupProgress
-) -> dict[str, Any]:
+def _refresh_after_seed(args: Any, seed: dict[str, Any], progress: SetupProgress) -> dict[str, Any]:
     if seed.get("ok"):
         return {
             "ok": True,
@@ -287,11 +280,13 @@ def _refresh_after_seed(
         )
         result = run_lifecycle(
             args.coordination_root,
-            "cgc",
-            "refresh-all",
+            LifecycleCommand(
+                provider="cgc",
+                action="refresh-all",
+                extra_args=tuple(cgc_extra_args(args)),
+            ),
             timeout=args.timeout,
             dry_run=args.dry_run,
-            extra_args=cgc_extra_args(args),
         )
         progress.phase_done(result)
         return result

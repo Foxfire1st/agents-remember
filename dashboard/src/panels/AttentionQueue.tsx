@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import { css, cva } from "../../styled-system/css";
 import { postAttentionDismiss } from "../data/actions";
@@ -10,9 +10,9 @@ import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
 import type { AttentionItem, TaskDocNode } from "../types/projection";
 
-// The home-screen attention queue (note 06): the server-ranked list of what needs the human,
+// The home-screen attention queue: the server-ranked list of what needs the human,
 // rebuilt from mc2's renderAttn UX. "Open" jumps to the item's lifecycle in the detail view — the
-// deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable (leaf-28 S5.2): a
+// deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable: a
 // per-item "Dismiss" and "Clear all" both POST a current acknowledgement. Lifecycle rows are scoped
 // by lifecycle id, gate rows are consumed by cancelling/deleting the gate, and actionable-drift rows
 // are repo-level one-shot signals anchored by the drift snapshot timestamp.
@@ -38,6 +38,15 @@ const item = cva({
     },
   },
 });
+// The Dot is decorative (`aria-hidden`), so the severity has to be spoken by its wrapper. The
+// wrapper needs a ROLE that can carry a name: `aria-label` on a bare span names a `generic`, which
+// ARIA prohibits and which no screen reader announces (axe-core reports `aria-prohibited-attr` at
+// `serious`), so the label reached nobody. `img` is the role for a mark that means something — it
+// puts "Severity: warn" in the accessibility tree with the glyph hidden underneath it.
+// (LifecycleList's equivalent span escapes the same bug only because it sits inside React Aria's
+// `role="option"`, whose name-from-content absorbs the label.)
+// `flexShrink` because the wrapper, not the Dot, is the flex item.
+const severityMark = css({ flexShrink: "0", lineHeight: "1.35" });
 const bodyCol = css({ flex: "1", minWidth: "0" });
 const head = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" });
 const heading = css({ margin: "0" });
@@ -118,56 +127,25 @@ function canDismiss(item: AttentionItem): boolean {
   );
 }
 
-export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
-  const queue = useDashboard(selectQueue);
-  const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
-  // Wait times advance locally between emissions — the change gate (260703-L15) no longer
-  // re-serves the queue every tick just because the waits aged.
-  const nowMs = useNowMs();
-  const [clearing, setClearing] = useState(false);
-  const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
-  const dismissableQueue = queue.filter(canDismiss);
-  const dismissItem = (item: AttentionItem) => {
-    if (!canDismiss(item) || dismissing.has(item.id)) return;
-    dashboardStore.getState().suppressAttention([item.id]);
-    setDismissing((prev) => new Set(prev).add(item.id));
-    void postAttentionDismiss(dismissPayload(item))
-      .then((status) => {
-        if (status !== "dismissed") dashboardStore.getState().releaseAttention([item.id]);
-      })
-      .finally(() =>
-        setDismissing((prev) => {
-          const next = new Set(prev);
-          next.delete(item.id);
-          return next;
-        }),
-      );
-  };
-  const clearAll = () => {
-    if (clearing || dismissableQueue.length === 0) return;
-    const ids = dismissableQueue.map((item) => item.id);
-    dashboardStore.getState().suppressAttention(ids);
-    setClearing(true);
-    void Promise.all(
-      dismissableQueue.map(async (item) => ({
-        id: item.id,
-        status: await postAttentionDismiss(dismissPayload(item)),
-      })),
-    )
-      .then((results) => {
-        const failed = results.filter((result) => result.status !== "dismissed").map((result) => result.id);
-        if (failed.length > 0) dashboardStore.getState().releaseAttention(failed);
-      })
-      .finally(() => setClearing(false));
-  };
-  const panelHead = (
+function AttentionHead({
+  queueLength,
+  dismissableCount,
+  clearing,
+  onClearAll,
+}: {
+  queueLength: number;
+  dismissableCount: number;
+  clearing: boolean;
+  onClearAll: () => void;
+}) {
+  return (
     <div className={head}>
-      <h2 className={heading}>Attention · {queue.length} waiting</h2>
-      {dismissableQueue.length > 0 ? (
+      <h2 className={heading}>Attention · {queueLength} waiting</h2>
+      {dismissableCount > 0 ? (
         <button
           type="button"
           className={clearButton}
-          onClick={clearAll}
+          onClick={onClearAll}
           disabled={clearing}
           data-testid="attn-clear"
         >
@@ -176,10 +154,149 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
       ) : null}
     </div>
   );
+}
+
+function dismissAttentionItem(
+  item: AttentionItem,
+  dismissing: ReadonlySet<string>,
+  setDismissing: (updater: (prev: ReadonlySet<string>) => ReadonlySet<string>) => void,
+): void {
+  if (!canDismiss(item) || dismissing.has(item.id)) return;
+  dashboardStore.getState().suppressAttention([item.id]);
+  setDismissing((prev) => new Set(prev).add(item.id));
+  void postAttentionDismiss(dismissPayload(item))
+    .then((status) => {
+      if (status !== "dismissed") dashboardStore.getState().releaseAttention([item.id]);
+    })
+    .finally(() =>
+      setDismissing((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      }),
+    );
+}
+
+function clearAllAttention(
+  items: AttentionItem[],
+  clearing: boolean,
+  setClearing: (value: boolean) => void,
+): void {
+  if (clearing || items.length === 0) return;
+  const ids = items.map((item) => item.id);
+  dashboardStore.getState().suppressAttention(ids);
+  setClearing(true);
+  void Promise.all(
+    items.map(async (item) => ({
+      id: item.id,
+      status: await postAttentionDismiss(dismissPayload(item)),
+    })),
+  )
+    .then((results) => {
+      const failed = results.filter((result) => result.status !== "dismissed").map((result) => result.id);
+      if (failed.length > 0) dashboardStore.getState().releaseAttention(failed);
+    })
+    .finally(() => setClearing(false));
+}
+
+function AttentionRow({
+  entry,
+  docs,
+  nowMs,
+  dismissing,
+  onSelect,
+  onDismiss,
+}: {
+  entry: AttentionItem;
+  docs: readonly TaskDocNode[];
+  nowMs: number;
+  dismissing: ReadonlySet<string>;
+  onSelect: (lifecycleId: string) => void;
+  onDismiss: (item: AttentionItem) => void;
+}) {
+  const lifecycleId = entry.lifecycleId;
+  const doc = taskForAttention(entry, docs);
+  const displayTitle = titleForAttention(entry, doc);
+  const displayDetail = detailForAttention(entry, doc);
+  const dismissable = canDismiss(entry);
+  return (
+    <motion.li
+      key={entry.id}
+      layout
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      className={item({ severity: entry.severity })}
+      data-testid="attn-item"
+    >
+      <span
+        className={severityMark}
+        role="img"
+        aria-label={`Severity: ${entry.severity}`}
+        title={`Severity: ${entry.severity}`}
+        data-testid="attn-severity"
+      >
+        <Dot variant={entry.severity} />
+      </span>
+      <div className={bodyCol}>
+        <div className={itemTitle}>{displayTitle}</div>
+        {displayDetail ? <div className={detail}>{displayDetail}</div> : null}
+        <div className={meta}>
+          {entry.lane} · {fmtWait(servedAgeSeconds(entry, entry.waitSeconds, nowMs))}
+        </div>
+      </div>
+      <div className={actionsCol}>
+        {lifecycleId ? (
+          <button type="button" className={ghost} onClick={() => onSelect(lifecycleId)}>
+            Open
+          </button>
+        ) : null}
+        {dismissable ? (
+          <button
+            type="button"
+            className={dismissButton}
+            onClick={() => onDismiss(entry)}
+            disabled={dismissing.has(entry.id)}
+            data-testid="attn-dismiss"
+            aria-label={`Dismiss ${displayTitle}`}
+          >
+            Dismiss
+          </button>
+        ) : null}
+      </div>
+    </motion.li>
+  );
+}
+
+function AttentionQueueImpl({
+  onSelect,
+  active = true,
+}: {
+  onSelect: (lifecycleId: string) => void;
+  active?: boolean;
+}) {
+  const queue = useDashboard(selectQueue);
+  const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  // Wait times advance locally between emissions — the change gate no longer
+  // re-serves the queue every tick just because the waits aged. A hidden kept-alive rail freezes
+  // this clock; it has no visible age labels to refresh.
+  const nowMs = useNowMs(10_000, active);
+  const [clearing, setClearing] = useState(false);
+  const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
+  const dismissableQueue = queue.filter(canDismiss);
+  const dismissItem = (item: AttentionItem) => dismissAttentionItem(item, dismissing, setDismissing);
+  const clearAll = () => clearAllAttention(dismissableQueue, clearing, setClearing);
   return (
     <Panel
       testid="attention-queue"
-      head={panelHead}
+      head={
+        <AttentionHead
+          queueLength={queue.length}
+          dismissableCount={dismissableQueue.length}
+          clearing={clearing}
+          onClearAll={clearAll}
+        />
+      }
       className={sizing}
     >
       {queue.length === 0 ? (
@@ -187,55 +304,25 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
       ) : (
         <ul className={list}>
           <AnimatePresence initial={false}>
-            {queue.map((q) => {
-              const lifecycleId = q.lifecycleId;
-              const doc = taskForAttention(q, docs);
-              const displayTitle = titleForAttention(q, doc);
-              const displayDetail = detailForAttention(q, doc);
-              const dismissable = canDismiss(q);
-              return (
-                <motion.li
-                  key={q.id}
-                  layout
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className={item({ severity: q.severity })}
-                  data-testid="attn-item"
-                >
-                  <Dot variant={q.severity} />
-                  <div className={bodyCol}>
-                    <div className={itemTitle}>{displayTitle}</div>
-                    {displayDetail ? <div className={detail}>{displayDetail}</div> : null}
-                    <div className={meta}>
-                      {q.lane} · {fmtWait(servedAgeSeconds(q, q.waitSeconds, nowMs))}
-                    </div>
-                  </div>
-                  <div className={actionsCol}>
-                    {lifecycleId ? (
-                      <button type="button" className={ghost} onClick={() => onSelect(lifecycleId)}>
-                        Open
-                      </button>
-                    ) : null}
-                    {dismissable ? (
-                      <button
-                        type="button"
-                        className={dismissButton}
-                        onClick={() => dismissItem(q)}
-                        disabled={dismissing.has(q.id)}
-                        data-testid="attn-dismiss"
-                        aria-label={`Dismiss ${displayTitle}`}
-                      >
-                        Dismiss
-                      </button>
-                    ) : null}
-                  </div>
-                </motion.li>
-              );
-            })}
+            {queue.map((q) => (
+              <AttentionRow
+                key={q.id}
+                entry={q}
+                docs={docs}
+                nowMs={nowMs}
+                dismissing={dismissing}
+                onSelect={onSelect}
+                onDismiss={dismissItem}
+              />
+            ))}
           </AnimatePresence>
         </ul>
       )}
     </Panel>
   );
 }
+
+// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
+// switch with unchanged props, and the memo gate skips this subtree then; the queue's own store
+// subscriptions still drive its updates.
+export const AttentionQueue = memo(AttentionQueueImpl);

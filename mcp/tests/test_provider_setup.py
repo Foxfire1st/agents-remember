@@ -14,11 +14,13 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+)
 from agents_remember.providers import provider_setup
 from agents_remember.providers.cgc import seed as cgc_seed
 from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.grepai import seed as grepai_seed
-from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.setup_progress import SetupProgress
 
 
@@ -139,7 +141,8 @@ class ProviderSetupTests(unittest.TestCase):
         fallback = starts[4][3]
         self.assertEqual(fallback, {"active": True, "reason": "HEAD commits differ"})
         self.assertEqual(
-            [event[3] for event in starts[:4] + starts[5:]], [None] * 6,
+            [event[3] for event in starts[:4] + starts[5:]],
+            [None] * 6,
             "only the refresh-all fallback start carries seedFallback",
         )
         dones = [event for event in recorder.events if event[0] == "done"]
@@ -318,18 +321,18 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             seed = next(result for result in payload["results"] if result["action"] == "seed")
             self.assertFalse(seed["ok"])
-            self.assertTrue(
-                any(result["action"] == "refresh-all" for result in payload["results"])
-            )
+            self.assertTrue(any(result["action"] == "refresh-all" for result in payload["results"]))
 
     def test_cgc_refresh_fallback_is_off_by_default(self) -> None:
         # 260707-HFX-L2: a refused seed must never cost a from-zero reindex on
         # its own — the fallback fires only on explicit opt-in.
-        self.assertFalse(provider_setup.ProviderSetupRequest(
-            action="prepare",
-            coordination_root=Path("/tmp"),
-            settings_path=Path("/tmp/settings.json"),
-        ).cgc_refresh_fallback)
+        self.assertFalse(
+            provider_setup.ProviderSetupRequest(
+                action="prepare",
+                coordination_root=Path("/tmp"),
+                settings_path=Path("/tmp/settings.json"),
+            ).cgc_refresh_fallback
+        )
         parser = provider_setup.build_parser()
         args = parser.parse_args(
             ["prepare", "--coordination-root", "/tmp", "--from-settings", "/tmp/s.json"]
@@ -585,11 +588,7 @@ class ProviderSetupTests(unittest.TestCase):
             self.assertEqual(
                 cgc["runtimeRoot"],
                 (
-                    isolated_root
-                    / "providers"
-                    / "runners"
-                    / "codegraphcontext"
-                    / instance_id
+                    isolated_root / "providers" / "runners" / "codegraphcontext" / instance_id
                 ).as_posix(),
             )
             self.assertEqual(

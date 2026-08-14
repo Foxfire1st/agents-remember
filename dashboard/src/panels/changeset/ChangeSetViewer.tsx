@@ -153,18 +153,138 @@ function partnerCodePath(memPath: string): string | null {
   return base;
 }
 
-export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: ChangeSetTarget & { onBack: () => void }) {
-  const [data, setData] = useState<TaskChangeset | MasterChangeset | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [active, setActive] = useState<{ kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null>(null);
-  const [diff, setDiff] = useState<FileDiff | null>(null);
-  const [partner, setPartner] = useState<FileDiff | null>(null);
-  // Selection precedence leaf > master > scope: a `leaf` is one leaf's committed/working delta
-  // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
-  const isLeaf = Boolean(leaf);
-  const isSeries = Boolean(master) && !leaf;
-  const hasData = data !== null;
+function changesetListRequest(
+  repo: string,
+  scope: string | undefined,
+  master: string | undefined,
+  leaf: string | undefined,
+  mode: LeafMode | undefined,
+): Promise<TaskChangeset | MasterChangeset> {
+  return leaf
+    ? leafChangeset(repo, master ?? "", leaf, mode ?? "committed")
+    : master
+      ? masterChangeset(repo, master, { includeLeaves: false })
+      : taskChangeset(repo, scope ?? "");
+}
 
+function diffRequestFor(
+  repo: string,
+  scope: string | undefined,
+  master: string | undefined,
+  leaf: string | undefined,
+  mode: LeafMode | undefined,
+  kind: "code" | "memory",
+  path: string,
+): Promise<FileDiff | null> {
+  return leaf
+    ? leafFileDiff(repo, master ?? "", leaf, kind, path, mode ?? "committed")
+    : master
+      ? masterFileDiff(repo, master, kind, path)
+      : fileDiff(repo, scope ?? "", kind, path);
+}
+
+function partnerTargetFor(
+  kind: "code" | "memory",
+  path: string,
+  hasSidecar?: boolean,
+): { kind: "code" | "memory"; path: string } | null {
+  if (kind === "code") {
+    return hasSidecar ? { kind: "memory", path: `onboarding/${path}.md` } : null;
+  }
+  const code = partnerCodePath(path);
+  return code ? { kind: "code", path: code } : null;
+}
+
+function headerLabelFor(
+  leaf: string | undefined,
+  master: string | undefined,
+  scope: string | undefined,
+  isSeries: boolean,
+  mode: LeafMode | undefined,
+): string {
+  if (leaf) return mode === "working" ? `working · ${leaf} · uncommitted` : `committed · ${leaf}`;
+  return isSeries ? `series ${master} · net since series start` : (scope ?? "");
+}
+
+function CounterRow({ counters }: { counters: TaskChangeset["counters"] }) {
+  return (
+    <span className={counterRow} data-testid="changeset-counters">
+      <span>
+        code <span className={ins}>+{counters.code.insertions}</span>{" "}
+        <span className={del}>−{counters.code.deletions}</span> ({counters.code.files})
+      </span>
+      <span>
+        memory <span className={ins}>+{counters.memory.insertions}</span>{" "}
+        <span className={del}>−{counters.memory.deletions}</span> ({counters.memory.files})
+      </span>
+    </span>
+  );
+}
+
+function ChangeList({
+  files,
+  kind,
+  active,
+  onOpen,
+  partnerHint,
+  testPrefix,
+}: {
+  files: ChangedFile[];
+  kind: "code" | "memory";
+  active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null;
+  onOpen: (kind: "code" | "memory", file: ChangedFile, withPartner?: boolean) => void;
+  partnerHint: (file: ChangedFile) => boolean;
+  testPrefix?: string;
+}) {
+  return (
+    <div className={section}>
+      <div className={sectionHead}>
+        changed {kind === "code" ? "code" : "onboarding"} ({files.length})
+      </div>
+      {files.map((f) => (
+        <div
+          key={f.path}
+          className={row}
+          data-active={active?.kind === kind && active.path === f.path}
+        >
+          <button type="button" className={rowMain} onClick={() => onOpen(kind, f)}>
+            <span className={statusChip}>{f.status}</span>
+            <span className={pathText}>{f.path}</span>
+            <Counts file={f} />
+          </button>
+          {partnerHint(f) ? (
+            <button
+              type="button"
+              className={sidecarBtn}
+              title={
+                kind === "code"
+                  ? "open with its sidecar (3rd column)"
+                  : "open with its partner code file (3rd column)"
+              }
+              onClick={() => onOpen(kind, f, true)}
+              data-testid={testPrefix}
+            >
+              {kind === "code" ? "◇" : "↔"}
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useChangesetLoad(
+  repo: string,
+  scope: string | undefined,
+  master: string | undefined,
+  leaf: string | undefined,
+  mode: LeafMode | undefined,
+  setData: (data: TaskChangeset | MasterChangeset | null) => void,
+  setError: (error: string | null) => void,
+  setActive: (active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null) => void,
+  setDiff: (diff: FileDiff | null) => void,
+  setPartner: (diff: FileDiff | null) => void,
+): void {
   useEffect(() => {
     let live = true;
     setData(null);
@@ -172,11 +292,7 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
     setActive(null);
     setDiff(null);
     setPartner(null);
-    const req = leaf
-      ? leafChangeset(repo, master ?? "", leaf, mode ?? "committed")
-      : master
-        ? masterChangeset(repo, master, { includeLeaves: false })
-        : taskChangeset(repo, scope ?? "");
+    const req = changesetListRequest(repo, scope, master, leaf, mode);
     void req.then(
       (d) => live && setData(d),
       (e: unknown) => live && setError(e instanceof FilesApiError ? `${e.code} (${e.httpStatus})` : "Failed to load change-set"),
@@ -184,17 +300,19 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
     return () => {
       live = false;
     };
-  }, [repo, scope, master, leaf, mode]);
+  }, [repo, scope, master, leaf, mode, setData, setError, setActive, setDiff, setPartner]);
+}
 
-  // L4a: the WORKING view is the LIVE uncommitted delta, so it must not be a frozen snapshot taken
-  // when the button was clicked. Refresh the change-set after each prior refresh settles so a file edited *after* opening
-  // appears in the list (and the counters track), AND re-fetch the file currently open in the diff
-  // column so an edit to the file you are LOOKING AT updates in place. The open-diff re-fetch is cheap
-  // and non-disruptive: CodeMirror only rebuilds when the before/after content actually changed, so an
-  // unchanged poll is a no-op (no flicker / scroll-reset) — it only re-renders when that file is the
-  // one edited, which is exactly when you want it to. Only `working` polls — committed/series/scope
-  // are immutable snapshots of committed state. (A server push would need a worktree watcher + SSE; a
-  // settle-then-schedule loop is self-contained and enough on localhost.)
+function useWorkingChangesetPoll(
+  mode: LeafMode | undefined,
+  leaf: string | undefined,
+  repo: string,
+  master: string | undefined,
+  active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null,
+  hasData: boolean,
+  setData: (data: TaskChangeset | MasterChangeset | null) => void,
+  setDiff: (diff: FileDiff | null) => void,
+): void {
   useEffect(() => {
     if (mode !== "working" || !leaf || !hasData) return;
     let live = true;
@@ -216,26 +334,113 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
       live = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [mode, leaf, repo, master, active, hasData]);
+  }, [mode, leaf, repo, master, active, hasData, setData, setDiff]);
+}
 
-  const partnerOf = (kind: "code" | "memory", path: string, hasSidecar?: boolean) =>
-    kind === "code"
-      ? hasSidecar
-        ? { kind: "memory" as const, path: `onboarding/${path}.md` }
-        : null
-      : (() => {
-          const code = partnerCodePath(path);
-          return code ? { kind: "code" as const, path: code } : null;
-        })();
+function ChangeSetWorkspace({
+  error,
+  data,
+  active,
+  diff,
+  partner,
+  onOpen,
+}: {
+  error: string | null;
+  data: TaskChangeset | MasterChangeset | null;
+  active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null;
+  diff: FileDiff | null;
+  partner: FileDiff | null;
+  onOpen: (kind: "code" | "memory", file: ChangedFile, withPartner?: boolean) => void;
+}) {
+  if (error) {
+    return (
+      <div className={placeholder} data-testid="pane-placeholder">
+        {error}
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className={placeholder} data-testid="pane-placeholder">
+        Loading change-set…
+      </div>
+    );
+  }
+  return (
+    <PanelGroup direction="horizontal" autoSaveId="changeset.outer" className={css({ flex: "1", minHeight: "0" })}>
+      <Panel defaultSize={26} minSize={16}>
+        <div className={colList}>
+          <ChangeList
+            files={data?.code ?? []}
+            kind="code"
+            active={active}
+            onOpen={onOpen}
+            partnerHint={(file) => file.hasSidecar === true}
+            testPrefix="changeset-open-sidecar"
+          />
+          <ChangeList
+            files={data?.memory ?? []}
+            kind="memory"
+            active={active}
+            onOpen={onOpen}
+            partnerHint={(file) => partnerTargetFor("memory", file.path) !== null}
+          />
+        </div>
+      </Panel>
+      <PanelResizeHandle className={handle} />
+      <Panel minSize={20}>
+        {diff ? (
+          <ChangeSetPane diff={diff} keyPrefix="changeset.main" />
+        ) : (
+          // No file picked yet: the same faint boomerang backdrop the File Viewer / Operations use.
+          <div className={emptyHost}>
+            {/* Brighter than the shared 0.14 default — the siege-tank clip reads darker; matches DualPane. */}
+            <EmptyStateBackdrop src="/assets/sc2-siege-tank-boomerang.mp4" opacity={0.18}>
+              Select a changed file
+            </EmptyStateBackdrop>
+          </div>
+        )}
+      </Panel>
+      {partner ? (
+        <>
+          <PanelResizeHandle className={handle} />
+          <Panel minSize={20}>
+            <ChangeSetPane diff={partner} keyPrefix="changeset.partner" />
+          </Panel>
+        </>
+      ) : null}
+    </PanelGroup>
+  );
+}
+
+export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: ChangeSetTarget & { onBack: () => void }) {
+  const [data, setData] = useState<TaskChangeset | MasterChangeset | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState<{ kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null>(null);
+  const [diff, setDiff] = useState<FileDiff | null>(null);
+  const [partner, setPartner] = useState<FileDiff | null>(null);
+  // Selection precedence leaf > master > scope: a `leaf` is one leaf's committed/working delta
+  // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
+  const isSeries = Boolean(master) && !leaf;
+  const hasData = data !== null;
+
+  useChangesetLoad(repo, scope, master, leaf, mode, setData, setError, setActive, setDiff, setPartner);
+
+  // L4a: the WORKING view is the LIVE uncommitted delta, so it must not be a frozen snapshot taken
+  // when the button was clicked. Refresh the change-set after each prior refresh settles so a file edited *after* opening
+  // appears in the list (and the counters track), AND re-fetch the file currently open in the diff
+  // column so an edit to the file you are LOOKING AT updates in place. The open-diff re-fetch is cheap
+  // and non-disruptive: CodeMirror only rebuilds when the before/after content actually changed, so an
+  // unchanged poll is a no-op (no flicker / scroll-reset) — it only re-renders when that file is the
+  // one edited, which is exactly when you want it to. Only `working` polls — committed/series/scope
+  // are immutable snapshots of committed state. (A server push would need a worktree watcher + SSE; a
+  // settle-then-schedule loop is self-contained and enough on localhost.)
+  useWorkingChangesetPoll(mode, leaf, repo, master, active, hasData, setData, setDiff);
 
   // Each selector diffs its own range, all into the same MergeView: a leaf its committed/working
   // range, `master` the NET series range (base -> tip), an enclosure `scope` its base -> worktree.
   const loadDiff = (kind: "code" | "memory", path: string) =>
-    leaf
-      ? leafFileDiff(repo, master ?? "", leaf, kind, path, mode ?? "committed")
-      : master
-        ? masterFileDiff(repo, master, kind, path)
-        : fileDiff(repo, scope ?? "", kind, path);
+    diffRequestFor(repo, scope, master, leaf, mode, kind, path);
 
   const open = (kind: "code" | "memory", file: Row, withPartner = false) => {
     if (!leaf && !master && !scope) return;
@@ -243,18 +448,12 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
     setDiff(null);
     setPartner(null);
     void loadDiff(kind, file.path).then(setDiff, () => setDiff(null));
-    const partnerRef = withPartner ? partnerOf(kind, file.path, file.hasSidecar) : null;
+    const partnerRef = withPartner ? partnerTargetFor(kind, file.path, file.hasSidecar) : null;
     if (partnerRef) void loadDiff(partnerRef.kind, partnerRef.path).then(setPartner, () => setPartner(null));
   };
 
   const counters = data?.counters;
-  const headerLabel = isLeaf
-    ? mode === "working"
-      ? `working · ${leaf} · uncommitted`
-      : `committed · ${leaf}`
-    : isSeries
-      ? `series ${master} · net since series start`
-      : (scope ?? "");
+  const headerLabel = headerLabelFor(leaf, master, scope, isSeries, mode);
 
   return (
     <div className={screen} data-testid="changeset-viewer">
@@ -263,103 +462,17 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
           ← back
         </button>
         <span className={title}>change-set · {headerLabel}</span>
-        {counters ? (
-          <span className={counterRow} data-testid="changeset-counters">
-            <span>
-              code <span className={ins}>+{counters.code.insertions}</span>{" "}
-              <span className={del}>−{counters.code.deletions}</span> ({counters.code.files})
-            </span>
-            <span>
-              memory <span className={ins}>+{counters.memory.insertions}</span>{" "}
-              <span className={del}>−{counters.memory.deletions}</span> ({counters.memory.files})
-            </span>
-          </span>
-        ) : null}
+        {counters ? <CounterRow counters={counters} /> : null}
       </header>
 
-      {error ? (
-        <div className={placeholder} data-testid="pane-placeholder">
-          {error}
-        </div>
-      ) : !data ? (
-        <div className={placeholder} data-testid="pane-placeholder">
-          Loading change-set…
-        </div>
-      ) : (
-        <PanelGroup direction="horizontal" autoSaveId="changeset.outer" className={css({ flex: "1", minHeight: "0" })}>
-          <Panel defaultSize={26} minSize={16}>
-            <div className={colList}>
-              <div className={section}>
-                <div className={sectionHead}>changed code ({data?.code.length ?? 0})</div>
-                {(data?.code ?? []).map((f) => (
-                  <div key={f.path} className={row} data-active={active?.kind === "code" && active.path === f.path}>
-                    <button type="button" className={rowMain} onClick={() => open("code", f)}>
-                      <span className={statusChip}>{f.status}</span>
-                      <span className={pathText}>{f.path}</span>
-                      <Counts file={f} />
-                    </button>
-                    {f.hasSidecar ? (
-                      <button
-                        type="button"
-                        className={sidecarBtn}
-                        title="open with its sidecar (3rd column)"
-                        onClick={() => open("code", f, true)}
-                        data-testid="changeset-open-sidecar"
-                      >
-                        ◇
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <div className={section}>
-                <div className={sectionHead}>changed onboarding ({data?.memory.length ?? 0})</div>
-                {(data?.memory ?? []).map((f) => (
-                  <div key={f.path} className={row} data-active={active?.kind === "memory" && active.path === f.path}>
-                    <button type="button" className={rowMain} onClick={() => open("memory", f)}>
-                      <span className={statusChip}>{f.status}</span>
-                      <span className={pathText}>{f.path}</span>
-                      <Counts file={f} />
-                    </button>
-                    {partnerOf("memory", f.path) ? (
-                      <button
-                        type="button"
-                        className={sidecarBtn}
-                        title="open with its partner code file (3rd column)"
-                        onClick={() => open("memory", f, true)}
-                      >
-                        ↔
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Panel>
-          <PanelResizeHandle className={handle} />
-          <Panel minSize={20}>
-            {diff ? (
-              <ChangeSetPane diff={diff} keyPrefix="changeset.main" />
-            ) : (
-              // No file picked yet: the same faint boomerang backdrop the File Viewer / Operations use.
-              <div className={emptyHost}>
-                {/* Brighter than the shared 0.14 default — the siege-tank clip reads darker; matches DualPane. */}
-                <EmptyStateBackdrop src="/assets/sc2-siege-tank-boomerang.mp4" opacity={0.18}>
-                  Select a changed file
-                </EmptyStateBackdrop>
-              </div>
-            )}
-          </Panel>
-          {partner ? (
-            <>
-              <PanelResizeHandle className={handle} />
-              <Panel minSize={20}>
-                <ChangeSetPane diff={partner} keyPrefix="changeset.partner" />
-              </Panel>
-            </>
-          ) : null}
-        </PanelGroup>
-      )}
+      <ChangeSetWorkspace
+        error={error}
+        data={data}
+        active={active}
+        diff={diff}
+        partner={partner}
+        onOpen={open}
+      />
     </div>
   );
 }

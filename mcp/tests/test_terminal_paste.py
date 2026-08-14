@@ -4,8 +4,11 @@ import pytest
 from agents_remember.serving.terminal_paste import (
     CODEX_PASTE_ENTER_SUPPRESS_SECONDS,
     DISPATCH_SUBMIT_SETTLE_SECONDS,
+    AcceptanceWindow,
     DispatchPastePolicy,
+    PasteRecoveryLadder,
     TerminalPaster,
+    TerminalPasterSeams,
     sanitize_for_injection,
 )
 
@@ -21,12 +24,28 @@ class _Clock:
 
 
 class _Tmux:
-    def __init__(self, *, capture_values: list[str] | None = None) -> None:
+    """A tmux double that can also refuse: ``paste_results`` and ``failing_keys`` fail commands.
+
+    Every tmux command the paster drives can fail in production (the pane went away mid-ladder,
+    the server is wedged), and the paster's contract is different for each failure -- an unwritten
+    buffer is not delivered, a refused Enter is delivered but unsubmitted. The double therefore has
+    to be able to say no per command, not merely record the calls.
+    """
+
+    def __init__(
+        self,
+        *,
+        capture_values: list[str] | None = None,
+        paste_results: list[bool] | None = None,
+        failing_keys: frozenset[str] = frozenset(),
+    ) -> None:
         self.loads: list[str] = []
         self.pastes = 0
         self.keys: list[str] = []
         self.captures = 0
         self.capture_values = list(capture_values or [])
+        self.paste_results = list(paste_results or [])
+        self.failing_keys = failing_keys
         self.sleeps: list[float] = []
 
     def load(self, _name: str, text: str) -> bool:
@@ -35,11 +54,11 @@ class _Tmux:
 
     def paste(self, _tmux: str, _name: str) -> bool:
         self.pastes += 1
-        return True
+        return self.paste_results.pop(0) if self.paste_results else True
 
     def key(self, _tmux: str, key: str) -> bool:
         self.keys.append(key)
-        return True
+        return key not in self.failing_keys
 
     def capture(self, _tmux: str) -> str:
         self.captures += 1
@@ -53,12 +72,14 @@ class _Tmux:
 
 def _paster(tmux: _Tmux) -> TerminalPaster:
     return TerminalPaster(
-        load_buffer=tmux.load,
-        paste_buffer=tmux.paste,
-        send_key=tmux.key,
-        capture_pane=tmux.capture,
-        sleep=tmux.sleep,
-        monotonic=_Clock(),
+        TerminalPasterSeams(
+            load_buffer=tmux.load,
+            paste_buffer=tmux.paste,
+            send_key=tmux.key,
+            capture_pane=tmux.capture,
+            sleep=tmux.sleep,
+            monotonic=_Clock(),
+        )
     )
 
 
@@ -76,6 +97,107 @@ def test_success_uses_log_probe_and_never_captures_pane() -> None:
     assert tmux.captures == 0
 
 
+def test_acceptance_on_the_first_enter_climbs_no_rung_of_the_ladder() -> None:
+    # The pane was not yet accepted when the paster was called, so the whole ladder is armed --
+    # and the ordinary case is that the very first Enter is enough. Nothing beyond it may run:
+    # one paste, one Enter, and no clear/replace, because every extra rung risks a duplicate.
+    tmux = _Tmux()
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: tmux.keys == ["Enter"],
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
+    )
+    assert result.submitted
+    assert result.delivered
+    assert tmux.loads == ["brief"]
+    assert tmux.pastes == 1
+    assert tmux.keys == ["Enter"]
+    # Exactly the one origin capture the ladder takes before pasting; no rung read the pane.
+    assert tmux.captures == 1
+
+
+def test_an_unwritable_buffer_reports_undelivered_and_never_presses_enter() -> None:
+    # tmux refused the paste, so nothing reached the composer. Pressing Enter now would submit
+    # whatever the composer already held, so the paster must stop with delivered=False instead.
+    tmux = _Tmux(paste_results=[False])
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: False,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
+    )
+    assert not result.delivered
+    assert not result.submitted
+    assert result.capture == "failure pane"
+    assert tmux.pastes == 1
+    assert tmux.keys == []
+
+
+def test_a_refused_enter_ends_the_ladder_as_delivered_but_unsubmitted() -> None:
+    # The bytes are in the composer (delivered) but tmux would not send the key, so no submission
+    # can be claimed and no further rung may run: a rung that re-pastes would duplicate the draft.
+    tmux = _Tmux(failing_keys=frozenset({"Enter"}))
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: False,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
+    )
+    assert result.delivered
+    assert not result.submitted
+    assert result.capture == "failure pane"
+    assert tmux.pastes == 1
+    assert tmux.keys == ["Enter"]
+
+
+def test_a_refused_clear_key_blocks_the_repaste_rather_than_appending() -> None:
+    # Rung 3 found the prior payload still visible and could not clear it. Re-pasting on top of a
+    # payload that is still there is exactly the duplicate submission the ladder exists to avoid,
+    # so the attempt stops on the pane it could not clear.
+    tmux = _Tmux(
+        capture_values=["codex >", "[Pasted Content 5 chars]\ncodex >"],
+        failing_keys=frozenset({"C-u"}),
+    )
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: False,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
+    )
+    assert result.delivered
+    assert not result.submitted
+    assert result.capture == "failure pane"
+    assert tmux.keys == ["Enter", "Enter", "C-u"]
+    assert tmux.loads == ["brief"]
+    assert tmux.pastes == 1
+
+
+def test_dispatch_recovery_reports_failure_when_the_verified_repaste_cannot_be_written() -> None:
+    # The retry pane proved the prior draft absent, so re-pasting the durable brief is the correct
+    # move -- but tmux refused it. Nothing reached the composer, so this is an undelivered failure
+    # and no Enter follows it.
+    tmux = _Tmux(
+        capture_values=["\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} Explain this codebase"],
+        paste_results=[False],
+    )
+    result = _paster(tmux).paste_dispatch(
+        "ar-1",
+        "brief",
+        accepted=lambda: False,
+        policy=DispatchPastePolicy(attempt="recovery", visible_marker="entry: E1", harness="codex"),
+    )
+    assert not result.delivered
+    assert not result.submitted
+    assert tmux.loads == ["brief"]
+    assert tmux.pastes == 1
+    assert tmux.keys == []
+
+
 def test_first_absence_waits_full_window_before_enter_repress() -> None:
     tmux = _Tmux()
 
@@ -87,8 +209,7 @@ def test_first_absence_waits_full_window_before_enter_repress() -> None:
         "brief",
         submit=True,
         accepted=accepted,
-        flush_window=1.0,
-        poll_interval=0.1,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0, poll_interval=0.1)),
     )
     assert result.submitted
     assert tmux.keys == ["Enter", "Enter"]
@@ -107,7 +228,7 @@ def test_repaste_happens_only_after_enter_repress_window() -> None:
         "brief",
         submit=True,
         accepted=accepted,
-        flush_window=1.0,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
     )
     assert result.submitted
     assert tmux.pastes == 2
@@ -122,7 +243,7 @@ def test_exhausted_ladder_returns_the_final_failure_capture() -> None:
         "brief",
         submit=True,
         accepted=lambda: False,
-        flush_window=1.0,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
     )
     assert result.delivered
     assert not result.submitted
@@ -144,7 +265,7 @@ def test_duplicate_chip_blocks_repaste_when_clear_does_not_remove_it() -> None:
         "brief",
         submit=True,
         accepted=lambda: False,
-        flush_window=1.0,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
     )
     assert result.delivered
     assert not result.submitted
@@ -169,7 +290,7 @@ def test_visible_composer_chip_is_cleared_before_replacement() -> None:
         "brief",
         submit=True,
         accepted=lambda: tmux.pastes >= 2,
-        flush_window=1.0,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
     )
     assert result.submitted
     assert tmux.pastes == 2
@@ -185,7 +306,7 @@ def test_unobservable_pane_blocks_repaste() -> None:
         "brief",
         submit=True,
         accepted=lambda: False,
-        flush_window=1.0,
+        ladder=PasteRecoveryLadder(window=AcceptanceWindow(flush_window=1.0)),
     )
     assert result.delivered
     assert not result.submitted
@@ -196,9 +317,21 @@ def test_unobservable_pane_blocks_repaste() -> None:
 
 def test_settle_guard_is_at_least_100ms() -> None:
     tmux = _Tmux()
-    _paster(tmux).paste("ar-1", "brief", submit=True, accepted=lambda: True, settle_delay=0)
+    _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: True,
+        ladder=PasteRecoveryLadder(settle_delay=0),
+    )
     # Pre-existing acceptance skips transport. Exercise the transport-only command path instead.
-    _paster(tmux).paste("ar-1", "/effort ultracode", submit=True, accepted=None, settle_delay=0)
+    _paster(tmux).paste(
+        "ar-1",
+        "/effort ultracode",
+        submit=True,
+        accepted=None,
+        ladder=PasteRecoveryLadder(settle_delay=0),
+    )
     assert 0.1 in tmux.sleeps
 
 
@@ -222,12 +355,11 @@ def test_dispatch_settle_is_strictly_beyond_codex_suppression_window() -> None:
 
 def test_initial_dispatch_uses_one_paste_and_one_enter() -> None:
     tmux = _Tmux()
-    result = _paster(tmux).paste(
+    result = _paster(tmux).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: tmux.keys == ["Enter"],
-        dispatch_policy=DispatchPastePolicy(attempt="initial", visible_marker="entry: E1"),
+        policy=DispatchPastePolicy(attempt="initial", visible_marker="entry: E1"),
     )
     assert result.submitted
     assert tmux.loads == ["brief"]
@@ -243,14 +375,11 @@ def test_dispatch_retry_submits_visible_same_draft_without_repaste() -> None:
             "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} Explain this codebase"
         ]
     )
-    result = _paster(tmux).paste(
+    result = _paster(tmux).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: tmux.keys == ["Enter"],
-        dispatch_policy=DispatchPastePolicy(
-            attempt="recovery", visible_marker="entry: E1", harness="codex"
-        ),
+        policy=DispatchPastePolicy(attempt="recovery", visible_marker="entry: E1", harness="codex"),
     )
     assert result.submitted
     assert tmux.loads == []
@@ -262,14 +391,11 @@ def test_dispatch_retry_pastes_once_only_after_verified_absence() -> None:
     tmux = _Tmux(
         capture_values=["\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} Explain this codebase"]
     )
-    result = _paster(tmux).paste(
+    result = _paster(tmux).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: tmux.keys == ["Enter"],
-        dispatch_policy=DispatchPastePolicy(
-            attempt="recovery", visible_marker="entry: E1", harness="codex"
-        ),
+        policy=DispatchPastePolicy(attempt="recovery", visible_marker="entry: E1", harness="codex"),
     )
     assert result.submitted
     assert tmux.loads == ["brief"]
@@ -283,14 +409,11 @@ def test_dispatch_retry_leaves_ambiguous_duplicate_chips_pending() -> None:
         "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK}"
     )
     tmux = _Tmux(capture_values=[capture])
-    result = _paster(tmux).paste(
+    result = _paster(tmux).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: False,
-        dispatch_policy=DispatchPastePolicy(
-            attempt="recovery", visible_marker="entry: E1", harness="codex"
-        ),
+        policy=DispatchPastePolicy(attempt="recovery", visible_marker="entry: E1", harness="codex"),
     )
     assert result.delivered
     assert not result.submitted
@@ -303,14 +426,11 @@ def test_dispatch_retry_leaves_ambiguous_duplicate_chips_pending() -> None:
 def test_dispatch_retry_leaves_unrelated_codex_draft_pending() -> None:
     capture = "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} do not overwrite me"
     tmux = _Tmux(capture_values=[capture])
-    result = _paster(tmux).paste(
+    result = _paster(tmux).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: False,
-        dispatch_policy=DispatchPastePolicy(
-            attempt="recovery", visible_marker="entry: E1", harness="codex"
-        ),
+        policy=DispatchPastePolicy(attempt="recovery", visible_marker="entry: E1", harness="codex"),
     )
     assert result.delivered
     assert not result.submitted
@@ -325,14 +445,11 @@ def test_dispatch_retry_does_not_submit_historical_matching_marker() -> None:
         "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} entry: E1\n■ You've hit your usage limit."
     )
     tmux = _Tmux(capture_values=[capture])
-    result = _paster(tmux).paste(
+    result = _paster(tmux).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: False,
-        dispatch_policy=DispatchPastePolicy(
-            attempt="recovery", visible_marker="entry: E1", harness="codex"
-        ),
+        policy=DispatchPastePolicy(attempt="recovery", visible_marker="entry: E1", harness="codex"),
     )
     assert result.delivered
     assert not result.submitted
@@ -363,22 +480,20 @@ def test_early_enter_control_is_suppressed_but_dispatch_enter_submits() -> None:
         "brief",
         submit=True,
         accepted=lambda: early.submitted,
-        flush_window=0,
-        settle_delay=0.1,
-        enter_represses=0,
-        repastes=0,
+        ladder=PasteRecoveryLadder(
+            window=AcceptanceWindow(flush_window=0), settle_delay=0.1, enter_represses=0, repastes=0
+        ),
     )
     assert not early_result.submitted
     assert early.keys == ["Enter"]
 
     dispatch = _SuppressionTmux()
-    dispatch_result = _paster(dispatch).paste(
+    dispatch_result = _paster(dispatch).paste_dispatch(
         "ar-1",
         "brief",
-        submit=True,
         accepted=lambda: dispatch.submitted,
-        flush_window=0,
-        dispatch_policy=DispatchPastePolicy(attempt="initial", visible_marker="entry: E1"),
+        window=AcceptanceWindow(flush_window=0),
+        policy=DispatchPastePolicy(attempt="initial", visible_marker="entry: E1"),
     )
     assert dispatch_result.submitted
     assert dispatch.keys == ["Enter"]

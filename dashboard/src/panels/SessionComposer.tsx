@@ -1,94 +1,117 @@
-import { useState } from "react";
-import { Button, TextArea, TextField } from "react-aria-components";
+// One CM6 markdown composer for every session surface: per-session drafts live in the
+// cockpit store, Ctrl+Enter submits through /submit, Enter remains a newline, and Alt+Up performs
+// an epoch-bound atomic server withdrawal before restoring text. No component here owns a
+// PTY connection or paste helper; raw xterm typing remains the only raw-stdin path.
+// The store/editor/keymap machinery lives in sessionComposerHooks.ts, the render rows in
+// sessionComposerParts.tsx, and the shared styles in sessionComposerStyles.ts.
 
-import { css } from "../../styled-system/css";
+import { Compartment } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
-// The context composer (slice 6e-3): a docked input that injects a block of text into the **active**
-// session's stdin — "send to session" / "pass any amount of context into the chat" (the on-ramp to 6f
-// highlight→feedback). Presentational + controlled: it owns only the draft text and reports `onSend`;
-// `Chats` wires that to the active `TerminalConnection` and wraps it as a bracketed paste. React Aria
-// `TextField`/`TextArea` + `Button` (coding-guidelines: use the React Aria primitive, don't hand-roll).
-const form = css({
-  display: "flex",
-  alignItems: "flex-end",
-  gap: "0.4rem",
-  flexShrink: 0,
-});
-const field = css({ display: "flex", flex: "1", minWidth: "0" });
-const area = css({
-  font: "inherit",
-  fontSize: "0.78rem",
-  color: "inherit",
-  width: "100%",
-  resize: "none",
-  minHeight: "2.25rem",
-  maxHeight: "8rem",
-  paddingInline: "0.5rem",
-  paddingBlock: "0.35rem",
-  background: "bg",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
-const send = css({
-  font: "inherit",
-  fontSize: "0.74rem",
-  letterSpacing: "0.04em",
-  flexShrink: 0,
-  paddingInline: "0.7rem",
-  paddingBlock: "0.35rem",
-  borderRadius: "2px",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "amber",
-  color: "amber",
-  background: "transparent",
-  cursor: "pointer",
-  _hover: { background: "rgba(232, 193, 112, 0.1)" },
-  _disabled: { opacity: "0.4", cursor: "default", _hover: { background: "transparent" } },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
+import { useEffectiveKeymap } from "../data/keymap/preferences";
+import type { OpenSession } from "../data/sessions";
+import type { ConversationInterrupt } from "./session-cockpit/conversation/useConversationControls";
+import {
+  useComposerEditor,
+  useComposerInteraction,
+  useComposerKeymap,
+  useComposerRecovery,
+  useComposerStore,
+  useComposerStatusHandlers,
+  useComposerSubmit,
+  useComposerView,
+  type ComposerCallbackRefs,
+} from "./sessionComposerHooks";
+import {
+  ComposerView,
+} from "./sessionComposerParts";
 
-export function SessionComposer({ onSend }: { onSend: (text: string) => void }) {
-  const [text, setText] = useState("");
+export interface SessionComposerHandle {
+  submit(): void;
+  popBack(): void;
+  focus(): void;
+  getDraft(): string;
+  getElement(): HTMLElement | null;
+}
 
-  const submit = () => {
-    const value = text.trim();
-    if (!value) return;
-    onSend(value);
-    setText("");
-  };
+export interface SessionComposerProps {
+  session: OpenSession;
+  queuedSetHint?: string | null;
+  onSlashAtLineStart?: () => void;
+  onEscape?: () => void;
+  ariaLabel?: string;
+  /** The shared exact-turn interrupt — renders the ⏹ stop beside send while a turn works. */
+  interrupt?: ConversationInterrupt;
+  /** The view-owned working signal (SSE-preferred) that mounts/unmounts the stop control. */
+  turnWorking?: boolean;
+}
+
+export const SessionComposer = forwardRef<
+  SessionComposerHandle,
+  SessionComposerProps
+>(function SessionComposer(
+  {
+    session,
+    queuedSetHint,
+    onSlashAtLineStart,
+    onEscape,
+    ariaLabel = `Message ${session.label}`,
+    interrupt,
+    turnWorking = false,
+  },
+  forwardedRef,
+) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<EditorView | null>(null);
+  const syncingDraftRef = useRef(false);
+  const composingRef = useRef(false);
+  // A compartment is a plain extension key: one instance can be re-used across editor
+  // instances, and the EditorView itself is recreated per session identity below.
+  const editable = useMemo(() => new Compartment(), []);
+  const profileCompartment = useMemo(() => new Compartment(), []);
+  const keymapCompartment = useMemo(() => new Compartment(), []);
+  const effectiveKeymap = useEffectiveKeymap();
+  const callbackRef = useRef<ComposerCallbackRefs>({ onSlashAtLineStart, onEscape });
+  callbackRef.current = { onSlashAtLineStart, onEscape };
+  const [notice, setNotice] = useState<string | null>(null);
+  const store = useComposerStore(session);
+  const interaction = useComposerInteraction(session);
+  useEffect(() => setNotice(null), [session.id]);
+  const { submit, submitRef, popBackRef } = useComposerSubmit(session, interaction.answerInteractionId, setNotice, editorRef, composingRef);
+  const composerKeymap = useComposerKeymap(effectiveKeymap, submitRef, popBackRef, callbackRef);
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      submit: () => submitRef.current(), popBack: () => popBackRef.current(),
+      focus: () => editorRef.current?.focus(), getDraft: () => editorRef.current?.state.doc.toString() ?? "", getElement: () => frameRef.current,
+    }),
+    [submitRef, popBackRef],
+  );
+  useComposerEditor({
+    session, frameRef, editorRef, syncingDraftRef, composingRef, editable, profileCompartment,
+    keymapCompartment, draft: store.draft, gate: store.gate, ariaLabel, effectiveKeymap, composerKeymap, callbackRef,
+  });
+  const { recoverWithdrawn, keepCurrentDraft } = useComposerRecovery(session, store.withdrawalRecovery, store.draft, setNotice, editorRef);
+  const view = useComposerView({ session, store, interaction, queuedSetHint, effectiveKeymap, setNotice });
+  const statusHandlers = useComposerStatusHandlers(session, store, setNotice);
 
   return (
-    <div className={form} data-testid="chats-composer">
-      <TextField
-        className={field}
-        aria-label="Send context to the session"
-        value={text}
-        onChange={setText}
-      >
-        <TextArea
-          className={area}
-          rows={1}
-          placeholder="Paste context to send to this session…  (⌘/Ctrl+Enter)"
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.preventDefault();
-              submit();
-            }
-          }}
-        />
-      </TextField>
-      <Button
-        className={send}
-        isDisabled={text.trim().length === 0}
-        onPress={submit}
-        data-testid="chats-composer-send"
-      >
-        Send
-      </Button>
-    </div>
+    <ComposerView
+      session={session} store={store} interaction={interaction} notice={notice}
+      frameRef={frameRef} view={view} interrupt={interrupt} turnWorking={turnWorking}
+      profile={effectiveKeymap.composerProfile} onSend={submit} onRetry={view.retry}
+      onRecover={recoverWithdrawn} onKeep={keepCurrentDraft}
+      onKeepWaiting={statusHandlers.onKeepWaiting}
+      onRelease={statusHandlers.onRelease}
+      onCopyRequestId={statusHandlers.onCopyRequestId}
+    />
   );
-}
+});

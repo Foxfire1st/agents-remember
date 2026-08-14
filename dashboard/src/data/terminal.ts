@@ -1,12 +1,18 @@
 import { createContext } from "react";
 
+import { readHarnessCatalog, type HarnessInfo } from "./harnessCatalog";
+import { fetchWithTimeout } from "./fetchWithTimeout";
+import { shareInflight } from "./inflight";
+export type { HarnessInfo } from "./harnessCatalog";
+
 // The client half of Mode B2 (slice 6e): a thin WebSocket bridge to the 6d terminal host at
 // `/api/terminal/{session}`. It is deliberately **xterm-agnostic** — it writes raw PTY bytes into
 // an injected `TerminalSink` and never imports xterm — so the protocol logic unit-tests against a
 // fake socket (the mirror of the backend's pure `_apply_terminal_input`), while `panels/Terminal`
 // owns the actual xterm rendering.
 
-const WS_OPEN = 1; // WebSocket.OPEN — referenced as a literal so tests need no real WebSocket.
+const WS_CONNECTING = 0;
+const WS_OPEN = 1; // WebSocket constants as literals so tests need no real WebSocket global.
 
 /** Where terminal output is written — an xterm `Terminal` in the app, a fake in tests. */
 export interface TerminalSink {
@@ -18,6 +24,13 @@ export interface TerminalSink {
 export interface TerminalConnection {
   sendInput(data: string): void;
   sendResize(cols: number, rows: number): void;
+  /** Attach a fresh socket to the same durable tmux session after an authoritative serving-boot
+   *  change. Each boot identity is consumed at most once. Returns true only when a replacement
+   *  socket was opened; this is an explicit one-shot action, never a timer/retry loop. */
+  reattach(
+    servingBootIdentity: string,
+    options?: { supersedeOpen?: boolean },
+  ): boolean;
   /** Resolves once the session looks ready for input — its output has gone quiet (the harness finished
    *  booting and is at its prompt) or a timeout elapses. The highlight composer waits on this so a
    *  context package isn't dropped into a still-starting harness (slice 6f). */
@@ -36,6 +49,10 @@ export interface ConnectTerminalOptions {
   socketFactory?: TerminalSocketFactory;
   /** Override the resolved `ws(s)://…` URL (tests). */
   url?: string;
+  /** Freshness honesty: `connected` on the WS handshake,
+   *  `reconnecting` when an explicit reattach starts, and `dropped` on a non-deliberate
+   *  close/exit. A deliberate `dispose()` reports nothing — the pane is gone, not unhealthy. */
+  onSocketState?: (state: "connected" | "reconnecting" | "dropped") => void;
 }
 
 /** Resolve the same-origin `ws(s)://<host>/api/terminal/{id}` URL for a session id (pure). */
@@ -93,7 +110,7 @@ const _delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeou
 
 const PASTE_SETTLE_MS = 250; // let the paste→pending-input widget render before submitting
 const CR_ECHO_SETTLE_MS = 250; // let the Enter's OWN echo land so it folds into the baseline, not a response
-const SUBMIT_RETRY_MS = 1800; // re-send Enter once on this cadence (tuned in S0 against a live harness)
+const SUBMIT_RETRY_MS = 1800; // re-send Enter once on this cadence (tuned against a live harness)
 const SUBMIT_TIMEOUT_MS = 9000; // give up confirming after this and surface an error, never silently
 
 /**
@@ -172,73 +189,154 @@ export async function pasteAndConfirm(
 
 /**
  * Open a WebSocket to the 6d bridge and pump it into `sink`. **Binary** frames are raw PTY bytes
- * (written verbatim — the VT stream xterm renders); a `{type:"exit"}` text frame or a socket close
- * ends the session exactly once. The returned handle emits the `{type:stdin|resize}` text frames
- * `_apply_terminal_input` parses server-side and tears the socket down.
+ * (written verbatim — the VT stream xterm renders); only a `{type:"exit"}` text frame ends the
+ * durable session. A transport close reports dropped state and remains eligible for a boot-owned
+ * reattach. The returned handle emits the `{type:stdin|resize}` text frames `_apply_terminal_input`
+ * parses server-side and tears the socket down.
  */
+interface TerminalSocketState {
+  socket: WebSocket | null;
+  disposed: boolean;
+  terminalExited: boolean;
+  lastReattachIdentity: string | null;
+  // The latest requested winsize, replayed on open: the first fit() runs before the WS handshake
+  // completes, so its resize frame would be dropped (send requires OPEN) and the PTY/tmux would stay
+  // at the spawn-default size — the terminal renders small until something else triggers a resize.
+  pendingResize: { cols: number; rows: number } | null;
+  // Stdin queued before the socket opens — a create-then-send (slice 6f) injects into a brand-new
+  // session whose handshake hasn't completed, so the first package would be dropped. Replayed on open;
+  // normal typed keystrokes arrive after open and send directly.
+  pendingInput: string[];
+  // Output-readiness (slice 6f): track when PTY output last arrived so `whenReady` can wait for a
+  // booting harness to settle at its prompt before a package is injected.
+  lastOutputAt: number;
+  sawOutput: boolean;
+}
+
+function wireSocket(
+  state: TerminalSocketState,
+  current: WebSocket,
+  sink: TerminalSink,
+  options: ConnectTerminalOptions,
+): void {
+  let dropped = false;
+  const reportDropped = () => {
+    // A close from the superseded daemon must never overwrite the active replacement's state.
+    if (state.disposed || dropped || state.socket !== current) return;
+    dropped = true;
+    options.onSocketState?.("dropped");
+  };
+
+  current.onmessage = (event: MessageEvent) => {
+    if (state.socket !== current) return;
+    if (event.data instanceof ArrayBuffer) {
+      state.sawOutput = true;
+      state.lastOutputAt = Date.now();
+      sink.write(new Uint8Array(event.data));
+    } else if (typeof event.data === "string" && parseTerminalControl(event.data) === "exit") {
+      state.terminalExited = true;
+      reportDropped();
+      sink.onExit();
+    }
+  };
+  current.onclose = reportDropped;
+  // Flush the buffered size once the socket is OPEN so the PTY winsize syncs to the fitted xterm
+  // even though the first fit() fired mid-handshake. The same replay restores the exact viewport
+  // after a serving restart; input typed while disconnected follows only after the resize.
+  current.onopen = () => {
+    if (state.disposed || state.socket !== current) return;
+    options.onSocketState?.("connected");
+    if (state.pendingResize) {
+      sendFrame(state, { type: "resize", cols: state.pendingResize.cols, rows: state.pendingResize.rows });
+    }
+    for (const data of state.pendingInput) sendFrame(state, { type: "stdin", data });
+    state.pendingInput = [];
+  };
+}
+
+function sendFrame(state: TerminalSocketState, payload: Record<string, unknown>): void {
+  if (state.socket?.readyState === WS_OPEN) {
+    state.socket.send(JSON.stringify(payload));
+  }
+}
+
+function alreadyConnected(state: TerminalSocketState): boolean {
+  return Boolean(
+    state.socket &&
+      (state.socket.readyState === WS_CONNECTING || state.socket.readyState === WS_OPEN),
+  );
+}
+
+function openSocketSupersedes(
+  state: TerminalSocketState,
+  reattachOptions: { supersedeOpen?: boolean },
+): boolean {
+  return state.socket?.readyState === WS_OPEN && !reattachOptions.supersedeOpen;
+}
+
+function closeSuperseded(previous: WebSocket | null, current: WebSocket): void {
+  if (previous && previous !== current) previous.close();
+}
+
+function openTerminalSocket(
+  state: TerminalSocketState,
+  url: string,
+  factory: (url: string) => WebSocket,
+  sink: TerminalSink,
+  options: ConnectTerminalOptions,
+  reattachIdentity?: string,
+  reattachOptions: { supersedeOpen?: boolean } = {},
+): boolean {
+  if (state.disposed || state.terminalExited) return false;
+  if (reattachIdentity !== undefined) {
+    if (state.lastReattachIdentity === reattachIdentity) return false;
+    state.lastReattachIdentity = reattachIdentity;
+    if (openSocketSupersedes(state, reattachOptions)) return false;
+    options.onSocketState?.("reconnecting");
+  } else if (alreadyConnected(state)) {
+    return false;
+  }
+  const previous = state.socket;
+  const current = factory(url);
+  state.socket = current;
+  // A boot-owned replacement supersedes even a still-CONNECTING socket that belonged to the dead
+  // daemon. Set active identity first, then close it, so any synchronous stale callback is inert.
+  closeSuperseded(previous, current);
+  current.binaryType = "arraybuffer";
+  wireSocket(state, current, sink, options);
+  return true;
+}
+
 export function connectTerminal(
   sessionId: string,
   sink: TerminalSink,
   options: ConnectTerminalOptions = {},
 ): TerminalConnection {
   const factory = options.socketFactory ?? ((url) => new WebSocket(url));
-  const socket = factory(options.url ?? terminalSocketUrl(sessionId));
-  socket.binaryType = "arraybuffer";
-
-  let ended = false;
-  // The latest requested winsize, replayed on open: the first fit() runs before the WS handshake
-  // completes, so its resize frame would be dropped (send requires OPEN) and the PTY/tmux would stay
-  // at the spawn-default size — the terminal renders small until something else triggers a resize.
-  let pendingResize: { cols: number; rows: number } | null = null;
-  // Stdin queued before the socket opens — a create-then-send (slice 6f) injects into a brand-new
-  // session whose handshake hasn't completed, so the first package would be dropped. Replayed on open;
-  // normal typed keystrokes arrive after open and send directly.
-  let pendingInput: string[] = [];
-  // Output-readiness (slice 6f): track when PTY output last arrived so `whenReady` can wait for a
-  // booting harness to settle at its prompt before a package is injected.
-  let lastOutputAt = 0;
-  let sawOutput = false;
-  const end = () => {
-    if (!ended) {
-      ended = true;
-      sink.onExit();
-    }
+  const url = options.url ?? terminalSocketUrl(sessionId);
+  const state: TerminalSocketState = {
+    socket: null,
+    disposed: false,
+    terminalExited: false,
+    lastReattachIdentity: null,
+    pendingResize: null,
+    pendingInput: [],
+    lastOutputAt: 0,
+    sawOutput: false,
   };
-
-  socket.onmessage = (event: MessageEvent) => {
-    if (event.data instanceof ArrayBuffer) {
-      sawOutput = true;
-      lastOutputAt = Date.now();
-      sink.write(new Uint8Array(event.data));
-    } else if (typeof event.data === "string" && parseTerminalControl(event.data) === "exit") {
-      end();
-    }
-  };
-  socket.onclose = end;
-
-  const send = (payload: Record<string, unknown>) => {
-    if (socket.readyState === WS_OPEN) {
-      socket.send(JSON.stringify(payload));
-    }
-  };
-
-  // Flush the buffered size once the socket is OPEN so the PTY winsize syncs to the fitted xterm even
-  // though the first fit() fired mid-handshake (the resize race that left the terminal rendering small).
-  socket.onopen = () => {
-    if (pendingResize) send({ type: "resize", cols: pendingResize.cols, rows: pendingResize.rows });
-    for (const data of pendingInput) send({ type: "stdin", data });
-    pendingInput = [];
-  };
+  openTerminalSocket(state, url, factory, sink, options);
 
   return {
     sendInput: (data) => {
-      if (socket.readyState === WS_OPEN) send({ type: "stdin", data });
-      else pendingInput.push(data);
+      if (state.socket?.readyState === WS_OPEN) sendFrame(state, { type: "stdin", data });
+      else state.pendingInput.push(data);
     },
     sendResize: (cols, rows) => {
-      pendingResize = { cols, rows };
-      send({ type: "resize", cols, rows });
+      state.pendingResize = { cols, rows };
+      sendFrame(state, { type: "resize", cols, rows });
     },
+    reattach: (servingBootIdentity, reattachOptions) =>
+      openTerminalSocket(state, url, factory, sink, options, servingBootIdentity, reattachOptions),
     whenReady: () =>
       new Promise<void>((resolve) => {
         const IDLE_MS = 700; // output quiet this long ⇒ the harness has settled at its prompt
@@ -247,130 +345,98 @@ export function connectTerminal(
         const tick = () => {
           const now = Date.now();
           if (now - startedAt >= TIMEOUT_MS) return resolve();
-          if (sawOutput && now - lastOutputAt >= IDLE_MS) return resolve();
+          if (state.sawOutput && now - state.lastOutputAt >= IDLE_MS) return resolve();
           setTimeout(tick, 150);
         };
         tick();
       }),
-    lastOutputAt: () => lastOutputAt,
+    lastOutputAt: () => state.lastOutputAt,
     dispose: () => {
-      ended = true; // an intentional teardown must not echo `onExit` via the close handler
-      socket.close();
+      state.disposed = true; // an intentional teardown must not report a dropped live pane
+      state.socket?.close();
     },
   };
 }
 
-/** The launch kinds the opener understands: a plain shell, or a named harness (slice 6e-2b). */
-export type TerminalOpenKind = "terminal" | "harness";
+// The catalog-row wire shape moved to types/terminalCatalog.ts (the cockpit
+// consumes the FULL `TerminalCatalogEntry.to_json()` shape). Re-exported here so existing
+// consumers keep their import site; `TerminalSessionInfo` is that full row.
+export type {
+  HarnessAcceptanceState,
+  HarnessActivityState,
+  HarnessControlState,
+  SeatTurnState,
+  TerminalCatalogRow as TerminalSessionInfo,
+  TaskDocumentRef,
+  TerminalLivenessEvidence,
+  TerminalOpenKind,
+  TerminalSessionStatus,
+} from "../types/terminalCatalog";
+import type { TaskDocumentRef, TerminalCatalogRow } from "../types/terminalCatalog";
 
-/** One supported harness as `GET /api/harnesses` reports it — `detected` ⇒ a launch button appears. */
-export interface HarnessInfo {
-  id: string;
-  name: string;
-  detected: boolean;
-}
-
-export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";
-
-export interface TerminalSessionInfo {
-  id: string;
-  label: string;
-  kind: TerminalOpenKind;
-  harness?: string;
-  lifecycleId?: string;
-  /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat claims. */
-  leafKey?: string;
-  /** The AR_SPAWN_ROLE recorded at spawn (L14): the l-01 role this session was dispatched AS
-   *  (architect/orchestrator/strategist/manager/worker/curator/reviewer/designer). Absent on hand-opened sessions. */
-  spawnRole?: string;
-  /** The role occupying the leaf binding. Hand-opened sessions gain this at attach time. */
-  seatRole?: string;
-  cwd: string;
-  tmuxName: string;
-  createdAt: string;
-  lastAttachedAt: string;
-  status: TerminalSessionStatus;
-  terminatedAt?: string;
-  landedAt?: string;
-  landedReason?: string;
-  landedEdge?: string;
-  spawnedBySession?: string;
-  spawnedByLifecycle?: string;
-  spawnedLabel?: string;
-  turnState?: string;
-  turnStateChangedAt?: string;
-}
-
-interface OpenTerminalOptions {
-  label?: string;
-  lifecycleId?: string;
-  leafKey?: string;
-}
+export {
+  openTerminalSession,
+  terminalOpenFailureMessage,
+  type OpenedTerminalSession,
+  type OpenTerminalOptions,
+  type TerminalOpenFailure,
+  type TerminalOpenFailureKind,
+  type TerminalOpenResult,
+} from "./terminalOpen";
 
 /**
  * Ask the server which supported harnesses are installed (slice 6e-2b `GET /api/harnesses`). Returns
  * `[]` on any failure — the dev bench has no backend, so the Chats strip just shows ＋ Terminal.
  */
 export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
-  try {
-    const response = await fetch(`${base}/api/harnesses`);
-    if (!response.ok) return [];
-    const body = (await response.json()) as { harnesses?: HarnessInfo[] };
-    return body.harnesses ?? [];
-  } catch {
-    return [];
-  }
+  return (await fetchHarnessesOrNull(base)) ?? [];
 }
 
-export async function fetchTerminalSessionsOrNull(base = ""): Promise<TerminalSessionInfo[] | null> {
-  try {
-    const response = await fetch(`${base}/api/terminal/sessions`);
-    if (!response.ok) return null;
-    const body = (await response.json()) as { sessions?: TerminalSessionInfo[] };
-    return Array.isArray(body.sessions) ? body.sessions : [];
-  } catch {
-    return null;
-  }
+/**
+ * Same read, failure-distinguishing: the launch flow must render a fetch
+ * failure loudly rather than an empty (and therefore lying) harness list — `null` = failed.
+ */
+export async function fetchHarnessesOrNull(base = ""): Promise<HarnessInfo[] | null> {
+  const result = await readHarnessCatalog(base);
+  if (result.status === "ready") return result.harnesses;
+  if (result.status === "empty") return [];
+  return null;
 }
 
-export async function fetchTerminalSessions(base = ""): Promise<TerminalSessionInfo[]> {
+/**
+ * Hard bound for one terminal-catalog read (the live-wedge guard). The normal poll beat is
+ * milliseconds and boot contention ~1 s; 10 s lets a half-dead socket expire as ONE missed
+ * beat instead of wedging every beat that single-flights behind it.
+ */
+export const TERMINAL_CATALOG_REQUEST_TIMEOUT_MS = 10_000;
+
+export async function fetchTerminalSessionsOrNull(base = ""): Promise<TerminalCatalogRow[] | null> {
+  // Boot hydrate + the 2500 ms poll beat can stack concurrent reads of the same catalog (and
+  // StrictMode doubles the boot hydrate): concurrent callers share one in-flight GET. Failure
+  // still resolves `null` for every caller; settle clears the slot so the next beat re-fires.
+  // The read is BOUNDED: a hung (half-dead) socket must expire as an ordinary `null` beat —
+  // unbounded, it wedges the single-flighted promise and the whole poll loop behind it.
+  return shareInflight(`terminal:sessions:${base}`, async () => {
+    try {
+      const response = await fetchWithTimeout(
+        `${base}/api/terminal/sessions`,
+        TERMINAL_CATALOG_REQUEST_TIMEOUT_MS,
+      );
+      if (!response.ok) return null;
+      const body = (await response.json()) as { sessions?: TerminalCatalogRow[] };
+      return Array.isArray(body.sessions) ? body.sessions : [];
+    } catch {
+      return null;
+    }
+  });
+}
+
+export async function fetchTerminalSessions(base = ""): Promise<TerminalCatalogRow[]> {
   const sessions = await fetchTerminalSessionsOrNull(base);
   if (sessions === null) {
     return [];
   }
   return sessions;
-}
-
-/**
- * Ask the server to **spawn + own** a session (slice 6e-2a opener): `POST /api/terminal/{id}` →
- * `TerminalHost.open` (the command is server-resolved from `kind` + `harness`, never sent). Returns
- * `true` on success. Best-effort — the dev bench has no backend, so the caller still opens the (mock)
- * socket. For `kind="harness"`, pass the harness id (slice 6e-2b).
- */
-export async function openTerminalSession(
-  sessionId: string,
-  kind: TerminalOpenKind = "terminal",
-  base = "",
-  harness?: string,
-  options: OpenTerminalOptions = {},
-): Promise<boolean> {
-  try {
-    const body = {
-      kind,
-      ...(harness ? { harness } : {}),
-      ...(options.label ? { label: options.label } : {}),
-      ...(options.lifecycleId ? { lifecycleId: options.lifecycleId } : {}),
-      ...(options.leafKey ? { leafKey: options.leafKey } : {}),
-    };
-    const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 export async function terminateTerminalSession(sessionId: string, base = ""): Promise<boolean> {
@@ -414,31 +480,30 @@ export async function cleanupLandedTerminalSessions(
   }
 }
 
-/** The outcome of a leaf-attach POST: bound, refused (the pair already has a live owner), or failed. */
-export type AttachLeafResult = "ok" | "leaf-taken" | "error";
+/** The outcome of a trusted task-seat attachment. */
+export type AttachTaskResult = "ok" | "seat-taken" | "error";
 
 /**
- * Claim one leaf-role pair for an existing session. The server is the uniqueness arbiter: `200`
- * atomically binds the pair, `409` means another live session owns that same pair, and any other
- * status or network failure is `"error"`. Enclosure-independent.
+ * Claim one document-role seat for an existing session. The server is the uniqueness arbiter:
+ * `200` atomically binds the pair, `409` means another live session owns it.
  */
-export async function attachSessionToLeaf(
+export async function attachSessionToTask(
   sessionId: string,
-  leafKey: string,
+  taskDocumentRef: TaskDocumentRef,
   role: string,
   base = "",
-): Promise<AttachLeafResult> {
+): Promise<AttachTaskResult> {
   try {
     const response = await fetch(
-      `${base}/api/terminal/${encodeURIComponent(sessionId)}/attach-leaf`,
+      `${base}/api/terminal/${encodeURIComponent(sessionId)}/attach-task`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leafKey, role }),
+        body: JSON.stringify({ taskDocumentRef, role }),
       },
     );
     if (response.ok) return "ok";
-    if (response.status === 409) return "leaf-taken";
+    if (response.status === 409) return "seat-taken";
     return "error";
   } catch {
     return "error";

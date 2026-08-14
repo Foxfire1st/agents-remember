@@ -21,6 +21,9 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.sync import sync_result
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     default_contract,
     load_contract,
     write_contract,
@@ -44,31 +47,45 @@ class SyncFixture:
         git(self.memory_repo, "commit", "-m", "Add memory ledger")
         self.memory_base = git(self.memory_repo, "rev-parse", "HEAD")
         self.contract = default_contract(
-            task_name="Sync Thing",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="external",
-            coordination_root=root / "ar-coordination",
-            code_repo_path=self.code_repo,
-            code_source_branch="main",
-            code_work_branch="ar/sync-thing",
-            code_base_commit=self.code_base,
-            worktree_name="sync-thing",
-            memory_repo_path=self.memory_repo,
-            memory_source_branch="main",
-            memory_work_branch="ar/sync-thing",
-            memory_base_commit=self.memory_base,
+            ContractTask(
+                name="Sync Thing",
+                repo_name="repo-a",
+                coordination_root=root / "ar-coordination",
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            leaf=LeafIdentity(worktree_name="sync-thing"),
+            code=RepoBranchPlan(
+                repo_path=self.code_repo,
+                source_branch="main",
+                work_branch="ar/sync-thing",
+                base_commit=self.code_base,
+            ),
+            memory=RepoBranchPlan(
+                repo_path=self.memory_repo,
+                source_branch="main",
+                work_branch="ar/sync-thing",
+                base_commit=self.memory_base,
+            ),
         )
         assert self.contract.memory_worktree is not None
         git(
             self.code_repo,
-            "worktree", "add", "-b", self.contract.code_work_branch,
-            str(self.contract.code_worktree), "main",
+            "worktree",
+            "add",
+            "-b",
+            self.contract.code_work_branch,
+            str(self.contract.code_worktree),
+            "main",
         )
         git(
             self.memory_repo,
-            "worktree", "add", "-b", self.contract.memory_work_branch,
-            str(self.contract.memory_worktree), "main",
+            "worktree",
+            "add",
+            "-b",
+            self.contract.memory_work_branch,
+            str(self.contract.memory_worktree),
+            "main",
         )
         write_contract(self.contract.contract_path, self.contract)
 
@@ -103,13 +120,9 @@ class WorktreeSyncTests(unittest.TestCase):
             self.assertEqual(result.payload["state"], "synced")
             self.assertEqual(section(result.payload, "code")["state"], "merged")
             self.assertEqual(section(result.payload, "memory")["state"], "fast-forwarded")
-            self.assertEqual(
-                git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip
-            )
+            self.assertEqual(git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip)
             assert fixture.contract.memory_worktree is not None
-            self.assertEqual(
-                git(fixture.contract.memory_worktree, "rev-parse", "HEAD"), memory_tip
-            )
+            self.assertEqual(git(fixture.contract.memory_worktree, "rev-parse", "HEAD"), memory_tip)
             reloaded = load_contract(fixture.contract.contract_path)
             self.assertEqual(reloaded.code_base_commit, code_tip)
             self.assertEqual(reloaded.memory_base_commit, memory_tip)
@@ -255,9 +268,7 @@ def commit_file(repo: Path, name: str, content: str) -> None:
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=repo, text=True, capture_output=True, check=False
-    )
+    result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
     return result.stdout.strip()

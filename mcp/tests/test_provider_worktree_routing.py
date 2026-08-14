@@ -15,13 +15,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from agents_remember.controllers.provider_tools import (
+from agents_remember.application.provider_tools import (
     _resolve_worktree_target,
     _worktree_provider_targets,
 )
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+    scoped_name,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.providers.grepai.isolated import _isolated_grepai_base_fields
-from agents_remember.providers.identity import provider_instance_id, scoped_name
 
 
 def _write_worktree_state(
@@ -82,9 +87,7 @@ class WorktreeTargetResolutionTests(unittest.TestCase):
         settings = _write_worktree_state(
             self.root, repo="agents-remember", group="demo-ar", task="260601_demo"
         )
-        target = _resolve_worktree_target(
-            self.config, repo_id="agents-remember", worktree=None
-        )
+        target = _resolve_worktree_target(self.config, repo_id="agents-remember", worktree=None)
         assert target is not None
         self.assertEqual(target.settings_path, settings)
         self.assertEqual(target.repo_id, "agents-remember")
@@ -93,32 +96,22 @@ class WorktreeTargetResolutionTests(unittest.TestCase):
         _write_worktree_state(
             self.root, repo="agents-remember", group="demo-ar", task="260601_demo"
         )
-        target = _resolve_worktree_target(
-            self.config, repo_id="agents-remember", worktree="demo"
-        )
+        target = _resolve_worktree_target(self.config, repo_id="agents-remember", worktree="demo")
         assert target is not None
         self.assertEqual(target.group, "demo-ar")
 
     def test_multiple_worktrees_without_explicit_is_ambiguous(self) -> None:
-        _write_worktree_state(
-            self.root, repo="agents-remember", group="a-ar", task="260601_a"
-        )
-        _write_worktree_state(
-            self.root, repo="agents-remember", group="b-ar", task="260601_b"
-        )
+        _write_worktree_state(self.root, repo="agents-remember", group="a-ar", task="260601_a")
+        _write_worktree_state(self.root, repo="agents-remember", group="b-ar", task="260601_b")
         with self.assertRaises(ValueError):
-            _resolve_worktree_target(
-                self.config, repo_id="agents-remember", worktree=None
-            )
+            _resolve_worktree_target(self.config, repo_id="agents-remember", worktree=None)
 
     def test_explicit_worktree_no_match_raises(self) -> None:
         _write_worktree_state(
             self.root, repo="agents-remember", group="demo-ar", task="260601_demo"
         )
         with self.assertRaises(ValueError):
-            _resolve_worktree_target(
-                self.config, repo_id="agents-remember", worktree="nope"
-            )
+            _resolve_worktree_target(self.config, repo_id="agents-remember", worktree="nope")
 
     def test_other_repo_worktree_does_not_default_for_this_repo(self) -> None:
         _write_worktree_state(self.root, repo="other-repo", group="x-ar", task="260601_x")

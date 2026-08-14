@@ -12,12 +12,22 @@ class MockTerminalSocket {
   binaryType = "blob";
   readyState = 1; // OPEN
   onmessage: ((event: MessageEvent) => void) | null = null;
+  onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   private readonly encoder = new TextEncoder();
 
-  constructor() {
+  constructor(dropAfterOpen = false, emitBanner = true) {
     // Deliver the banner after `connectTerminal` has wired `onmessage` (same-tick, so a microtask).
-    queueMicrotask(() => this.emit(BANNER));
+    queueMicrotask(() => {
+      if (this.readyState !== 1) return; // StrictMode may dispose the first mount before this runs.
+      this.onopen?.();
+      // Cockpit scenarios do not need terminal output. Omitting it there prevents an xterm render
+      // callback from racing a Playwright navigation while preserving the legacy gallery mock.
+      if (emitBanner) this.emit(BANNER);
+      if (dropAfterOpen) {
+        window.setTimeout(() => this.close(), 40);
+      }
+    });
   }
 
   send(raw: string): void {
@@ -33,8 +43,11 @@ class MockTerminalSocket {
   }
 
   close(): void {
+    if (this.readyState === 3) return;
     this.readyState = 3; // CLOSED
     this.onclose?.();
+    this.onmessage = null;
+    this.onopen = null;
   }
 
   private emit(text: string): void {
@@ -42,5 +55,11 @@ class MockTerminalSocket {
   }
 }
 
-export const mockTerminalSocketFactory: TerminalSocketFactory = () =>
-  new MockTerminalSocket() as unknown as WebSocket;
+export function createMockTerminalSocketFactory(
+  options: { dropAfterOpen?: boolean; emitBanner?: boolean } = {},
+): TerminalSocketFactory {
+  return () =>
+    new MockTerminalSocket(options.dropAfterOpen, options.emitBanner ?? true) as unknown as WebSocket;
+}
+
+export const mockTerminalSocketFactory = createMockTerminalSocketFactory();

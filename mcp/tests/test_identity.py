@@ -6,7 +6,7 @@ import re
 import unittest
 from pathlib import Path
 
-from agents_remember.providers.identity import (
+from agents_remember.kernel.primitives.identity import (
     MAX_SCOPED_NAME,
     provider_instance_id,
     scoped_name,

@@ -1,10 +1,10 @@
 # Verdict Template (adversarial reviewer)
 
 The artifact an **adversarial reviewer** writes at a seam (`roles/reviewer.md`). It lands
-under the series `notes/reports/` directory and attaches to the handover gate as **judge evidence**.
-There are two variants: **master-exit** (before a manager hands over to the orchestrator) and
-**super-exit** (before the orchestrator hands over to the developer) — plus a loop-review
-adaptation of the master-exit shape (see Loop-Review Adaptation below).
+under the series `notes/reports/` directory. Leaf route review binds through the task document;
+seam verdicts attach to handover gates as **judge evidence**. Variants are **leaf route review**,
+**master-exit** (before manager → orchestrator), **super-exit** (before orchestrator → developer),
+and the loop-review adaptation below.
 
 ## Rules
 
@@ -23,6 +23,45 @@ adaptation of the master-exit shape (see Loop-Review Adaptation below).
    standing criterion even when it found nothing, candidate rows when run — and carry any proposed
    catalog amendments (the promotion ratchet) in that section.
 
+## Leaf Route-Review Variant (every code-changing leaf)
+
+```md
+# Independent Route-Review Verdict — <leaf id>
+
+| Field           | Value                                              |
+| --------------- | -------------------------------------------------- |
+| scope           | <leaf code candidate; the plane binds its tree>    |
+| reviewer seat   | <leaf task_doc path> + reviewer                    |
+| recommendation  | PASS \| PASS-WITH-NOTES \| BLOCK                   |
+| decider         | owning manager (architect in flat/solo mode)       |
+| artifact path   | notes/reports/<leaf-id>-route-review-verdict.md    |
+| written         | <YYYY-MM-DDTHH:MM>                                 |
+
+## Major-Route Coverage (every material route accounted for)
+| Major route | Independent reviewer report | Verdict | Changed + surrounding scope reviewed |
+| ----------- | --------------------------- | ------- | ------------------------------------ |
+| <route>     | notes/reports/<route-report>.md | pass \| pass-with-notes \| block | <paths/owners/tests> |
+
+## Criteria Catalog Results
+| Criterion (id · catalog) | Ran | Finding | Evidence |
+| ------------------------ | --- | ------- | -------- |
+| <CS-1 · code-seam>       | yes | none    | <what was refute-tested> |
+
+## Findings (ranked; each refute-tested)
+| # | Severity | Route | Finding | Evidence file/ref | Refutation attempted | Survives? |
+| - | -------- | ----- | ------- | ----------------- | -------------------- | --------- |
+
+## Owner Recording Packet
+- verdict: `<pass | pass-with-notes | block>`
+- verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
+- routes: `<one {route, verdict, evidenceRef} row per table row>`
+
+The owner passes only this packet to `task_doc.record_route_review`. Do not include a candidate hash:
+the control plane computes and stamps the current Git candidate tree after proving every referenced
+artifact exists. A repair changes the tree and therefore requires the same route reviewers to
+delta-verify and the owner to record a fresh packet.
+```
+
 ## Master-Exit Variant
 
 ```md
@@ -32,7 +71,7 @@ adaptation of the master-exit shape (see Loop-Review Adaptation below).
 | --------------- | -------------------------------------------------- |
 | seam            | master-exit                                        |
 | scope           | <master integration branch ref>                    |
-| reviewer        | <this reviewer's agent/lifecycle id>               |
+| reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <master task_doc + leaf task docs>                 |
 | recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
 | decider         | orchestrator (delegated `master-handover-approval`; serious issues escalate → developer) |
@@ -84,7 +123,7 @@ reviewer does not.
 | --------------- | -------------------------------------------------- |
 | seam            | super-exit                                         |
 | scope           | <super integration branch ref>                     |
-| reviewer        | <this reviewer's agent/lifecycle id>               |
+| reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <portfolio task docs + master task docs>           |
 | recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
 | decider         | developer (human review concentrates at the super gate) |

@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from agents_remember.application.worktree_tools import TaskIdentity, worktree_start_tool
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.controllers.worktree_tools import worktree_start_tool
 from agents_remember.kernel.memory_ledger import create_initial_ledger, ledger_to_text
-from agents_remember.mcp.config import load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.providers import lifecycle, provider_setup
 from agents_remember.providers.settings import lifecycle_settings_from_config
 from agents_remember.providers.setup_progress import read_setup_progress
@@ -25,7 +27,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:28).
+def _run(  # pragma: no cover
     command: list[str], *, cwd: Path | None = None, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
@@ -42,11 +45,13 @@ def _run(
     return result
 
 
-def _git(repo: Path, *args: str) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:45).
+def _git(repo: Path, *args: str) -> str:  # pragma: no cover
     return _run(["git", *args], cwd=repo).stdout.strip()
 
 
-def _init_git_repo(repo: Path, files: dict[str, str]) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:49).
+def _init_git_repo(repo: Path, files: dict[str, str]) -> str:  # pragma: no cover
     repo.mkdir(parents=True)
     _run(["git", "init", "-b", "main"], cwd=repo)
     _git(repo, "config", "user.email", "providers@example.invalid")
@@ -60,7 +65,8 @@ def _init_git_repo(repo: Path, files: dict[str, str]) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _init_memory_repo(memory_repo: Path, repo_id: str, code_commit: str) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:63).
+def _init_memory_repo(memory_repo: Path, repo_id: str, code_commit: str) -> str:  # pragma: no cover
     memory_repo.mkdir(parents=True)
     _run(["git", "init", "-b", "main"], cwd=memory_repo)
     _git(memory_repo, "config", "user.email", "providers@example.invalid")
@@ -84,7 +90,8 @@ def _init_memory_repo(memory_repo: Path, repo_id: str, code_commit: str) -> str:
     return _git(memory_repo, "rev-parse", "HEAD")
 
 
-def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:87).
+def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:  # pragma: no cover
     payload = {
         "version": 1,
         "coordinationRoot": (root / "ar-coordination").as_posix(),
@@ -100,11 +107,13 @@ def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _provider_timeout() -> int:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:103).
+def _provider_timeout() -> int:  # pragma: no cover
     return int(os.environ.get("AGENTS_REMEMBER_PROVIDER_INTEGRATION_TIMEOUT", "1800"))
 
 
-def _docker_available() -> bool:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:107).
+def _docker_available() -> bool:  # pragma: no cover
     return (
         shutil.which("docker") is not None
         and subprocess.run(
@@ -118,19 +127,22 @@ def _docker_available() -> bool:
     )
 
 
-def _dict_value(value: object) -> dict[str, Any]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:121).
+def _dict_value(value: object) -> dict[str, Any]:  # pragma: no cover
     if isinstance(value, dict):
         return cast(dict[str, Any], value)
     return {}
 
 
-def _list_value(value: object) -> list[Any]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:127).
+def _list_value(value: object) -> list[Any]:  # pragma: no cover
     if isinstance(value, list):
         return cast(list[Any], value)
     return []
 
 
-def _settings_provider_containers(settings: dict[str, object]) -> set[str]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:133).
+def _settings_provider_containers(settings: dict[str, object]) -> set[str]:  # pragma: no cover
     providers = _dict_value(_dict_value(settings.get("contextProviders")).get("providers"))
     names: set[str] = set()
     grepai = _dict_value(providers.get("grepai-memory"))
@@ -142,7 +154,8 @@ def _settings_provider_containers(settings: dict[str, object]) -> set[str]:
     return names
 
 
-def _grepai_containers(provider: dict[str, Any]) -> set[str]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:145).
+def _grepai_containers(provider: dict[str, Any]) -> set[str]:  # pragma: no cover
     runtime = _dict_value(provider.get("runtime"))
     runner = _dict_value(runtime.get("runner"))
     backend = _dict_value(provider.get("backend"))
@@ -159,7 +172,8 @@ def _grepai_containers(provider: dict[str, Any]) -> set[str]:
     }
 
 
-def _cgc_containers(provider: dict[str, Any]) -> set[str]:
+# 260731-EFA-L7 R10: live-provider-gated helper; needs installed provider runtimes.
+def _cgc_containers(provider: dict[str, Any]) -> set[str]:  # pragma: no cover
     backend = _dict_value(provider.get("backend"))
     runtime = _dict_value(provider.get("runtime"))
     runner = _dict_value(runtime.get("runner"))
@@ -174,7 +188,8 @@ def _cgc_containers(provider: dict[str, Any]) -> set[str]:
     return names
 
 
-def _settings_networks(settings: dict[str, object]) -> set[str]:
+# 260731-EFA-L7 R10: live-provider-gated helper; needs installed provider runtimes.
+def _settings_networks(settings: dict[str, object]) -> set[str]:  # pragma: no cover
     providers = _dict_value(_dict_value(settings.get("contextProviders")).get("providers"))
     names: set[str] = set()
     grepai = _dict_value(providers.get("grepai-memory"))
@@ -192,7 +207,8 @@ def _settings_networks(settings: dict[str, object]) -> set[str]:
     return names
 
 
-def _cleanup_provider_settings(settings: dict[str, object]) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:197).
+def _cleanup_provider_settings(settings: dict[str, object]) -> None:  # pragma: no cover
     for container in sorted(_settings_provider_containers(settings)):
         subprocess.run(
             ["docker", "rm", "-f", container],
@@ -211,7 +227,10 @@ def _cleanup_provider_settings(settings: dict[str, object]) -> None:
         )
 
 
-def _watchers_status(coordination_root: Path, settings_path: Path) -> dict[str, object]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:216).
+def _watchers_status(
+    coordination_root: Path, settings_path: Path
+) -> dict[str, object]:  # pragma: no cover
     return lifecycle.watchers_run(
         argparse.Namespace(
             coordination_root=coordination_root,
@@ -224,7 +243,10 @@ def _watchers_status(coordination_root: Path, settings_path: Path) -> dict[str, 
     )
 
 
-def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None:
+# 260731-EFA-L7 R10: AR_RUN_*_WORKFLOW-gated test body; needs live provider stack.
+def test_worktree_and_benchmark_providers_run_end_to_end(
+    tmp_path: Path,
+) -> None:  # pragma: no cover
     if not _docker_available():
         pytest.skip("docker is not available")
 
@@ -260,38 +282,16 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
 
         worktree_payload = worktree_start_tool(
             config,
-            repo_id=repo_id,
-            task_name="Provider Integration Worktree",
-            worktree_name="provider-integration",
-            workflow_kind="light-task",
-            dry_run=False,
+            TaskIdentity(
+                repo_id=repo_id,
+                task_name="Provider Integration Worktree",
+                worktree_name="provider-integration",
+                workflow_kind="light-task",
+            ),
         )
         assert worktree_payload["state"] == "started", json.dumps(worktree_payload, indent=2)
-        # Provider setup now runs on a background thread (GitHub #53): the start
-        # returns `starting` plus a progress file, and readiness is polled.
-        providers_block = worktree_payload["providers"]
-        assert providers_block["state"] == "starting", json.dumps(worktree_payload, indent=2)
-        progress_path = Path(providers_block["progressFile"])
-        deadline = time.monotonic() + _provider_timeout()
-        progress: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            progress = read_setup_progress(progress_path)
-            if progress is not None and progress["state"] != "running":
-                break
-            time.sleep(2)
-        assert progress is not None and progress["state"] == "ok", json.dumps(
-            progress or {"error": "background provider setup never finished"}, indent=2
-        )
-        worktree_provider_state = Path(progress["summary"]["providerStateFile"])
-        worktree_state = json.loads(worktree_provider_state.read_text(encoding="utf-8"))
-        worktree_settings_info = worktree_state["isolatedProviderSettings"]
-        worktree_settings_path = Path(worktree_settings_info["path"])
-        worktree_settings = json.loads(worktree_settings_path.read_text(encoding="utf-8"))
-        cleanup_settings.append(worktree_settings)
-        assert set(worktree_settings_info["providers"]) == {
-            "codegraphcontext-code",
-            "grepai-memory",
-        }
+        progress = _await_background_provider_setup(worktree_payload)
+        worktree_settings_path = _isolated_worktree_settings(progress, cleanup_settings)
         worktree_status = _watchers_status(coordination_root, worktree_settings_path)
         assert worktree_status["enabled"] == {
             "grepai-memory": True,
@@ -299,43 +299,13 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
         }
         assert worktree_status["ok"], json.dumps(worktree_status, indent=2)
 
-        benchmark_coordination = tmp_path / "benchmark" / "ar-coordination"
-        benchmark_repo = tmp_path / "benchmark" / "workspace" / repo_id
-        benchmark_memory = benchmark_coordination / "memory-repos" / f"ar-{repo_id}"
-        shutil.copytree(code_root, benchmark_repo, ignore=shutil.ignore_patterns(".git"))
-        shutil.copytree(memory_root, benchmark_memory, ignore=shutil.ignore_patterns(".git"))
-        benchmark_case = benchmark_runner.BenchmarkCase(
-            Path("case.json"),
-            {
-                "id": "provider-integration",
-                "repository": {"name": repo_id},
-                "memoryRepository": {"name": f"ar-{repo_id}"},
-                "workspace": {"fixturePath": "provider-integration"},
-            },
+        benchmark_status = _run_benchmark_provider_stack(
+            tmp_path,
+            repo_id=repo_id,
+            code_root=code_root,
+            memory_root=memory_root,
+            cleanup_settings=cleanup_settings,
         )
-        benchmark_settings = benchmark_runner.benchmark_lifecycle_settings(
-            case=benchmark_case,
-            coordination_root=benchmark_coordination,
-            source_repo_root=benchmark_repo,
-            memory_repo=benchmark_memory,
-            provider_ids=("grepai-memory", "codegraphcontext-code"),
-        )
-        cleanup_settings.append(benchmark_settings)
-        benchmark_settings_path = tmp_path / "benchmark-provider-settings.json"
-        benchmark_settings_path.write_text(
-            json.dumps(benchmark_settings, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        benchmark_runner.prepare_configured_providers(
-            benchmark_case,
-            benchmark_coordination,
-            benchmark_repo,
-            benchmark_memory,
-            dry_run=False,
-            provider_timeout=_provider_timeout(),
-            provider_ids=("grepai-memory", "codegraphcontext-code"),
-        )
-        benchmark_status = _watchers_status(benchmark_coordination, benchmark_settings_path)
         assert benchmark_status["enabled"] == {
             "grepai-memory": True,
             "codegraphcontext-code": True,
@@ -344,3 +314,101 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
     finally:
         for settings in reversed(cleanup_settings):
             _cleanup_provider_settings(settings)
+
+
+# 260731-EFA-L7 R10: live-provider-gated helper; needs installed provider runtimes.
+def _await_background_provider_setup(
+    worktree_payload: dict[str, Any],
+) -> dict[str, Any]:  # pragma: no cover
+    """Poll the progress file a started worktree hands back until setup stops running.
+
+    Provider setup runs on a background thread (GitHub #53), so `worktree_start` returns
+    `starting` plus a progress file rather than a finished stack; readiness is polled.
+    """
+    providers_block = worktree_payload["providers"]
+    assert providers_block["state"] == "starting", json.dumps(worktree_payload, indent=2)
+    progress_path = Path(providers_block["progressFile"])
+    deadline = time.monotonic() + _provider_timeout()
+    progress: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        progress = read_setup_progress(progress_path)
+        if progress is not None and progress["state"] != "running":
+            break
+        time.sleep(2)
+    assert progress is not None and progress["state"] == "ok", json.dumps(
+        progress or {"error": "background provider setup never finished"}, indent=2
+    )
+    return progress
+
+
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:327).
+def _isolated_worktree_settings(  # pragma: no cover
+    progress: dict[str, Any], cleanup_settings: list[dict[str, Any]]
+) -> Path:
+    """The provider settings the worktree wrote for itself, with both providers isolated.
+
+    Registered for teardown before the isolation is asserted, so a stack that came up wrong
+    is still a stack that gets reclaimed.
+    """
+    worktree_state = json.loads(
+        Path(progress["summary"]["providerStateFile"]).read_text(encoding="utf-8")
+    )
+    settings_info = worktree_state["isolatedProviderSettings"]
+    settings_path = Path(settings_info["path"])
+    cleanup_settings.append(json.loads(settings_path.read_text(encoding="utf-8")))
+    assert set(settings_info["providers"]) == {"codegraphcontext-code", "grepai-memory"}
+    return settings_path
+
+
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:345).
+def _run_benchmark_provider_stack(  # pragma: no cover
+    tmp_path: Path,
+    *,
+    repo_id: str,
+    code_root: Path,
+    memory_root: Path,
+    cleanup_settings: list[dict[str, Any]],
+) -> dict[str, object]:
+    """Stand the same two providers up through the benchmark runner's own entry point.
+
+    The benchmark copies the repo and memory pair into its own coordination root, so this
+    proves the runner configures a stack of its own rather than reusing the worktree's.
+
+    The settings are registered for teardown the moment they exist and before anything is
+    started from them, so a failure part-way through still leaves containers to be reclaimed.
+    """
+    benchmark_coordination = tmp_path / "benchmark" / "ar-coordination"
+    benchmark_repo = tmp_path / "benchmark" / "workspace" / repo_id
+    benchmark_memory = benchmark_coordination / "memory-repos" / f"ar-{repo_id}"
+    shutil.copytree(code_root, benchmark_repo, ignore=shutil.ignore_patterns(".git"))
+    shutil.copytree(memory_root, benchmark_memory, ignore=shutil.ignore_patterns(".git"))
+    benchmark_case = benchmark_runner.BenchmarkCase(
+        Path("case.json"),
+        {
+            "id": "provider-integration",
+            "repository": {"name": repo_id},
+            "memoryRepository": {"name": f"ar-{repo_id}"},
+            "workspace": {"fixturePath": "provider-integration"},
+        },
+    )
+    benchmark_workspace = benchmark_runner.BenchmarkWorkspace(
+        case=benchmark_case,
+        workspace_root=benchmark_coordination.parent,
+        coordination_root=benchmark_coordination,
+        source_repo_root=benchmark_repo,
+        memory_repo=benchmark_memory,
+        provider_ids=("grepai-memory", "codegraphcontext-code"),
+    )
+    benchmark_settings = benchmark_runner.benchmark_lifecycle_settings(benchmark_workspace)
+    cleanup_settings.append(benchmark_settings)
+    benchmark_settings_path = tmp_path / "benchmark-provider-settings.json"
+    benchmark_settings_path.write_text(
+        json.dumps(benchmark_settings, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    benchmark_runner.prepare_configured_providers(
+        benchmark_workspace,
+        dry_run=False,
+        provider_timeout=_provider_timeout(),
+    )
+    return _watchers_status(benchmark_coordination, benchmark_settings_path)

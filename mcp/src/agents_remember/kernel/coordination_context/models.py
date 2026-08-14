@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 from agents_remember.errors import AgentsRememberError
 
@@ -71,6 +71,110 @@ class CoordinationSelection:
     settings_path: Path
 
 
+@dataclass(frozen=True)
+class EnclosureSelector:
+    """How a caller names the enclosure to resolve.
+
+    Either directly, by ``contract_path``, or indirectly: a task (with ``parent_task`` to
+    disambiguate a repeated task name) plus the leaf id or worktree name that picks one
+    enclosure inside it. Resolution tries these in a fixed order, so a caller that supplies
+    a subset is still supplying one selector -- the whole set travels from the tool boundary
+    down to :func:`resolve_contract` unchanged.
+    """
+
+    contract_path: Path | None = None
+    task_name: str | None = None
+    parent_task: str | None = None
+    leaf_id: str | None = None
+    worktree_name: str | None = None
+
+
+@dataclass(frozen=True)
+class CoordinationHints:
+    """What a caller already knows about where the coordination tree is.
+
+    Every field is a hint, not a fact: a requested topology overrides detection, an explicit
+    coordination root or settings file short-circuits the search, and an onboarding root
+    selects the from-onboarding resolution path entirely. Detection fills in whatever is
+    absent.
+    """
+
+    topology: Literal["internal", "external"] | None = None
+    coordination_root: Path | None = None
+    settings_path: Path | None = None
+    onboarding_root: Path | None = None
+
+
+class ContractReaderPort(Protocol):
+    """The worktree contract-file surface the resolver may use."""
+
+    def load_contract(self, path: Path) -> Any: ...
+    def worktree_group_for(
+        self, coordination_root: Path, code_repository_name: str, worktree_name: str
+    ) -> Path: ...
+    def resolve_active_task_root(
+        self,
+        coordination_root: Path,
+        code_repository_name: str,
+        task_name: str,
+        *,
+        parent_task: str | None = None,
+    ) -> Path: ...
+    def find_task_contract(
+        self,
+        coordination_root: Path,
+        code_repository_name: str,
+        task_name: str,
+        *,
+        parent_task: str | None = None,
+        leaf_id: str | None = None,
+    ) -> Path | None: ...
+    def find_worktree_contract(
+        self,
+        coordination_root: Path,
+        code_repository_name: str,
+        worktree_name: str,
+    ) -> Path | None: ...
+
+
+@dataclass(frozen=True)
+class EnclosureResolution:
+    """One resolution's selector plus its bound contract reader."""
+
+    selector: EnclosureSelector | None = None
+    contract_reader: ContractReaderPort | None = None
+
+
+@dataclass(frozen=True)
+class CoordinationRequest:
+    """Everything a coordination-context resolution needs beyond repo identity."""
+
+    hints: CoordinationHints | None = None
+    selector: EnclosureSelector | None = None
+    contract_reader: ContractReaderPort | None = None
+
+
+@dataclass(frozen=True)
+class CodeRepository:
+    """A resolved code repository: its name, its root on disk, and the workspace holding it."""
+
+    name: str
+    root: Path
+    workspace: Path
+
+
+@dataclass(frozen=True)
+class CoordinationRoots:
+    """The coordination tree after resolution: which topology won, and the four roots that
+    topology implies. Detection produces them together and no reader wants a subset."""
+
+    topology: Literal["internal", "external"]
+    coordination_root: Path
+    memory_root: Path
+    onboarding_root: Path
+    settings_path: Path
+
+
 @dataclass
 class CoordinationContext:
     topology: Literal["internal", "external"]
@@ -90,9 +194,16 @@ class CoordinationContext:
     storage: StorageSettings
     path_rules: list[StorageRule]
     cross_repo: CrossRepoSettings
-    memory_mode: Literal["internal", "external", "disabled"]
+    # From the worktree contract whenever one is in scope: `resolver.build_coordination_context`
+    # (resolver.py line 284) reads `contract.memory_mode` straight into this field, falling back
+    # to `_memory_mode(roots.topology)` only when there is no contract. So the vocabulary is the
+    # contract's, and this alias is the one declaration rather than a second copy of the pair.
+    memory_mode: MemoryMode
     contract_path: Path | None = None
     worktree_group: Path | None = None
     code_worktree: Path | None = None
     memory_worktree: Path | None = None
     ledger_path: Path | None = None
+
+
+MemoryMode = Literal["internal", "external", "disabled"]

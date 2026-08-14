@@ -1,0 +1,13 @@
+# Generated Vite chunks can contain significant whitespace-only lines inside JavaScript
+# template literals (for example, indentation in CodeMirror completion snippets).
+mcp/src/agents_remember/package_data/dashboard/assets/*.js whitespace=-blank-at-eol
+
+# The vendored tiktoken vocabulary is content-addressed: models/tokens.py checks the
+# file's SHA-256 before every load and refuses to start on any copy whose bytes differ. A
+# line-ending conversion on a checkout with core.autocrlf=true is exactly that, so without
+# this line those clones -- and only those -- cannot start the server at all. Marked binary
+# so no EOL or text filter can touch it. Refreshing the vocabulary renames this entry, and
+# mcp/tests/test_cold_start.py::test_the_gitattributes_entry_names_the_shipped_file stays
+# red until it is renamed; the procedure is in
+# mcp/src/agents_remember/package_data/tiktoken/README.md.
+mcp/src/agents_remember/package_data/tiktoken/fb374d419588a4632f3f557e76b4b70aebbca790 -text

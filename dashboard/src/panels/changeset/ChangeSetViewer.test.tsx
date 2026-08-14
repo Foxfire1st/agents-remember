@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CockpitShell } from "../../cockpit/Cockpit";
 import { dashboardStore } from "../../data/store";
 import { GALLERY } from "../../dev/fixtures";
-import { DetailPanel } from "../DetailPanel";
+import { DetailPanel } from "../detail-panel/DetailPanel";
 import { ChangeSetViewer } from "./ChangeSetViewer";
 
 // Mock the diff column so the screen tests never construct a CodeMirror MergeView in jsdom

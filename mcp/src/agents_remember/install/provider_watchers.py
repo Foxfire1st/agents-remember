@@ -43,6 +43,24 @@ def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
     return path
 
 
+@dataclass(frozen=True)
+class ProviderWatcherRebind:
+    """One runtime-install watcher rebind.
+
+    A rebind is the stop → refresh → start cycle a runtime install performs
+    around the provider tree: the coordination root it acts on, the live
+    provider settings its lifecycle actions are derived from, its execution
+    mode and budget, and the report every phase accumulates into. Every phase
+    of the cycle needs all of it, so the cycle travels as one object.
+    """
+
+    coordination_root: Path
+    settings: dict[str, Any]
+    dry_run: bool
+    timeout: int
+    report: ProviderWatcherRebindReport = field(default_factory=ProviderWatcherRebindReport)
+
+
 def provider_watcher_lifecycle_args(
     coordination_root: Path,
     settings_path: Path,
@@ -59,22 +77,15 @@ def provider_watcher_lifecycle_args(
     )
 
 
-def run_provider_watcher_lifecycle(
-    coordination_root: Path,
-    settings: dict[str, Any],
-    *,
-    action: str,
-    dry_run: bool,
-    timeout: int,
-) -> dict[str, Any]:
-    settings_path = write_temp_provider_settings(settings)
+def run_provider_watcher_lifecycle(rebind: ProviderWatcherRebind, action: str) -> dict[str, Any]:
+    settings_path = write_temp_provider_settings(rebind.settings)
     try:
         return lifecycle.watchers_run(
             provider_watcher_lifecycle_args(
-                coordination_root,
+                rebind.coordination_root,
                 settings_path,
-                dry_run=dry_run,
-                timeout=timeout,
+                dry_run=rebind.dry_run,
+                timeout=rebind.timeout,
             ),
             action,
         )
@@ -83,23 +94,13 @@ def run_provider_watcher_lifecycle(
 
 
 def record_provider_watcher_lifecycle(
-    report: ProviderWatcherRebindReport,
-    coordination_root: Path,
-    settings: dict[str, Any],
+    rebind: ProviderWatcherRebind,
     *,
     phase: str,
     action: str,
-    dry_run: bool,
-    timeout: int,
 ) -> dict[str, Any]:
-    result = run_provider_watcher_lifecycle(
-        coordination_root,
-        settings,
-        action=action,
-        dry_run=dry_run,
-        timeout=timeout,
-    )
-    report.runs.append({"phase": phase, **result})
+    result = run_provider_watcher_lifecycle(rebind, action)
+    rebind.report.runs.append({"phase": phase, **result})
     return result
 
 
@@ -124,90 +125,41 @@ def add_provider_watcher_recovery_actions(
     )
 
 
-def stop_provider_watchers_before_refresh(
-    report: ProviderWatcherRebindReport,
-    coordination_root: Path,
-    settings: dict[str, Any],
-    *,
-    dry_run: bool,
-    timeout: int,
-) -> None:
+def stop_provider_watchers_before_refresh(rebind: ProviderWatcherRebind) -> None:
     result = record_provider_watcher_lifecycle(
-        report,
-        coordination_root,
-        settings,
+        rebind,
         phase="pre-provider-refresh-stop",
         action="stop",
-        dry_run=dry_run,
-        timeout=timeout,
     )
     if provider_watcher_lifecycle_ok(result):
         return
-    report.ok = False
-    add_provider_watcher_recovery_actions(report, result)
+    rebind.report.ok = False
+    add_provider_watcher_recovery_actions(rebind.report, result)
     raise RuntimeError(
         "provider watcher stop failed before runtime provider refresh: "
         f"{json.dumps(result, indent=2)}"
     )
 
 
-def complete_provider_watcher_rebind(
-    report: ProviderWatcherRebindReport,
-    coordination_root: Path,
-    settings: dict[str, Any],
-    *,
-    dry_run: bool,
-    timeout: int,
-) -> None:
-    record_provider_watcher_lifecycle(
-        report,
-        coordination_root,
-        settings,
-        phase="post-install-start",
-        action="start",
-        dry_run=dry_run,
-        timeout=timeout,
-    )
+def complete_provider_watcher_rebind(rebind: ProviderWatcherRebind) -> None:
+    report = rebind.report
+    record_provider_watcher_lifecycle(rebind, phase="post-install-start", action="start")
     status = record_provider_watcher_lifecycle(
-        report,
-        coordination_root,
-        settings,
+        rebind,
         phase="post-install-status",
         action="status",
-        dry_run=dry_run,
-        timeout=timeout,
     )
     if not provider_watcher_lifecycle_ok(status):
         report.messages.append(
             "Provider watchers were still degraded after runtime reinstall; "
             "attempted one non-destructive restart/rebind."
         )
-        record_provider_watcher_lifecycle(
-            report,
-            coordination_root,
-            settings,
-            phase="recovery-stop",
-            action="stop",
-            dry_run=dry_run,
-            timeout=timeout,
-        )
-        record_provider_watcher_lifecycle(
-            report,
-            coordination_root,
-            settings,
-            phase="recovery-start",
-            action="start",
-            dry_run=dry_run,
-            timeout=timeout,
-        )
+        record_provider_watcher_lifecycle(rebind, phase="recovery-stop", action="stop")
+        record_provider_watcher_lifecycle(rebind, phase="recovery-start", action="start")
         status = record_provider_watcher_lifecycle(
-            report,
-            coordination_root,
-            settings,
+            rebind,
             phase="recovery-status",
             action="status",
-            dry_run=dry_run,
-            timeout=timeout,
         )
     report.ok = provider_watcher_lifecycle_ok(status)
     if not report.ok:

@@ -1,22 +1,31 @@
+"""Canonical task-document seat assignment tests (EFA-L19; historical filename)."""
+
 from __future__ import annotations
 
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.mcp.tools.terminal import attach_terminal_session_to_leaf_payload
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    terminal_catalog_path,
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.tools.terminal import attach_terminal_session_to_task_payload
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.serving import _app_terminal_routes as terminal_routes
+from agents_remember.serving._app_common import TerminalAttachTaskRequest
+from agents_remember.serving.seat_binding import role_suffixed_leaf_base
+from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_task_assignment import (
+    TaskAssignmentRuntime,
+    assign_terminal_session_to_task,
 )
-from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.tasks import TaskDocument, write_task_doc
+from test_worktree_support import git, write_current_task_lineage
 
 
 class _Host:
@@ -36,51 +45,78 @@ def _config(root: Path) -> McpRuntimeConfig:
     )
 
 
-def _write_leaf(root: Path) -> str:
-    task_root = root / "tasks" / "repo" / "master"
+def _task_doc(**values: object) -> TaskDocument:
+    return TaskDocument.model_validate(
+        {
+            "id": values.pop("id"),
+            "slug": values.pop("slug"),
+            "title": values.pop("title"),
+            "kind": values.pop("kind"),
+            "repo": "repo",
+            "createdAt": "2026-07-07T10:00",
+            **values,
+        }
+    )
+
+
+def _write_topology(root: Path) -> tuple[TaskDocumentRef, TaskDocumentRef, TaskDocumentRef]:
+    task_root = root / "tasks" / "repo"
     write_task_doc(
-        task_root,
-        TaskDocument.model_validate(
-            {
-                "id": "MASTER",
-                "slug": "task",
-                "title": "Master",
-                "kind": "master",
-                "repo": "repo",
-                "createdAt": "2026-07-07T10:00",
-                "subTasks": [
-                    {
-                        "number": "leaf-1",
-                        "name": "Leaf 1",
-                        "file": "legacy-leaf.md",
-                        "status": "inProgress",
-                    }
-                ],
-            }
+        task_root / "sprint",
+        _task_doc(
+            id="SPRINT",
+            slug="sprint",
+            title="Sprint",
+            kind="master",
+            orchestrates=["master"],
         ),
     )
     write_task_doc(
-        task_root,
-        TaskDocument.model_validate(
-            {
-                "id": "leaf-1",
-                "slug": "legacy-leaf",
-                "title": "Leaf 1",
-                "kind": "subTask",
-                "repo": "repo",
-                "createdAt": "2026-07-07T10:01",
-                "master": "task.md",
-            }
+        task_root / "master",
+        _task_doc(
+            id="MASTER",
+            slug="master",
+            title="Master",
+            kind="master",
+            subTasks=[
+                {
+                    "number": "leaf-1",
+                    "name": "Leaf 1",
+                    "file": "leaf-1.md",
+                    "status": "inProgress",
+                }
+            ],
         ),
     )
-    return "repo/master/leaf-1"
+    write_task_doc(
+        task_root / "master",
+        _task_doc(
+            id="leaf-1",
+            slug="leaf-1",
+            title="Leaf 1",
+            kind="subTask",
+            master="task.md",
+        ),
+    )
+    write_current_task_lineage(
+        root,
+        repo_name="repo",
+        master_name="master",
+        leaf_id="leaf-1",
+    )
+    return (
+        TaskDocumentRef(repository="repo", path="sprint/task.json"),
+        TaskDocumentRef(repository="repo", path="master/task.json"),
+        TaskDocumentRef(repository="repo", path="master/leaf-1.json"),
+    )
 
 
 def _entry(
     session_id: str,
     *,
-    leaf_key: str | None = None,
+    task_document_ref: TaskDocumentRef | None = None,
     spawn_role: str | None = None,
+    seat_role: str | None = None,
 ) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
@@ -94,160 +130,203 @@ def _entry(
         created_at="2026-07-02T00:00:00Z",
         last_attached_at="2026-07-02T00:00:00Z",
         status="running",
-        leaf_key=leaf_key,
+        task_document_ref=task_document_ref,
         spawn_role=spawn_role,
+        seat_role=seat_role,
     )
 
 
-def _require_entry(catalog: TerminalCatalog, session_id: str) -> TerminalCatalogEntry:
-    entry = catalog.get(session_id)
-    if entry is None:
-        raise AssertionError(f"missing catalog entry {session_id}")
-    return entry
-
-
-class TerminalLeafAssignmentTests(unittest.TestCase):
-    def test_assign_terminal_session_to_leaf_moves_existing_catalog_row(self) -> None:
+class TerminalTaskAssignmentTests(unittest.TestCase):
+    def test_assignment_moves_one_session_between_valid_leaf_role_seats(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
-            catalog.upsert(_entry("chat-1", leaf_key="repo/master/old"))
+            root = Path(tmp)
+            _sprint, _master, leaf = _write_topology(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("worker", spawn_role="worker"))
 
-            result = assign_terminal_session_to_leaf(
-                catalog,
-                _Host("ar-chat-1"),
-                session_id="chat-1",
-                leaf_key="repo/master/new",
-                role="worker",
+            result = assign_terminal_session_to_task(
+                TaskAssignmentRuntime(
+                    catalog,
+                    _Host("ar-worker"),
+                    terminal_routes.TaskDocumentTopology(root),
+                ),
+                session_id="worker",
+                task_document_ref=leaf,
             )
 
             self.assertEqual(result.status, "attached")
-            self.assertEqual(result.previous_leaf_key, "repo/master/old")
-            updated = _require_entry(catalog, "chat-1")
-            self.assertEqual(updated.leaf_key, "repo/master/new")
+            self.assertEqual(catalog.get("worker").task_document_ref, leaf)  # type: ignore[union-attr]
+            self.assertEqual(catalog.get("worker").binding_role, "worker")  # type: ignore[union-attr]
 
-    def test_assign_terminal_session_to_leaf_reports_leaf_taken_without_mutating(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
-            catalog.upsert(_entry("owner", leaf_key="repo/master/new", spawn_role="worker"))
-            catalog.upsert(_entry("seeker", leaf_key="repo/master/old", spawn_role="worker"))
-
-            result = assign_terminal_session_to_leaf(
-                catalog,
-                _Host("ar-owner", "ar-seeker"),
-                session_id="seeker",
-                leaf_key="repo/master/new",
-                role="worker",
-            )
-
-            self.assertEqual(result.status, "leaf-taken")
-            self.assertEqual(result.owner_session_id, "owner")
-            seeker = _require_entry(catalog, "seeker")
-            self.assertEqual(seeker.leaf_key, "repo/master/old")
-
-    def test_attach_terminal_session_to_leaf_payload_uses_dashboard_catalog(self) -> None:
+    def test_stale_super_refuses_assignment_without_mutating_the_seat(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = _config(root)
-            canonical = _write_leaf(root)
+            _sprint, _master, leaf = _write_topology(root)
+            repo = root / "fixture-repositories" / "repo"
+            marker = repo / "super-moved.txt"
+            marker.write_text("new super\n", encoding="utf-8")
+            git(repo, "add", marker.name)
+            git(repo, "commit", "-m", "move super")
             catalog = TerminalCatalog(terminal_catalog_path(root))
-            catalog.upsert(_entry("chat-1", leaf_key="repo/master/old"))
+            catalog.upsert(_entry("worker", spawn_role="worker"))
 
-            payload = attach_terminal_session_to_leaf_payload(
-                config,
-                session_id="chat-1",
-                leaf_key="legacy-leaf",
-                role="worker",
-                host=_Host("ar-chat-1"),
+            result = assign_terminal_session_to_task(
+                TaskAssignmentRuntime(
+                    catalog,
+                    _Host("ar-worker"),
+                    terminal_routes.TaskDocumentTopology(root),
+                ),
+                session_id="worker",
+                task_document_ref=leaf,
+            )
+
+            self.assertEqual(result.status, "source-lineage-stale")
+            self.assertEqual(result.source_lineage.state, "blocked")  # type: ignore[union-attr]
+            self.assertIsNone(catalog.get("worker").task_document_ref)  # type: ignore[union-attr]
+
+    def test_same_document_and_role_is_seat_taken_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _sprint, _master, leaf = _write_topology(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("owner", task_document_ref=leaf, spawn_role="worker"))
+            catalog.upsert(_entry("seeker", spawn_role="worker"))
+
+            result = assign_terminal_session_to_task(
+                TaskAssignmentRuntime(
+                    catalog,
+                    _Host("ar-owner", "ar-seeker"),
+                    terminal_routes.TaskDocumentTopology(root),
+                ),
+                session_id="seeker",
+                task_document_ref=leaf,
+            )
+
+            self.assertEqual(result.status, "seat-taken")
+            self.assertEqual(result.owner_session_id, "owner")
+            self.assertIsNone(catalog.get("seeker").task_document_ref)  # type: ignore[union-attr]
+
+    def test_different_roles_can_share_one_leaf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _sprint, _master, leaf = _write_topology(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("worker", task_document_ref=leaf, spawn_role="worker"))
+            catalog.upsert(_entry("reviewer", spawn_role="reviewer"))
+
+            result = assign_terminal_session_to_task(
+                TaskAssignmentRuntime(
+                    catalog,
+                    _Host("ar-worker", "ar-reviewer"),
+                    terminal_routes.TaskDocumentTopology(root),
+                ),
+                session_id="reviewer",
+                task_document_ref=leaf,
+            )
+
+            self.assertEqual(result.status, "attached")
+            self.assertEqual(catalog.get("reviewer").binding_role, "reviewer")  # type: ignore[union-attr]
+
+    def test_role_altitude_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sprint, master, leaf = _write_topology(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("architect", spawn_role="architect"))
+            catalog.upsert(_entry("manager", spawn_role="manager"))
+            host = _Host("ar-architect", "ar-manager")
+            topology = terminal_routes.TaskDocumentTopology(root)
+            runtime = TaskAssignmentRuntime(catalog, host, topology)
+
+            wrong_leaf = assign_terminal_session_to_task(
+                runtime,
+                session_id="architect",
+                task_document_ref=leaf,
+            )
+            wrong_sprint = assign_terminal_session_to_task(
+                runtime,
+                session_id="manager",
+                task_document_ref=sprint,
+            )
+            right_master = assign_terminal_session_to_task(
+                runtime,
+                session_id="manager",
+                task_document_ref=master,
+            )
+
+            self.assertEqual(wrong_leaf.status, "task-binding-invalid")
+            self.assertEqual(wrong_sprint.status, "task-binding-invalid")
+            self.assertEqual(right_master.status, "attached")
+
+    def test_payload_uses_canonical_task_reference_and_spawn_role(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _sprint, _master, leaf = _write_topology(root)
+            catalog = TerminalCatalog(terminal_catalog_path(root))
+            catalog.upsert(_entry("worker", spawn_role="worker"))
+
+            payload = attach_terminal_session_to_task_payload(
+                _config(root),
+                session_id="worker",
+                task_document_ref=leaf,
+                host=_Host("ar-worker"),
             )
 
             self.assertTrue(payload["ok"])
-            self.assertEqual(payload["operation"], "attach_terminal_session_to_leaf")
+            self.assertEqual(payload["operation"], "attach_terminal_session_to_task")
             self.assertEqual(payload["status"], "attached")
-            self.assertEqual(payload["session"], "chat-1")
-            self.assertEqual(payload["previousLeafKey"], "repo/master/old")
-            self.assertEqual(payload["role"], "chat")
+            self.assertEqual(payload["taskDocumentRef"], leaf.model_dump())
             self.assertEqual(payload["seatRole"], "worker")
-            updated = _require_entry(catalog, "chat-1")
-            self.assertEqual(payload["leafKey"], canonical)
-            self.assertEqual(updated.leaf_key, canonical)
 
-    def test_attach_defaults_to_spawn_role_and_requires_role_for_hand_opened_chat(self) -> None:
+    def test_hand_opened_harness_requires_an_explicit_structural_role(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = _config(root)
-            canonical = _write_leaf(root)
+            _sprint, _master, leaf = _write_topology(root)
             catalog = TerminalCatalog(terminal_catalog_path(root))
-            catalog.upsert(_entry("worker", spawn_role="worker"))
-            catalog.upsert(_entry("hand-opened"))
-            host = _Host("ar-worker", "ar-hand-opened")
+            catalog.upsert(_entry("free"))
 
-            worker = attach_terminal_session_to_leaf_payload(
-                config, session_id="worker", leaf_key=canonical, host=host
-            )
-            hand_opened = attach_terminal_session_to_leaf_payload(
-                config, session_id="hand-opened", leaf_key=canonical, host=host
+            payload = attach_terminal_session_to_task_payload(
+                _config(root),
+                session_id="free",
+                task_document_ref=leaf,
+                host=_Host("ar-free"),
             )
 
-            self.assertEqual(worker["status"], "attached")
-            self.assertEqual(worker["seatRole"], "worker")
-            self.assertEqual(hand_opened["status"], "role-required")
-            self.assertIsNone(_require_entry(catalog, "hand-opened").leaf_key)
+            self.assertEqual(payload["status"], "role-required")
+            self.assertIsNone(catalog.get("free").task_document_ref)  # type: ignore[union-attr]
 
-    def test_hand_opened_architect_attaches_without_impersonating_worker(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
-            catalog.upsert(_entry("worker", leaf_key="repo/master/leaf", spawn_role="worker"))
-            catalog.upsert(_entry("architect"))
-            host = _Host("ar-worker", "ar-architect")
-
-            result = assign_terminal_session_to_leaf(
-                catalog,
-                host,
-                session_id="architect",
-                leaf_key="repo/master/leaf",
-                role="architect",
-            )
-
-            self.assertEqual(result.status, "attached")
-            self.assertEqual(_require_entry(catalog, "worker").binding_role, "worker")
-            self.assertEqual(_require_entry(catalog, "architect").binding_role, "architect")
-
-    def test_role_suffixed_leaf_ref_is_rejected_with_pair_guidance(self) -> None:
+    def test_http_attach_returns_structural_seat_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config = _config(root)
-            _write_leaf(root)
-
-            payload = attach_terminal_session_to_leaf_payload(
-                config,
-                session_id="unused",
-                leaf_key="legacy-leaf-curator",
-                role="curator",
-                host=_Host(),
-            )
-
-            self.assertEqual(payload["status"], "leaf-ref-not-found")
-            self.assertIn("role-suffixed leaf refs are unsupported", payload["detail"])
-            self.assertIn("role='curator'", payload["detail"])
-
-    def test_attach_payload_rejects_unmatchable_leaf_ref_without_mutating(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config = _config(root)
-            _write_leaf(root)
+            _sprint, _master, leaf = _write_topology(root)
             catalog = TerminalCatalog(terminal_catalog_path(root))
-            catalog.upsert(_entry("chat-1", leaf_key="repo/master/old"))
-
-            payload = attach_terminal_session_to_leaf_payload(
-                config,
-                session_id="chat-1",
-                leaf_key="missing-leaf",
+            catalog.upsert(_entry("owner", task_document_ref=leaf, spawn_role="worker"))
+            catalog.upsert(_entry("seeker", spawn_role="worker"))
+            runtime = cast(
+                Any,
+                SimpleNamespace(
+                    config=SimpleNamespace(coordination_root=root),
+                    catalog=catalog,
+                    host=_Host("ar-owner", "ar-seeker"),
+                ),
             )
 
-            self.assertFalse(payload["ok"])
-            self.assertEqual(payload["status"], "leaf-ref-not-found")
-            self.assertIn("<repo>/<master-folder>/<doc-id>", payload["detail"])
-            self.assertEqual(_require_entry(catalog, "chat-1").leaf_key, "repo/master/old")
+            response = terminal_routes._attach_task_response(
+                runtime,
+                "seeker",
+                TerminalAttachTaskRequest(taskDocumentRef=leaf, role="worker"),
+            )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertIn(b"seat-taken", response.body)
+            self.assertIn(b"taskDocumentRef", response.body)
+
+    def test_legacy_role_suffix_parser_covers_supported_separators_and_refusals(self) -> None:
+        self.assertEqual(role_suffixed_leaf_base("leaf-WORKER"), ("leaf", "worker"))
+        self.assertEqual(role_suffixed_leaf_base("leaf/reviewer"), ("leaf", "reviewer"))
+        self.assertEqual(role_suffixed_leaf_base("leaf:curator"), ("leaf", "curator"))
+        self.assertIsNone(role_suffixed_leaf_base("worker"))
+        self.assertIsNone(role_suffixed_leaf_base("leaf-unknown"))
 
 
 if __name__ == "__main__":

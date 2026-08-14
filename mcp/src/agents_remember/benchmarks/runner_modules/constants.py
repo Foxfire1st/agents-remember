@@ -3,6 +3,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
+
 AGENTS_MD_TARGETS = {
     Path("runtime/agents-md-files/coordinator/AGENTS.md"): Path("AGENTS.md"),
     Path("runtime/agents-md-files/system/AGENTS.md"): Path("system/AGENTS.md"),
@@ -35,8 +37,7 @@ CODEX_SANDBOX_DEFAULT = "default"
 # Secure-by-default: the public codex_benchmark_run tool defaults to Codex's own
 # sandbox. Operators who need full host access must opt in explicitly with
 # codex_sandbox="danger-full-access".
-CODEX_BENCHMARK_SANDBOX = CODEX_SANDBOX_DEFAULT
-CODEX_BENCHMARK_SANDBOX_MODES = (CODEX_SANDBOX_DANGER_FULL_ACCESS, CODEX_SANDBOX_DEFAULT)
+CODEX_BENCHMARK_SANDBOX_MODES = (CODEX_SANDBOX_DANGER_FULL_ACCESS, CODEX_BENCHMARK_SANDBOX)
 CODEX_BENCHMARK_SCOPE = "codex-benchmark-only"
 BENCHMARK_MCP_SERVER_NAME = "agents_remember_benchmark"
 BENCHMARK_MCP_SETTINGS_NAME = "agents-remember-benchmark.settings.json"

@@ -53,10 +53,11 @@ Start the watchers so the providers index the configured repos and memory, then
 confirm they are healthy:
 
 ```text
-provider_watchers(action="start")   # start watchers
-provider_watchers(action="refresh")  # re-seed after repo/memory changes
-provider_status()                                   # compact readiness summary
-provider_diagnostics()                              # raw provider-native detail
+provider_watchers(action="start")               # start watchers
+provider_watchers(action="restart")             # stop and start, indexes untouched
+provider_watchers(action="invalidate-indexes")  # delete and rebuild every index (slow)
+provider_status()                               # compact readiness summary
+provider_diagnostics()                          # raw provider-native detail
 ```
 
 `provider_watchers` actions: `status`, `start`, `stop`, `restart`, `refresh`,
@@ -83,7 +84,10 @@ See the [MCP tool reference](../reference/mcp-tools.md) for arguments.
   available.
 - **"run runtime_install before provider operations"** — the provider runner
   integrity check failed; run `runtime_install()` first.
-- **Changed repo or memory not reflected** — `provider_watchers(action="refresh")`.
+- **Changed repo or memory not reflected** —
+  `provider_watchers(action="invalidate-indexes")` rebuilds every index from scratch.
+  Use `action="restart"` instead when the watchers themselves are stuck but their
+  indexes are fine; it is far cheaper.
 
 Providers are optional: Agents Remember's memory, onboarding, drift, and task
 workflows all work without them. They add faster code/memory search on top.

@@ -39,6 +39,19 @@ def normalize_rel_path(value: str) -> str:
     return value.replace("\\", "/").strip().strip("/")
 
 
+def mirror_onboarding_path(onboarding_root: Path, source_file: str) -> Path:
+    """Where ``source_file``'s sidecar onboarding lives: the same relative path, plus ``.md``.
+
+    The 1:1 mirror rule, expressed once. It is a pure derivation over
+    :func:`normalize_rel_path` -- no filesystem access, no memory-quality vocabulary -- and it
+    is asked by three different substrates: the drift checker, the missing-onboarding check,
+    and the sidecar pairing the read tools and the dashboard file API share. It used to be
+    declared by the drift checker, which made ``kernel`` import ``memory_quality``
+    (``layers.toml``) for a path join.
+    """
+    return onboarding_root / f"{normalize_rel_path(source_file)}.md"
+
+
 def extract_yaml_blocks(markdown_text: str) -> list[str]:
     return [
         match.group(1)

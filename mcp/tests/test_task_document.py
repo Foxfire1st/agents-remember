@@ -3,34 +3,39 @@
 Covers the ``ar-task-document/v1`` schema (round-trip, alias, strictness, progress
 helpers), the deterministic markdown renderer (the ``w-02-light-task-workflow``
 template shape, checkbox mapping, escaping, empty sections), the JSON+markdown
-store, the ``task_doc`` controller operations and error paths (including contract
+store, the ``task_doc`` application operations and error paths (including contract
 lifecycle-key pickup), and the MCP tool registration.
 """
-
-from __future__ import annotations
 
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import (
+    Any,
+    cast,
+)
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers.task_doc_tools import TaskDocError, task_doc_tool
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.mcp.tools import task_doc_payload
-from agents_remember.mcp.tools.base import PUBLIC_TOOLS
-from agents_remember.models.task_doc import TaskDocResponse
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
-from agents_remember.observer.ambient import reset_ambient
+import agents_remember.tasks.store as task_store
+from agents_remember.application.task_doc_tools import (
+    TaskDocEdit,
+    TaskDocTarget,
+    task_doc_tool,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
     TaskDocument,
+    completion_blockers,
     current_step,
     doc_stem,
     json_path_for,
@@ -40,8 +45,8 @@ from agents_remember.tasks import (
     step_done,
     step_total,
     write_task_doc,
+    write_task_docs,
 )
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
 
 
 def _doc(**over: Any) -> TaskDocument:
@@ -73,7 +78,7 @@ def _master(**over: Any) -> TaskDocument:
 
 
 def _config(coord: Path) -> McpRuntimeConfig:
-    """A lightweight stand-in: the task-doc controller only reads coordination_root."""
+    """A lightweight stand-in: the task-doc entry point only reads coordination_root."""
     return cast(McpRuntimeConfig, SimpleNamespace(coordination_root=coord))
 
 
@@ -97,7 +102,7 @@ class SchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             TaskDocument.model_validate({**_doc().model_dump(by_alias=True), "bogus": 1})
 
-    def test_progress_counts_substeps_when_present_else_step(self) -> None:
+    def test_progress_counts_every_declared_parent_and_child(self) -> None:
         doc = _doc(
             steps=[
                 {
@@ -112,8 +117,39 @@ class SchemaTests(unittest.TestCase):
                 {"id": "S2", "title": "Two", "status": "done"},
             ]
         )
-        # Two substeps under S1 (1 done) + S2 itself (done) = 3 leaves, 2 done.
-        self.assertEqual((step_done(doc), step_total(doc)), (2, 3))
+        # Parent S1 remains visible beside its two children, plus S2: 4 units, 2 done.
+        self.assertEqual((step_done(doc), step_total(doc)), (2, 4))
+        self.assertEqual(
+            [(item.id, item.parentId, item.status) for item in completion_blockers(doc)],
+            [("S1", None, "inProgress"), ("S1.b", "S1", "pending")],
+        )
+
+    def test_current_step_includes_active_and_pending_nested_units(self) -> None:
+        active = _doc(
+            steps=[
+                {
+                    "id": "S1",
+                    "title": "Parent",
+                    "status": "done",
+                    "substeps": [{"id": "C1", "title": "Child", "status": "blocked"}],
+                }
+            ]
+        )
+        self.assertEqual(current_step(active), "S1/C1 — Child")
+        pending = active.model_copy(
+            update={
+                "steps": [
+                    active.steps[0].model_copy(
+                        update={
+                            "substeps": [
+                                active.steps[0].substeps[0].model_copy(update={"status": "pending"})
+                            ]
+                        }
+                    )
+                ]
+            }
+        )
+        self.assertEqual(current_step(pending), "S1/C1 — Child")
 
     def test_current_step_prefers_active_then_first_unfinished_then_none(self) -> None:
         active = _doc(steps=[{"id": "S1", "title": "One", "status": "blocked"}])
@@ -149,6 +185,16 @@ class SchemaTests(unittest.TestCase):
             _master(steps=[{"id": "S1", "title": "x"}])
         with self.assertRaises(ValidationError):
             _master(lifecycleId="LC")
+
+    def test_integration_branch_is_master_only_and_nonblank(self) -> None:
+        sprint = _master(orchestrates=["master"], integrationBranch=" ar/super ")
+        self.assertEqual(sprint.integrationBranch, "ar/super")
+        with self.assertRaises(ValidationError):
+            _master(orchestrates=["master"], integrationBranch="   ")
+        with self.assertRaises(ValidationError):
+            _master(integrationBranch="ar/super")
+        with self.assertRaises(ValidationError):
+            _doc(integrationBranch="ar/super")
 
     def test_leaf_forbids_subtasks_and_non_freeform_sections(self) -> None:
         # the master series index stays master-only
@@ -196,9 +242,7 @@ class SchemaTests(unittest.TestCase):
         master = _master(orchestrates=["260706_management-repo", "260707_settings-page"])
         again = TaskDocument.model_validate(master.model_dump(by_alias=True))
         self.assertEqual(again, master)
-        self.assertEqual(
-            again.orchestrates, ["260706_management-repo", "260707_settings-page"]
-        )
+        self.assertEqual(again.orchestrates, ["260706_management-repo", "260707_settings-page"])
         # A leaf/light doc never commands masters.
         with self.assertRaises(ValidationError):
             _doc(orchestrates=["260706_management-repo"])
@@ -248,6 +292,12 @@ class RenderTests(unittest.TestCase):
                     "## Implementation Steps",
                     "",
                     "### S1 — Do",
+                    "",
+                    "---",
+                    "",
+                    "## Route Review",
+                    "",
+                    "_No candidate-bound route review recorded._",
                     "",
                     "---",
                     "",
@@ -304,6 +354,39 @@ class RenderTests(unittest.TestCase):
         )
         self.assertIn("- [ ] Parent", md)
         self.assertIn("  - [x] child — n", md)
+
+    def test_intentional_skip_is_distinct_in_parent_and_child_markdown(self) -> None:
+        disposition = {
+            "kind": "intentionalSkip",
+            "reason": "Superseded by the accepted path.",
+            "recordedAt": "2026-08-03T12:00:00+00:00",
+            "recordedVia": "task_doc.skip_step",
+        }
+        md = render_markdown(
+            _doc(
+                steps=[
+                    {
+                        "id": "S1",
+                        "title": "Skipped parent",
+                        "status": "done",
+                        "disposition": disposition,
+                        "substeps": [
+                            {
+                                "id": "C1",
+                                "title": "Skipped child",
+                                "status": "done",
+                                "disposition": disposition,
+                            }
+                        ],
+                    },
+                    {"id": "S2", "title": "Ordinary done", "status": "done"},
+                ]
+            )
+        )
+        self.assertIn("- [x] Skipped parent — SKIPPED: Superseded by the accepted path.", md)
+        self.assertIn("  - [x] Skipped child — SKIPPED: Superseded by the accepted path.", md)
+        ordinary = md.split("### S2 — Ordinary done", maxsplit=1)[1]
+        self.assertNotIn("SKIPPED", ordinary)
 
     def test_step_outcome_on_checkbox_and_bare_step_has_no_echo(self) -> None:
         md = render_markdown(
@@ -555,8 +638,31 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(md_path.read_text(encoding="utf-8"), render_markdown(doc))
         self.assertEqual(list(self.root.glob("*.tmp")), [])
 
+    def test_batch_failure_removes_new_files_published_before_later_document(self) -> None:
+        docs = [
+            _doc(id="L1", slug="01_first", kind="subTask"),
+            _doc(id="L2", slug="02_second", kind="subTask"),
+        ]
+        real_atomic_write = task_store.atomic_write_text
+        call_count = 0
 
-class ControllerTests(unittest.TestCase):
+        def fail_on_second_document(path: Path, text: str) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 3:
+                raise OSError("injected second-document failure")
+            real_atomic_write(path, text)
+
+        with (
+            patch.object(task_store, "atomic_write_text", side_effect=fail_on_second_document),
+            self.assertRaisesRegex(OSError, "injected second-document failure"),
+        ):
+            write_task_docs(self.root, docs)
+
+        self.assertEqual(list(self.root.iterdir()), [])
+
+
+class ApplicationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.coord = Path(tempfile.mkdtemp())
         self.cfg = _config(self.coord)
@@ -574,10 +680,9 @@ class ControllerTests(unittest.TestCase):
         payload.update(fields)
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="create",
-            task_name="3c-x",
-            fields=payload,
+            edit=TaskDocEdit(fields=payload),
         )
 
     def _create_parent_master(self, **fields: Any) -> dict[str, Any]:
@@ -594,10 +699,9 @@ class ControllerTests(unittest.TestCase):
         payload.update(fields)
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="create",
-            task_name="3c-x",
-            fields=payload,
+            edit=TaskDocEdit(fields=payload),
         )
 
     def _call(
@@ -611,707 +715,12 @@ class ControllerTests(unittest.TestCase):
     ) -> dict[str, Any]:
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation=operation,
-            task_name="3c-x",
-            slug="03c_x",
-            fields=fields,
-            step=step,
-            decision=decision,
+            edit=TaskDocEdit(fields=fields, step=step, decision=decision),
             dry_run=dry_run,
         )
 
-    def test_create_writes_both_files(self) -> None:
-        result = self._create(steps=[{"id": "S1", "title": "One", "status": "inProgress"}])
-        self.assertEqual(result["operation"], "task_doc.create")
-        self.assertEqual((result["stepsDone"], result["stepsTotal"]), (0, 1))
-        self.assertTrue(Path(str(result["docPath"])).exists())
-        self.assertTrue(Path(str(result["renderedPath"])).exists())
-        self.assertNotIn("masterSync", result)
 
-    def test_leaf_create_syncs_parent_master_row(self) -> None:
-        self._create_parent_master()
-        result = self._create(master="task.md")
-
-        sync = result["masterSync"]
-        self.assertEqual(sync["status"], "created")
-        master = read_task_doc(Path(str(sync["masterDocPath"])))
-        self.assertEqual(len(master.subTasks), 1)
-        [row] = master.subTasks
-        self.assertEqual(row.number, "3C")
-        self.assertEqual(row.name, "Smoke")
-        self.assertEqual(row.file, "03c_x.md")
-        self.assertEqual(row.status, "planning")
-        self.assertEqual(row.scope, "")
-
-    def test_leaf_updates_preserve_manual_master_scope(self) -> None:
-        self._create_parent_master()
-        self._create(master="task.md")
-        task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="set_subtask",
-            task_name="3c-x",
-            subtask={"number": "3C", "scope": "keep this prose"},
-        )
-
-        result = self._call("set_field", fields={"title": "Renamed", "status": "inProgress"})
-
-        self.assertEqual(result["masterSync"]["status"], "updated")
-        master = read_task_doc(Path(str(result["masterSync"]["masterDocPath"])))
-        [row] = master.subTasks
-        self.assertEqual(row.name, "Renamed")
-        self.assertEqual(row.status, "inProgress")
-        self.assertEqual(row.scope, "keep this prose")
-
-    def test_leaf_step_progress_derives_master_row_status(self) -> None:
-        self._create_parent_master()
-        self._create(
-            master="task.md",
-            steps=[{"id": "S1", "title": "One", "status": "pending"}],
-        )
-
-        blocked = self._call("set_step", step={"id": "S1", "title": "One", "status": "blocked"})
-        master = read_task_doc(Path(str(blocked["masterSync"]["masterDocPath"])))
-        self.assertEqual(master.subTasks[0].status, "inProgress")
-
-        done = self._call("set_step", step={"id": "S1", "title": "One", "status": "done"})
-        master = read_task_doc(Path(str(done["masterSync"]["masterDocPath"])))
-        self.assertEqual(master.subTasks[0].status, "Completed")
-
-    def test_leaf_dry_run_includes_master_sync_preview_without_writing(self) -> None:
-        self._create_parent_master()
-        self._create(master="task.md")
-        master_path = self.coord / "tasks" / "agents-remember" / "3c-x" / "task.json"
-        before = master_path.read_text(encoding="utf-8")
-
-        result = self._call("set_field", fields={"title": "Preview Rename"}, dry_run=True)
-
-        sync = result["masterSync"]
-        self.assertEqual(sync["status"], "would-update")
-        self.assertIn("Preview Rename", sync["rendered"])
-        self.assertIn("Preview Rename", sync["diff"])
-        self.assertIsInstance(sync["wouldLose"], bool)
-        self.assertEqual(master_path.read_text(encoding="utf-8"), before)
-
-    def test_create_rejects_duplicate(self) -> None:
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._create()
-
-    def test_set_status_and_set_field(self) -> None:
-        self._create()
-        status_result = self._call("set_status", fields={"status": "inProgress"})
-        self.assertEqual(status_result["status"], "inProgress")
-        updated = self._call("set_field", fields={"objective": "new", "bogus": "x"})
-        self.assertEqual(updated["operation"], "task_doc.set_field")
-        self.assertEqual(read_task_doc(Path(str(updated["docPath"]))).objective, "new")
-
-    def test_set_field_code_examples_note(self) -> None:
-        self._create()
-        updated = self._call("set_field", fields={"codeExamplesNote": "Drafted at the plan gate."})
-        doc = read_task_doc(Path(str(updated["docPath"])))
-        self.assertEqual(doc.codeExamplesNote, "Drafted at the plan gate.")
-
-    def test_set_field_status_note(self) -> None:
-        self._create()
-        updated = self._call("set_field", fields={"statusNote": "core JSON format landed"})
-        doc = read_task_doc(Path(str(updated["docPath"])))
-        self.assertEqual(doc.statusNote, "core JSON format landed")
-
-    def test_set_field_orchestrates_on_master(self) -> None:
-        # L14: `orchestrates` is a mutable flat string list on a master (the set_field path
-        # makes an existing master an orchestration task without a replace); the render carries it.
-        self._create_parent_master()
-        updated = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="set_field",
-            task_name="3c-x",
-            fields={"orchestrates": ["260706_management-repo"]},
-        )
-        doc = read_task_doc(Path(str(updated["docPath"])))
-        self.assertEqual(doc.orchestrates, ["260706_management-repo"])
-        rendered = Path(str(updated["renderedPath"])).read_text(encoding="utf-8")
-        self.assertIn("**Orchestrates:** `260706_management-repo`", rendered)
-
-    def test_set_field_orchestrates_rejected_on_leaf(self) -> None:
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._call("set_field", fields={"orchestrates": ["260706_management-repo"]})
-
-    def test_dry_run_create_renders_without_writing(self) -> None:
-        result = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="3c-x",
-            fields={
-                "id": "3C",
-                "slug": "03c_x",
-                "title": "Smoke",
-                "kind": "subTask",
-                "repo": "agents-remember",
-                "type": "Code",
-                "createdAt": "2026-01-01T00:00",
-                "objective": "Preview me.",
-            },
-            dry_run=True,
-        )
-        self.assertTrue(result["dryRun"])
-        self.assertIn("Preview me.", str(result["rendered"]))
-        # nothing written: neither the json source nor the rendered md exists
-        self.assertFalse(Path(str(result["docPath"])).exists())
-        self.assertFalse(Path(str(result["renderedPath"])).exists())
-
-    def test_dry_run_does_not_mutate_existing_files(self) -> None:
-        created = self._create(objective="orig")
-        json_path = Path(str(created["docPath"]))
-        md_path = Path(str(created["renderedPath"]))
-        before_json = json_path.read_text(encoding="utf-8")
-        before_md = md_path.read_text(encoding="utf-8")
-        result = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="set_field",
-            task_name="3c-x",
-            slug="03c_x",
-            fields={"objective": "changed"},
-            dry_run=True,
-        )
-        self.assertIn("changed", str(result["rendered"]))  # the would-be render reflects the edit
-        # …but disk is untouched
-        self.assertEqual(json_path.read_text(encoding="utf-8"), before_json)
-        self.assertEqual(md_path.read_text(encoding="utf-8"), before_md)
-
-    def test_dry_run_would_lose_flags_unmodeled_md_content(self) -> None:
-        created = self._create(objective="orig")
-        md_path = Path(str(created["renderedPath"]))
-        # a clean re-preview (no real change) matches disk exactly: no loss, empty diff
-        clean = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="set_field",
-            task_name="3c-x",
-            slug="03c_x",
-            fields={"objective": "orig"},
-            dry_run=True,
-        )
-        self.assertFalse(clean["wouldLose"])
-        self.assertEqual(clean["diff"], "")
-        # a hand-authored line the JSON does not model → wouldLose true + the diff shows it dropped
-        md_path.write_text(
-            md_path.read_text(encoding="utf-8") + "\n## Bespoke hand note\nkeep me\n",
-            encoding="utf-8",
-        )
-        lossy = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="set_field",
-            task_name="3c-x",
-            slug="03c_x",
-            fields={"objective": "orig"},
-            dry_run=True,
-        )
-        self.assertTrue(lossy["wouldLose"])
-        self.assertIn("keep me", str(lossy["diff"]))
-
-    def test_replace_rewrites_structural_fields_and_decisions(self) -> None:
-        created = self._create(
-            objective="old",
-            steps=[{"id": "S1", "title": "Old step", "status": "done"}],
-            codeExamples=[
-                {
-                    "id": "E1",
-                    "title": "Old example",
-                    "distinctChange": "old",
-                    "why": "old",
-                }
-            ],
-            decisions=[{"at": "t1", "decision": "old", "rationale": "old"}],
-        )
-        json_path = Path(str(created["docPath"]))
-        result = self._call(
-            "replace",
-            fields={
-                "id": "3C",
-                "slug": "03c_x",
-                "title": "Smoke reset",
-                "kind": "subTask",
-                "repo": "agents-remember",
-                "type": "Code",
-                "createdAt": "2026-01-01T00:00",
-                "objective": "new",
-                "steps": [{"id": "S2", "title": "New step", "status": "pending"}],
-                "codeExamples": [
-                    {
-                        "id": "E2",
-                        "title": "New example",
-                        "distinctChange": "new",
-                        "why": "new",
-                    }
-                ],
-                "decisions": [],
-            },
-        )
-        self.assertEqual(result["operation"], "task_doc.replace")
-        doc = read_task_doc(json_path)
-        self.assertEqual(doc.title, "Smoke reset")
-        self.assertEqual([step.id for step in doc.steps], ["S2"])
-        self.assertEqual([example.id for example in doc.codeExamples], ["E2"])
-        self.assertEqual(doc.decisions, [])
-
-    def test_replace_dry_run_does_not_mutate_existing_files(self) -> None:
-        created = self._create(objective="old")
-        json_path = Path(str(created["docPath"]))
-        md_path = Path(str(created["renderedPath"]))
-        before_json = json_path.read_text(encoding="utf-8")
-        before_md = md_path.read_text(encoding="utf-8")
-        result = self._call(
-            "replace",
-            fields={
-                "id": "3C",
-                "slug": "03c_x",
-                "title": "Smoke",
-                "kind": "subTask",
-                "repo": "agents-remember",
-                "type": "Code",
-                "createdAt": "2026-01-01T00:00",
-                "objective": "replacement preview",
-            },
-            dry_run=True,
-        )
-        self.assertTrue(result["dryRun"])
-        self.assertIn("replacement preview", str(result["rendered"]))
-        self.assertEqual(json_path.read_text(encoding="utf-8"), before_json)
-        self.assertEqual(md_path.read_text(encoding="utf-8"), before_md)
-
-    def test_replace_rejects_document_path_change(self) -> None:
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._call(
-                "replace",
-                fields={
-                    "id": "3C",
-                    "slug": "different",
-                    "title": "Moved",
-                    "kind": "subTask",
-                    "repo": "agents-remember",
-                    "type": "Code",
-                    "createdAt": "2026-01-01T00:00",
-                },
-            )
-
-    def test_set_step_inserts_then_updates_without_duplicating(self) -> None:
-        self._create(steps=[{"id": "S1", "title": "One", "status": "pending"}])
-        self._call(
-            "set_step",
-            step={"id": "S1.a", "title": "sub", "status": "pending", "parent": "S1"},
-        )
-        result = self._call(
-            "set_step",
-            step={"id": "S1.a", "title": "sub", "status": "done", "parent": "S1"},
-        )
-        doc = read_task_doc(Path(str(result["docPath"])))
-        self.assertEqual(len(doc.steps[0].substeps), 1)
-        self.assertEqual(doc.steps[0].substeps[0].status, "done")
-
-    def test_append_decision_accumulates(self) -> None:
-        self._create()
-        self._call("append_decision", decision={"at": "t1", "decision": "d1", "rationale": "r"})
-        result = self._call(
-            "append_decision", decision={"at": "t2", "decision": "d2", "rationale": "r"}
-        )
-        self.assertEqual(len(read_task_doc(Path(str(result["docPath"]))).decisions), 2)
-
-    def test_get_does_not_mutate(self) -> None:
-        self._create()
-        before = Path(str(self._call("get")["docPath"])).read_text(encoding="utf-8")
-        after = Path(str(self._call("get")["docPath"])).read_text(encoding="utf-8")
-        self.assertEqual(before, after)
-
-    def test_create_picks_up_contract_lifecycle_id(self) -> None:
-        contract = default_contract(
-            task_name="3c-x",
-            repo_name="agents-remember",
-            workflow_kind="chat-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord,
-            code_source_branch="main",
-            code_work_branch="wb",
-            code_base_commit="abc123",
-            worktree_name="3c-x",
-            lifecycle_id="LC-CONTRACT",
-        )
-        write_contract(contract.contract_path, contract)
-        result = self._create()  # no lifecycleId in fields
-        self.assertEqual(result["lifecycleId"], "LC-CONTRACT")
-
-    def test_create_refuses_light_and_defaults_master_without_contract(self) -> None:
-        base = {
-            "id": "K1",
-            "slug": "task",
-            "title": "Kind",
-            "repo": "agents-remember",
-            "createdAt": "2026-01-01T00:00",
-        }
-        # Explicit light is refused: every task is wrapped master/leaf, even a single-file change.
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(
-                self.cfg,
-                repo_id="agents-remember",
-                operation="create",
-                task_name="kind-x",
-                fields={**base, "kind": "light"},
-            )
-        # No contract + no kind defaults to a standalone master (not the retired "light" default).
-        created = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="kind-x",
-            fields=base,
-        )
-        self.assertEqual(created["kind"], "master")
-        # replace shares _build_doc, so it refuses light on the same path.
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(
-                self.cfg,
-                repo_id="agents-remember",
-                operation="replace",
-                task_name="kind-x",
-                slug="task",
-                fields={**base, "kind": "light"},
-            )
-
-    def test_create_defaults_subtask_under_leaf_contract(self) -> None:
-        contract = default_contract(
-            task_name="leaf-x",
-            repo_name="agents-remember",
-            workflow_kind="chat-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord,
-            code_source_branch="main",
-            code_work_branch="wb",
-            code_base_commit="abc123",
-            worktree_name="leaf-x",
-            lifecycle_id="LC-LEAF",
-        )
-        write_contract(contract.contract_path, contract)
-        # A bare create against a leaf contract is the leaf sub-task (context-aware default).
-        result = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="leaf-x",
-            fields={
-                "id": "L1",
-                "slug": "01_leaf",
-                "title": "Leaf",
-                "repo": "agents-remember",
-                "createdAt": "2026-01-01T00:00",
-            },
-        )
-        self.assertEqual(result["kind"], "subTask")
-
-    def test_resolve_by_contract_path(self) -> None:
-        created = self._create()
-        task_root = Path(str(created["docPath"])).parent
-        result = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="get",
-            contract_path=str(task_root / "series-contract.md"),
-            slug="03c_x",
-        )
-        self.assertEqual(result["taskId"], "3C")
-
-    def test_error_paths(self) -> None:
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(self.cfg, repo_id="agents-remember", operation="frob", task_name="x")
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(self.cfg, repo_id="agents-remember", operation="get")
-        with self.assertRaises(TaskDocError):
-            self._call("get")  # doc not created yet
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._call("set_status", fields={})
-        with self.assertRaises(TaskDocError):
-            self._call("set_field", fields={"unknown": "x"})
-        with self.assertRaises(TaskDocError):
-            self._call("set_step", step={"title": "no id"})
-        with self.assertRaises(TaskDocError):
-            self._call("set_step", step={"id": "S9.a", "title": "x", "parent": "ghost"})
-
-
-class MasterControllerTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.coord = Path(tempfile.mkdtemp())
-        self.cfg = _config(self.coord)
-
-    def _create(self, **fields: Any) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "id": "series",
-            "slug": "series",
-            "title": "Series",
-            "kind": "master",
-            "repo": "agents-remember",
-            "type": "Master (Code)",
-            "createdAt": "2026-01-01T00:00",
-            "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
-        }
-        payload.update(fields)
-        return task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="series",
-            fields=payload,
-        )
-
-    def _op(self, operation: str, **kw: Any) -> dict[str, Any]:
-        return task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation=operation,
-            task_name="series",
-            **kw,
-        )
-
-    def test_create_master_writes_task_json_without_lifecycle(self) -> None:
-        result = self._create()
-        self.assertEqual(result["kind"], "master")
-        self.assertTrue(str(result["docPath"]).endswith("task.json"))
-        self.assertIsNone(result["lifecycleId"])
-
-    def test_set_subtask_inserts_then_updates_by_number(self) -> None:
-        self._create(subTasks=[{"number": "1", "name": "A", "status": "planning"}])
-        self._op("set_subtask", subtask={"number": "3c", "name": "B", "status": "inProgress"})
-        result = self._op(
-            "set_subtask", subtask={"number": "1", "status": "Completed", "scope": "done"}
-        )
-        doc = read_task_doc(Path(str(result["docPath"])))
-        self.assertEqual(
-            [(s.number, s.status) for s in doc.subTasks],
-            [("1", "Completed"), ("3c", "inProgress")],
-        )
-        self.assertEqual(doc.subTasks[0].scope, "done")
-
-    def test_set_section_upserts_by_heading(self) -> None:
-        self._create()
-        self._op("set_section", section={"heading": "Invariants", "body": "- x"})
-        result = self._op("set_section", section={"heading": "Invariants", "body": "- y"})
-        doc = read_task_doc(Path(str(result["docPath"])))
-        invariants = [s for s in doc.sections if s.heading == "Invariants"]
-        self.assertEqual(len(invariants), 1)
-        self.assertEqual(invariants[0].body, "- y")
-
-    def test_master_create_ignores_contract_lifecycle_id(self) -> None:
-        contract = default_contract(
-            task_name="series",
-            repo_name="agents-remember",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord,
-            code_source_branch="main",
-            code_work_branch="wb",
-            code_base_commit="abc123",
-            worktree_name="series",
-            lifecycle_id="LC-X",
-        )
-        write_contract(contract.contract_path, contract)
-        self.assertIsNone(self._create()["lifecycleId"])
-
-    def test_master_rejects_step_op(self) -> None:
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._op("set_step", step={"id": "S1", "title": "x"})
-
-    def test_subtask_op_rejects_non_master_but_section_allows_freeform(self) -> None:
-        # A subTask leaf (the non-master kind now that "light" is no longer authorable). Its
-        # slug is distinct from "task" so master-sync does not treat its own task.json as a master.
-        task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="lite",
-            fields={
-                "id": "L",
-                "slug": "01_leaf",
-                "title": "L",
-                "kind": "subTask",
-                "repo": "r",
-                "createdAt": "2026-01-01T00:00",
-            },
-        )
-        # set_subtask stays master-only (the series index has no meaning on a leaf)
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(
-                self.cfg,
-                repo_id="agents-remember",
-                operation="set_subtask",
-                task_name="lite",
-                slug="01_leaf",
-                subtask={"number": "1", "name": "x"},
-            )
-        # set_section on a leaf adds a freeform extra section (R4)
-        result = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="set_section",
-            task_name="lite",
-            slug="01_leaf",
-            section={"heading": "Status history", "body": "old."},
-        )
-        doc = read_task_doc(Path(str(result["docPath"])))
-        self.assertEqual([s.heading for s in doc.sections], ["Status history"])
-        # a non-freeform section on a leaf is rejected (the validator backstop)
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(
-                self.cfg,
-                repo_id="agents-remember",
-                operation="set_section",
-                task_name="lite",
-                slug="01_leaf",
-                section={"heading": "X", "kind": "subTasks"},
-            )
-
-    def test_master_op_argument_errors(self) -> None:
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._op("set_subtask", subtask={"name": "no number"})
-        with self.assertRaises(TaskDocError):
-            self._op("set_section", section={"body": "no heading"})
-
-    def _author_leaf(self, *, number: str = "1", slug: str = "01_a") -> tuple[Path, Path]:
-        leaf = task_doc_tool(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="series",
-            fields={
-                "id": number,
-                "slug": slug,
-                "title": f"Leaf {number}",
-                "kind": "subTask",
-                "master": "task.md",
-                "repo": "agents-remember",
-                "createdAt": "2026-01-01T00:00",
-            },
-        )
-        return Path(str(leaf["docPath"])), Path(str(leaf["renderedPath"]))
-
-    def test_remove_subtask_deletes_leaf_doc_and_row(self) -> None:
-        # remove means remove: the master row AND the leaf doc (json + md) are gone.
-        self._create()
-        leaf_json, leaf_md = self._author_leaf()
-        self.assertTrue(leaf_json.exists() and leaf_md.exists())
-        result = self._op("remove_subtask", subtask={"number": "1"})
-        self.assertEqual(result["removedSubtask"], "1")
-        master = read_task_doc(Path(str(result["docPath"])))
-        self.assertEqual([s.number for s in master.subTasks], [])
-        self.assertFalse(leaf_json.exists())
-        self.assertFalse(leaf_md.exists())
-        self.assertIn(leaf_json.as_posix(), result["deletedFiles"])
-
-    def test_remove_subtask_keep_file_retains_leaf_doc(self) -> None:
-        # keep_file drops the index row but leaves the leaf doc on disk.
-        self._create()
-        leaf_json, leaf_md = self._author_leaf()
-        result = self._op("remove_subtask", subtask={"number": "1", "keep_file": True})
-        master = read_task_doc(Path(str(result["docPath"])))
-        self.assertEqual([s.number for s in master.subTasks], [])
-        self.assertTrue(leaf_json.exists() and leaf_md.exists())
-        self.assertEqual(result["deletedFiles"], [])
-
-    def test_remove_subtask_dry_run_previews_without_deleting(self) -> None:
-        self._create()
-        leaf_json, leaf_md = self._author_leaf()
-        result = self._op("remove_subtask", subtask={"number": "1"}, dry_run=True)
-        self.assertTrue(result["dryRun"])
-        self.assertIn(leaf_json.as_posix(), result["wouldDeleteFiles"])
-        self.assertTrue(leaf_json.exists() and leaf_md.exists())
-        master = read_task_doc(Path(str(result["docPath"])))
-        self.assertEqual([s.number for s in master.subTasks], ["1"])
-
-    def test_remove_subtask_absent_or_no_number_raises(self) -> None:
-        self._create()
-        with self.assertRaises(TaskDocError):
-            self._op("remove_subtask", subtask={"number": "ghost"})
-        with self.assertRaises(TaskDocError):
-            self._op("remove_subtask", subtask={"name": "no number"})
-
-    def test_remove_subtask_rejects_non_master(self) -> None:
-        self._create()
-        self._author_leaf()
-        with self.assertRaises(TaskDocError):
-            task_doc_tool(
-                self.cfg,
-                repo_id="agents-remember",
-                operation="remove_subtask",
-                task_name="series",
-                slug="01_a",
-                subtask={"number": "1"},
-            )
-
-    def test_remove_subtask_response_validates_on_both_paths(self) -> None:
-        # FINDING 1 (260703-L18, closes friction F-N): the remove_subtask result must satisfy the
-        # TaskDocResponse contract (extra=forbid). Before removedSubtask/deletedFiles/wouldDeleteFiles
-        # were declared, the destructive success FAILED response validation, so the caller saw a tool
-        # error after the removal already happened (and could retry an already-done op). Both the
-        # delete-with-files and keep_file paths -- and the dry-run preview -- must validate.
-        self._create()
-        self._author_leaf(number="1", slug="01_a")
-        deleted = self._op("remove_subtask", subtask={"number": "1"})
-        self.assertEqual(deleted["removedSubtask"], "1")
-        self.assertTrue(deleted["deletedFiles"])  # the leaf json + md paths
-        TaskDocResponse.model_validate(deleted)  # would raise ValidationError before the fix
-
-        self._author_leaf(number="2", slug="02_b")
-        kept = self._op("remove_subtask", subtask={"number": "2", "keep_file": True})
-        self.assertEqual(kept["deletedFiles"], [])
-        TaskDocResponse.model_validate(kept)
-
-        self._author_leaf(number="3", slug="03_c")
-        preview = self._op("remove_subtask", subtask={"number": "3"}, dry_run=True)
-        self.assertTrue(preview["wouldDeleteFiles"])
-        TaskDocResponse.model_validate(preview)
-
-
-class RegistrationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        reset_ambient()
-        self.coord = Path(tempfile.mkdtemp())
-        self.cfg = _config(self.coord)
-
-    def test_task_doc_registered(self) -> None:
-        self.assertIn("task_doc", PUBLIC_TOOLS)
-        self.assertIs(PUBLIC_TOOL_RESPONSE_MODELS["task_doc"], TaskDocResponse)
-
-    def test_payload_builder_returns_valid_token_stamped_response(self) -> None:
-        payload = task_doc_payload(
-            self.cfg,
-            repo_id="agents-remember",
-            operation="create",
-            task_name="3c-reg",
-            fields={
-                "id": "R1",
-                "slug": "task",
-                "title": "Reg",
-                "kind": "master",
-                "repo": "agents-remember",
-                "createdAt": "2026-01-01T00:00",
-            },
-        )
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["operation"], "task_doc.create")
-        self.assertIn("tokens", payload)
-        # The emitted payload validates against the registered response model.
-        TaskDocResponse.model_validate(payload)
-
-
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -41,6 +41,7 @@ provider_settings = setup_common.provider_settings
 require_settings_path = setup_common.require_settings_path
 run_command = setup_common.run_command
 run_lifecycle = setup_common.run_lifecycle
+LifecycleCommand = setup_common.LifecycleCommand
 selected_provider_enabled = setup_common.selected_provider_enabled
 settings_path = setup_common.settings_path
 stable_provider_id = setup_common.stable_provider_id
@@ -105,9 +106,7 @@ class ProviderSetupRequest:
                 source_coordination_root=_resolve_optional_path(
                     self.grepai_seed.source_coordination_root
                 ),
-                source_settings_path=_resolve_optional_path(
-                    self.grepai_seed.source_settings_path
-                ),
+                source_settings_path=_resolve_optional_path(self.grepai_seed.source_settings_path),
                 project_id=self.grepai_seed.project_id,
                 target_memory_root=_resolve_optional_path(self.grepai_seed.target_memory_root),
             ),
@@ -115,9 +114,7 @@ class ProviderSetupRequest:
                 runtime_root=_resolve_optional_path(self.grepai_isolated.runtime_root),
                 settings_path=_resolve_optional_path(self.grepai_isolated.settings_path),
                 project_id=self.grepai_isolated.project_id,
-                target_memory_root=_resolve_optional_path(
-                    self.grepai_isolated.target_memory_root
-                ),
+                target_memory_root=_resolve_optional_path(self.grepai_isolated.target_memory_root),
                 allow_missing_roots=self.grepai_isolated.allow_missing_roots,
             ),
         )
@@ -285,19 +282,46 @@ def _seed_catchup_results(
     }
     limit = getattr(args, "cgc_seed_delta_max_files", 0) or cgc_seed.DEFAULT_SEED_DELTA_MAX_FILES
     if count > limit:
-        payload["skipped"] = True
-        payload["staleIndex"] = {
-            "served": True,
-            "behindFiles": count,
-            "deltaMaxFiles": limit,
-            "reindex": "explicit 'cgc refresh' only",
-        }
-        _record_index_state(args, settings, payload)
-        return [payload]
-    root = Path(target_root)
+        return _stale_index_skip(
+            args,
+            settings,
+            payload,
+            {
+                "served": True,
+                "behindFiles": count,
+                "deltaMaxFiles": limit,
+                "reindex": "explicit 'cgc refresh' only",
+            },
+        )
+    touch_paths, residuals = _seed_touch_plan(divergence.get("entries", []), Path(target_root))
+    watcher = _wait_for_cgc_watcher_ready(args, settings)
+    payload["watcherReady"] = watcher
+    if not watcher.get("ready"):
+        return _stale_index_skip(
+            args,
+            settings,
+            payload,
+            {
+                "served": True,
+                "behindFiles": count,
+                "reason": "watcher not ready before the touch window; delta not delivered",
+                "reindex": "explicit 'cgc refresh' only",
+            },
+        )
+    return _deliver_seed_touches(args, settings, payload, touch_paths, residuals)
+
+
+def _seed_touch_plan(
+    entries: list[dict[str, Any]], root: Path
+) -> tuple[list[Path], list[dict[str, str]]]:
+    """Split the diff into paths a touch can re-index and residual staleness it cannot.
+
+    Deletions, the vanished source half of a rename, and paths absent from the checkout have
+    no file left to touch, so they stay in the index as phantoms until an explicit refresh.
+    """
     touch_paths: list[Path] = []
     residuals: list[dict[str, str]] = []
-    for entry in divergence.get("entries", []):
+    for entry in entries:
         status = str(entry.get("status", ""))
         path = str(entry.get("path", ""))
         if status == "R" and entry.get("from"):
@@ -310,18 +334,30 @@ def _seed_catchup_results(
             touch_paths.append(candidate)
         else:
             residuals.append({"kind": "missing-on-disk", "path": path})
-    watcher = _wait_for_cgc_watcher_ready(args, settings)
-    payload["watcherReady"] = watcher
-    if not watcher.get("ready"):
-        payload["skipped"] = True
-        payload["staleIndex"] = {
-            "served": True,
-            "behindFiles": count,
-            "reason": "watcher not ready before the touch window; delta not delivered",
-            "reindex": "explicit 'cgc refresh' only",
-        }
-        _record_index_state(args, settings, payload)
-        return [payload]
+    return touch_paths, residuals
+
+
+def _stale_index_skip(
+    args: argparse.Namespace,
+    settings: dict[str, Any],
+    payload: dict[str, Any],
+    stale_index: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Record and report a delta this run did not deliver: the index serves, knowingly stale."""
+    payload["skipped"] = True
+    payload["staleIndex"] = stale_index
+    _record_index_state(args, settings, payload)
+    return [payload]
+
+
+def _deliver_seed_touches(
+    args: argparse.Namespace,
+    settings: dict[str, Any],
+    payload: dict[str, Any],
+    touch_paths: list[Path],
+    residuals: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Touch the deliverable files; ``caughtUp`` is claimed only with zero residuals."""
     for candidate in touch_paths:
         os.utime(candidate)
     payload["touched"] = len(touch_paths)
@@ -339,9 +375,7 @@ def _seed_catchup_results(
     return [payload]
 
 
-def _cgc_watcher_container_name(
-    args: argparse.Namespace, settings: dict[str, Any]
-) -> str | None:
+def _cgc_watcher_container_name(args: argparse.Namespace, settings: dict[str, Any]) -> str | None:
     provider = provider_settings(settings, cgc_setup.CGC_PROVIDER_ID)
     repo_id = getattr(args, "cgc_seed_repo_id", None)
     if not isinstance(provider, dict) or not repo_id:
@@ -428,11 +462,13 @@ def _watcher_results(args: argparse.Namespace, settings: dict[str, Any]) -> list
         progress.phase_start("watchers", action)
         result = run_lifecycle(
             args.coordination_root,
-            "watchers",
-            action,
+            LifecycleCommand(
+                provider="watchers",
+                action=action,
+                extra_args=tuple(provider_settings_extra_args(args)),
+            ),
             timeout=args.timeout,
             dry_run=args.dry_run,
-            extra_args=provider_settings_extra_args(args),
         )
         progress.phase_done(result)
         results.append(result)
@@ -594,15 +630,13 @@ def write_isolated_provider_settings(
 
 
 def _isolated_provider_settings_path(args: argparse.Namespace) -> Path:
-    explicit = (
-        getattr(args, "grepai_isolated_settings_path", None)
-        or getattr(args, "cgc_isolated_settings_path", None)
+    explicit = getattr(args, "grepai_isolated_settings_path", None) or getattr(
+        args, "cgc_isolated_settings_path", None
     )
     if explicit is not None:
         return explicit
-    root = (
-        getattr(args, "grepai_isolated_runtime_root", None)
-        or getattr(args, "cgc_isolated_runtime_root", None)
+    root = getattr(args, "grepai_isolated_runtime_root", None) or getattr(
+        args, "cgc_isolated_runtime_root", None
     )
     if root is None:
         raise RuntimeError("isolated provider settings require an isolated runtime root")

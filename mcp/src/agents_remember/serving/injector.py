@@ -1,7 +1,7 @@
-"""The one delivery path: paste each input, then verify it in the harness session log.
+"""Legacy pane/log delivery diagnostics retained for offline evidence inspection.
 
-Session commands and messages are always separate entries. Screen text never decides acceptance;
-the pane is read only to prevent a duplicate re-paste and to preserve final failure evidence.
+Hosted harness launch and delivery do not import this module. Protocol adapters are the sole live
+authority; these classifiers remain for historical rows and focused diagnostic tests only.
 """
 
 from __future__ import annotations
@@ -19,13 +19,6 @@ from agents_remember.serving.terminal_paste import (
 )
 
 DeliveryOutcome = Literal["acked", "landed-unacked", "blocked", "failed"]
-
-# 2026-07-10 real-seat creation-to-user-log calibration (unique inbox ULID -> JSONL user record):
-# Claude n=12, p50=5.044 s, observed max=40.260 s; Codex n=190, p50=3.111 s,
-# p95=18.476 s, immediate-cohort max=28.949 s. Longer Codex rows were queued/redelivery delays,
-# not log flushes. These are the shortest tenth-second windows covering each observed direct cohort.
-_LOG_FLUSH_WINDOWS = {"claude": 40.3, "codex": 29.0}
-_GENERIC_LOG_FLUSH_WINDOW = 40.3
 
 
 @dataclass(frozen=True)
@@ -111,14 +104,11 @@ def deliver(
         if row.kind == "session-command"
         else (lambda: session_log.message_present(row.entry_id))
     )
-    flush_window = _LOG_FLUSH_WINDOWS.get(harness or "", _GENERIC_LOG_FLUSH_WINDOW)
-    outcome = paster.paste(
-        tmux_name,
-        text,
-        submit=True,
-        accepted=accepted,
-        flush_window=flush_window,
-        dispatch_policy=row.dispatch_policy,
+    dispatch_policy = row.dispatch_policy
+    outcome = (
+        paster.paste_dispatch(tmux_name, text, accepted=accepted, policy=dispatch_policy)
+        if dispatch_policy is not None
+        else paster.paste(tmux_name, text, submit=True, accepted=accepted)
     )
     if outcome.submitted:
         return DeliveryResult(

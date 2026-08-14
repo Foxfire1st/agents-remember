@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -14,10 +15,8 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.providers import provider_setup
 from agents_remember.tasks.leaf_doc import restamp_leaf_doc_lifecycle
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
-from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
@@ -29,12 +28,11 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     longest_tracked_path_length,
     require_git,
-    run_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
-    contract_payload,
     next_guidance,
+    recovery_guidance,
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -42,10 +40,26 @@ from agents_remember.worktrees.modules.start_contract import (
     build_start_contract,
     memory_base_for_source,
 )
-from agents_remember.worktrees.start_progress import clear_start_progress, write_start_progress
+from agents_remember.worktrees.modules.start_result import started_result
+from agents_remember.worktrees.reopen import reopen_required_start_result
+from agents_remember.worktrees.services import ProviderSetupRequestSpec, worktree_services
+from agents_remember.worktrees.source_lineage import (
+    lineage_block_payload,
+    lineage_refusal,
+    parent_source_lineage,
+    source_lineage_for_contract,
+)
+from agents_remember.worktrees.start_progress import (
+    StartBeat,
+    StartingEnclosure,
+    clear_start_progress,
+    write_start_progress,
+)
 from agents_remember.worktrees.task_resolver import resolve_leaf_enclosure_contract
 from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
     WorktreeContract,
+    amend_contract,
     load_contract,
     write_contract,
 )
@@ -91,11 +105,23 @@ def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
 
 def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
-    return WorktreeCommandResult(0, status_payload(contract))
+    return WorktreeCommandResult(0, dict(status_payload(contract)))
 
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    lineage = source_lineage_for_contract(contract)
+    if lineage_refusal(lineage) is not None:
+        assert lineage is not None
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                **lineage_block_payload(lineage),
+                "summary": "Attach refused before stale task context was resumed: "
+                + lineage.summary,
+            },
+        )
     return WorktreeCommandResult(
         0, {"state": "attached", "attached": True, **status_payload(contract)}
     )
@@ -109,7 +135,7 @@ def _blocked_memory_start_result(
         {
             "state": "blocked",
             "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-            **next_guidance(
+            **recovery_guidance(
                 "choose_memory_recovery",
                 tool="worktree_start",
                 args={
@@ -130,16 +156,20 @@ def _contract_after_memory_start(
     contract: WorktreeContract, memory_state: dict[str, object]
 ) -> WorktreeContract:
     if contract.memory_mode == "external" and memory_state["state"] == "disabled":
-        return replace(
-            contract,
-            memory_mode="disabled",
-            memory_repo_path=None,
-            memory_source_branch="",
-            memory_work_branch="",
-            memory_base_commit="",
-            memory_worktree=None,
-            ledger_path=None,
-            memory_state="disabled",
+        return amend_contract(
+            replace(
+                contract,
+                memory_repo_path=None,
+                memory_source_branch="",
+                memory_work_branch="",
+                memory_base_commit="",
+                memory_worktree=None,
+                ledger_path=None,
+                memory_state="disabled",
+            ),
+            # Through the typed record, like every other vocabulary cell: `memory_state` above
+            # is free text and `memory_mode` is not.
+            ContractCells(memory_mode="disabled"),
         )
     reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
     if isinstance(reconciled_base, str) and reconciled_base:
@@ -161,7 +191,7 @@ def _blocked_provider_start_result(
         {
             "state": "blocked",
             "summary": "Worktree provider setup could not be prepared safely.",
-            **next_guidance(
+            **recovery_guidance(
                 "choose_provider_setup_recovery",
                 tool="worktree_start",
                 args={
@@ -175,40 +205,6 @@ def _blocked_provider_start_result(
             "code_worktree": code_state,
             "memory": memory_state,
             "providers": provider_state,
-        },
-    )
-
-
-def _started_result(
-    contract: WorktreeContract,
-    code_state: str,
-    memory_state: dict[str, object],
-    provider_state: dict[str, object],
-) -> WorktreeCommandResult:
-    summary = "Worktree task started; continue the wrapped workflow before closeout."
-    if provider_state.get("state") == "starting":
-        summary = (
-            "Worktree task started; provider setup is running in the background — "
-            "poll worktree_status until its providers block reaches a terminal state."
-        )
-    return WorktreeCommandResult(
-        0,
-        {
-            "state": "started",
-            "summary": summary,
-            **next_guidance(
-                "continue_work",
-                tool="worktree_status",
-                args=contract_next_args(contract),
-            ),
-            "code_worktree": code_state,
-            "memory": memory_state,
-            "providers": provider_state,
-            "enclosure_path": contract.contract_path.as_posix(),
-            "contract_path": contract.contract_path.as_posix(),
-            "leaf_id": contract.leaf_id,
-            "task_artifact": contract.task_artifact.as_posix(),
-            "contract": contract_payload(contract),
         },
     )
 
@@ -340,7 +336,7 @@ def _stale_base_preflight(
         "summary": "Source branches are behind their upstream; a worktree started now "
         "would base on stale code/memory and silently defeat the provider seed "
         "fast-path. Choose fast-forward or proceed-stale.",
-        **next_guidance(
+        **recovery_guidance(
             "choose_stale_base_recovery",
             tool="worktree_start",
             args={
@@ -384,15 +380,26 @@ def _fast_forward_stale_branches(
     return failures
 
 
+def _starting_enclosure(contract: WorktreeContract, worktree_name: str) -> StartingEnclosure:
+    """The contract's own front-matter facts, for a start that has not written one yet."""
+    return StartingEnclosure(
+        repo_name=contract.repo_name,
+        task_name=contract.task_name,
+        worktree_name=worktree_name,
+        worktree_group=contract.worktree_group.as_posix(),
+        memory_mode=contract.memory_mode,
+        code_source_branch=contract.code_source_branch,
+        code_base_commit=contract.code_base_commit,
+        code_repo_path=contract.code_repo_path.as_posix(),
+        code_worktree=contract.code_worktree.as_posix(),
+    )
+
+
 def _record_start_block(
     context,
     contract: WorktreeContract,
     args: WorktreeArgs,
-    *,
-    phase: str,
-    reason: str,
-    completed: tuple[str, ...],
-    choices: tuple[str, ...],
+    beat: StartBeat,
 ) -> None:
     """Record a pre-contract start block (slice 5e §5.4) so the dashboard can see a start gated
     before its contract exists. Best-effort; skipped on dry runs."""
@@ -400,19 +407,8 @@ def _record_start_block(
         return
     write_start_progress(
         context.coordination_root,
-        repo_name=contract.repo_name,
-        task_name=contract.task_name,
-        worktree_name=args.worktree_name,
-        worktree_group=contract.worktree_group.as_posix(),
-        phase=phase,
-        memory_mode=contract.memory_mode,
-        code_source_branch=contract.code_source_branch,
-        code_base_commit=contract.code_base_commit,
-        code_repo_path=contract.code_repo_path.as_posix(),
-        code_worktree=contract.code_worktree.as_posix(),
-        blocked_reason=reason,
-        completed_phases=completed,
-        choices=choices,
+        _starting_enclosure(contract, args.worktree_name),
+        beat,
     )
 
 
@@ -427,9 +423,7 @@ def _record_start_progress(
     context,
     contract: WorktreeContract,
     args: WorktreeArgs,
-    *,
-    phase: str,
-    completed: tuple[str, ...],
+    beat: StartBeat,
 ) -> None:
     """Record a happy-path pre-contract start beat (§9) so the Engine Room can observe the enclosure
     assembling rather than popping in at contract-write. Non-blocked (``blocked_reason`` stays None);
@@ -438,62 +432,119 @@ def _record_start_progress(
         return
     write_start_progress(
         context.coordination_root,
-        repo_name=contract.repo_name,
-        task_name=contract.task_name,
-        worktree_name=args.worktree_name,
-        worktree_group=contract.worktree_group.as_posix(),
-        phase=phase,
-        memory_mode=contract.memory_mode,
-        code_source_branch=contract.code_source_branch,
-        code_base_commit=contract.code_base_commit,
-        code_repo_path=contract.code_repo_path.as_posix(),
-        code_worktree=contract.code_worktree.as_posix(),
-        completed_phases=completed,
+        _starting_enclosure(contract, args.worktree_name),
+        beat,
     )
 
 
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     context = resolve_context(args)
-    repo = context.code_repository_root
     contract = build_start_contract(context, args)
     if isinstance(contract, WorktreeCommandResult):
         return contract
+    existing_result = _existing_contract_result(context, contract, args)
+    if existing_result is not None:
+        return existing_result
+    preflighted = _preflighted_contract(context, contract, args)
+    if isinstance(preflighted, WorktreeCommandResult):
+        return preflighted
+    return _create_start_enclosure(context, preflighted, args)
 
-    if contract.contract_path.exists():
-        existing = load_contract(contract.contract_path)
-        # An abandoned contract is a tombstone and a reopened one (L11) is a reset:
-        # either way its worktrees/branches are gone, so start must recreate fresh
-        # rather than attach to a dead binding.
-        if existing.cleanup not in ("abandoned", "reopened"):
-            if args.retry_provider_setup:
-                return _retry_provider_setup_result(context, existing, args)
-            return WorktreeCommandResult(
-                0, {"state": "attached-existing-contract", **status_payload(existing)}
-            )
 
+def _existing_contract_result(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> WorktreeCommandResult | None:
+    """Attach to a live contract at this path instead of recreating its worktrees.
+
+    An abandoned contract is a tombstone and a reopened one (L11) is a reset: either
+    way its worktrees/branches are gone, so start must recreate fresh rather than
+    attach to a dead binding.
+    """
+    if not contract.contract_path.exists():
+        return None
+    existing = load_contract(contract.contract_path)
+    if existing.cleanup in ("abandoned", "reopened"):
+        return None
+    if existing.cleanup == "completed":
+        return reopen_required_start_result(existing)
+    lineage = source_lineage_for_contract(existing)
+    refusal = lineage_refusal(lineage)
+    if refusal is not None:
+        assert lineage is not None
+        return WorktreeCommandResult(2, lineage_block_payload(lineage))
+    if args.retry_provider_setup:
+        return _retry_provider_setup_result(context, existing, args)
+    return WorktreeCommandResult(
+        0, {"state": "attached-existing-contract", **status_payload(existing)}
+    )
+
+
+def _preflighted_contract(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> WorktreeContract | WorktreeCommandResult:
+    """Run the pre-creation preflights, returning the blocked result or the usable contract.
+
+    A fast-forward recovery may move the source branches mid-preflight, so the contract
+    is rebuilt on that path and the caller works from the returned one.
+    """
+    # A dry-run that is about to create a master's first leaf also plans the parent
+    # integration contract and branch without publishing either. That virtual parent was
+    # built from the protected source's current tip, so asking the ordinary lineage reader
+    # to load its deliberately absent contract would turn preview non-mutation into a false
+    # unavailable refusal. Only this in-process planned-parent case bypasses the filesystem
+    # projection; existing parent contracts still fail closed through the normal reader.
+    parent_is_planned = (
+        args.dry_run
+        and bool(contract.parent_task_name)
+        and contract.parent_contract_path is not None
+        and not contract.parent_contract_path.exists()
+    )
+    lineage = None if parent_is_planned else parent_source_lineage(contract)
+    refusal = lineage_refusal(lineage)
+    if refusal is not None:
+        assert lineage is not None
+        block = lineage_block_payload(lineage)
+        _record_start_block(
+            context,
+            contract,
+            args,
+            StartBeat(
+                phase="source-lineage-blocked",
+                blocked_reason=str(block.get("summary", "")),
+            ),
+        )
+        return WorktreeCommandResult(2, block)
     stale_base_block = _stale_base_preflight(context, contract, args)
     if stale_base_block is not None:
         _record_start_block(
             context,
             contract,
             args,
-            phase="stale-base-blocked",
-            reason=str(stale_base_block.get("summary", "")),
-            completed=(),
-            choices=(),
+            StartBeat(
+                phase="stale-base-blocked",
+                blocked_reason=str(stale_base_block.get("summary", "")),
+            ),
         )
         return WorktreeCommandResult(2, stale_base_block)
     if args.stale_base_choice == "fast-forward":
         # A fast-forward recovery may have moved the source branches; rebuild the
         # contract so the recorded base commits reflect the recovered tips.
-        contract = build_start_contract(context, args)
-        if isinstance(contract, WorktreeCommandResult):
-            return contract
-
+        rebuilt = build_start_contract(context, args)
+        if isinstance(rebuilt, WorktreeCommandResult):
+            return rebuilt
+        contract = rebuilt
     long_path_block = _long_path_preflight(contract)
     if long_path_block is not None:
         return WorktreeCommandResult(2, long_path_block)
-    _record_start_progress(context, contract, args, phase="preflight", completed=())
+    return contract
+
+
+def _create_start_enclosure(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> WorktreeCommandResult:
+    """Create the code worktree, prepare memory, write the contract, and set the providers up."""
+    repo = context.code_repository_root
+    _record_start_progress(context, contract, args, StartBeat(phase="preflight"))
 
     code_state = ensure_worktree(
         repo,
@@ -502,7 +553,9 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
         contract.code_source_branch,
         args.dry_run,
     )
-    _record_start_progress(context, contract, args, phase="code-worktree", completed=("preflight",))
+    _record_start_progress(
+        context, contract, args, StartBeat(phase="code-worktree", completed_phases=("preflight",))
+    )
     memory_state = prepare_memory_for_start(contract, args)
     if memory_state["state"] == "blocked":
         raw_choices = memory_state.get("choices")
@@ -510,12 +563,14 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
             context,
             contract,
             args,
-            phase="memory-blocked",
-            reason=str(memory_state.get("reason", "")),
-            completed=("preflight", "code-worktree"),
-            choices=tuple(str(choice) for choice in raw_choices)
-            if isinstance(raw_choices, list)
-            else (),
+            StartBeat(
+                phase="memory-blocked",
+                completed_phases=("preflight", "code-worktree"),
+                choices=tuple(str(choice) for choice in raw_choices)
+                if isinstance(raw_choices, list)
+                else (),
+                blocked_reason=str(memory_state.get("reason", "")),
+            ),
         )
         return _blocked_memory_start_result(context, args, code_state, memory_state)
     contract = _contract_after_memory_start(contract, memory_state)
@@ -525,10 +580,11 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
             context,
             contract,
             args,
-            phase="provider-blocked",
-            reason=str(provider_plan.get("reason", "")),
-            completed=("preflight", "code-worktree", "memory-compatible"),
-            choices=(),
+            StartBeat(
+                phase="provider-blocked",
+                completed_phases=("preflight", "code-worktree", "memory-compatible"),
+                blocked_reason=str(provider_plan.get("reason", "")),
+            ),
         )
         return _blocked_provider_start_result(
             context, args, code_state, memory_state, provider_plan
@@ -543,15 +599,13 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
         # follow THIS enclosure's fresh lifecycle. First starts are a no-op (the
         # doc is authored afterwards, stamped by task_doc against the contract).
         if contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
-            restamp_leaf_doc_lifecycle(
-                contract.task_root, contract.leaf_id, contract.lifecycle_id
-            )
+            restamp_leaf_doc_lifecycle(contract.task_root, contract.leaf_id, contract.lifecycle_id)
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(
             context, args, code_state, memory_state, provider_state
         )
-    return _started_result(contract, code_state, memory_state, provider_state)
+    return started_result(contract, args, code_state, memory_state, provider_state)
 
 
 def prepare_providers_for_start(
@@ -598,9 +652,10 @@ def run_or_launch_provider_setup(
         return plan
     paths = plan["paths"]
     assert isinstance(paths, ProviderStartPaths)
-    request = _provider_setup_request(context, args, paths)
+    spec = _provider_setup_request(context, args, paths)
+    request = worktree_services().provider_lifecycle.setup_request(spec=spec)
     if args.dry_run:
-        payload = provider_setup.run_provider_setup(request)
+        payload = worktree_services().provider_lifecycle.run_setup(request)
         if not payload.get("ok"):
             return {
                 "state": "blocked",
@@ -619,7 +674,7 @@ def run_or_launch_provider_setup(
         if setup_config is not None and setup_config.unlink_settings_after_setup
         else None
     )
-    return provider_async.launch_provider_setup(
+    return worktree_services().provider_lifecycle.launch_setup(
         request=request,
         contract=contract,
         write_state_file=lambda payload: _write_provider_state_file(
@@ -632,7 +687,7 @@ def run_or_launch_provider_setup(
 def _retry_provider_setup_result(
     context, contract: WorktreeContract, args: WorktreeArgs
 ) -> WorktreeCommandResult:
-    if provider_async.provider_setup_running(contract):
+    if worktree_services().provider_lifecycle.setup_running(contract):
         return WorktreeCommandResult(
             2,
             {
@@ -641,7 +696,7 @@ def _retry_provider_setup_result(
                     "Provider setup is still running for this worktree (fresh "
                     "heartbeat); poll worktree_status instead of retrying."
                 ),
-                "providers": provider_async.provider_setup_status(contract),
+                "providers": worktree_services().provider_lifecycle.setup_status(contract),
                 **next_guidance(
                     "continue_work",
                     tool="worktree_status",
@@ -738,17 +793,19 @@ def _provider_enablement_state(
     target_memory_root: Path | None,
 ) -> dict[str, object]:
     try:
-        settings = provider_setup.load_settings(provider_settings_path)
+        settings = worktree_services().provider_lifecycle.load_settings(provider_settings_path)
     except RuntimeError as error:
         return {
             "state": "blocked",
             "reason": str(error),
             "targetCoordinationRoot": target_coordination_root.as_posix(),
         }
-    cgc_enabled = bool(settings) and provider_setup.provider_enabled(
+    cgc_enabled = bool(settings) and worktree_services().provider_lifecycle.provider_enabled(
         settings, "codegraphcontext-code"
     )
-    grepai_enabled = bool(settings) and provider_setup.provider_enabled(settings, "grepai-memory")
+    grepai_enabled = bool(settings) and worktree_services().provider_lifecycle.provider_enabled(
+        settings, "grepai-memory"
+    )
     grepai_worktree_enabled = grepai_enabled and target_memory_root is not None
     if cgc_enabled or grepai_worktree_enabled:
         return _enabled_provider_state(cgc_enabled, grepai_worktree_enabled)
@@ -759,7 +816,9 @@ def _provider_enablement_state(
             grepai_enabled=grepai_enabled,
             target_memory_root=target_memory_root,
         ),
-        "settingsFile": provider_setup.settings_path(provider_settings_path).as_posix(),
+        "settingsFile": worktree_services()
+        .provider_lifecycle.settings_path(provider_settings_path)
+        .as_posix(),
     }
 
 
@@ -802,28 +861,29 @@ def _provider_setup_request(
     context,
     args: WorktreeArgs,
     paths: ProviderStartPaths,
-) -> provider_setup.ProviderSetupRequest:
-    return provider_setup.ProviderSetupRequest(
+):
+    lifecycle = worktree_services().provider_lifecycle
+    return ProviderSetupRequestSpec(
         action="prepare",
         coordination_root=paths.target_coordination_root,
-        settings_path=provider_setup.settings_path(paths.provider_settings_path),
+        settings_path=lifecycle.settings_path(paths.provider_settings_path),
         timeout=getattr(args, "provider_timeout", 1800),
         dry_run=args.dry_run,
         skip_grepai=paths.target_memory_root is None,
-        cgc_seed=provider_setup.CgcSeedOptions(
+        cgc_seed=lifecycle.cgc_seed_options(
             source_coordination_root=paths.source_coordination_root,
             repo_id=context.code_repository_name,
             source_repo_root=paths.source_repo_root,
             target_repo_root=paths.target_repo_root,
         ),
-        cgc_isolated=provider_setup.IsolatedCgcOptions(runtime_root=paths.provider_runtime_root),
-        grepai_seed=provider_setup.GrepaiSeedOptions(
+        cgc_isolated=lifecycle.isolated_cgc_options(runtime_root=paths.provider_runtime_root),
+        grepai_seed=lifecycle.grepai_seed_options(
             source_coordination_root=paths.source_coordination_root,
             source_settings_path=paths.provider_settings_path,
             project_id=context.code_repository_name,
             target_memory_root=paths.target_memory_root,
         ),
-        grepai_isolated=provider_setup.IsolatedGrepaiOptions(
+        grepai_isolated=lifecycle.isolated_grepai_options(
             runtime_root=paths.provider_runtime_root,
             project_id=context.code_repository_name,
             target_memory_root=paths.target_memory_root,
@@ -832,7 +892,14 @@ def _provider_setup_request(
     )
 
 
-def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, object]:
+def _memory_source_state(
+    contract: WorktreeContract, args: WorktreeArgs
+) -> dict[str, object] | None:
+    """The state that settles the memory side before its ledger is ever read.
+
+    Either there is no external memory repo to prepare, or the one configured cannot
+    be started from (absent, or dirty in its official checkout).
+    """
     if contract.memory_mode == "internal":
         return {"state": "internal", "reason": "memory lives in the code worktree"}
     if contract.memory_mode == "disabled":
@@ -842,19 +909,35 @@ def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> 
         return _missing_memory_repo_state(args)
     if (contract.memory_repo_path / ".git").exists() and has_changes(contract.memory_repo_path):
         return _dirty_memory_source_state(args)
+    return None
+
+
+def _rebased_on_mapped_commit(
+    contract: WorktreeContract, ledger: MemoryLedger, args: WorktreeArgs
+) -> tuple[WorktreeContract, MemoryLedger] | dict[str, object]:
+    """Rebind the contract onto a base the official ledger maps, or the state that blocks start."""
+    disabled = _disabled_memory_choice(args)
+    if disabled:
+        return disabled
+    reconciled = _reconcile_missing_mapping(contract, ledger, args)
+    if reconciled is None:
+        return _missing_mapping_state(contract, ledger)
+    return reconciled
+
+
+def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, object]:
+    source_state = _memory_source_state(contract, args)
+    if source_state is not None:
+        return source_state
     ledger = _load_memory_ledger(contract, args)
     if isinstance(ledger, dict):
         return ledger
-    mapping = find_mapping(ledger, contract.code_base_commit)
     reconciled_base: str | None = None
-    if mapping is None:
-        disabled = _disabled_memory_choice(args)
-        if disabled:
-            return disabled
-        reconciled = _reconcile_missing_mapping(contract, ledger, args)
-        if reconciled is None:
-            return _missing_mapping_state(contract, ledger)
-        contract, ledger = reconciled
+    if find_mapping(ledger, contract.code_base_commit) is None:
+        rebased = _rebased_on_mapped_commit(contract, ledger, args)
+        if isinstance(rebased, dict):
+            return rebased
+        contract, ledger = rebased
         reconciled_base = contract.memory_base_commit
     # The reconciliation rebind re-widens the contract's optional memory fields; re-narrow both.
     assert contract.memory_repo_path is not None
@@ -1073,9 +1156,9 @@ def _reconcile_missing_mapping(
     )
     advanced = replace(
         contract,
-            memory_base_commit=memory_base_for_source(
-                contract.memory_repo_path, contract.memory_source_branch
-            ),
+        memory_base_commit=memory_base_for_source(
+            contract.memory_repo_path, contract.memory_source_branch
+        ),
     )
     return advanced, updated
 

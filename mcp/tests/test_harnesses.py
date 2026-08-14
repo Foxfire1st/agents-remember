@@ -15,8 +15,8 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.harnesses import HARNESSES, Harness
 from agents_remember.serving.harnesses import (
-    HARNESSES,
     DetectedHarness,
     detect_harnesses,
     effort_session_commands,
@@ -56,72 +56,34 @@ class HarnessRegistryTests(unittest.TestCase):
 
 
 class KnobMappingTests(unittest.TestCase):
-    """The per-harness knob→flag mapping (260703-L16): claude maps model/effort onto its launch
-    flags with a two-vehicle effort vocabulary (flag values vs session values); Codex maps its
-    real API enum onto ``--config``; Pi remains env-only."""
+    """Builtins defer to adapters; custom settings mappings remain registry-owned."""
 
-    def _claude(self):
-        claude = find_harness("claude")
-        assert claude is not None
-        return claude
+    def test_builtin_registry_is_not_a_model_or_effort_catalog(self) -> None:
+        for harness in HARNESSES:
+            with self.subTest(harness=harness.id):
+                self.assertEqual(knob_argv(harness, model="model", effort="high"), [])
+                self.assertEqual(effort_vocabulary(harness), ())
+                self.assertEqual(effort_session_commands(harness, "ultracode"), [])
+                self.assertIsNone(invalid_effort_detail(harness, "future-effort"))
 
-    def test_claude_maps_model_and_effort_onto_launch_flags(self) -> None:
-        self.assertEqual(
-            knob_argv(self._claude(), model="opus", effort="max"),
-            ["--model", "opus", "--effort", "max"],
-        )
-        self.assertEqual(knob_argv(self._claude(), effort="high"), ["--effort", "high"])
-        self.assertEqual(knob_argv(self._claude()), [])
-
-    def test_claude_effort_vocabulary_is_the_two_vehicle_union(self) -> None:
-        # Empirical (2026-07-07): the flag set low..max, plus the session-only ultracode the
-        # interactive /effort command accepts but the --effort launch flag warn-degrades on.
-        self.assertEqual(
-            effort_vocabulary(self._claude()),
-            ("low", "medium", "high", "xhigh", "max", "ultracode"),
+    def test_settings_defined_harness_keeps_its_explicit_mapping(self) -> None:
+        custom = Harness(
+            id="custom",
+            name="Custom",
+            command="custom",
+            argv=("custom",),
+            model_flag="--engine",
+            effort_flag="--depth",
+            effort_flag_values=("low", "high"),
+            defined_in="settings",
         )
 
-    def test_session_level_effort_rides_a_session_command_not_the_flag(self) -> None:
-        claude = self._claude()
-        self.assertEqual(knob_argv(claude, effort="ultracode"), [])
         self.assertEqual(
-            effort_session_commands(claude, "ultracode"), ["/effort ultracode"]
+            knob_argv(custom, model="model", effort="high"),
+            ["--engine", "model", "--depth", "high"],
         )
-        # A flag-vocabulary value never leaks into the session vehicle.
-        self.assertEqual(effort_session_commands(claude, "max"), [])
-
-    def test_invalid_effort_detail_names_harness_and_both_value_sets(self) -> None:
-        detail = invalid_effort_detail(self._claude(), "turbo")
-        assert detail is not None
-        self.assertIn("'turbo'", detail)
-        self.assertIn("'claude'", detail)
-        self.assertIn("low, medium, high, xhigh, max", detail)
-        self.assertIn("ultracode", detail)
-        # In-vocabulary values (either vehicle) pass.
-        self.assertIsNone(invalid_effort_detail(self._claude(), "max"))
-        self.assertIsNone(invalid_effort_detail(self._claude(), "ultracode"))
-
-    def test_codex_knobs_use_explicit_argv_and_pi_remains_env_only(self) -> None:
-        codex = find_harness("codex")
-        pi = find_harness("pi")
-        assert codex is not None and pi is not None
-        self.assertEqual(
-            knob_argv(codex, model="gpt-5.6-sol", effort="xhigh"),
-            ["--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"],
-        )
-        self.assertIn("medium", effort_vocabulary(codex))
-        self.assertEqual(
-            effort_vocabulary(codex),
-            ("none", "minimal", "low", "medium", "high", "xhigh"),
-        )
-        for invalid in ("max", "ultracode", "auto", "anything"):
-            detail = invalid_effort_detail(codex, invalid)
-            self.assertIsNotNone(detail)
-            self.assertIn("none, minimal, low, medium, high, xhigh", detail or "")
-        self.assertEqual(knob_argv(pi, model="gpt-5", effort="anything"), [])
-        self.assertEqual(effort_session_commands(pi, "anything"), [])
-        self.assertEqual(effort_vocabulary(pi), ())
-        self.assertIsNone(invalid_effort_detail(pi, "anything"))
+        self.assertEqual(effort_vocabulary(custom), ("low", "high"))
+        self.assertIsNotNone(invalid_effort_detail(custom, "turbo"))
 
 
 class DetectionTests(unittest.TestCase):

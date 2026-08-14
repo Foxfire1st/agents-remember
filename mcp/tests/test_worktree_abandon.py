@@ -14,9 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from agents_remember.worktrees.modules.abandon import _abandon_blockers, _abandon_branch
-from agents_remember.worktrees.modules.guidance import lifecycle_guidance
-from agents_remember.worktrees.modules.provider_teardown import (
+from agents_remember.application.provider_runtime import (
     _reclaim_image,
     _reclaim_ownership,
     _reclaim_result,
@@ -24,6 +22,12 @@ from agents_remember.worktrees.modules.provider_teardown import (
     _worktree_provider_docker_resources,
     teardown_worktree_providers,
 )
+from agents_remember.worktrees.modules.abandon import (
+    _abandon_blockers,
+    _abandon_branch,
+    _abandon_directories,
+)
+from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from test_worktree_support import git, init_repo
 
@@ -50,9 +54,7 @@ def _settings() -> dict:
                         "network": {"name": "ar-grepai-memory-projects-demo-ar"},
                     },
                     "backend": {"containerName": "ar-grepai-postgres-projects-demo-ar"},
-                    "embedder": {
-                        "backend": {"containerName": "ar-grepai-ollama-projects-demo-ar"}
-                    },
+                    "embedder": {"backend": {"containerName": "ar-grepai-ollama-projects-demo-ar"}},
                     "roots": [{"projectId": "agents-remember"}],
                 },
             }
@@ -179,9 +181,7 @@ class AbandonBranchSafetyTests(unittest.TestCase):
         self.assertEqual(result["reason"], "unmerged")
         self.assertTrue(result["unmergedCommits"])
         # the branch is preserved (commits not lost)
-        self.assertIn(
-            "ar/work", git(self.repo, "branch", "--list", "ar/work")
-        )
+        self.assertIn("ar/work", git(self.repo, "branch", "--list", "ar/work"))
 
     def test_force_discards_unmerged_branch(self) -> None:
         result = _abandon_branch(self.repo, "ar/work", "main", dry_run=False, force=True)
@@ -206,6 +206,22 @@ class AbandonBlockerTests(unittest.TestCase):
         worktrees: dict[str, dict[str, object]] = {"code": {"removed": True}}
         branches: dict[str, dict[str, object]] = {"code": {"deleted": True}}
         self.assertEqual(_abandon_blockers(worktrees, branches), [])
+
+
+class AbandonReportCleanupTests(unittest.TestCase):
+    def test_non_force_abandon_removes_the_enclosure_report_before_the_group(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            group = Path(tmp) / "worktrees" / "agents-remember" / "demo-ar"
+            report = group / "reports" / "curator-memory-quality.md"
+            report.parent.mkdir(parents=True)
+            report.write_text("temporary\n", encoding="utf-8")
+            contract = cast(WorktreeContract, SimpleNamespace(worktree_group=group))
+
+            result = _abandon_directories(contract, dry_run=False, force=False)
+
+            self.assertTrue(result["reports"]["removed"])
+            self.assertTrue(result["worktree_group"]["removed"])
+            self.assertFalse(group.exists())
 
 
 class AbandonLifecyclePhaseTests(unittest.TestCase):

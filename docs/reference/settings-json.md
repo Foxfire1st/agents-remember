@@ -6,7 +6,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate executor/resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -237,11 +237,16 @@ stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
 `setupFailureCriticalStreak`, and `recentSampleLimit`. Unknown
 `providerDegradation` keys are rejected.
 
-`retirement` (optional) configures the auto-land hooks for worktree-backed tmux
+`retirement` (optional) configures completion cleanup for worktree-backed tmux
 seats. `autoLandOnIntegration` and `autoLandOnFinalize` (both default `true`)
-gate whether integrating a leaf or finalizing a master marks spent hosted seats
-as landed/archive. Landing leaves transcripts inspectable and non-active; it
-does not close tmux. The legacy `autoRetireOnIntegration` and
+gate whether cleanup runs after integrating a leaf or finalizing a master.
+`autoCloseCompletedSeats` defaults `true`: worker, reviewer, and curator seats
+with a durable turn report for that exact leaf are retired through the normal
+graceful-stop/tmux-kill path; their transcripts remain inspectable. A seat with
+no durable report remains live and is returned as deferred. Setting
+`autoCloseCompletedSeats` to `false` restores the previous landed/archive
+behavior, which removes those roles from the active rail without closing tmux.
+Manager and orchestrator seats are never included. The legacy `autoRetireOnIntegration` and
 `autoRetireOnFinalize` keys are accepted as aliases for existing settings files.
 Unknown `retirement` keys are rejected.
 
@@ -278,7 +283,7 @@ Reserved Families below).
 
 **Null rule.** A JSON `null` at a known `orchestration.*` family key
 (`gateDelegation` · `loops` · `roles` · `rolesPerLevel` · `concurrency` ·
-`spawn` · `harnesses`), in EITHER layer, is REFUSED naming the offending file.
+`spawn` · `harnesses` · `qualityGate`), in EITHER layer, is REFUSED naming the offending file.
 `null` reads as *absent* to every family parser and the deep merge REPLACES a
 non-object, so `"concurrency": null` in the repo-local layer would otherwise
 SILENTLY wipe the global caps — the one scalar collision that used to defeat
@@ -293,7 +298,8 @@ a harness/MCP restart.
 
 **Defaults.** An absent file, or an absent key, means: all-human gate
 delegation, the loop defaults below, no role overrides, no concurrency caps,
-no spawn harness preference (detection-gated spawns).
+no spawn harness preference (detection-gated spawns), and a host-managed full
+quality gate with normal RAM and swap behavior (see `orchestration.qualityGate`).
 
 ### orchestration.gateDelegation
 
@@ -324,24 +330,26 @@ Read cadence above).
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
 `system-specialist`, `reviewer`).
 Precedence: role-file defaults < global settings < repo-local settings. These
-settings are the sole developer-controlled spend surface for ordinary spawned
-seats; `spawn_agent_session` callers declare role and level, not
-`harness`/`model`/`effort` or direct launch/session spend controls. The
+settings are the sole developer-controlled spend surface for ordinary dispatched
+seats. Agent callers submit a canonical child task document and role to the structural
+dispatcher; the plane derives level and resolves the settings-owned launch selection. Agents do
+not submit `harness`/`model`/`effort` or direct launch/session spend controls. The
 knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
 with every parameter, vocabulary, and refusal is
 **`docs/reference/harnesses.md`**):
 
-1. **Validated enum knobs** — `harness` (a known harness id: builtin
+1. **Validated native selection** — `harness` (a known harness id: builtin
    `claude`/`codex`/`pi` or an `orchestration.harnesses`-defined one),
-   `model`, `effort`. The spawn path seeds `model`/`effort` into the spawn env
-   (`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`) AND applies them onto the harness
-   launch argv per-harness (claude: `--model`/`--effort`; codex: `--model` plus
-   `--config model_reasoning_effort=<value>`; only mapping-less harnesses stay env-only).
-   `effort` is validated per-harness at DISPATCH:
-   unknown values refuse loudly naming the harness and its valid sets.
+   `model`, `effort`. Role-configured native spawns require all three. The spawn
+   path records model/effort in `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` provenance and
+   carries one typed selection to the adapter. The adapter discovers its token-free,
+   installed/account-accurate catalog, validates effort under the selected model, and
+   then applies Claude `--model`/`--effort`, Pi `--model`/`--thinking`, or Codex
+   `thread/start` model + `config.model_reasoning_effort`. Unknown values fail at the
+   runner launch boundary before the configured real vendor session starts.
 2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
-   launch argv. Never validated; recorded in spawn provenance.
-3. **`sessionCommands`** (list of strings; each line pasted + submitted as
+   base argv and recorded in spawn provenance. Adapter-owned selector conflicts refuse.
+3. **`sessionCommands`** (list of strings; each explicit line submitted through the protocol as
    fresh-session launch configuration before task assignment) and **`promptKeywords`** (list of
    strings prepended exactly once to the later post-readiness `dispatch-brief`). Never validated;
    recorded in spawn provenance. For evidence-capable harness logs (currently Claude), the brief
@@ -350,33 +358,27 @@ with every parameter, vocabulary, and refusal is
    with an explicitly unproven outcome rather than entering an impossible proof retry loop.
    Session-command application by itself does not prove brief delivery.
 
-Hosted role dispatch uses the exact id through three states: `spawn_agent_session` returns
-`spawned-unbriefed`; `hosted_session_readiness` alone advances the exact seat to harness-ready;
-one durable exact-agent `dispatch-brief` starts the brief/turn-report clocks. Spawned-only and
+Inside the private control plane, hosted role dispatch uses an exact runtime correlation through
+three states: create returns `spawned-unbriefed`; readiness advances that occupant to
+harness-ready; one durable exact-pinned `dispatch-brief` starts the briefed-by deadline row. This
+correlation is never returned by `dispatch_agent`. Spawned-only and
 not-ready seats are not active work. Briefed requires both `deliveryState=delivered` and
 `deliveryDetail=harness-log-confirmed`; failure leaves the original row pending without duplicate
 brief or respawn.
 
-The claude effort vocabulary (empirical, 2026-07-07) is TWO-VEHICLE:
-
-| Value | Delivery vehicle |
-| --- | --- |
-| `low`, `medium`, `high`, `xhigh`, `max` | the `--effort` launch flag |
-| `ultracode` | the `/effort ultracode` session command, applied during fresh-session launch |
-
-Rationale: the installed claude CLI **warns-then-silently-degrades** on
-unknown `--effort` values (probed with `ultracode`, which its interactive
-`/effort` command DOES accept), so unvalidated values would quietly downgrade
-the most reasoning-hungry seats — dispatch accepts the union of both sets and
-refuses anything in neither.
+Native effort options are dynamic and model-gated. Claude currently advertises launch-settable
+`low|medium|high|xhigh|max`; `ultracode` is not converted into a session command. Pi validation also
+prevents its native silently-clamped thinking behavior from hiding a stale setting. After startup,
+Pi and Codex provide model/effort echo evidence; Claude echoes model while its initial effort is
+reported as catalog-validated native flag evidence because stream-json init has no effort echo.
 
 `orchestration.rolesPerLevel.<level>.<role>` (ruling 2026-07-07T08:15) adds
 the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
 `portfolio` (the `loops.perLevel` vocabulary), each holding the same
 knob-override shape. A level override deep-merges over the flat
-`orchestration.roles` default at leaf-key granularity (harness inherited
-unless overridden; arrays replace). The dispatcher declares its level via
-`spawn_agent_session(level=...)`, default `leaf`. Full spend resolution chain:
+`orchestration.roles` default at field granularity (harness inherited unless overridden; arrays
+replace). The structural dispatcher derives `leaf`, `master`, or `portfolio` from the child role
+and its canonical document altitude. Full spend resolution chain:
 repo-local level override > global level override > repo-local role default >
 global role default > detection-gated default. The resolved level rides spawn
 provenance (`spawnLevel`/`spawnLevelSource`). Legacy caller-supplied
@@ -392,32 +394,69 @@ Extends/overrides the builtin harness registry (developer ruling 2026-07-07:
 the registry is good defaults, not a wall). Entries are keyed by harness id:
 a NEW id adds a harness (`command` and/or `argv` required — the command array
 launches it exactly the way you would run it yourself), an EXISTING id
-pre-customizes the builtin defaults (its `argv` replaces ours). Optional
-knob-mapping fields: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
+pre-customizes the builtin defaults (its `argv` replaces ours). Optional compatibility
+knob-mapping fields for a NEW non-native id: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
 `effortSessionValues` + `effortSessionCommand` (pairs required together).
+Native Claude/Codex/Pi model and effort always belong to their adapter, even when settings override
+the builtin base argv.
 Detection still gates dispatch; an id known nowhere refuses loudly pointing
 at the manual. Schema, semantics, and a worked add-`hermes` example:
 `docs/reference/harnesses.md`.
 
-### orchestration.supervisor
+### orchestration.agentNotifier
 
-`orchestration.supervisor` configures the deterministic supervisor sweep. All
-fields are optional; an empty block keeps the safe defaults.
+`orchestration.agentNotifier` configures the deterministic agent-notifier sweep (the
+supervisor renamed to its relay role). All fields are optional; an empty block keeps
+the safe defaults.
+
+> Compatibility window: the loader still accepts the legacy `orchestration.supervisor`
+> key as an explicit alias, with a loud deprecation warning, until the window closes
+> (the rename is carried by the agent-notifier reform master). A file setting both keys
+> is refused. Remove `orchestration.supervisor` from any live settings file and use
+> `orchestration.agentNotifier`.
 
 | Field | Default | Notes |
 | --- | --- | --- |
 | `enabled` | `true` | Turns the sweep loop on or off. |
 | `intervalSeconds` | `10` | Sweep cadence. |
-| `staleCutoffSeconds` | `60` | Age after which the supervisor heartbeat is reported stale. |
+| `staleCutoffSeconds` | `60` | Age after which the agent-notifier heartbeat is reported stale. |
 | `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
 | `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
 | `redeliverBudget` | `1` | Maximum inbox redelivery attempts per sweep. Harness-log confirmation is synchronous and bounded per input, so backlogs drain across sweeps without multiplying that wait inside one heartbeat tick. |
-| `escalationBudget` | `250` | Maximum escalation-rung emissions per sweep. A large backlog of rung-due rows is spread across sweeps (rung readiness is level-triggered, so deferred rows re-fire on the next sweep) rather than doing O(backlog) synchronous owner pastes + `escalation.rung` event appends in one sweep. Positive integer. |
+| `escalationBudget` | `250` | Per-sweep load-shed cap on owner-signal emissions (seat-liveness + dead-upstream), the twin of `redeliverBudget`. Shed findings re-fire next sweep (level-triggered). Not a policy knob: the timed escalation ladder is retired. |
 
-`enabled: false` is the emergency kill switch for the supervisor loop. During the
+`enabled: false` is the emergency kill switch for the agent-notifier loop. During the
 2026-07-09 redelivery-cadence incident the global coordinator settings disabled
-the supervisor until the 15-minute redelivery and signal-cooldown fix landed and
+the agent-notifier until the 15-minute redelivery and signal-cooldown fix landed and
 passed smoke.
+
+### orchestration.qualityGate
+
+`orchestration.qualityGate` selects the canonical executor and owns optional
+full-wrapper resource overrides. The full wrapper runs exactly once per master, at the master
+integration gate. The only accepted executor is the pinned Dagger clean-Ubuntu graph; GitHub PR
+checks do not run it. Dagger reconstructs the exact staged candidate,
+including the real read-only Codex protocol probe, and exports its current and
+final evidence into the owning enclosure's self-overwriting `reports/` files.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `executor` | `"dagger"` | The only accepted value is `"dagger"`, which runs the canonical wrapper in the pinned clean Ubuntu graph. Host wrapper and test execution refuse; an unavailable Dagger engine is an error, not a fallback. |
+| `memoryCapBytes` | omitted (container runtime manages resources) | Optional positive hard cap applied by the Dagger container's inner wrapper. A capped kill fails and names this policy key; there is no host systemd/RLIMIT execution path. |
+
+```jsonc
+"orchestration": {
+  "qualityGate": {
+    "executor": "dagger",
+    "memoryCapBytes": 8589934592
+  }
+}
+```
+
+The executor applies to lifecycle-owned leaf-closeout and master-integration acceptance. The
+memory cap remains a full-master resource policy; deterministic pre-push checks and leaf
+integration run no acceptance. An explicit cap is an opt-in restriction, not the default resource
+policy; the gate treats a capped kill as a failure, never a skip.
 
 ### orchestration.concurrency, orchestration.spawn
 
@@ -425,12 +464,12 @@ passed smoke.
 `maxParallelMasters`, `maxParallelLeaves`, `maxSubAgents` (positive integers;
 omitted means uncapped). The caps are doctrine input for the spawning seats.
 
-`orchestration.spawn.harness` names the default harness `spawn_agent_session`
-uses when no role/level knob supplies one. Resolution order at the spawn seam:
+`orchestration.spawn.harness` names the default harness the private launch seam uses when no
+role/level knob supplies one. Resolution order at that seam:
 role knobs (level-merged) > repo-local settings > global settings >
 detection-gated default (the first
-effective-registry harness found on PATH; the repo-local layer is selected by
-the qualified leaf key's repository segment). Values are validated against
+effective-registry harness found on PATH; the repo-local layer is selected by the canonical task
+document's repository). Values are validated against
 the effective harness ids (builtin + `orchestration.harnesses`) and gated by
 detection — a settings value can never inject a command through a reference;
 argv is definable only in the explicit `orchestration.harnesses` family.
@@ -438,17 +477,17 @@ argv is definable only in the explicit `orchestration.harnesses` family.
 ```jsonc
 "orchestration": {
   "roles": {
-    "architect":    { "harness": "claude", "effort": "high" },
-    "orchestrator": { "harness": "claude", "effort": "high" },
-    "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
-    "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
-    "system-specialist": { "harness": "claude", "model": "fable", "effort": "high" },
-    "curator":      { "harness": "codex",  "effort": "medium" },
-    "worker":       { "harness": "codex",  "effort": "medium" }
+    "architect":    { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
+    "orchestrator": { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
+    "strategist":   { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
+    "reviewer":     { "harness": "claude", "model": "claude-sonnet-5", "effort": "high" },
+    "system-specialist": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
+    "curator":      { "harness": "codex", "model": "gpt-5.6-luna", "effort": "medium" },
+    "worker":       { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" }
   },
   "rolesPerLevel": {
-    "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
-    "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
+    "master":    { "reviewer": { "model": "claude-opus-4-8", "effort": "xhigh" } },
+    "portfolio": { "reviewer": { "model": "claude-fable-5", "effort": "max" } }
   },
   "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
   "spawn": { "harness": "claude" }
@@ -496,15 +535,17 @@ Semantics, as the loop doctrine defines them
 - `defaults.complexity` maps the dispatch-time complexity score (blast radius ·
   novelty · size) to tiers: at/above `fullLoopAt` a leaf runs the full loop
   (builder + independent reviewer); at/above `builderAt` it runs
-  builder-verified (builder + owner report-vs-artifact check, no reviewer);
-  below both it is direct (the level's ordinary build channel implements —
-  no loop machinery).
+  builder-verified (builder + owner report-vs-artifact check + the mandatory independent
+  route review; no iterative full-loop rounds);
+  below both it is direct (ordinary build + the mandatory independent route review;
+  no iterative loop machinery).
 - `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
   dispatch. `perLevel.master.loop: "seam-required"` names the default loop
-  posture; `"none"` configures the workflow-free manager (a master whose
-  leaves all score direct carries no loop machinery). **This knob governs the
-  LOOP only (review rounds / workflow-free manager): the master-exit SEAM gate
-  is unconditional doctrine — no knob value touches it.** Loop posture names
+  posture; `"none"` configures a manager without iterative loop rounds (a master whose
+  leaves all score direct still runs candidate-bound route review on every code leaf).
+  **This knob governs the LOOP only (review rounds): it cannot disable leaf route review,
+  curator/closeout admission, or the master-exit SEAM gate.** The master-exit seam
+  is unconditional doctrine — no knob value touches it. Loop posture names
   are model-interpreted doctrine (validated as non-empty strings, not a closed
   set). Each level runs its loop with its own agent set
   (`orchestration.roles` knobs per role).

@@ -14,7 +14,7 @@ import {
   missingTitle,
   phaseLineList,
   sectionLabel,
-} from "./engineRoomStyles";
+} from "./styles";
 
 function CommitRow({ label, refNode }: { label: string; refNode: CommitRefNode }) {
   const ref = [refNode.branch, refNode.commit?.slice(0, 8)].filter(Boolean).join(" @ ");
@@ -50,21 +50,11 @@ export function DiagnosticsPanel({
   // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale) provider
   // lines. Derived from `phase` on the frontend (the live runtime is pre-05m, so it sends no power-down signal).
   const poweringDown = node.phase === "cleanup-pending" || node.phase === "abandoned";
-  const setupLine = poweringDown
-    ? ["powering down", node.currentPhase].filter(Boolean).join(" · ")
-    : [
-        node.setupState,
-        node.heartbeatAgeSeconds !== undefined ? `heartbeat ${fmtWait(node.heartbeatAgeSeconds)}` : undefined,
-        node.currentPhase,
-      ]
-        .filter(Boolean)
-        .join(" · ");
+  const setupLine = setupLineFor(node, poweringDown);
   return (
     <div className={diagPanel} data-testid="diagnostics">
       <span className={sectionLabel}>Diagnostics</span>
-      {node.summary ? (
-        <p className={css({ color: "ink", fontSize: "0.74rem", margin: "0" })}>{node.summary}</p>
-      ) : null}
+      <OptionalDiagRows node={node} />
       <div className={diagRow}>
         <span className={diagKey}>Phase</span>
         <span className={diagValue}>{node.phase}</span>
@@ -73,16 +63,14 @@ export function DiagnosticsPanel({
         <span className={diagKey}>Health</span>
         <span className={diagValue}>{node.health}</span>
       </div>
-      {node.nextAction ? (
-        <div className={diagRow}>
-          <span className={diagKey}>Next</span>
-          <span className={diagValue}>{node.nextAction}</span>
-        </div>
-      ) : null}
       <CommitRow label="Code source" refNode={node.codeSource} />
       <CommitRow label="Code worktree" refNode={node.codeWorktree} />
-      {node.memorySource ? <CommitRow label="Memory source" refNode={node.memorySource} /> : null}
-      {node.memoryWorktree ? <CommitRow label="Memory worktree" refNode={node.memoryWorktree} /> : null}
+      {node.sourceLineage ? (
+        <div className={diagRow} title={node.sourceLineage.summary}>
+          <span className={diagKey}>Source lineage</span>
+          <span className={diagValue}>{node.sourceLineage.state}</span>
+        </div>
+      ) : null}
       {setupLine ? (
         <div className={diagRow}>
           <span className={diagKey}>Provider setup</span>
@@ -90,18 +78,7 @@ export function DiagnosticsPanel({
         </div>
       ) : null}
       {node.completedPhases.length > 0 || node.failedPhases.length > 0 ? (
-        <ul className={phaseLineList}>
-          {node.completedPhases.map((line) => (
-            <li key={line} className={css({ color: poweringDown ? "muted" : "mint" })}>
-              {poweringDown ? "◦" : "✓"} {line}
-            </li>
-          ))}
-          {node.failedPhases.map((line) => (
-            <li key={line} className={css({ color: "alarm" })}>
-              ✗ {line}
-            </li>
-          ))}
-        </ul>
+        <PhaseLineList node={node} poweringDown={poweringDown} />
       ) : null}
       {node.seedFallback ? (
         <div className={diagRow}>
@@ -109,30 +86,8 @@ export function DiagnosticsPanel({
           <span className={diagValue}>reroute → reindex fallback</span>
         </div>
       ) : null}
-      {lifecycleId && gateNode && isWorktreeGateKind(gateNode.kind) ? (
-        <div className={actionRow}>
-          <GateResponder
-            lifecycleId={lifecycleId}
-            gateNode={gateNode}
-            compact
-            testId="engine-gate-responder"
-          />
-        </div>
-      ) : node.actions.length > 0 ? (
-        <div className={actionRow}>
-          {node.actions.map((action) => (
-            <Affordance key={action.action} action={action} />
-          ))}
-        </div>
-      ) : null}
-      {node.missingFacts.length > 0 ? (
-        <div className={missingNotice} data-testid="missing-facts">
-          <span className={missingTitle}>Missing observability</span>
-          {node.missingFacts.map((fact) => (
-            <span key={fact}>· {fact}</span>
-          ))}
-        </div>
-      ) : null}
+      <DiagnosticActionRow node={node} lifecycleId={lifecycleId} gateNode={gateNode} />
+      {node.missingFacts.length > 0 ? <MissingFacts facts={node.missingFacts} /> : null}
       {node.sourceFiles.length > 0 ? (
         <div className={diagRow}>
           <span className={diagKey}>Sources</span>
@@ -143,4 +98,103 @@ export function DiagnosticsPanel({
       ) : null}
     </div>
   );
+}
+
+function setupLineFor(node: EngineProcessNode, poweringDown: boolean): string {
+  return poweringDown
+    ? ["powering down", node.currentPhase].filter(Boolean).join(" · ")
+    : [
+        node.setupState,
+        node.heartbeatAgeSeconds !== undefined
+          ? `heartbeat ${fmtWait(node.heartbeatAgeSeconds)}`
+          : undefined,
+        node.currentPhase,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+}
+
+function PhaseLineList({
+  node,
+  poweringDown,
+}: {
+  node: EngineProcessNode;
+  poweringDown: boolean;
+}) {
+  return (
+    <ul className={phaseLineList}>
+      {node.completedPhases.map((line) => (
+        <li key={line} className={css({ color: poweringDown ? "muted" : "mint" })}>
+          {poweringDown ? "◦" : "✓"} {line}
+        </li>
+      ))}
+      {node.failedPhases.map((line) => (
+        <li key={line} className={css({ color: "alarm" })}>
+          ✗ {line}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MissingFacts({ facts }: { facts: string[] }) {
+  return (
+    <div className={missingNotice} data-testid="missing-facts">
+      <span className={missingTitle}>Missing observability</span>
+      {facts.map((fact) => (
+        <span key={fact}>· {fact}</span>
+      ))}
+    </div>
+  );
+}
+
+function OptionalDiagRows({ node }: { node: EngineProcessNode }) {
+  return (
+    <>
+      {node.summary ? (
+        <p className={css({ color: "ink", fontSize: "0.74rem", margin: "0" })}>{node.summary}</p>
+      ) : null}
+      {node.nextAction ? (
+        <div className={diagRow}>
+          <span className={diagKey}>Next</span>
+          <span className={diagValue}>{node.nextAction}</span>
+        </div>
+      ) : null}
+      {node.memorySource ? <CommitRow label="Memory source" refNode={node.memorySource} /> : null}
+      {node.memoryWorktree ? <CommitRow label="Memory worktree" refNode={node.memoryWorktree} /> : null}
+    </>
+  );
+}
+
+function DiagnosticActionRow({
+  node,
+  lifecycleId,
+  gateNode,
+}: {
+  node: EngineProcessNode;
+  lifecycleId?: string;
+  gateNode?: GateNode;
+}) {
+  if (lifecycleId && gateNode && isWorktreeGateKind(gateNode.kind)) {
+    return (
+      <div className={actionRow}>
+        <GateResponder
+          lifecycleId={lifecycleId}
+          gateNode={gateNode}
+          compact
+          testId="engine-gate-responder"
+        />
+      </div>
+    );
+  }
+  if (node.actions.length > 0) {
+    return (
+      <div className={actionRow}>
+        {node.actions.map((action) => (
+          <Affordance key={action.action} action={action} />
+        ))}
+      </div>
+    );
+  }
+  return null;
 }

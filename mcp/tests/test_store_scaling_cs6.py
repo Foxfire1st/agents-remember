@@ -3,13 +3,13 @@
 Store-level proofs for the inline fixes this leaf landed, all inheriting the shared
 ``tests/_scaling`` helper so every future durable store gets the same floor:
 
-- ``SupervisorSignalCooldownStore``: read-once snapshot (``records=``), a named
+- ``AgentNotifierSignalCooldownStore``: read-once snapshot (``records=``), a named
   ``compact()`` that bounds the on-disk log, and corrupt-line-tolerant ``read()``.
 - ``ProviderMetricsStore.read_recent``: bounded tail read, not O(filesize).
 - ``EventStore.read``: one torn line no longer poisons the projection tick.
 
-The supervisor-sweep *integration* proofs (read-count per sweep, escalation budget,
-expectation snapshot) live in ``test_supervisor.py`` next to the sweep harness.
+The agent-notifier-sweep *integration* proofs (read-count per sweep, escalation budget,
+expectation snapshot) live in ``test_agent_notifier.py`` next to the sweep harness.
 """
 
 from __future__ import annotations
@@ -25,24 +25,32 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _scaling import assert_bounded_count, assert_bounded_file_size, assert_subquadratic
+from agents_remember.controlplane.agent_notifier_signals import (
+    AgentNotifierSignalCooldownStore,
+    AgentNotifierSignalKey,
+    AgentNotifierSignalRecord,
+    AgentNotifierSignalTarget,
+)
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
 from agents_remember.controlplane.expectation_rows import (
+    Expectation,
     ExpectationRow,
     ExpectationRowStore,
+    ExpectationSubject,
     write_expectation_row,
 )
 from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeRecord,
     OrchestrationNudgeStore,
 )
-from agents_remember.controlplane.supervisor_signals import (
-    SupervisorSignalCooldownStore,
-    SupervisorSignalRecord,
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
 )
-from agents_remember.observer.ambient import AmbientLifecycle
+from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_TTL_SECONDS,
     compact_workspace_river,
@@ -50,50 +58,54 @@ from agents_remember.observer.event_retention import (
     prune_expired_lifecycle_event_logs,
 )
 from agents_remember.observer.events import Event
-from agents_remember.observer.served_store import ServedRecord, ServedStore
+from agents_remember.observer.served_store import ServedLedger, ServedRecord, ServedStore
 from agents_remember.observer.store import EventStore, workspace_base_offset
 from agents_remember.providers.degradation import ProviderDegradationStore
 from agents_remember.providers.metrics import PROVIDER_METRICS_SCHEMA, ProviderMetricsStore
 from agents_remember.serving.events import decode_cursor, read_new_events
-from agents_remember.serving.terminal import TmuxProbeResult
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
 )
 from agents_remember.serving.terminal_liveness import (
+    LivenessProbe,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
+from agents_remember.serving.terminal_tmux import TmuxProbeResult
 
 NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
+MASTER_REF = TaskDocumentRef(repository="repo", path="260707_master/task.json")
 
 
-def _signal(record_id: str, *, ts: datetime, detail: str = "turn-state-stale") -> SupervisorSignalRecord:
-    return SupervisorSignalRecord(
+def _signal(
+    record_id: str, *, ts: datetime, detail: str = "turn-state-stale"
+) -> AgentNotifierSignalRecord:
+    return AgentNotifierSignalRecord(
         id=record_id,
         ts=ts.isoformat(),
         targetAgentId="manager-1",
         targetLifecycleId=None,
         targetRole="manager",
-        leafKey="repo/260707_master/leaf-1",
+        taskDocumentRef=MASTER_REF,
+        seatRole="manager",
         findingKind="seat-liveness",
         detail=detail,
         deliveryState="delivered",
     )
 
 
-class SupervisorSignalStoreScalingTests(unittest.TestCase):
+class AgentNotifierSignalStoreScalingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.store = SupervisorSignalCooldownStore(Path(self.tmp.name))
+        self.store = AgentNotifierSignalCooldownStore(Path(self.tmp.name))
 
     def test_compact_reclaims_stale_records_and_bounds_file_at_two_sizes(self) -> None:
         """CS-6 D3: a named compactor drops records past the retention window and keeps the
         on-disk log bounded no matter how many stale rows accumulated (>= 2 sizes)."""
 
         def compacted_size(stale_count: int) -> float:
-            store = SupervisorSignalCooldownStore(Path(self.tmp.name) / f"n{stale_count}")
+            store = AgentNotifierSignalCooldownStore(Path(self.tmp.name) / f"n{stale_count}")
             for index in range(stale_count):
                 # Far outside the 900s window -> can never suppress a signal again.
                 store.append(_signal(f"old-{index}", ts=NOW - timedelta(days=30, seconds=index)))
@@ -116,28 +128,35 @@ class SupervisorSignalStoreScalingTests(unittest.TestCase):
         reads = {"count": 0}
         original = self.store.read
 
-        def counting_read() -> list[SupervisorSignalRecord]:
+        def counting_read() -> list[AgentNotifierSignalRecord]:
             reads["count"] += 1
             return original()
 
         self.store.read = counting_read  # type: ignore[method-assign]
         for _ in range(50):
             self.store.in_cooldown(
-                target_agent_id="manager-1",
-                target_lifecycle_id=None,
-                target_role="manager",
-                leaf_key="repo/260707_master/leaf-1",
-                finding_kind="seat-liveness",
-                detail="turn-state-stale",
+                AgentNotifierSignalKey(
+                    target=AgentNotifierSignalTarget(
+                        agent_id="manager-1",
+                        lifecycle_id=None,
+                        role="manager",
+                        task_document_ref=MASTER_REF,
+                        seat_role="manager",
+                    ),
+                    finding_kind="seat-liveness",
+                    detail="turn-state-stale",
+                ),
                 now=NOW,
                 cooldown_seconds=900.0,
                 records=snapshot,
             )
-        assert_bounded_count(reads["count"], 0, label="signal-store reads across 50 cooldown checks")
+        assert_bounded_count(
+            reads["count"], 0, label="signal-store reads across 50 cooldown checks"
+        )
 
     def test_read_is_corrupt_line_tolerant(self) -> None:
         """CS-6 D3 robustness: a torn/legacy line is skipped, not raised -- one bad append cannot
-        freeze the supervisor sweep that folds this non-authoritative cooldown log."""
+        freeze the agent-notifier sweep that folds this non-authoritative cooldown log."""
         self.store.append(_signal("good-1", ts=NOW))
         path = self.store.log_path()
         with path.open("a", encoding="utf-8") as handle:
@@ -162,9 +181,7 @@ class ProviderMetricsTailReadTests(unittest.TestCase):
             for index in range(count):
                 # ~pad each line past the tail block so the tail must span multiple reads.
                 handle.write(
-                    json.dumps(
-                        {"schema": PROVIDER_METRICS_SCHEMA, "seq": index, "pad": "x" * 200}
-                    )
+                    json.dumps({"schema": PROVIDER_METRICS_SCHEMA, "seq": index, "pad": "x" * 200})
                     + "\n"
                 )
 
@@ -204,19 +221,21 @@ class ProviderMetricsTailReadTests(unittest.TestCase):
 
 class ExpectationRowSnapshotTests(unittest.TestCase):
     def test_mark_missed_with_snapshot_does_not_read_the_file(self) -> None:
-        """CS-6 D2 (Z4b): the supervisor threads its one-read snapshot into per-finding
+        """CS-6 D2 (Z4b): the agent-notifier threads its one-read snapshot into per-finding
         mark_missed, so K missed-transitions in a sweep cost 0 additional full-file folds."""
         with tempfile.TemporaryDirectory() as tmp:
             store = ExpectationRowStore(Path(tmp))
             rows = [
                 write_expectation_row(
                     store,
+                    Expectation(
+                        kind="briefed-by",
+                        source_id=f"seat-{index}",
+                        subject=ExpectationSubject(agent_id="worker-1"),
+                    ),
                     row_id=f"exp-{index}",
                     now=NOW - timedelta(minutes=10),
-                    kind="briefed-by",
                     sla_seconds=60.0,
-                    source_id=f"seat-{index}",
-                    subject_agent_id="worker-1",
                 )
                 for index in range(20)
             ]
@@ -246,16 +265,26 @@ class EventStoreToleranceTests(unittest.TestCase):
             # Write to a lifecycle log: one good, one torn, one good.
             store.append(
                 Event(
-                    id="g1", ts=NOW.isoformat(), kind="test.b", trust="observed",
-                    actor="system", data={}, lifecycleId="life-1",
+                    id="g1",
+                    ts=NOW.isoformat(),
+                    kind="test.b",
+                    trust="observed",
+                    actor="system",
+                    data={},
+                    lifecycleId="life-1",
                 )
             )
             with path.open("a", encoding="utf-8") as handle:
                 handle.write('{"id": "torn", "ts": "oops"\n')  # truncated + bad ts
             store.append(
                 Event(
-                    id="g2", ts=NOW.isoformat(), kind="test.c", trust="observed",
-                    actor="system", data={}, lifecycleId="life-1",
+                    id="g2",
+                    ts=NOW.isoformat(),
+                    kind="test.c",
+                    trust="observed",
+                    actor="system",
+                    data={},
+                    lifecycleId="life-1",
                 )
             )
             events = store.read("life-1")
@@ -298,17 +327,24 @@ class LifecycleHeartbeatSidecarTests(unittest.TestCase):
                 log_lines = log_path.read_text(encoding="utf-8").splitlines()
                 self.assertEqual(len(log_lines), 1)
                 self.assertNotIn("lifecycle.heartbeat", log_path.read_text(encoding="utf-8"))
-                assert_bounded_file_size(log_path, 1024, label=f"heartbeat-free lifecycle log {beats}")
+                assert_bounded_file_size(
+                    log_path, 1024, label=f"heartbeat-free lifecycle log {beats}"
+                )
                 assert_bounded_file_size(sidecar_path, 1024, label=f"heartbeat sidecar {beats}")
                 events = store.read("life-1")
-                self.assertEqual([event.kind for event in events], ["lifecycle.started", "lifecycle.heartbeat"])
+                self.assertEqual(
+                    [event.kind for event in events], ["lifecycle.started", "lifecycle.heartbeat"]
+                )
                 self.assertEqual(events[-1].id, f"beat-{beats - 1}")
 
     def test_prune_fully_reclaims_beaten_lifecycles_before_fleeting_reap_at_two_sizes(self) -> None:
         """B1/F7/CS-6 D3: pruning owns every sidecar plus the lifecycle directory; the later
         opportunistic fleeting reap sees no heartbeat-only orphan left behind."""
         for lifecycle_count in (10, 100):
-            with self.subTest(lifecycle_count=lifecycle_count), tempfile.TemporaryDirectory() as tmp:
+            with (
+                self.subTest(lifecycle_count=lifecycle_count),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
                 root = Path(tmp)
                 store = EventStore(root)
                 for index in range(lifecycle_count):
@@ -344,7 +380,9 @@ class LifecycleHeartbeatSidecarTests(unittest.TestCase):
                 self.assertEqual(len(removed), lifecycle_count)
                 self.assertEqual(list((root / "lifecycles").iterdir()), [])
 
-                ambient = AmbientLifecycle(store, heartbeat_seconds=3600, clock=lambda: NOW)
+                ambient = AmbientLifecycle(
+                    store, timing=AmbientTiming(heartbeat_seconds=3600), clock=lambda: NOW
+                )
                 self.addCleanup(ambient.shutdown)
                 self.assertEqual(ambient._reap_stale_fleeting(), [])
 
@@ -356,8 +394,12 @@ class ExpectationCompactTests(unittest.TestCase):
 
     def _terminal(self, row_id: str, *, state: str, at: datetime) -> ExpectationRow:
         return ExpectationRow(
-            id=row_id, ts=at.isoformat(), kind="briefed-by", state=state,  # type: ignore[arg-type]
-            createdAt=(at - timedelta(minutes=5)).isoformat(), dueAt=at.isoformat(),
+            id=row_id,
+            ts=at.isoformat(),
+            kind="briefed-by",
+            state=state,  # type: ignore[arg-type]
+            createdAt=(at - timedelta(minutes=5)).isoformat(),
+            dueAt=at.isoformat(),
             sourceId=f"src-{row_id}",
             metAt=at.isoformat() if state == "met" else None,
             missedAt=at.isoformat() if state == "missed" else None,
@@ -370,11 +412,16 @@ class ExpectationCompactTests(unittest.TestCase):
         def compacted_size(stale_count: int) -> float:
             store = ExpectationRowStore(Path(self.tmp.name) / f"n{stale_count}")
             for index in range(stale_count):
-                store.append(self._terminal(f"old-{index}", state="met", at=NOW - timedelta(days=2)))
+                store.append(
+                    self._terminal(f"old-{index}", state="met", at=NOW - timedelta(days=2))
+                )
             for index in range(3):
                 write_expectation_row(
-                    store, row_id=f"pending-{index}", now=NOW - timedelta(minutes=1),
-                    kind="briefed-by", sla_seconds=3600.0, source_id=f"seat-{index}",
+                    store,
+                    Expectation(kind="briefed-by", source_id=f"seat-{index}"),
+                    row_id=f"pending-{index}",
+                    now=NOW - timedelta(minutes=1),
+                    sla_seconds=3600.0,
                 )
             store.append(self._terminal("recent", state="missed", at=NOW - timedelta(seconds=30)))
             removed, kept = store.compact(now=NOW)
@@ -471,11 +518,61 @@ class ToleranceBatchTests(unittest.TestCase):
     def test_served_store_read_tolerant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = ServedStore(Path(tmp))
-            store.append("life-1", ServedRecord(kind="overview", path="a", hash="h1", ts=NOW.isoformat()))
+            store.append(
+                "life-1", ServedRecord(kind="overview", path="a", hash="h1", ts=NOW.isoformat())
+            )
             with store.log_path("life-1").open("a", encoding="utf-8") as handle:
                 handle.write('{"kind": "overview", "path"\n')
-            store.append("life-1", ServedRecord(kind="overview", path="b", hash="h2", ts=NOW.isoformat()))
+            store.append(
+                "life-1", ServedRecord(kind="overview", path="b", hash="h2", ts=NOW.isoformat())
+            )
             self.assertEqual({r.path for r in store.read("life-1")}, {"a", "b"})
+
+    def test_served_ledger_reads_through_once_and_resets_both_halves(self) -> None:
+        # The ledger is the hot path over the store: the first question about a lifecycle
+        # hydrates from disk, and a reset must drop the in-memory set AND the log, or a
+        # `refresh=true` read would re-serve nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ServedStore(Path(tmp))
+            store.append(
+                "life-1", ServedRecord(kind="overview", path="a", hash="h1", ts=NOW.isoformat())
+            )
+            ledger = ServedLedger(store)
+
+            self.assertTrue(ledger.is_served("life-1", "overview", "a", "h1"))
+            self.assertFalse(ledger.is_served("life-1", "overview", "a", "h2"))
+
+            ledger.record("life-1", "overview", "b", "h3", ts=NOW.isoformat())
+            self.assertTrue(ledger.is_served("life-1", "overview", "b", "h3"))
+            self.assertEqual({r.path for r in store.read("life-1")}, {"a", "b"})
+
+            ledger.reset("life-1")
+            self.assertFalse(ledger.is_served("life-1", "overview", "a", "h1"))
+            self.assertEqual(store.read("life-1"), [])
+
+    def test_resetting_a_lifecycle_that_never_served_anything_is_a_no_op(self) -> None:
+        # There is no log to unlink for a lifecycle that read nothing, and `refresh=true`
+        # on a fresh session takes exactly that path.
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = ServedLedger(ServedStore(Path(tmp)))
+
+            ledger.reset("never-served")
+
+            self.assertFalse(ledger.is_served("never-served", "overview", "a", "h1"))
+
+    def test_forgetting_a_lifecycle_drops_the_set_and_keeps_the_log(self) -> None:
+        # The counterpart of reset, and the one duty AmbientLifecycle keeps over the
+        # ledger: a lifecycle that ended or was left behind releases memory, but its
+        # durable record survives -- deleting it would destroy a merely-paused lifecycle.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ServedStore(Path(tmp))
+            ledger = ServedLedger(store)
+            ledger.record("life-1", "overview", "a", "h1", ts=NOW.isoformat())
+
+            ledger.forget("life-1")
+
+            self.assertEqual({r.path for r in store.read("life-1")}, {"a"})
+            self.assertTrue(ledger.is_served("life-1", "overview", "a", "h1"))
 
 
 class _DiskCountingCatalog(TerminalCatalog):
@@ -536,15 +633,19 @@ class TerminalCatalogSweepScalingTests(unittest.TestCase):
     def _sweep_disk_ops(self, rows: int) -> tuple[int, int]:
         with tempfile.TemporaryDirectory() as tmp:
             catalog = _DiskCountingCatalog(Path(tmp) / f"terminal-sessions-{rows}.json")
-            with catalog.batch():  # seed once (the batch itself is what makes this O(n), not O(n^2))
+            with (
+                catalog.batch()
+            ):  # seed once (the batch itself is what makes this O(n), not O(n^2))
                 for index in range(rows):
                     catalog.upsert(_running_harness_entry(f"s{index:05d}"))
             sweeper = TerminalCatalogLivenessSweeper(
                 catalog,
                 _AllAliveHost(),
                 now=lambda: NOW,
-                config=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
-                pane_capturer=lambda _tmux_name: "(esc to interrupt)",
+                probe=LivenessProbe(
+                    hysteresis=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
+                    pane_capturer=lambda _tmux_name: "(esc to interrupt)",
+                ),
             )
             catalog.disk_read_calls = 0
             catalog.disk_write_calls = 0
@@ -610,16 +711,28 @@ class EventRiverCompactionTests(unittest.TestCase):
         recent_ts = (NOW - timedelta(minutes=5)).isoformat()
         for index in range(old_rows):
             store.append(
-                Event(id=f"old-{index:06d}", ts=old_ts, kind="supervisor.redeliver",
-                      trust="observed", actor="system", data={"n": index})
+                Event(
+                    id=f"old-{index:06d}",
+                    ts=old_ts,
+                    kind="agent-notifier.redeliver",
+                    trust="observed",
+                    actor="system",
+                    data={"n": index},
+                )
             )
         recent_ids: list[str] = []
         for index in range(recent_rows):
             event_id = f"recent-{index:04d}"
             recent_ids.append(event_id)
             store.append(
-                Event(id=event_id, ts=recent_ts, kind="orchestration.nudge",
-                      trust="observed", actor="system", data={"n": index})
+                Event(
+                    id=event_id,
+                    ts=recent_ts,
+                    kind="orchestration.nudge",
+                    trust="observed",
+                    actor="system",
+                    data={"n": index},
+                )
             )
         return recent_ids
 
@@ -658,7 +771,9 @@ class EventRiverCompactionTests(unittest.TestCase):
                 recent_ids = self._seed_river(root, old_rows=old_rows, recent_rows=recent_rows)
                 offsets = initial_event_offsets(root, now=NOW)
                 first_batch, _ = read_new_events(root, offsets, limit=1)
-                self.assertEqual([json.loads(event.data)["id"] for event in first_batch], [recent_ids[0]])
+                self.assertEqual(
+                    [json.loads(event.data)["id"] for event in first_batch], [recent_ids[0]]
+                )
                 cursor_after_first = decode_cursor(first_batch[0].cursor)
 
                 reclaimed = compact_workspace_river(root, now=NOW)
@@ -666,7 +781,9 @@ class EventRiverCompactionTests(unittest.TestCase):
                 self.assertEqual(reclaimed, old_rows)
                 self.assertGreater(workspace_base_offset(root), 0)
                 resumed, _ = read_new_events(root, cursor_after_first)
-                self.assertEqual([json.loads(event.data)["id"] for event in resumed], recent_ids[1:])
+                self.assertEqual(
+                    [json.loads(event.data)["id"] for event in resumed], recent_ids[1:]
+                )
 
     def test_compaction_is_noop_when_nothing_aged_out(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from agents_remember.application import provider_tools, worktree_tools
 from agents_remember.benchmarks.runner_modules.constants import (
     BENCHMARK_MCP_SETTINGS_NAME,
     CODEX_HARNESS_DIR,
@@ -27,8 +28,7 @@ from agents_remember.benchmarks.runner_modules.workspace import (
     UNFILTERED_PROVIDERS_ENV,
     filter_benchmark_provider_ids,
 )
-from agents_remember.controllers import provider_tools, worktree_tools
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
     ProviderScope,
@@ -53,9 +53,7 @@ from agents_remember.providers.settings import lifecycle_settings_from_config
 def _armed_boot_config(tmp: Path, *, disk_providers: dict) -> McpRuntimeConfig:
     """A config whose BOOT SNAPSHOT is armed while the disk says ``disk_providers``."""
     authority = tmp / "authority.json"
-    authority.write_text(
-        json.dumps({"version": 1, "providers": disk_providers}), encoding="utf-8"
-    )
+    authority.write_text(json.dumps({"version": 1, "providers": disk_providers}), encoding="utf-8")
     coordination_root = tmp / "coord"
     workspace_root = tmp / "ws"
     return McpRuntimeConfig(
@@ -87,9 +85,7 @@ class ReloadProviderAuthorityTests(unittest.TestCase):
 
     def test_disk_armed_yields_live_map(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"codegraphcontext-code": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"codegraphcontext-code": {}})
             authority = reload_provider_authority(config)
         self.assertEqual(sorted(authority.providers), ["codegraphcontext-code"])
         self.assertIsNone(authority.error)
@@ -120,9 +116,7 @@ class ReloadProviderAuthorityTests(unittest.TestCase):
 
     def test_require_launch_authority_returns_live_config_when_armed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"codegraphcontext-code": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"codegraphcontext-code": {}})
             live = require_provider_launch_authority(config, operation="test-op")
         self.assertEqual(sorted(live.providers), ["codegraphcontext-code"])
 
@@ -141,14 +135,10 @@ class WorktreeStartVetoTests(unittest.TestCase):
                     returncode=0, payload={"state": "blocked"}
                 )
 
-            with mock.patch.object(
-                worktree_tools.git_worktree_manager, "start_result", fake_start
-            ):
+            with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
                 result = worktree_tools.worktree_start_tool(
                     config,
-                    repo_id="repo",
-                    task_name="t",
-                    worktree_name="w",
+                    worktree_tools.TaskIdentity(repo_id="repo", task_name="t", worktree_name="w"),
                 )
         # The launch side-channel never materializes: no settings file, no setup config.
         self.assertIsNone(captured["provider_setup_config"])
@@ -157,9 +147,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
 
     def test_disk_armed_snapshot_launches_with_live_map(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"grepai-memory": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"grepai-memory": {}})
             captured: dict[str, object] = {}
 
             def fake_start(
@@ -168,7 +156,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
                 setup_config = args.provider_setup_config
                 captured["provider_setup_config"] = setup_config
                 if setup_config is not None:
-                    # Read while the temp file exists — the controller's finally
+                    # Read while the temp file exists — the application layer's finally
                     # unlinks it once no background setup owns it.
                     captured["settings"] = json.loads(
                         Path(setup_config.settings_path).read_text(encoding="utf-8")
@@ -177,14 +165,10 @@ class WorktreeStartVetoTests(unittest.TestCase):
                     returncode=0, payload={"state": "blocked"}
                 )
 
-            with mock.patch.object(
-                worktree_tools.git_worktree_manager, "start_result", fake_start
-            ):
+            with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
                 result = worktree_tools.worktree_start_tool(
                     config,
-                    repo_id="repo",
-                    task_name="t",
-                    worktree_name="w",
+                    worktree_tools.TaskIdentity(repo_id="repo", task_name="t", worktree_name="w"),
                 )
         self.assertIsNotNone(captured["provider_setup_config"])
         settings = captured["settings"]
@@ -197,17 +181,16 @@ class QueryFunnelGateTests(unittest.TestCase):
     def test_query_funnel_requires_its_specific_provider(self) -> None:
         # Review note: an armed grepai must not authorize a cgc one-shot runner.
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"grepai-memory": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"grepai-memory": {}})
             run = mock.Mock()
             with self.assertRaises(ConfigError) as ctx:
                 provider_tools._provider_operation_result(
                     config,
-                    operation="cgc_symbol_search",
-                    launch_capable=True,
-                    launch_capable_provider="codegraphcontext-code",
-                    run=run,
+                    provider_tools.ProviderOperation(
+                        operation="cgc_symbol_search",
+                        required_provider="codegraphcontext-code",
+                        run=run,
+                    ),
                 )
         self.assertIn("codegraphcontext-code", str(ctx.exception))
         run.assert_not_called()
@@ -317,8 +300,9 @@ class FleetSetupLockTests(unittest.TestCase):
                 pass
 
     def test_lock_is_noop_when_uncontended(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, _fleet_setup_lock(
-            Path(tmp) / "setup.lock", timeout=1
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _fleet_setup_lock(Path(tmp) / "setup.lock", timeout=1),
         ):
             pass
 
@@ -355,6 +339,23 @@ class MetricsTests(unittest.TestCase):
         assert snapshot.error is not None
         self.assertIn("daemon down", snapshot.error)
 
+    def test_sampler_bounds_docker_ps_timeout_into_error_sample(self) -> None:
+        # 260718-CHATS-L5F R6: a slow/hung docker daemon must not escape as a subprocess timeout
+        # traceback every sampling interval; the sampler bounds it into an error-annotated snapshot.
+        with (
+            mock.patch("agents_remember.providers.metrics.docker_command", return_value="docker"),
+            mock.patch(
+                "agents_remember.providers.metrics.run_command",
+                return_value={"returncode": None, "stdout": "", "stderr": "", "timedOut": True},
+            ) as run,
+        ):
+            snapshot = sample_provider_containers(cwd=Path("."), timeout=20)
+        # The sampler asks run_command to bound the timeout rather than raise it.
+        assert run.call_args is not None and run.call_args.kwargs.get("allow_timeout") is True
+        self.assertEqual(snapshot.containers, [])
+        assert snapshot.error is not None
+        self.assertIn("timed out", snapshot.error)
+
     def test_sampler_dockerless_host_yields_error_sample(self) -> None:
         with mock.patch(
             "agents_remember.providers.metrics.docker_command",
@@ -371,9 +372,7 @@ class MetricsTests(unittest.TestCase):
                 "Names": "ar-grepai-postgres-i1",
                 "State": "running",
                 "Status": "Up 2 hours",
-                "Labels": (
-                    "agents-remember.provider=grepai-memory,agents-remember.instance-id=i1"
-                ),
+                "Labels": ("agents-remember.provider=grepai-memory,agents-remember.instance-id=i1"),
             }
         )
         stats_line = json.dumps(
@@ -384,7 +383,9 @@ class MetricsTests(unittest.TestCase):
             }
         )
 
-        def fake_run(command: list[str], *, cwd: Path, timeout: int) -> dict[str, object]:
+        def fake_run(
+            command: list[str], *, cwd: Path, timeout: int, allow_timeout: bool = False
+        ) -> dict[str, object]:
             if "stats" in command:
                 return {"returncode": 0, "stdout": stats_line + "\n"}
             return {"returncode": 0, "stdout": ps_line + "\nnot-json\n"}
@@ -413,7 +414,9 @@ class MetricsTests(unittest.TestCase):
             }
         )
 
-        def fake_run(command: list[str], *, cwd: Path, timeout: int) -> dict[str, object]:
+        def fake_run(
+            command: list[str], *, cwd: Path, timeout: int, allow_timeout: bool = False
+        ) -> dict[str, object]:
             if "stats" in command:
                 return {"returncode": 1, "stdout": "", "stderr": ""}
             return {"returncode": 0, "stdout": ps_line + "\n"}

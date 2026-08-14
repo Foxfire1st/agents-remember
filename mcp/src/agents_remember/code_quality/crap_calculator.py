@@ -1,4 +1,11 @@
-"""CRAP-Calculator: combine function complexity with coverage data."""
+"""CRAP-Calculator: combine function complexity with branch coverage data.
+
+``crap = cc**2 * (1 - coverage)**3 + cc`` is defined over *branch* coverage, and the
+coverage term is the only thing a test can move. This module reads the branch fields
+Coverage.py emits under ``[tool.coverage.run] branch = true`` -- ``executed_branches``
+and ``missing_branches`` -- and refuses to score a report produced without them, so the
+formula cannot quietly be fed the statement coverage it is not defined over.
+"""
 
 from __future__ import annotations
 
@@ -23,14 +30,28 @@ IGNORED_PATH_PARTS = {
     "node_modules",
     "venv",
 }
-DEFAULT_CRAP_THRESHOLD = 30.0
+# A score at or above 20 fails without a baseline or exemption. Cover missing branch
+# arcs or split the function. Known measurement boundary: Radon counts boolean
+# short-circuits in complexity while Coverage.py may emit no corresponding arc, so a
+# score can sometimes be reduced only by simplifying the function.
+DEFAULT_CRAP_THRESHOLD = 20.0
 DEFAULT_TOP = 25
 
 
 @dataclass(frozen=True)
 class FileCoverage:
+    """One file's coverage, statements and branch arcs alike.
+
+    A branch arc is Coverage.py's ``[source_line, destination_line]`` pair. Arcs are
+    attributed to a function by their *source* line -- the branching statement -- because
+    a destination is frequently outside the span (a ``return`` arc leaves the function,
+    and Coverage.py writes the exit destination as a negative number).
+    """
+
     executed_lines: frozenset[int]
     missing_lines: frozenset[int]
+    executed_branches: frozenset[tuple[int, int]]
+    missing_branches: frozenset[tuple[int, int]]
     has_data: bool = True
 
     @property
@@ -49,6 +70,8 @@ class FunctionScore:
     covered_lines: int
     missing_lines: int
     executable_lines: int
+    covered_branches: int
+    missing_branches: int
     coverage_ratio: float
     crap: float
     missing_coverage_data: bool = False
@@ -64,8 +87,20 @@ class FileRollup:
 
 
 def crap_score(complexity: int, coverage_ratio: float) -> float:
+    """CRAP for one function. ``coverage_ratio`` is branch coverage, never statements."""
     bounded_coverage = max(0.0, min(coverage_ratio, 1.0))
     return complexity**2 * (1.0 - bounded_coverage) ** 3 + complexity
+
+
+def coverage_clearing(complexity: int, threshold: float) -> float | None:
+    """The branch coverage at which ``complexity`` first scores below ``threshold``.
+
+    ``crap = cc**2 * (1 - c)**3 + cc`` solved for ``c``. ``None`` when the complexity term
+    alone reaches the threshold, which is the case no amount of testing can fix.
+    """
+    if complexity >= threshold:
+        return None
+    return 1.0 - ((threshold - complexity) / complexity**2) ** (1.0 / 3.0)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -77,6 +112,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def load_coverage_by_path(coverage_json: Path, project_root: Path) -> dict[str, FileCoverage]:
     data = read_json(coverage_json)
+    require_branch_measurement(data, coverage_json)
     files = data.get("files")
     if not isinstance(files, dict):
         raise RuntimeError(f"coverage JSON is missing a files object: {coverage_json}")
@@ -88,16 +124,49 @@ def load_coverage_by_path(coverage_json: Path, project_root: Path) -> dict[str, 
         coverage = FileCoverage(
             executed_lines=frozenset(parse_line_numbers(raw_data.get("executed_lines", []))),
             missing_lines=frozenset(parse_line_numbers(raw_data.get("missing_lines", []))),
+            executed_branches=frozenset(parse_branch_arcs(raw_data.get("executed_branches"))),
+            missing_branches=frozenset(parse_branch_arcs(raw_data.get("missing_branches"))),
         )
         for key in coverage_keys(Path(raw_path), project_root):
             coverage_by_path[key] = coverage
     return coverage_by_path
 
 
+def require_branch_measurement(data: dict[str, Any], coverage_json: Path) -> None:
+    """Refuse coverage reports that do not carry branch measurement."""
+    meta = data.get("meta")
+    branch = meta.get("branch_coverage") if isinstance(meta, dict) else None
+    if branch is not True:
+        raise RuntimeError(
+            f"{coverage_json}: meta.branch_coverage is {branch!r}, so this report carries no "
+            "branch data. CRAP is defined over branch coverage; re-run coverage with "
+            "[tool.coverage.run] branch = true."
+        )
+
+
 def parse_line_numbers(raw: object) -> set[int]:
     if not isinstance(raw, list):
         return set()
     return {int(value) for value in raw if isinstance(value, int) and value > 0}
+
+
+def parse_branch_arcs(raw: object) -> set[tuple[int, int]]:
+    """``[[source, destination], ...]`` as pairs.
+
+    A malformed entry raises rather than being dropped: a silently skipped arc is a
+    branch that reads as taken, which moves a score in the forgiving direction.
+    """
+    if not isinstance(raw, list):
+        raise RuntimeError(f"expected a list of branch arcs, got {type(raw).__name__}")
+    arcs: set[tuple[int, int]] = set()
+    for entry in raw:
+        if not isinstance(entry, list) or len(entry) != 2:
+            raise RuntimeError(f"expected a [source, destination] branch arc, got {entry!r}")
+        source, destination = entry
+        if not isinstance(source, int) or not isinstance(destination, int):
+            raise RuntimeError(f"branch arc endpoints must be integers, got {entry!r}")
+        arcs.add((source, destination))
+    return arcs
 
 
 def coverage_keys(path: Path, project_root: Path) -> set[str]:
@@ -157,7 +226,7 @@ def find_file_coverage(
         coverage = coverage_by_path.get(key)
         if coverage is not None:
             return coverage
-    return FileCoverage(frozenset(), frozenset(), has_data=False)
+    return FileCoverage(frozenset(), frozenset(), frozenset(), frozenset(), has_data=False)
 
 
 def complexity_blocks(path: Path) -> list[Any]:
@@ -179,7 +248,13 @@ def score_block(path: Path, block: Any, coverage: FileCoverage) -> FunctionScore
     executable = coverage.executable_lines & span
     covered = coverage.executed_lines & span
     missing = coverage.missing_lines & span
-    coverage_ratio = coverage_ratio_for_function(covered, executable, coverage.has_data)
+    taken = arcs_from(coverage.executed_branches, span)
+    untaken = arcs_from(coverage.missing_branches, span)
+    coverage_ratio = coverage_ratio_for_function(
+        len(covered) + taken,
+        len(executable) + taken + untaken,
+        coverage.has_data,
+    )
     complexity = int(block.complexity)
     return FunctionScore(
         path=path,
@@ -191,22 +266,29 @@ def score_block(path: Path, block: Any, coverage: FileCoverage) -> FunctionScore
         covered_lines=len(covered),
         missing_lines=len(missing),
         executable_lines=len(executable),
+        covered_branches=taken,
+        missing_branches=untaken,
         coverage_ratio=coverage_ratio,
         crap=crap_score(complexity, coverage_ratio),
         missing_coverage_data=not coverage.has_data,
     )
 
 
-def coverage_ratio_for_function(
-    covered: set[int] | frozenset[int],
-    executable: set[int] | frozenset[int],
-    has_data: bool,
-) -> float:
+def arcs_from(arcs: frozenset[tuple[int, int]], span: set[int]) -> int:
+    return sum(1 for source, _destination in arcs if source in span)
+
+
+def coverage_ratio_for_function(covered_units: int, total_units: int, has_data: bool) -> float:
+    """Coverage.py statement-plus-branch ratio over one function span.
+
+    An absent file is wholly uncovered. A measured span with no executable units is
+    treated as covered, matching an explicit coverage exclusion.
+    """
     if not has_data:
         return 0.0
-    if not executable:
+    if not total_units:
         return 1.0
-    return len(covered) / len(executable)
+    return covered_units / total_units
 
 
 def calculate_scores(
@@ -252,6 +334,8 @@ def score_to_mapping(score: FunctionScore, project_root: Path) -> dict[str, Any]
         "coveredLines": score.covered_lines,
         "missingLines": score.missing_lines,
         "executableLines": score.executable_lines,
+        "coveredBranches": score.covered_branches,
+        "missingBranches": score.missing_branches,
         "crap": round(score.crap, 2),
         "missingCoverageData": score.missing_coverage_data,
     }
@@ -274,7 +358,9 @@ def display_path(path: Path, project_root: Path) -> str:
         return path.as_posix()
 
 
-def render_table(scores: list[FunctionScore], project_root: Path, threshold: float, top: int) -> str:
+def render_table(
+    scores: list[FunctionScore], project_root: Path, threshold: float, top: int
+) -> str:
     selected = scores[:top] if top > 0 else scores
     rollups = rollup_by_file(scores, threshold)
     lines = [
@@ -284,8 +370,8 @@ def render_table(scores: list[FunctionScore], project_root: Path, threshold: flo
         "",
         "## Function Scores",
         "",
-        "| CRAP | CC | Coverage | Exec Lines | Function | Location |",
-        "| ---: | ---: | ---: | ---: | --- | --- |",
+        "| CRAP | CC | Branch Cov | Exec Lines | Branches | Function | Location |",
+        "| ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     lines.extend(function_row(score, project_root) for score in selected)
     lines.extend(
@@ -303,10 +389,11 @@ def render_table(scores: list[FunctionScore], project_root: Path, threshold: flo
 
 def function_row(score: FunctionScore, project_root: Path) -> str:
     coverage = f"{score.coverage_ratio * 100:.1f}%"
+    branches = f"{score.covered_branches}/{score.covered_branches + score.missing_branches}"
     location = f"{display_path(score.path, project_root)}:{score.start_line}"
     return (
         f"| {score.crap:.2f} | {score.complexity} | {coverage} | "
-        f"{score.executable_lines} | `{score.function}` | `{location}` |"
+        f"{score.executable_lines} | {branches} | `{score.function}` | `{location}` |"
     )
 
 
@@ -324,8 +411,7 @@ def render_json(scores: list[FunctionScore], project_root: Path, threshold: floa
         "threshold": threshold,
         "functions": [score_to_mapping(score, project_root) for score in scores],
         "files": [
-            rollup_to_mapping(rollup, project_root)
-            for rollup in rollup_by_file(scores, threshold)
+            rollup_to_mapping(rollup, project_root) for rollup in rollup_by_file(scores, threshold)
         ],
     }
     return json.dumps(payload, indent=2)

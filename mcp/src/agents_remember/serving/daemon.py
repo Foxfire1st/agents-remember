@@ -43,8 +43,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.mcp import SERVER_VERSION
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
+from agents_remember.kernel.primitives.version import SERVER_VERSION
+from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
 
 STATE_FILE_NAME = "daemon.json"
 LOG_FILE_NAME = "dashboard.log"
@@ -70,6 +74,20 @@ class DaemonState:
     config_path: str
     log_path: str
     started_at: str
+
+
+@dataclass(frozen=True)
+class DaemonEndpoint:
+    """Which daemon this is: where it serves and which build it runs.
+
+    Adoption is exactly an equality check on these three (see :func:`_describe_mismatch`) -- a
+    daemon matching two of them is still the wrong daemon -- so they are compared, recorded and
+    passed as one value rather than three parallel arguments.
+    """
+
+    host: str
+    port: int
+    version: str = SERVER_VERSION
 
 
 @dataclass(frozen=True)
@@ -108,9 +126,7 @@ def read_state(directory: Path) -> DaemonState | None:
 
 def write_state(directory: Path, state: DaemonState) -> None:
     """Atomic write (tmp + rename): readers never observe a torn state file."""
-    directory.mkdir(parents=True, exist_ok=True)
     path = directory / STATE_FILE_NAME
-    tmp = path.with_suffix(".json.tmp")
     payload = {
         "pid": state.pid,
         "host": state.host,
@@ -120,8 +136,7 @@ def write_state(directory: Path, state: DaemonState) -> None:
         "logPath": state.log_path,
         "startedAt": state.started_at,
     }
-    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def clear_state(directory: Path) -> None:
@@ -168,12 +183,9 @@ def _pid_is_dashboard(pid: int) -> bool:
 
 def spawn(
     config: McpRuntimeConfig,
+    endpoint: DaemonEndpoint,
     *,
-    host: str,
-    port: int,
-    version: str,
-    interval: float = 1.0,
-    heartbeat: float | None = None,
+    cadence: ProjectionCadence = DEFAULT_PROJECTION_CADENCE,
 ) -> DaemonState:
     """Launch the detached foreground CLI and record it immediately.
 
@@ -194,14 +206,14 @@ def spawn(
         "--config",
         str(config.config_path),
         "--host",
-        host,
+        endpoint.host,
         "--port",
-        str(port),
+        str(endpoint.port),
         "--interval",
-        str(interval),
+        str(cadence.interval),
     ]
-    if heartbeat is not None:
-        command += ["--heartbeat", str(heartbeat)]
+    if cadence.heartbeat is not None:
+        command += ["--heartbeat", str(cadence.heartbeat)]
     command.append("--no-access-log")
     with log_path.open("ab") as log:
         process = subprocess.Popen(
@@ -215,9 +227,9 @@ def spawn(
     _spawned.append(process)
     state = DaemonState(
         pid=process.pid,
-        host=host,
-        port=port,
-        version=version,
+        host=endpoint.host,
+        port=endpoint.port,
+        version=endpoint.version,
         config_path=str(config.config_path),
         log_path=str(log_path),
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -253,17 +265,14 @@ def stop(directory: Path, *, timeout: float = _STOP_TIMEOUT_SECONDS) -> str:
 
 def ensure(
     config: McpRuntimeConfig,
+    endpoint: DaemonEndpoint,
     *,
-    host: str,
-    port: int,
-    version: str = SERVER_VERSION,
-    interval: float = 1.0,
-    heartbeat: float | None = None,
+    cadence: ProjectionCadence = DEFAULT_PROJECTION_CADENCE,
 ) -> EnsureResult:
     """Adopt a healthy daemon, spawn a missing one, restart a mismatched one.
 
-    ``interval`` / ``heartbeat`` reach the child only when this call spawns (or
-    restarts) it; an adopted daemon keeps the cadences it was started with.
+    ``cadence`` reaches the child only when this call spawns (or restarts) it; an adopted daemon
+    keeps the cadences it was started with.
     """
     directory = daemon_dir(config)
     directory.mkdir(parents=True, exist_ok=True)
@@ -278,15 +287,7 @@ def ensure(
                 detail="another supervisor is ensuring the dashboard daemon; skipped",
             )
         try:
-            return _ensure_locked(
-                config,
-                directory,
-                host=host,
-                port=port,
-                version=version,
-                interval=interval,
-                heartbeat=heartbeat,
-            )
+            return _ensure_locked(config, directory, endpoint, cadence=cadence)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
@@ -294,13 +295,11 @@ def ensure(
 def _ensure_locked(
     config: McpRuntimeConfig,
     directory: Path,
+    endpoint: DaemonEndpoint,
     *,
-    host: str,
-    port: int,
-    version: str,
-    interval: float,
-    heartbeat: float | None = None,
+    cadence: ProjectionCadence,
 ) -> EnsureResult:
+    host, port, version = endpoint.host, endpoint.port, endpoint.version
     current, alive = probe(directory)
     mismatch = ""
     if alive and current is not None:
@@ -312,9 +311,7 @@ def _ensure_locked(
             )
         mismatch = _describe_mismatch(current, host=host, port=port, version=version)
         stop(directory)
-    state = spawn(
-        config, host=host, port=port, version=version, interval=interval, heartbeat=heartbeat
-    )
+    state = spawn(config, endpoint, cadence=cadence)
     if not _wait_ready(state):
         if _pid_alive(state.pid):
             detail = (
@@ -363,7 +360,7 @@ def maybe_autostart_dashboard(config: McpRuntimeConfig) -> threading.Thread | No
 
 def _autostart(config: McpRuntimeConfig) -> None:
     try:
-        result = ensure(config, host="127.0.0.1", port=config.dashboard.port)
+        result = ensure(config, DaemonEndpoint(host="127.0.0.1", port=config.dashboard.port))
         print(f"dashboard autostart: {result.action}: {result.detail}", file=sys.stderr)
     except Exception as error:  # boot must survive any autostart failure
         print(f"dashboard autostart: failed: {error}", file=sys.stderr)
@@ -415,7 +412,7 @@ def _reap_spawned() -> None:
 def _rotate_log(log_path: Path) -> None:
     try:
         if log_path.exists() and log_path.stat().st_size > 0:
-            os.replace(log_path, log_path.with_suffix(".log.1"))
+            atomic_replace(log_path, log_path.with_suffix(".log.1"))
     except OSError:
         pass  # rotation is best-effort; a spawn must not fail over log shuffling
 

@@ -11,12 +11,14 @@ than merely whether ``origin/main`` exists, and the PR ref carries gh's open/mer
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
 from agents_remember.worktrees.modules.landing import _default_branch, landing_refs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -26,7 +28,7 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
         "task_id": "T",
         "task_name": "demo",
         "repo_name": "repo-a",
-        "workflow_kind": "chat",
+        "workflow_kind": "chat-task",
         "memory_mode": "external",
         "coordination_root": tmp,
         "task_root": tmp,
@@ -165,6 +167,32 @@ class LandingRefsTests(unittest.TestCase):
         # the protected-target probe could not run either -> honest missing/unknown
         self.assertEqual(by_kind["origin-main"]["factState"], "missing")
         self.assertEqual(by_kind["origin-main"]["state"], "unknown")
+
+    @patch("agents_remember.worktrees.modules.landing.subprocess.run")
+    def test_the_gh_probe_does_not_inherit_the_repository_selectors(self, run: MagicMock) -> None:
+        # `gh` is not git, but it resolves the repository through git, so an exported GIT_DIR
+        # would have it list another repository's pull requests under this branch's name and
+        # the landing arc would report a PR that has nothing to do with this worktree.
+        # `cwd=repo` does not outrank the selectors for gh any more than it does for git.
+        captured: list[dict[str, object]] = []
+
+        def fake(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            captured.append({"cmd": cmd, **kwargs})
+            return _completed("[]")
+
+        run.side_effect = fake
+        selectors = {name: str(self.tmp / "decoy") for name in GIT_REPOSITORY_SELECTOR_ENV}
+        with patch.dict(os.environ, selectors):
+            landing_refs(_contract(self.tmp))
+
+        gh_calls = [call for call in captured if str(call["cmd"][0]) == "gh"]  # type: ignore[index]
+        self.assertTrue(gh_calls)  # the probe really ran; the assertions below are not vacuous
+        for call in gh_calls:
+            environment = call.get("env")
+            self.assertIsInstance(environment, dict)
+            assert isinstance(environment, dict)
+            self.assertTrue(set(GIT_REPOSITORY_SELECTOR_ENV).isdisjoint(environment))
+            self.assertIn("PATH", environment)  # only the selectors go; gh still has to run
 
 
 class DefaultBranchTests(unittest.TestCase):

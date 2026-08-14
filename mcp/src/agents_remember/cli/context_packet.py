@@ -1,4 +1,4 @@
-"""JSON-only CLI adapter for the context packet controller."""
+"""JSON-only CLI adapter for the context packet application entry point."""
 
 from __future__ import annotations
 
@@ -6,12 +6,15 @@ import argparse
 import json
 from typing import Any
 
-from agents_remember.controllers.context_packet import (
+from agents_remember.application.context_packet import (
     ContextPacketError,
     ContextPacketRequest,
     build_context_packet,
 )
-from agents_remember.mcp.config import ConfigError, load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    ConfigError,
+    load_config,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

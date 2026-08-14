@@ -64,7 +64,9 @@ class SyncRuntimeTests(unittest.TestCase):
             self.assertFalse((target / "stale.md").exists())
             self.assertFalse((target / "__pycache__").exists())
             self.assertTrue(
-                sync_runtime.diff_target(sync_runtime.RuntimeTarget("fixture", source, target)).in_sync
+                sync_runtime.diff_target(
+                    sync_runtime.RuntimeTarget("fixture", source, target)
+                ).in_sync
             )
 
     def test_default_targets_only_write_to_mcp_package_data(self) -> None:

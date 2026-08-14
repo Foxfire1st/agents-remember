@@ -7,14 +7,16 @@
 
   --bg: oklch(0.16 0.02 250);
   --bg-panel: oklch(0.2 0.02 250);
+  --well: #070b0f; /* terminal well — the xterm pty inset, shared by the structured chat stage (FB7.1) */
   --ink: oklch(0.92 0.03 90);
   --grid: oklch(0.3 0.02 250);
+  --muted: oklch(0.7 0.02 250); /* muted control text — mirrors panda.config's `muted` token */
 
   --amber: oklch(0.82 0.16 75); /* nominal wireframe */
   --cyan: oklch(0.85 0.13 200); /* progress / running */
-  --alarm: oklch(0.63 0.24 25); /* whole-silhouette alarm */
+  --alarm: oklch(0.67 0.22 25); /* AA status text + whole-silhouette alarm */
   --mint: oklch(0.88 0.16 165); /* fresh-online / live */
-  --dormant: oklch(0.45 0.06 25); /* skeletal dark-red dormant */
+  --dormant: oklch(0.67 0.06 25); /* AA status text + skeletal red dormant */
 
   /* Rank-insignia tiers (L14): gold = orchestration seat, purple = management. */
   --gold: oklch(0.87 0.15 95);

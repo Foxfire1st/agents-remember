@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Render the Codex Agents Remember starter package for one workspace."""
 
+# Generated file -- do not edit.
+# Source: scripts/harness/render_starter.py
+# Regenerate: python3 scripts/sync-harness.py
+
 from __future__ import annotations
 
 import argparse
@@ -9,15 +13,25 @@ import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
+HARNESS_LABEL = "Codex"
 PATH_PLACEHOLDER = "<PATH/TO/YOUR/PROJECTS_FOLDER>"
 REPO_PLACEHOLDER = "<YOUR_REPOSITORY_FOLDER_NAME>"
 HOOK_COMMAND_PLACEHOLDER = "<PYTHON_HOOK_COMMAND>"
+PLACEHOLDERS = (
+    PATH_PLACEHOLDER,
+    REPO_PLACEHOLDER,
+    HOOK_COMMAND_PLACEHOLDER,
+)
 TARGET_FILES = (
     "config.toml",
     "mcp/agents-remember-settings.json",
 )
+
+
+Renderer = Callable[[Path, Path, list[str]], None]
 
 
 def command_string(argv: list[str]) -> str:
@@ -41,7 +55,9 @@ def repository_ids(workspace_root: Path, repos: list[str]) -> list[str]:
     ordered: list[str] = []
     for repo_id in repos:
         if not repo_id or any(separator in repo_id for separator in ("/", "\\")):
-            raise SystemExit(f"repository id must be a folder name under workspace root: {repo_id!r}")
+            raise SystemExit(
+                f"repository id must be a folder name under workspace root: {repo_id!r}"
+            )
         repo_root = workspace_root / repo_id
         if not repo_root.is_dir():
             raise SystemExit(f"repository root does not exist for {repo_id!r}: {repo_root}")
@@ -68,19 +84,20 @@ def render_settings(path: Path, workspace_root: Path, repos: list[str]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
-def validate(script_root: Path) -> None:
+def validate(*groups: tuple[Path, tuple[str, ...]]) -> None:
     unresolved: list[str] = []
-    for relative in TARGET_FILES:
-        path = script_root / relative
-        text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER, HOOK_COMMAND_PLACEHOLDER)):
-            unresolved.append(path.as_posix())
+    for root, relatives in groups:
+        for relative in relatives:
+            path = root / relative
+            text = path.read_text(encoding="utf-8")
+            if any(marker in text for marker in PLACEHOLDERS):
+                unresolved.append(path.as_posix())
     if unresolved:
         joined = "\n".join(unresolved)
         raise SystemExit(f"unresolved starter placeholders remain:\n{joined}")
 
 
-def render(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
+def render_codex(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
     hook_command = command_string(
         [
             str(Path(sys.executable).resolve()),
@@ -95,10 +112,10 @@ def render(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
         },
     )
     render_settings(script_root / "mcp" / "agents-remember-settings.json", workspace_root, repos)
-    validate(script_root)
+    validate((script_root, TARGET_FILES))
 
 
-def main() -> None:
+def main(render: Renderer) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo",
@@ -113,8 +130,8 @@ def main() -> None:
     workspace_root = infer_workspace_root(script_root)
     repos = repository_ids(workspace_root, args.repo)
     render(script_root, workspace_root, repos)
-    print(f"Rendered Codex starter for {workspace_root.as_posix()}")
+    print(f"Rendered {HARNESS_LABEL} starter for {workspace_root.as_posix()}")
 
 
 if __name__ == "__main__":
-    main()
+    main(render_codex)

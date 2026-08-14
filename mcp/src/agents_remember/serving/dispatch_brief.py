@@ -4,35 +4,69 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
-from agents_remember.serving.harness_logs import HarnessSessionLog
+from agents_remember.controlplane.expectation_rows import (
+    Expectation,
+    ExpectationRow,
+    ExpectationRowStore,
+    ExpectationSubject,
+    write_expectation_row,
+)
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxMessageKind,
+    OperatorInboxEntry,
+)
+from agents_remember.kernel.agentic_settings import (
+    DEFAULT_EXPECTATION_SLA_SECONDS,
+    load_agentic_settings,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
+from agents_remember.observer import observer_root
+from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.hosted_readiness import (
     HostedReadinessHost,
     HostedReadinessResult,
     hosted_session_identity,
     hosted_session_readiness,
 )
-from agents_remember.serving.injector import DeliveryRow, verify_or_reissue_command
-from agents_remember.serving.terminal import ensure_terminal_input_ready
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_paste import DispatchPastePolicy, TerminalPaster
+from agents_remember.serving.ports import TerminalCatalogPort
+from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_paste import TerminalPaster
+
+if TYPE_CHECKING:
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 DISPATCH_BRIEF_KIND = "dispatch-brief"
-InputReadyCheck = Callable[[str], bool]
-ReadinessCheck = Callable[[TerminalCatalog, HostedReadinessHost, str], HostedReadinessResult]
+ReadinessCheck = Callable[[TerminalCatalogPort, HostedReadinessHost, str], HostedReadinessResult]
 
 
 @dataclass(frozen=True)
-class LaunchCommandGate:
-    allows_brief: bool
-    detail: str | None = None
-    capture: str = ""
+class HostedDelivery:
+    """Hosted inbox delivery collaborators owned by the serving performer layer."""
+
+    enabled: bool = True
+    catalog: TerminalCatalogPort | None = None
+    host: TerminalHost | None = None
+    paster: TerminalPaster | None = None
+    readiness: ReadinessCheck | None = None
+    gate: DispatchBriefGate | None = None
+
+
+HOSTED_DELIVERY = HostedDelivery()
+"""Deliver through the real hosted-session collaborators."""
+
+NO_HOSTED_DELIVERY = HostedDelivery(enabled=False)
+"""Persist the inbox entry without pushing it into a hosted session."""
 
 
 def _readiness_check(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     host: HostedReadinessHost,
     session_id: str,
 ) -> HostedReadinessResult:
@@ -41,40 +75,106 @@ def _readiness_check(
 
 @dataclass(frozen=True)
 class DispatchBriefGate:
-    """Immediate copy-mode cancellation plus exact-session readiness recheck."""
+    """Exact-session protocol readiness gate; terminal input mode has no authority."""
 
-    input_ready: InputReadyCheck = ensure_terminal_input_ready
     readiness: ReadinessCheck = _readiness_check
 
     def check(
         self,
-        catalog: TerminalCatalog,
+        catalog: TerminalCatalogPort,
         host: HostedReadinessHost,
         target: TerminalCatalogEntry,
         *,
         recovery: bool = False,
     ) -> str | None:
+        del recovery  # retries obey the same protocol handshake; no compatibility readiness path
         observed = self.readiness(catalog, host, target.id)
         failure = _exact_running_failure(
             observed,
             target,
-            phase="before copy-mode cancellation",
+            phase="during adapter readiness check",
         )
         if failure is not None:
             return failure
-        if not self.input_ready(target.tmux_name):
-            return "pane copy mode could not be cancelled and verified; no input sent"
-        final = self.readiness(catalog, host, target.id)
-        failure = _exact_running_failure(
-            final,
-            target,
-            phase="after copy-mode cancellation",
-        )
-        if failure is not None:
-            return failure
-        if _final_readiness_allows_input(final, recovery=recovery):
+        if _final_readiness_allows_input(observed):
             return None
-        return f"dispatch target is {final.status}: {final.detail or 'not input-ready'}"
+        return f"dispatch target is {observed.status}: {observed.detail or 'not adapter-ready'}"
+
+
+def expectation_store(config: McpRuntimeConfig) -> ExpectationRowStore:
+    return ExpectationRowStore(observer_root(config))
+
+
+def expectation_sla_seconds(config: McpRuntimeConfig | None, kind: str) -> float:
+    if config is None:
+        return DEFAULT_EXPECTATION_SLA_SECONDS[kind]
+    return load_agentic_settings(config.coordination_root).expectations.sla_for(kind)
+
+
+def require_dispatch_target(
+    *,
+    message_kind: InboxMessageKind,
+    agent_id: str | None,
+    delivery: HostedDelivery,
+) -> TerminalCatalogEntry | None:
+    """Return the exact running dispatch target before durable persistence.
+
+    Readiness gates the delivery attempt, not creation of the durable brief. This lets the
+    control plane queue one exact-pinned initial brief while a newly launched adapter finishes
+    negotiating, then retry it without asking the spawning model to retain a runtime id.
+    """
+
+    if message_kind != DISPATCH_BRIEF_KIND:
+        return None
+    if delivery.catalog is None:
+        raise ValueError("dispatch-brief requires runtime configuration")
+    if agent_id is None or not delivery.enabled:
+        raise ValueError("dispatch-brief requires exact agent_id and deliver_to_hosted=true")
+    target = delivery.catalog.get(agent_id)
+    if target is None or target.status != "running":
+        raise ValueError(
+            "dispatch-brief requires one exact running target selected internally by the plane"
+        )
+    return target
+
+
+def start_dispatch_expectations(
+    config: McpRuntimeConfig,
+    entry: OperatorInboxEntry,
+    target: TerminalCatalogEntry,
+) -> None:
+    """Start the briefed-by deadline row from the one durable dispatch row.
+
+    The turn-report-by clock is retired: completion truth comes from the catalog turn
+    projection, never from artifact/clock inference.
+    """
+
+    store = expectation_store(config)
+    created_at = datetime.fromisoformat(entry.createdAt)
+    task_document_ref = target.binding_task_document_ref
+    if store.find_by_source(entry.id, kind="briefed-by") is not None:
+        return
+    write_expectation_row(
+        store,
+        Expectation(
+            kind="briefed-by",
+            source_id=entry.id,
+            subject=ExpectationSubject(
+                agent_id=target.id,
+                lifecycle_id=target.lifecycle_id,
+                task_document_ref=task_document_ref,
+                seat_role=target.binding_role,
+            ),
+            note=f"briefed-by: {target.label} ({target.spawn_role or target.kind})",
+        ),
+        row_id=new_ulid(),
+        now=created_at,
+        sla_seconds=expectation_sla_seconds(config, "briefed-by"),
+    )
+
+
+def fulfill_dispatch_expectation(config: McpRuntimeConfig, entry: OperatorInboxEntry) -> None:
+    fulfill_briefed_expectation(expectation_store(config), entry)
 
 
 def _exact_running_failure(
@@ -93,29 +193,8 @@ def _exact_running_failure(
 
 def _final_readiness_allows_input(
     observed: HostedReadinessResult,
-    *,
-    recovery: bool,
 ) -> bool:
-    if observed.status == "ready":
-        return True
-    return bool(
-        recovery
-        and observed.status == "not-ready"
-        and observed.detail == "harness composer is not ready"
-    )
-
-
-def dispatch_paste_policy(
-    entry: OperatorInboxEntry, target: TerminalCatalogEntry
-) -> DispatchPastePolicy:
-    """Use a fresh one-paste attempt once; every durable retry inspects the existing draft."""
-
-    attempt = "initial" if entry.attemptCount == 0 else "recovery"
-    return DispatchPastePolicy(
-        attempt=attempt,
-        visible_marker=f"entry: {entry.id}",
-        harness=target.harness,
-    )
+    return observed.status == "ready"
 
 
 def with_prompt_keywords(target: TerminalCatalogEntry, text: str) -> str:
@@ -126,57 +205,16 @@ def with_prompt_keywords(target: TerminalCatalogEntry, text: str) -> str:
     return f"{' '.join(target.prompt_keywords)}\n\n{text}"
 
 
-def verify_launch_commands(
-    target: TerminalCatalogEntry,
-    *,
-    paster: TerminalPaster,
-    session_log: HarnessSessionLog,
-) -> LaunchCommandGate:
-    """Retro-prove spawn-phase commands after the dispatch row binds the harness log."""
-
-    if not target.session_commands:
-        return LaunchCommandGate(True)
-    if not session_log.command_evidence_supported:
-        return LaunchCommandGate(
-            True,
-            "harness has no command-entry/output evidence adapter; launch transport remains unproven",
-        )
-    if session_log.bound_path is None:
-        return LaunchCommandGate(False, "dispatch log did not bind launch command evidence")
-    failures: list[str] = []
-    capture = ""
-    for index, command in enumerate(target.session_commands, start=1):
-        result = verify_or_reissue_command(
-            DeliveryRow(
-                kind="session-command",
-                entry_id=target.id,
-                text=command,
-                submit=True,
-                envelope=False,
-            ),
-            tmux_name=target.tmux_name,
-            paster=paster,
-            harness=target.harness,
-            session_log=session_log,
-        )
-        if result.outcome != "acked":
-            failures.append(f"command {index}: {result.reason or result.outcome}")
-            capture = result.capture or capture
-    if failures:
-        return LaunchCommandGate(False, "; ".join(failures), capture)
-    return LaunchCommandGate(True)
-
-
 def delivery_is_briefed(entry: OperatorInboxEntry) -> bool:
     return (
         entry.messageKind == DISPATCH_BRIEF_KIND
         and entry.deliveryState == "delivered"
-        and entry.deliveryDetail == "harness-log-confirmed"
+        and entry.adapterDeliveryState in {"accepted", "queued", "completed"}
     )
 
 
 def dispatch_stays_on_exact_session(entry: OperatorInboxEntry) -> bool:
-    """Pending dispatch rows never enter a ladder that can readdress their exact agent id."""
+    """Pending dispatch rows are exact-pinned: they never rebind or readdress away."""
 
     return entry.messageKind == DISPATCH_BRIEF_KIND and entry.state == "pending"
 

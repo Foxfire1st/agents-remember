@@ -13,6 +13,11 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.orchestration_tools import (
+    NudgeSubject,
+    NudgeTarget,
+    orchestration_nudge_manager_tool,
+)
 from agents_remember.controlplane.orchestration_artifacts import (
     escalation_packet,
     turn_report_artifact,
@@ -22,8 +27,10 @@ from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeStore,
     missing_artifact,
 )
-from agents_remember.mcp.config import McpRuntimeConfig, load_config
-from agents_remember.mcp.tools.orchestration import orchestration_nudge_manager_payload
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    load_config,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.store import EventStore
 from test_config import settings_payload
@@ -150,13 +157,15 @@ class NudgeToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = _config(root)
-            payload = orchestration_nudge_manager_payload(
+            payload = orchestration_nudge_manager_tool(
                 config,
                 reason="missing-turn-report",
-                subject="worker L3",
-                manager_agent_id="manager-a",
-                subject_agent_id="worker-a",
-                artifact_path="notes/reports/L3-worker-report.md",
+                target=NudgeTarget(agent_id="manager-a"),
+                subject=NudgeSubject(
+                    subject="worker L3",
+                    agent_id="worker-a",
+                    artifact_path="notes/reports/L3-worker-report.md",
+                ),
             )
 
             self.assertTrue(payload["ok"])

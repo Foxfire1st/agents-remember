@@ -26,19 +26,28 @@ sys.path.insert(0, str(MCP_SRC))
 from _scaling import assert_bounded_count
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
-from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.observer import contract_snapshot, drift_snapshots, projection_store, snapshots
-from agents_remember.observer.contract_snapshot import ContractSnapshotCache
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.observer.events import Event
-from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     Analytics,
+    EngineProcessFacts,
     TaskDocNode,
     WorkspaceProjection,
     task_documents_body_bytes,
 )
-from agents_remember.observer.snapshots import (
+from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections import (
+    contract_snapshot,
+    drift_snapshots,
+    projection_store,
+    snapshots,
+)
+from agents_remember.serving.projections.contract_snapshot import ContractSnapshotCache
+from agents_remember.serving.projections.paths import observer_logs_root
+from agents_remember.serving.projections.snapshots import (
     TASK_DOCUMENT_SCHEMA,
     TASK_DOCUMENT_SUMMARY_LIMIT,
     read_enclosures,
@@ -47,10 +56,15 @@ from agents_remember.observer.snapshots import (
     read_series_documents,
     read_task_document_body,
     read_task_documents,
+    refresh_engine_process_landing,
 )
-from agents_remember.observer.store import EventStore
+from agents_remember.serving.projections.snapshots_impl import _common as snapshots_common
+from agents_remember.serving.projections.snapshots_impl import _runtime as snapshots_runtime
 from agents_remember.worktrees.task_resolver import ENCLOSURES_DIR, SERIES_CONTRACT_FILENAME
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     WorktreeContract,
     default_contract,
     write_contract,
@@ -70,14 +84,18 @@ class GateReadFoldTests(unittest.TestCase):
             for index in range(lifecycles):
                 store.append(
                     GateRecord(
-                        id=f"g{index}", ts=NOW.isoformat(), kind="plan-approval", state="open",
+                        id=f"g{index}",
+                        ts=NOW.isoformat(),
+                        kind="plan-approval",
+                        state="open",
                         lifecycleId=f"life-{index}",
                     )
                 )
             reads = {"count": 0}
             original = GateStore.read
 
-            def counting_read(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
+            # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_projection_scaling_cs6.py:95).
+            def counting_read(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]  # pragma: no cover
                 reads["count"] += 1
                 return _orig(self, lifecycle_id)
 
@@ -101,8 +119,12 @@ class TaskDocSharedCacheTests(unittest.TestCase):
             (tasks / f"leaf-{index}.json").write_text(
                 json.dumps(
                     {
-                        "schema": TASK_DOCUMENT_SCHEMA, "kind": "light", "id": f"L{index}",
-                        "title": "t", "repo": "repo", "status": "planning",
+                        "schema": TASK_DOCUMENT_SCHEMA,
+                        "kind": "light",
+                        "id": f"L{index}",
+                        "title": "t",
+                        "repo": "repo",
+                        "status": "planning",
                         "createdAt": NOW.isoformat(),
                     }
                 ),
@@ -113,22 +135,22 @@ class TaskDocSharedCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             coordination_root = Path(tmp)
             self._seed(coordination_root, 30)
-            snapshots._task_doc_cache.clear()
+            snapshots_common._task_doc_cache.clear()
             reads = {"count": 0}
-            original = snapshots._read_json
+            original = snapshots_common._read_json
 
             def counting_read_json(path, _orig=original):  # type: ignore[no-untyped-def]
                 reads["count"] += 1
                 return _orig(path)
 
-            snapshots._read_json = counting_read_json  # type: ignore[assignment]
+            snapshots_common._read_json = counting_read_json  # type: ignore[assignment]
             try:
                 read_task_documents(coordination_root, enclosures=[], now=NOW)
                 after_first = reads["count"]
                 read_series_documents(coordination_root, now=NOW)
                 after_second = reads["count"]
             finally:
-                snapshots._read_json = original  # type: ignore[assignment]
+                snapshots_common._read_json = original  # type: ignore[assignment]
             # First reader walks + parses the tree once; the second reader adds ZERO parses (cache hit).
             self.assertGreaterEqual(after_first, 30)
             assert_bounded_count(
@@ -141,7 +163,7 @@ class GitStatusCacheTests(unittest.TestCase):
 
     def test_status_payload_cached_within_ttl(self) -> None:
         calls = {"count": 0}
-        original = snapshots.projected_status_payload
+        original = snapshots_runtime.projected_status_payload
 
         class NoLanding:
             def current(self, contract, *, now):  # type: ignore[no-untyped-def]
@@ -152,27 +174,27 @@ class GitStatusCacheTests(unittest.TestCase):
             calls["count"] += 1
             return {"ok": True}
 
-        snapshots.projected_status_payload = fake_status  # type: ignore[assignment]
-        snapshots._status_payload_cache.clear()
+        snapshots_runtime.projected_status_payload = fake_status  # type: ignore[assignment]
+        snapshots_common._status_payload_cache.clear()
         landing_state = NoLanding()
         try:
-            snapshots._safe_status_payload(
+            snapshots_runtime._safe_status_payload(
                 "c", cache_key="leaf-1", now=NOW, landing_state=landing_state
             )
-            snapshots._safe_status_payload(
+            snapshots_runtime._safe_status_payload(
                 "c",
                 cache_key="leaf-1",
                 now=NOW + timedelta(seconds=1),
                 landing_state=landing_state,
             )
-            snapshots._safe_status_payload(
+            snapshots_runtime._safe_status_payload(
                 "c",
                 cache_key="leaf-1",
                 now=NOW + timedelta(seconds=30),
                 landing_state=landing_state,
             )
         finally:
-            snapshots.projected_status_payload = original  # type: ignore[assignment]
+            snapshots_runtime.projected_status_payload = original  # type: ignore[assignment]
         # 1 cold probe + 1 refresh past the 8s TTL; the within-TTL call reused the cache.
         assert_bounded_count(calls["count"], 2, label="git status probes across 3 ticks")
 
@@ -180,27 +202,93 @@ class GitStatusCacheTests(unittest.TestCase):
 class LandingProjectionHotPathTests(unittest.TestCase):
     """Remote landing observation must not serialize the recurring projection reader."""
 
+    def test_heartbeat_refresh_replaces_only_landing_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coordination_root = Path(tmp)
+            contract = default_contract(
+                ContractTask(
+                    name="landing-heartbeat",
+                    repo_name="repo",
+                    coordination_root=coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="landing-heartbeat"),
+                code=RepoBranchPlan(
+                    repo_path=coordination_root / "repo",
+                    source_branch="main",
+                    work_branch="ar/landing",
+                    base_commit="base",
+                ),
+            )
+            contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+            write_contract(contract.contract_path, contract)
+            snapshot = contract_snapshot.build_contract_snapshot(coordination_root / "tasks")
+            original = EngineProcessFacts(
+                contract={"contract_path": contract.contract_path.as_posix()},
+                guidance={"phase": "work"},
+                status={
+                    "code_worktree_dirty": False,
+                    "landing": [{"ref": "old", "staleSeconds": 15.0}],
+                },
+            )
+
+            class PublishedLanding:
+                def __init__(self) -> None:
+                    self.seen: tuple[WorktreeContract, datetime] | None = None
+
+                def current(
+                    self, contract: WorktreeContract, *, now: datetime
+                ) -> list[dict[str, object]] | None:
+                    self.seen = contract, now
+                    return [{"ref": "origin/main", "staleSeconds": 1.0}]
+
+            landing_state = PublishedLanding()
+            refreshed = refresh_engine_process_landing(
+                [original],
+                now=NOW,
+                landing_state=landing_state,
+                contracts=snapshot,
+            )
+
+            self.assertEqual(refreshed[0].contract, original.contract)
+            self.assertEqual(refreshed[0].guidance, original.guidance)
+            status = refreshed[0].status
+            self.assertIsNotNone(status)
+            assert status is not None
+            self.assertEqual(status["code_worktree_dirty"], False)
+            self.assertEqual(
+                status["landing"],
+                [{"ref": "origin/main", "staleSeconds": 1.0}],
+            )
+            self.assertEqual(landing_state.seen, (contract, NOW))
+
     def test_slow_remote_landing_probes_do_not_block_engine_facts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             coordination_root = Path(tmp)
             for index in range(4):
                 contract = default_contract(
-                    task_name=f"landing-{index}",
-                    repo_name=f"repo-{index}",
-                    workflow_kind="light",
-                    memory_mode="disabled",
-                    coordination_root=coordination_root,
-                    code_repo_path=coordination_root / f"repo-{index}",
-                    code_source_branch=f"feat/{index}",
-                    code_work_branch=f"ar/{index}",
-                    code_base_commit=f"base-{index}",
-                    worktree_name=f"landing-{index}",
+                    ContractTask(
+                        name=f"landing-{index}",
+                        repo_name=f"repo-{index}",
+                        coordination_root=coordination_root,
+                        workflow_kind="light-task",
+                        memory_mode="disabled",
+                    ),
+                    leaf=LeafIdentity(worktree_name=f"landing-{index}"),
+                    code=RepoBranchPlan(
+                        repo_path=coordination_root / f"repo-{index}",
+                        source_branch=f"feat/{index}",
+                        work_branch=f"ar/{index}",
+                        base_commit=f"base-{index}",
+                    ),
                 )
                 contract = replace(contract, closeout_status="completed")
                 contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
                 write_contract(contract.contract_path, contract)
 
-            def slow_remote_probe(_contract):  # type: ignore[no-untyped-def]
+            # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_projection_scaling_cs6.py:287).
+            def slow_remote_probe(_contract):  # type: ignore[no-untyped-def]  # pragma: no cover
                 time.sleep(0.075)
                 return []
 
@@ -227,13 +315,13 @@ class LandingProjectionHotPathTests(unittest.TestCase):
 
         with (
             patch.object(
-                snapshots,
+                snapshots_runtime,
                 "projected_status_payload",
                 return_value={"code_worktree_exists": True},
             ),
-            self.assertLogs(snapshots.logger, level="WARNING") as captured,
+            self.assertLogs(snapshots_runtime.logger, level="WARNING") as captured,
         ):
-            status = snapshots._safe_status_payload(
+            status = snapshots_runtime._safe_status_payload(
                 "contract",
                 now=NOW,
                 landing_state=InvalidLanding(),
@@ -255,8 +343,13 @@ class LifecycleLogCacheTests(unittest.TestCase):
             for seq in range(events_per_log):
                 store.append(
                     Event(
-                        id=f"{lifecycle}-{seq}", ts=NOW.isoformat(), kind="test.event",
-                        trust="observed", actor="system", data={}, lifecycleId=f"life-{lifecycle}",
+                        id=f"{lifecycle}-{seq}",
+                        ts=NOW.isoformat(),
+                        kind="test.event",
+                        trust="observed",
+                        actor="system",
+                        data={},
+                        lifecycleId=f"life-{lifecycle}",
                     )
                 )
         projection_store._lifecycle_log_cache.clear()
@@ -264,7 +357,8 @@ class LifecycleLogCacheTests(unittest.TestCase):
         reads = {"count": 0}
         original = EventStore.read_log
 
-        def counting_read_log(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
+        # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_projection_scaling_cs6.py:356).
+        def counting_read_log(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]  # pragma: no cover
             reads["count"] += 1
             return _orig(self, lifecycle_id)
 
@@ -343,8 +437,13 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
 
     def _doc_node(self, index: int, body_len: int) -> TaskDocNode:
         return TaskDocNode(
-            id=f"L{index}", repository="repo", title="t", status="planning", kind="light",
-            docPath=f"tasks/repo/leaf-{index}.json", objective="x" * body_len,
+            id=f"L{index}",
+            repository="repo",
+            title="t",
+            status="planning",
+            kind="light",
+            docPath=f"tasks/repo/leaf-{index}.json",
+            objective="x" * body_len,
         )
 
     def _write_doc(self, coordination_root: Path, index: int, body_len: int) -> Path:
@@ -398,7 +497,9 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
                     "createdAt": NOW.isoformat(),
                     "objective": "m" * body_len,
                     "sections": [{"heading": "Long", "body": "s" * body_len}],
-                    "decisions": [{"at": NOW.isoformat(), "decision": "d" * body_len, "rationale": "r"}],
+                    "decisions": [
+                        {"at": NOW.isoformat(), "decision": "d" * body_len, "rationale": "r"}
+                    ],
                 }
             ),
             encoding="utf-8",
@@ -410,7 +511,9 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
             generatedAt=NOW.isoformat(), analytics=Analytics(taskDocuments=docs)
         )
 
-    def test_task_document_broadcast_summaries_are_body_free_and_windowed_at_two_sizes(self) -> None:
+    def test_task_document_broadcast_summaries_are_body_free_and_windowed_at_two_sizes(
+        self,
+    ) -> None:
         body_len = 1024
         for count in (TASK_DOCUMENT_SUMMARY_LIMIT + 20, TASK_DOCUMENT_SUMMARY_LIMIT + 200):
             with self.subTest(count=count), tempfile.TemporaryDirectory() as tmp:
@@ -467,11 +570,15 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
         over = self._projection(over_docs)
 
         with self.assertNoLogs(projection_store.logger, level="WARNING"):
-            measured_under = projection_store._warn_if_task_documents_payload_over_budget(under, now=NOW)
+            measured_under = projection_store._warn_if_task_documents_payload_over_budget(
+                under, now=NOW
+            )
         self.assertLessEqual(measured_under, TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES)
 
         with self.assertLogs(projection_store.logger, level="WARNING") as captured:
-            measured_over = projection_store._warn_if_task_documents_payload_over_budget(over, now=NOW)
+            measured_over = projection_store._warn_if_task_documents_payload_over_budget(
+                over, now=NOW
+            )
         self.assertGreater(measured_over, TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES)
         self.assertIn("taskDocuments", captured.output[0])
 
@@ -506,17 +613,20 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
         contracts: list[WorktreeContract] = []
         for index in range(count):
             contract = default_contract(
-                task_name=f"scaling task {index}",
-                repo_name="repo",
-                workflow_kind="light-task",
-                memory_mode="disabled",
-                coordination_root=coordination_root,
-                code_repo_path=coordination_root / "repo",
-                code_source_branch="main",
-                code_work_branch=f"ar/leaf-{index}",
-                code_base_commit="0" * 40,
-                worktree_name=f"leaf-{index}",
-                lifecycle_id=f"LC-{index}",
+                ContractTask(
+                    name=f"scaling task {index}",
+                    repo_name="repo",
+                    coordination_root=coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name=f"leaf-{index}", lifecycle_id=f"LC-{index}"),
+                code=RepoBranchPlan(
+                    repo_path=coordination_root / "repo",
+                    source_branch="main",
+                    work_branch=f"ar/leaf-{index}",
+                    base_commit="0" * 40,
+                ),
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)
@@ -602,9 +712,9 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
                 workspace_root=tmp_path / "ws",
                 transcript_root=coord / "logs",
             )
-            snapshots._task_doc_cache.clear()
+            snapshots_common._task_doc_cache.clear()
             projection_store._repo_surface_cache.clear()
-            self.addCleanup(snapshots._task_doc_cache.clear)
+            self.addCleanup(snapshots_common._task_doc_cache.clear)
             self.addCleanup(projection_store._repo_surface_cache.clear)
             walks = {"count": 0}
             original_iter = contract_snapshot.iter_leaf_enclosure_contracts
@@ -678,7 +788,10 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
             self.assertNotIn(contracts[1].contract_path, cache._entries)
             self.assertEqual(len(cache._entries), 2)
 
-    def test_permission_flip_invalidates_cache_instead_of_serving_stale_parse(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_projection_scaling_cs6.py:786).
+    def test_permission_flip_invalidates_cache_instead_of_serving_stale_parse(
+        self,
+    ) -> None:  # pragma: no cover
         """Review hardening: chmod changes ctime only -- the cache must skip, not serve forever.
 
         Pre-L2, an unreadable contract was skipped every tick (PermissionError). A cache
@@ -760,5 +873,5 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
             self.assertEqual(len(calls), 3)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

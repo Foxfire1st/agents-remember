@@ -1,4 +1,4 @@
-// The client half of the change-gate's volatile-age contract (260703-L15).
+// The client half of the change-gate's volatile-age contract.
 //
 // The server's SSE diff compares STABLE forms: the now-relative age fields listed in
 // VOLATILE_AGE_FIELDS are recomputed from the tick clock every projection, so comparing
@@ -10,7 +10,7 @@
 // advanced": the value is still never *computed* from the render clock, only aged forward
 // from the served anchor (localhost clocks; sub-second skew is far below display grain).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Mirror of serving/delta.py VOLATILE_AGE_FIELDS — keep the two sets in lockstep. */
 export const VOLATILE_AGE_FIELDS: ReadonlySet<string> = new Set([
@@ -19,6 +19,7 @@ export const VOLATILE_AGE_FIELDS: ReadonlySet<string> = new Set([
   "ageSeconds",
   "waitSeconds",
   "heartbeatAgeSeconds",
+  "elapsedSeconds",
 ]);
 
 /**
@@ -27,21 +28,28 @@ export const VOLATILE_AGE_FIELDS: ReadonlySet<string> = new Set([
  * redundant delta) is recognized as unchanged and keeps its existing object identity —
  * zero store write, zero downstream re-render, and the node keeps its original age anchor.
  */
-export function stableEquals(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, index) => stableEquals(item, b[index]));
-  }
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
+function sameRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
   const leftKeys = Object.keys(left).filter((key) => !VOLATILE_AGE_FIELDS.has(key));
   const rightKeys = Object.keys(right).filter((key) => !VOLATILE_AGE_FIELDS.has(key));
   if (leftKeys.length !== rightKeys.length) return false;
   return leftKeys.every(
     (key) => Object.prototype.hasOwnProperty.call(right, key) && stableEquals(left[key], right[key]),
   );
+}
+
+function sameArray(left: unknown[], right: unknown[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => stableEquals(item, right[index]));
+}
+
+export function stableEquals(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    return sameArray(a, b);
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  return sameRecord(a as Record<string, unknown>, b as Record<string, unknown>);
 }
 
 // Arrival anchors, keyed by node object identity. A WeakMap so anchors never retain nodes
@@ -74,12 +82,22 @@ export function servedAgeSeconds(
  * A coarse ticking clock for age display. Panels that render served ages re-render on this
  * step (default 10 s) instead of riding the old per-second full-payload churn; fmtWait's
  * display grain (s → m → h → d) makes a 10 s step visually seamless above the first minute.
+ *
+ * Kept-mounted cockpit layers pass `active=false` while hidden. Their last value then remains
+ * frozen without scheduling React work, and the clock catches up once when the layer is shown.
  */
-export function useNowMs(stepMs = 10_000): number {
+export function useNowMs(stepMs = 10_000, active = true): number {
   const [now, setNow] = useState(() => Date.now());
+  const wasActive = useRef(active);
   useEffect(() => {
+    if (!active) {
+      wasActive.current = false;
+      return;
+    }
+    if (!wasActive.current) setNow(Date.now());
+    wasActive.current = true;
     const id = window.setInterval(() => setNow(Date.now()), stepMs);
     return () => window.clearInterval(id);
-  }, [stepMs]);
+  }, [active, stepMs]);
   return now;
 }

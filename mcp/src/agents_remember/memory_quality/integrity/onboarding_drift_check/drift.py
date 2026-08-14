@@ -14,18 +14,21 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
     StorageSettings,
     clean_scalar,
     is_sidecar_storage,
+    mirror_onboarding_path,
     normalize_rel_path,
     resolve_coordination_context,
     resolve_storage_for_source,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     discover_onboarding_files,
     is_supported_sidecar_onboarding,
-    mirror_onboarding_path,
     normalize_overview_route,
     parse_table_metadata,
     rel,
@@ -49,7 +52,6 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops imp
     list_repo_sources,
     local_change_note,
     local_route_change_note,
-    run_git,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.inline import (
     classify_inline_source,
@@ -90,6 +92,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.sidecar imp
     classify_overview_onboarding,
     classify_sidecar_onboarding_units,
 )
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 __all__ = [
     "ACTIONABLE_CLASSIFICATIONS",
@@ -271,11 +274,16 @@ def main(argv: list[str] | None = None) -> int:
         context = resolve_coordination_context(
             code_repository_name=code_repository_root.name,
             workspace_root=code_repository_root.parent,
-            requested_topology=args.topology,
-            coordination_root=args.coordination_root,
-            settings_path=args.settings_path,
-            onboarding_root=args.onboarding_root,
             code_repository_root=code_repository_root,
+            request=CoordinationRequest(
+                hints=CoordinationHints(
+                    topology=args.topology,
+                    coordination_root=args.coordination_root,
+                    settings_path=args.settings_path,
+                    onboarding_root=args.onboarding_root,
+                ),
+                contract_reader=WorktreeContractReader(),
+            ),
         )
     except ValueError as error:
         parser.error(str(error))

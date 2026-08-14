@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from typing import ClassVar
 
@@ -28,6 +29,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     merge_settings,
 )
+from agents_remember.serving.harnesses import invalid_effort_detail, knob_argv
 
 
 def write_settings(root: Path, data: dict) -> Path:
@@ -58,9 +60,7 @@ class MergePrecedenceTests(unittest.TestCase):
         settings = load_agentic_settings(self.coordination_root, self.repo_root)
 
         self.assertEqual(settings.spawn_harness, "codex")
-        self.assertEqual(
-            settings.sources, (agentic_settings_path(self.coordination_root),)
-        )
+        self.assertEqual(settings.sources, (agentic_settings_path(self.coordination_root),))
 
     def test_local_only(self) -> None:
         write_settings(
@@ -121,9 +121,7 @@ class MergePrecedenceTests(unittest.TestCase):
     def test_absent_files_mean_documented_defaults(self) -> None:
         settings = load_agentic_settings(self.coordination_root, self.repo_root)
 
-        self.assertIsNone(
-            settings.gate_policy.rule_for("closeout-approval").delegated_role
-        )
+        self.assertIsNone(settings.gate_policy.rule_for("closeout-approval").delegated_role)
         self.assertFalse(settings.gate_delegation_configured)
         self.assertEqual(settings.loops.defaults.max_rounds, 3)
         self.assertEqual(settings.loops.defaults.reviewer_reuse, "delta-verify")
@@ -139,12 +137,11 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertIsNone(settings.concurrency.max_parallel_leaves)
         self.assertIsNone(settings.concurrency.max_sub_agents)
         self.assertIsNone(settings.spawn_harness)
+        self.assertIsNone(settings.quality_gate.memory_cap_bytes)
         self.assertEqual(settings.sources, ())
 
     def test_repo_root_is_optional(self) -> None:
-        write_settings(
-            self.coordination_root, {"orchestration": {"spawn": {"harness": "claude"}}}
-        )
+        write_settings(self.coordination_root, {"orchestration": {"spawn": {"harness": "claude"}}})
 
         settings = load_agentic_settings(self.coordination_root)
 
@@ -164,21 +161,15 @@ class FailLoudTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_unknown_orchestration_key_names_the_offending_file(self) -> None:
-        path = write_settings(
-            self.coordination_root, {"orchestration": {"lopps": {}}}
-        )
+        path = write_settings(self.coordination_root, {"orchestration": {"lopps": {}}})
 
         with self.assertRaisesRegex(AgenticSettingsError, "lopps") as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(path), str(caught.exception))
 
     def test_unknown_key_in_local_file_names_the_local_file(self) -> None:
-        write_settings(
-            self.coordination_root, {"orchestration": {"spawn": {"harness": "codex"}}}
-        )
-        local_path = write_settings(
-            self.repo_root, {"orchestration": {"spawn": {"harnes": "pi"}}}
-        )
+        write_settings(self.coordination_root, {"orchestration": {"spawn": {"harness": "codex"}}})
+        local_path = write_settings(self.repo_root, {"orchestration": {"spawn": {"harnes": "pi"}}})
 
         with self.assertRaisesRegex(AgenticSettingsError, "harnes") as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
@@ -213,18 +204,14 @@ class FailLoudTests(unittest.TestCase):
         )
         for family in ("concurrency", "roles", "loops", "spawn", "rolesPerLevel", "harnesses"):
             local_path = write_settings(self.repo_root, {"orchestration": {family: None}})
-            with self.assertRaisesRegex(
-                AgenticSettingsError, "inherit the global value"
-            ) as caught:
+            with self.assertRaisesRegex(AgenticSettingsError, "inherit the global value") as caught:
                 load_agentic_settings(self.coordination_root, self.repo_root)
             self.assertIn(f"orchestration.{family} is null", str(caught.exception))
             self.assertIn(str(local_path), str(caught.exception))
 
     def test_null_at_a_family_key_in_the_global_layer_also_refuses(self) -> None:
         """The null rule is uniform across BOTH layers (finding 6). A global-layer null refuses too."""
-        global_path = write_settings(
-            self.coordination_root, {"orchestration": {"loops": None}}
-        )
+        global_path = write_settings(self.coordination_root, {"orchestration": {"loops": None}})
         with self.assertRaisesRegex(AgenticSettingsError, "orchestration.loops is null") as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(global_path), str(caught.exception))
@@ -373,9 +360,7 @@ class TypedModelTests(unittest.TestCase):
 
     def test_complexity_thresholds_are_scale_validated(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "fullLoopAt"):
-            self._load(
-                {"loops": {"defaults": {"complexity": {"fullLoopAt": "extreme"}}}}
-            )
+            self._load({"loops": {"defaults": {"complexity": {"fullLoopAt": "extreme"}}}})
 
     def test_role_knobs_parse_and_default(self) -> None:
         settings = self._load(
@@ -395,12 +380,8 @@ class TypedModelTests(unittest.TestCase):
             RoleKnobs(harness="codex", model="gpt-5", effort="medium"),
         )
         self.assertEqual(settings.roles["orchestrator"], RoleKnobs(effort="high"))
-        self.assertEqual(
-            settings.roles["architect"], RoleKnobs(harness="claude", effort="high")
-        )
-        self.assertEqual(
-            settings.roles["curator"], RoleKnobs(harness="codex", effort="medium")
-        )
+        self.assertEqual(settings.roles["architect"], RoleKnobs(harness="claude", effort="high"))
+        self.assertEqual(settings.roles["curator"], RoleKnobs(harness="codex", effort="medium"))
         self.assertEqual(
             settings.roles["system-specialist"], RoleKnobs(harness="claude", model="fable")
         )
@@ -408,9 +389,7 @@ class TypedModelTests(unittest.TestCase):
         self.assertEqual(settings.role_knobs("manager"), RoleKnobs())
 
     def test_role_harness_must_be_a_registry_id(self) -> None:
-        with self.assertRaisesRegex(
-            AgenticSettingsError, "harness registry id.*claude-code"
-        ):
+        with self.assertRaisesRegex(AgenticSettingsError, "harness registry id.*claude-code"):
             self._load({"roles": {"worker": {"harness": "claude-code"}}})
 
     def test_spawn_harness_must_be_a_registry_id(self) -> None:
@@ -436,20 +415,20 @@ class TypedModelTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "maxSubAgents"):
             self._load({"concurrency": {"maxSubAgents": 0}})
 
-    def test_supervisor_defaults_when_absent(self) -> None:
+    def test_agent_notifier_defaults_when_absent(self) -> None:
         settings = self._load({})
 
-        self.assertTrue(settings.supervisor.enabled)
-        self.assertEqual(settings.supervisor.interval_seconds, 10.0)
-        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
-        self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
-        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 900.0)
-        self.assertEqual(settings.supervisor.redeliver_budget, 1)
+        self.assertTrue(settings.agent_notifier.enabled)
+        self.assertEqual(settings.agent_notifier.interval_seconds, 10.0)
+        self.assertEqual(settings.agent_notifier.stale_cutoff_seconds, 60.0)
+        self.assertIsNone(settings.agent_notifier.redeliver_rate_limit_seconds)
+        self.assertEqual(settings.agent_notifier.signal_cooldown_seconds, 900.0)
+        self.assertEqual(settings.agent_notifier.redeliver_budget, 1)
 
-    def test_supervisor_knobs_parse(self) -> None:
+    def test_agent_notifier_knobs_parse(self) -> None:
         settings = self._load(
             {
-                "supervisor": {
+                "agentNotifier": {
                     "enabled": False,
                     "intervalSeconds": 5,
                     "staleCutoffSeconds": 30,
@@ -460,36 +439,62 @@ class TypedModelTests(unittest.TestCase):
             }
         )
 
-        self.assertFalse(settings.supervisor.enabled)
-        self.assertEqual(settings.supervisor.interval_seconds, 5.0)
-        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 30.0)
-        self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 900.0)
-        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 1200.0)
-        self.assertEqual(settings.supervisor.redeliver_budget, 75)
+        self.assertFalse(settings.agent_notifier.enabled)
+        self.assertEqual(settings.agent_notifier.interval_seconds, 5.0)
+        self.assertEqual(settings.agent_notifier.stale_cutoff_seconds, 30.0)
+        self.assertEqual(settings.agent_notifier.redeliver_rate_limit_seconds, 900.0)
+        self.assertEqual(settings.agent_notifier.signal_cooldown_seconds, 1200.0)
+        self.assertEqual(settings.agent_notifier.redeliver_budget, 75)
 
-    def test_supervisor_enabled_must_be_a_boolean(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "supervisor.enabled"):
-            self._load({"supervisor": {"enabled": "yes"}})
+    def test_agent_notifier_enabled_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "agentNotifier.enabled"):
+            self._load({"agentNotifier": {"enabled": "yes"}})
 
-    def test_supervisor_interval_must_be_positive(self) -> None:
+    def test_agent_notifier_interval_must_be_positive(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "intervalSeconds"):
-            self._load({"supervisor": {"intervalSeconds": 0}})
+            self._load({"agentNotifier": {"intervalSeconds": 0}})
 
-    def test_supervisor_redeliver_budget_must_be_positive(self) -> None:
+    def test_agent_notifier_redeliver_budget_must_be_positive(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "redeliverBudget"):
-            self._load({"supervisor": {"redeliverBudget": 0}})
+            self._load({"agentNotifier": {"redeliverBudget": 0}})
 
-    def test_supervisor_redelivery_floor_must_be_at_least_15_minutes(self) -> None:
+    def test_agent_notifier_redelivery_floor_must_be_at_least_15_minutes(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "redeliverRateLimitSeconds"):
-            self._load({"supervisor": {"redeliverRateLimitSeconds": 899}})
+            self._load({"agentNotifier": {"redeliverRateLimitSeconds": 899}})
 
-    def test_supervisor_signal_cooldown_must_be_at_least_15_minutes(self) -> None:
+    def test_agent_notifier_signal_cooldown_must_be_at_least_15_minutes(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "signalCooldownSeconds"):
-            self._load({"supervisor": {"signalCooldownSeconds": 899}})
+            self._load({"agentNotifier": {"signalCooldownSeconds": 899}})
 
-    def test_unknown_supervisor_key_fails_loud(self) -> None:
+    def test_unknown_agent_notifier_key_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "sweepSeconds"):
-            self._load({"supervisor": {"sweepSeconds": 5}})
+            self._load({"agentNotifier": {"sweepSeconds": 5}})
+
+    def test_legacy_supervisor_key_is_an_explicit_deprecated_alias(self) -> None:
+        # OQ1 (260713-TES-L1): the loader accepts the legacy key during ONE explicit
+        # compatibility window, and the alias is loud, never silent.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            settings = self._load(
+                {
+                    "supervisor": {
+                        "enabled": False,
+                        "intervalSeconds": 7,
+                        "redeliverBudget": 3,
+                    }
+                }
+            )
+        self.assertFalse(settings.agent_notifier.enabled)
+        self.assertEqual(settings.agent_notifier.interval_seconds, 7.0)
+        self.assertEqual(settings.agent_notifier.redeliver_budget, 3)
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, UserWarning)
+        self.assertIn("orchestration.supervisor", str(caught[0].message))
+        self.assertIn("orchestration.agentNotifier", str(caught[0].message))
+
+    def test_legacy_and_new_agent_notifier_keys_together_fail_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "both set"):
+            self._load({"supervisor": {"enabled": True}, "agentNotifier": {"enabled": True}})
 
     def test_gate_delegation_parses_in_its_new_home(self) -> None:
         settings = self._load(
@@ -511,19 +516,16 @@ class TypedModelTests(unittest.TestCase):
 
     def test_human_pinned_gate_kind_cannot_be_delegated(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "human-pinned"):
-            self._load(
-                {"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}}
-            )
+            self._load({"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}})
 
     def test_unsupported_gate_kind_delegation_is_rejected(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "cannot be delegated"):
-            self._load(
-                {"gateDelegation": {"kinds": {"agent-question": {"role": "manager"}}}}
-            )
+            self._load({"gateDelegation": {"kinds": {"agent-question": {"role": "manager"}}}})
 
 
-class EscalationSettingsTests(unittest.TestCase):
-    """R1 (260707-HFX2-L4): the escalation ladder's ``orchestration.escalation`` knobs."""
+class RetiredEscalationSettingsTests(unittest.TestCase):
+    """The ``orchestration.escalation`` ladder family is demolished: any file that sets it
+    fails loud as an unknown key (fail-loud schema, no silent ignore)."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -537,55 +539,17 @@ class EscalationSettingsTests(unittest.TestCase):
         write_settings(self.coordination_root, {"orchestration": orchestration})
         return load_agentic_settings(self.coordination_root)
 
-    def test_defaults_when_absent(self) -> None:
+    def test_escalation_family_is_refused_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "escalation"):
+            self._load({"escalation": {}})
+
+    def test_respawn_after_rung_is_refused_with_the_family(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "escalation"):
+            self._load({"escalation": {"respawnAfterRung": 2}})
+
+    def test_no_escalation_attribute_on_loaded_settings(self) -> None:
         settings = self._load({})
-
-        self.assertEqual(settings.escalation.sla_for("nudge"), 300.0)
-        self.assertEqual(settings.escalation.rung_dwell(1), 300.0)
-        self.assertEqual(settings.escalation.rung_dwell(2), 900.0)
-        self.assertEqual(settings.escalation.nudge_rate_limit_seconds, 900)
-        self.assertEqual(settings.escalation.respawn_after_rung, 2)
-
-    def test_sla_and_rung_seconds_parse(self) -> None:
-        settings = self._load(
-            {
-                "escalation": {
-                    "slaSeconds": {"escalation": 120, "turn-report": 3600},
-                    "rungSeconds": {"1": 60, "2": 240, "3": 600},
-                    "nudgeRateLimitSeconds": 30,
-                    "respawnAfterRung": 2,
-                }
-            }
-        )
-
-        self.assertEqual(settings.escalation.sla_for("escalation"), 120.0)
-        self.assertEqual(settings.escalation.sla_for("turn-report"), 3600.0)
-        # An unconfigured kind keeps its documented default.
-        self.assertEqual(settings.escalation.sla_for("nudge"), 300.0)
-        self.assertEqual(settings.escalation.rung_dwell(1), 60.0)
-        self.assertEqual(settings.escalation.rung_dwell(2), 240.0)
-        self.assertEqual(settings.escalation.rung_dwell(3), 600.0)
-        self.assertEqual(settings.escalation.nudge_rate_limit_seconds, 30)
-
-    def test_unknown_message_kind_in_sla_seconds_fails_loud(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "not a known"):
-            self._load({"escalation": {"slaSeconds": {"bogus-kind": 60}}})
-
-    def test_sla_seconds_value_must_be_positive(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "slaSeconds.nudge"):
-            self._load({"escalation": {"slaSeconds": {"nudge": 0}}})
-
-    def test_rung_seconds_key_must_be_a_known_rung(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "rungSeconds"):
-            self._load({"escalation": {"rungSeconds": {"4": 60}}})
-
-    def test_respawn_after_rung_must_be_a_known_rung(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "respawnAfterRung"):
-            self._load({"escalation": {"respawnAfterRung": 5}})
-
-    def test_unknown_escalation_key_fails_loud(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "wobble"):
-            self._load({"escalation": {"wobble": True}})
+        self.assertFalse(hasattr(settings, "escalation"))
 
 
 class FreeFormRoleKnobTests(unittest.TestCase):
@@ -680,9 +644,7 @@ class RolesPerLevelTests(unittest.TestCase):
     # The developer's canonical reviewer economics: cheap per leaf, smarter at the master seam,
     # smartest + workflows for the portfolio end-to-end.
     ECONOMICS: ClassVar[dict] = {
-        "roles": {
-            "reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}
-        },
+        "roles": {"reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}},
         "rolesPerLevel": {
             "master": {"reviewer": {"model": "opus", "effort": "xhigh"}},
             "portfolio": {"reviewer": {"model": "fable", "effort": "ultracode"}},
@@ -772,9 +734,7 @@ class RolesPerLevelTests(unittest.TestCase):
         settings = self._load(
             {
                 "roles": {"reviewer": {"promptKeywords": ["careful"]}},
-                "rolesPerLevel": {
-                    "portfolio": {"reviewer": {"promptKeywords": ["ultracode"]}}
-                },
+                "rolesPerLevel": {"portfolio": {"reviewer": {"promptKeywords": ["ultracode"]}}},
             }
         )
         self.assertEqual(
@@ -823,9 +783,7 @@ class HarnessesFamilyTests(unittest.TestCase):
         self.assertEqual(hermes.name, "hermes")
         self.assertEqual(hermes.defined_in, "settings")
         # Builtin order is preserved; new ids append.
-        self.assertEqual(
-            [h.id for h in settings.harnesses], ["claude", "codex", "pi", "hermes"]
-        )
+        self.assertEqual([h.id for h in settings.harnesses], ["claude", "codex", "pi", "hermes"])
 
     def test_argv_only_entry_derives_its_command(self) -> None:
         settings = self._load({"harnesses": {"hermes": {"argv": ["hermes", "--tui"]}}})
@@ -839,9 +797,10 @@ class HarnessesFamilyTests(unittest.TestCase):
         claude = settings.find_harness("claude")
         assert claude is not None
         self.assertEqual(claude.argv, ("claude", "--continue"))
-        # The curated knob mapping and identity survive a partial override.
+        # Native knob ownership stays out of the static registry; identity survives a partial
+        # command override.
         self.assertEqual(claude.command, "claude")
-        self.assertEqual(claude.effort_flag, "--effort")
+        self.assertIsNone(claude.effort_flag)
         self.assertEqual(claude.defined_in, "registry")
 
     def test_replacing_codex_effort_flag_drops_its_config_value_template(self) -> None:
@@ -859,6 +818,20 @@ class HarnessesFamilyTests(unittest.TestCase):
         assert codex is not None
         self.assertEqual(codex.effort_flag, "--reasoning-effort")
         self.assertIsNone(codex.effort_flag_value_template)
+        self.assertEqual(codex.effort_validation, "enumerated")
+        self.assertIsNone(invalid_effort_detail(codex, "high"))
+        self.assertEqual(knob_argv(codex, effort="high"), ["--reasoning-effort", "high"])
+        detail = invalid_effort_detail(codex, "bogus-effort")
+        assert detail is not None
+        self.assertIn("high, xhigh", detail)
+        self.assertEqual(knob_argv(codex, effort="bogus-effort"), [])
+
+    def test_partial_codex_override_does_not_invent_a_static_effort_policy(self) -> None:
+        settings = self._load({"harnesses": {"codex": {"argv": ["codex", "--search"]}}})
+        codex = settings.find_harness("codex")
+        assert codex is not None
+        self.assertEqual(codex.effort_validation, "enumerated")
+        self.assertEqual(codex.effort_flag_values, ())
 
     def test_new_id_without_command_or_argv_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "command and/or argv"):
@@ -870,16 +843,10 @@ class HarnessesFamilyTests(unittest.TestCase):
 
     def test_vocabulary_pairs_must_come_together(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "effortFlagValues"):
-            self._load(
-                {"harnesses": {"hermes": {"command": "hermes", "effortFlag": "--r"}}}
-            )
+            self._load({"harnesses": {"hermes": {"command": "hermes", "effortFlag": "--r"}}})
         with self.assertRaisesRegex(AgenticSettingsError, "effortSessionCommand"):
             self._load(
-                {
-                    "harnesses": {
-                        "hermes": {"command": "hermes", "effortSessionValues": ["ultra"]}
-                    }
-                }
+                {"harnesses": {"hermes": {"command": "hermes", "effortSessionValues": ["ultra"]}}}
             )
 
     def test_effort_session_command_template_may_reference_only_value(self) -> None:
@@ -974,10 +941,90 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(seeded.loops, absent.loops)
         self.assertEqual(seeded.roles, absent.roles)
         self.assertEqual(seeded.concurrency, absent.concurrency)
+        self.assertEqual(seeded.quality_gate, absent.quality_gate)
         self.assertIsNone(seeded.spawn_harness)
         # The seed EXPLICITLY configures gateDelegation (all-human) so the
         # boot-snapshot consumer treats the file as the key's home.
         self.assertTrue(seeded.gate_delegation_configured)
+
+
+class QualityGateSettingsTests(unittest.TestCase):
+    """``orchestration.qualityGate``: optional hard cap inside the Dagger graph."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_defaults_when_absent(self) -> None:
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertIsNone(settings.quality_gate.memory_cap_bytes)
+        self.assertEqual(settings.quality_gate.executor, "dagger")
+
+    def test_memory_cap_bytes_parses_and_overrides(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"memoryCapBytes": 1073741824}}},
+        )
+
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertEqual(settings.quality_gate.memory_cap_bytes, 1073741824)
+
+    def test_an_empty_quality_gate_block_keeps_the_default(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {}}},
+        )
+
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertIsNone(settings.quality_gate.memory_cap_bytes)
+        self.assertEqual(settings.quality_gate.executor, "dagger")
+
+    def test_container_executor_is_explicit(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"executor": "dagger"}}},
+        )
+
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertEqual(settings.quality_gate.executor, "dagger")
+
+    def test_non_dagger_executor_fails_loud(self) -> None:
+        for executor in ("local", "fallback"):
+            with self.subTest(executor=executor):
+                write_settings(
+                    self.coordination_root,
+                    {"orchestration": {"qualityGate": {"executor": executor}}},
+                )
+                with self.assertRaisesRegex(AgenticSettingsError, "must be 'dagger'"):
+                    load_agentic_settings(self.coordination_root)
+
+    def test_unknown_quality_gate_key_fails_loud(self) -> None:
+        path = write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"memoryCapMegabytes": 1}}},
+        )
+
+        with self.assertRaisesRegex(AgenticSettingsError, "memoryCapMegabytes") as caught:
+            load_agentic_settings(self.coordination_root)
+        self.assertIn(str(path), str(caught.exception))
+
+    def test_memory_cap_must_be_a_positive_integer(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"memoryCapBytes": 0}}},
+        )
+
+        with self.assertRaisesRegex(AgenticSettingsError, "positive integer"):
+            load_agentic_settings(self.coordination_root)
 
 
 if __name__ == "__main__":

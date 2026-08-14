@@ -190,7 +190,7 @@ Providers are optional — memory, onboarding, drift, and task workflows all wor
 
 ## Start Working
 
-Sessions route by role through the `l-01-agent-lifecycles` skill: a developer-facing session is the **architect** and runs the architect lifecycle (request → trust-checkpoint → reframe-research → decide → build → close); spawned backend orchestrators and other role seats follow the role briefs that spawned them. For normal tasks the agent should:
+Sessions route by role through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and creates or resolves the durable sprint and first leaf before launching that sprint's **architect**; spawned backend seats follow their role briefs. For normal tasks the agent should:
 
 1. resolve the repository context with `c-08-ar-coordination-context-resolver`
 2. run `c-02-memory-quality-control` before planning against onboarding

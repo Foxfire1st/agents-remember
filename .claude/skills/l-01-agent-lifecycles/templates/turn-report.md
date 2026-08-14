@@ -2,7 +2,7 @@
 
 The **mandatory** artifact a worker writes at **every** hand-off (`roles/worker.md`). It is how the
 leaf's work survives the session's death and how a respawned successor onboards from **state, not the
-transcript**. A missing turn report is nudged by the HFX2-L2 supervisor sweep, never by a
+transcript**. A missing turn report is nudged by the HFX2-L2 agent-notifier sweep, never by a
 manager watching for it (uniform-mechanism ruling 2026-07-07).
 
 ## Rules
@@ -24,12 +24,11 @@ manager watching for it (uniform-mechanism ruling 2026-07-07).
 | ------------ | --------------------------------------- |
 | leaf         | <leaf id / task_doc path>               |
 | master       | <master id>                             |
-| worker       | <this session's agent/lifecycle id>     |
+| worker seat  | <leaf task_doc path> + worker           |
 | worktree     | <branch / worktree>                     |
 | status       | in-progress | leaf-complete | blocked    |
 | checks       | green | failing:<which> | not-yet-run    |
 | written      | <YYYY-MM-DDTHH:MM>                       |
-| inbox        | <operator_inbox entry id or none>        |
 
 ## What Was Done
 - <concrete change> (files: `<path>`, …)

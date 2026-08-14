@@ -65,17 +65,26 @@ merge → cleanup → carryover`. Merge is not its own gate — only timing.
 
 ---
 
-## Pre-push quality gate
+## Commit and push quality gates
 
-If the repo ships a quality wrapper and hooks:
+If the repo configures an integrated acceptance adapter and hooks:
 
-- **CI** — `<your CI workflow>` runs the wrapper on every push/PR to the spear (non-bypassable
-  backstop).
-- **Local pre-push** — `<.githooks/pre-push>` runs the same wrapper and blocks the push. Enable it
-  once per clone with `<./setup-hooks.sh, if present>`; `git push --no-verify` bypasses intentionally.
+- **Pull-request CI** — `<your CI workflow>` always runs deterministic non-test validation for the
+  PR; ordinary branch pushes do not launch a duplicate acceptance run.
+- **Local pre-commit** — `<.githooks/pre-commit>` runs deterministic fast checks before an ordinary
+  commit.
+- **Leaf closeout** — the closeout apply path runs change-set-scoped acceptance exactly once before creating
+  the leaf code commit, even when local hooks are not configured.
+- **Leaf integration** — lands the already-certified leaf commit and does not rerun acceptance.
+- **Master integration** — runs full-repository acceptance exactly once before integrating the master into its
+  parent or super branch.
+- **Local pre-push** — `<.githooks/pre-push>` may repeat deterministic non-test diagnostics, never
+  acceptance. Enable it once per clone with `<./setup-hooks.sh, if present>`;
+  `git push --no-verify` bypasses those local diagnostics intentionally.
 
-Point at the wrapper itself in [`tools.md`](tools.md); keep both gates calling the project-owned
-wrapper, not a hand-picked subset.
+Point at the acceptance adapter itself in [`tools.md`](tools.md); keep every gate calling the
+project-owned implementation, not a hand-picked subset. Any repository-defined risk threshold must
+be enforced by the default accepted invocation, not by an optional strictness flag.
 
 ---
 

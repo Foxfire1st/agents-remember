@@ -10,39 +10,131 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers import worktree_tools
-from agents_remember.mcp.config import McpRuntimeConfig, RetirementSettings
+from agents_remember.application import completion_cleanup, worktree_tools
+from agents_remember.application.lifecycle_operation_worker import integration_completion_payload
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
+    create_operator_inbox_entry,
+)
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RetirementSettings,
+)
 from agents_remember.mcp.tools.terminal import session_rename_payload, session_retire_payload
-from agents_remember.serving.landing import land_seats_for_leaf
+from agents_remember.models.lifecycles.operation import IntegrateOperationInput
+from agents_remember.models.operator_inbox import AgentRole
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
+from agents_remember.serving.landing import land_seats_for_task
+from agents_remember.serving.retire import SeatClosure
 from agents_remember.serving.retire_policy import (
     RetirePolicyError,
     SeatRef,
     check_retire_authority,
-    master_of,
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalSessionKind,
-    TerminalSessionStatus,
 )
 from agents_remember.serving.terminal_liveness import (
+    LivenessProbe,
     TerminalCatalogLivenessConfig,
     observe_terminal_liveness,
 )
 from agents_remember.serving.terminal_paste import TmuxPaneCapturer
 from agents_remember.serving.turn_state import classify_turn_state
+from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+
+SPRINT = TaskDocumentRef(repository="repo", path="sprint/task.json")
+MASTER_A = TaskDocumentRef(repository="repo", path="master-a/task.json")
+LEAF_A1 = TaskDocumentRef(repository="repo", path="master-a/leaf-1.json")
+LEAF_A2 = TaskDocumentRef(repository="repo", path="master-a/leaf-2.json")
+OTHER_LEAF_A = TaskDocumentRef(repository="repo", path="master-a/other-leaf.json")
+MASTER_B = TaskDocumentRef(repository="repo", path="master-b/task.json")
+LEAF_B2 = TaskDocumentRef(repository="repo", path="master-b/leaf-2.json")
+
+
+def _task_doc(**values: object) -> TaskDocument:
+    return TaskDocument.model_validate(
+        {
+            "id": values.pop("id"),
+            "slug": values.pop("slug"),
+            "title": values.pop("title"),
+            "kind": values.pop("kind"),
+            "repo": "repo",
+            "createdAt": "2026-07-07T00:00",
+            **values,
+        }
+    )
+
+
+def _write_task_topology(root: Path) -> None:
+    task_root = root / "tasks" / "repo"
+    write_task_doc(
+        task_root / "sprint",
+        _task_doc(
+            id="SPRINT",
+            slug="sprint",
+            title="Sprint",
+            kind="master",
+            orchestrates=["master-a", "master-b"],
+        ),
+    )
+    for master, leaves in (
+        ("master-a", ("leaf-1", "leaf-2", "other-leaf")),
+        ("master-b", ("leaf-2",)),
+    ):
+        write_task_doc(
+            task_root / master,
+            _task_doc(
+                id=master,
+                slug=master,
+                title=master,
+                kind="master",
+                subTasks=[
+                    {
+                        "number": leaf,
+                        "name": leaf,
+                        "file": f"{leaf}.md",
+                        "status": "inProgress",
+                    }
+                    for leaf in leaves
+                ],
+            ),
+        )
+        for leaf in leaves:
+            write_task_doc(
+                task_root / master,
+                _task_doc(
+                    id=leaf,
+                    slug=leaf,
+                    title=leaf,
+                    kind="subTask",
+                    master="task.md",
+                ),
+            )
 
 
 def _config(root: Path, **retirement_overrides: bool) -> McpRuntimeConfig:
+    _write_task_topology(root)
     return McpRuntimeConfig(
         config_path=root / "settings.json",
         coordination_root=root,
@@ -63,26 +155,28 @@ def _get(catalog: TerminalCatalog, session_id: str) -> TerminalCatalogEntry:
 def _entry(
     session_id: str,
     *,
-    leaf_key: str | None = None,
+    task_document_ref: TaskDocumentRef | None = None,
     spawn_role: str | None = None,
-    replacement_for_leaf: str | None = None,
-    status: TerminalSessionStatus = "running",
-    kind: TerminalSessionKind = "harness",
 ) -> TerminalCatalogEntry:
+    """A running harness seat holding one task document as ``spawn_role``.
+
+    Those two are what every case here varies -- the leaf a seat occupies and the role that
+    occupies it. Rarer shapes (a terminated row, a plain terminal row, an unbound replacement)
+    are ``replace(...)`` on the frozen ``TerminalCatalogEntry``, which already owns the fields.
+    """
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Seat {session_id}",
-        kind=kind,
-        harness="claude" if kind == "harness" else None,
+        kind="harness",
+        harness="claude",
         lifecycle_id=None,
         cwd=Path("/workspace"),
         tmux_name=f"ar-{session_id}",
         command=("claude",),
         created_at="2026-07-07T00:00:00+00:00",
         last_attached_at="2026-07-07T00:00:00+00:00",
-        status=status,
-        leaf_key=leaf_key,
-        replacement_for_leaf=replacement_for_leaf,
+        status="running",
+        task_document_ref=task_document_ref,
         spawn_role=spawn_role,
     )
 
@@ -103,67 +197,68 @@ class _FakeHost:
 class RetirePolicyMatrixTests(unittest.TestCase):
     """The exact authority matrix from the leaf doc's failing-first list."""
 
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        _write_task_topology(root)
+        self.topology = TaskDocumentTopology(root)
+
     def test_manager_retires_own_worker(self) -> None:
-        actor = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
-        target = SeatRef(session_id="worker-1", leaf_key="repo/master-a/leaf", seat_role="worker")
-        check_retire_authority(actor, target)  # must not raise
+        actor = SeatRef("mgr", MASTER_A, "manager")
+        target = SeatRef("worker-1", LEAF_A1, "worker")
+        check_retire_authority(actor, target, self.topology)  # must not raise
 
     def test_manager_retires_own_reviewer(self) -> None:
-        actor = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
-        target = SeatRef(session_id="rev-1", leaf_key="repo/master-a/leaf", seat_role="reviewer")
-        check_retire_authority(actor, target)  # must not raise
+        actor = SeatRef("mgr", MASTER_A, "manager")
+        target = SeatRef("rev-1", LEAF_A1, "reviewer")
+        check_retire_authority(actor, target, self.topology)  # must not raise
 
     def test_manager_refused_against_other_masters_worker(self) -> None:
-        actor = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
-        target = SeatRef(session_id="worker-1", leaf_key="repo/master-b/leaf", seat_role="worker")
+        actor = SeatRef("mgr", MASTER_A, "manager")
+        target = SeatRef("worker-1", LEAF_B2, "worker")
         with self.assertRaisesRegex(RetirePolicyError, "own master"):
-            check_retire_authority(actor, target)
+            check_retire_authority(actor, target, self.topology)
 
     def test_manager_refused_against_a_manager_seat(self) -> None:
-        actor = SeatRef(session_id="mgr-a", leaf_key="repo/master-a/manager-a", seat_role="manager")
-        target = SeatRef(
-            session_id="mgr-b", leaf_key="repo/master-a/manager-b", seat_role="manager"
-        )
+        actor = SeatRef("mgr-a", MASTER_A, "manager")
+        target = SeatRef("mgr-b", MASTER_A, "manager")
         with self.assertRaisesRegex(RetirePolicyError, "own master"):
-            check_retire_authority(actor, target)
+            check_retire_authority(actor, target, self.topology)
 
     def test_no_seat_retires_itself(self) -> None:
-        actor = SeatRef(session_id="same", leaf_key=None, seat_role="orchestrator")
-        target = SeatRef(session_id="same", leaf_key=None, seat_role="orchestrator")
+        actor = SeatRef("same", SPRINT, "orchestrator")
+        target = SeatRef("same", SPRINT, "orchestrator")
         with self.assertRaisesRegex(RetirePolicyError, "never retires itself"):
-            check_retire_authority(actor, target)
+            check_retire_authority(actor, target, self.topology)
 
     def test_manager_cannot_self_retire_even_against_worker_role_confusion(self) -> None:
         # Owner-never-self-retires is checked BEFORE the role-scoped rule -- no role authority
         # ever overrides it, even a manager whose own row were somehow role-tagged "worker".
-        actor = SeatRef(session_id="same", leaf_key="repo/master-a/leaf", seat_role="worker")
+        actor = SeatRef("same", LEAF_A1, "worker")
         with self.assertRaisesRegex(RetirePolicyError, "never retires itself"):
-            check_retire_authority(actor, actor)
+            check_retire_authority(actor, actor, self.topology)
 
     def test_orchestrator_retires_a_completed_manager(self) -> None:
-        actor = SeatRef(session_id="orch", leaf_key=None, seat_role="orchestrator")
-        target = SeatRef(session_id="mgr", leaf_key="repo/master-a/manager", seat_role="manager")
-        check_retire_authority(actor, target)  # must not raise
+        actor = SeatRef("orch", SPRINT, "orchestrator")
+        target = SeatRef("mgr", MASTER_A, "manager")
+        check_retire_authority(actor, target, self.topology)  # must not raise
 
     def test_orchestrator_retires_any_role(self) -> None:
-        actor = SeatRef(session_id="orch", leaf_key=None, seat_role="orchestrator")
+        actor = SeatRef("orch", SPRINT, "orchestrator")
         for role in ("worker", "reviewer", "manager", "designer", "strategist"):
             with self.subTest(role=role):
                 check_retire_authority(
                     actor,
-                    SeatRef(session_id=f"x-{role}", leaf_key="repo/m/leaf", seat_role=role),
+                    SeatRef(f"x-{role}", LEAF_A1, role),
+                    self.topology,
                 )
 
     def test_unprivileged_role_has_no_retire_authority(self) -> None:
-        actor = SeatRef(session_id="w", leaf_key="repo/master-a/leaf", seat_role="worker")
-        target = SeatRef(session_id="other", leaf_key="repo/master-a/leaf", seat_role="worker")
+        actor = SeatRef("w", LEAF_A1, "worker")
+        target = SeatRef("other", LEAF_A1, "worker")
         with self.assertRaisesRegex(RetirePolicyError, "no retire authority"):
-            check_retire_authority(actor, target)
-
-    def test_master_of_extracts_the_qualified_leaf_key_segment(self) -> None:
-        self.assertEqual(master_of("repo/master-a/leaf-1"), "master-a")
-        self.assertIsNone(master_of(None))
-        self.assertIsNone(master_of(""))
+            check_retire_authority(actor, target, self.topology)
 
 
 # --- session_retire MCP tool ------------------------------------------------------------------
@@ -182,9 +277,12 @@ class SessionRetireToolTests(unittest.TestCase):
     def _with_catalog_patched(self, fn):
         with (
             mock.patch(
-                "agents_remember.mcp.tools.terminal.TerminalCatalog", return_value=self.catalog
+                "agents_remember.application.terminal_tools.TerminalCatalog",
+                return_value=self.catalog,
             ),
-            mock.patch("agents_remember.mcp.tools.terminal.TerminalHost", return_value=_FakeHost()),
+            mock.patch(
+                "agents_remember.application.terminal_tools.TerminalHost", return_value=_FakeHost()
+            ),
         ):
             return fn()
 
@@ -198,9 +296,7 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(result["status"], "unknown-session")
 
     def test_unknown_actor_session_is_refused(self) -> None:
-        self.catalog.upsert(
-            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
-        )
+        self.catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
         result = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="missing-actor", session_id="worker-1"
@@ -210,10 +306,8 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(result["status"], "unknown-actor")
 
     def test_manager_retires_own_worker_end_to_end(self) -> None:
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
-        self.catalog.upsert(
-            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
-        )
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
+        self.catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
         result = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="mgr", session_id="worker-1", reason="leaf done"
@@ -228,13 +322,12 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(retired.status, "terminated")
         self.assertIsNotNone(retired.retired_at)
 
-    def test_manager_retires_unbound_failed_dispatch_from_replacement_leaf(self) -> None:
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/manager", spawn_role="manager"))
+    def test_manager_retires_unbound_failed_dispatch_from_replacement_task(self) -> None:
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
         self.catalog.upsert(
-            _entry(
-                "worker-failed",
-                spawn_role="worker",
-                replacement_for_leaf="repo/master-a/leaf-1",
+            replace(
+                _entry("worker-failed", spawn_role="worker"),
+                replacement_for_task_document_ref=LEAF_A1,
             )
         )
 
@@ -251,10 +344,8 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(result["status"], "retired")
 
     def test_manager_refused_against_other_masters_worker(self) -> None:
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
-        self.catalog.upsert(
-            _entry("worker-2", leaf_key="repo/master-b/leaf-2", spawn_role="worker")
-        )
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
+        self.catalog.upsert(_entry("worker-2", task_document_ref=LEAF_B2, spawn_role="worker"))
         result = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="mgr", session_id="worker-2"
@@ -267,7 +358,7 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(_get(self.catalog, "worker-2").status, "running")
 
     def test_no_seat_retires_itself(self) -> None:
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
         result = self._with_catalog_patched(
             lambda: session_retire_payload(self.config, actor_session_id="mgr", session_id="mgr")
         )
@@ -276,10 +367,8 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertIn("never retires itself", result["detail"])
 
     def test_retiring_an_already_retired_seat_is_idempotent(self) -> None:
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
-        self.catalog.upsert(
-            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
-        )
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
+        self.catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
         first = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="mgr", session_id="worker-1"
@@ -300,8 +389,8 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(second["retiredReason"], first["retiredReason"])
 
     def test_orchestrator_retires_a_manager(self) -> None:
-        self.catalog.upsert(_entry("orch", leaf_key=None, spawn_role="orchestrator"))
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
+        self.catalog.upsert(_entry("orch", task_document_ref=SPRINT, spawn_role="orchestrator"))
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
         result = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="orch", session_id="mgr", reason="master finalized"
@@ -326,7 +415,7 @@ class SessionRenameToolTests(unittest.TestCase):
 
     def _rename(self, session_id: str, label: str) -> dict:
         with mock.patch(
-            "agents_remember.mcp.tools.terminal.TerminalCatalog", return_value=self.catalog
+            "agents_remember.application.terminal_tools.TerminalCatalog", return_value=self.catalog
         ):
             return session_rename_payload(self.config, session_id=session_id, label=label)
 
@@ -361,7 +450,7 @@ class SessionRenameToolTests(unittest.TestCase):
         self.assertEqual(_get(self.catalog, "worker-1").spawn_role, "worker")
 
     def test_rename_of_a_retired_session_is_refused(self) -> None:
-        self.catalog.upsert(_entry("worker-1", status="terminated"))
+        self.catalog.upsert(replace(_entry("worker-1"), status="terminated"))
         result = self._rename("worker-1", "Too Late")
         self.assertEqual(result["status"], "unknown-session")
 
@@ -473,8 +562,8 @@ class TurnStateSweepWiringTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._dir.cleanup()
 
-    def test_alive_harness_row_gets_classified_and_changed_flag_set(self) -> None:
-        entry = _entry("chat-1", kind="harness")
+    def test_alive_legacy_harness_pane_is_diagnostic_only(self) -> None:
+        entry = _entry("chat-1")
         self.catalog.upsert(entry)
 
         class _AliveHost:
@@ -493,15 +582,17 @@ class TurnStateSweepWiringTests(unittest.TestCase):
             _AliveHost(),
             entry,
             checked_at=datetime(2026, 7, 8, tzinfo=UTC),
-            config=TerminalCatalogLivenessConfig(),
-            pane_capturer=capturer,
+            probe=LivenessProbe(hysteresis=TerminalCatalogLivenessConfig(), pane_capturer=capturer),
         )
         self.assertTrue(observation.alive)
         self.assertTrue(observation.turn_state_changed)
-        self.assertEqual(observation.entry.turn_state, "working")
+        self.assertEqual(observation.entry.turn_state, "stale")
+        self.assertEqual(observation.entry.control_state, "unsupported")
+        assert observation.entry.control_raw is not None
+        self.assertEqual(observation.entry.control_raw["paneDiagnostic"], "working")
 
     def test_plain_terminal_rows_are_never_classified(self) -> None:
-        entry = _entry("term-1", kind="terminal")
+        entry = replace(_entry("term-1"), kind="terminal", harness=None)
         self.catalog.upsert(entry)
 
         class _AliveHost:
@@ -522,8 +613,7 @@ class TurnStateSweepWiringTests(unittest.TestCase):
             _AliveHost(),
             entry,
             checked_at=datetime(2026, 7, 8, tzinfo=UTC),
-            config=TerminalCatalogLivenessConfig(),
-            pane_capturer=_capture,
+            probe=LivenessProbe(hysteresis=TerminalCatalogLivenessConfig(), pane_capturer=_capture),
         )
         self.assertIsNone(observation.entry.turn_state)
         self.assertEqual(calls, [])  # never captured for a plain terminal row
@@ -578,7 +668,7 @@ class TerminalMarkVsLivenessInterplayTests(unittest.TestCase):
 # --- Automation hooks: integrate / finalize auto-land --------------------------------------------
 
 
-class LandSeatsForLeafTests(unittest.TestCase):
+class LandSeatsForTaskTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.root = Path(self._dir.name)
@@ -588,24 +678,20 @@ class LandSeatsForLeafTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_lands_only_matching_role_and_leaf_without_terminating(self) -> None:
+        self.catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
+        self.catalog.upsert(_entry("reviewer-1", task_document_ref=LEAF_A1, spawn_role="reviewer"))
         self.catalog.upsert(
-            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
+            _entry("worker-other-leaf", task_document_ref=LEAF_A2, spawn_role="worker")
         )
-        self.catalog.upsert(
-            _entry("reviewer-1", leaf_key="repo/master-a/leaf-1", spawn_role="reviewer")
-        )
-        self.catalog.upsert(
-            _entry("worker-other-leaf", leaf_key="repo/master-a/leaf-2", spawn_role="worker")
-        )
-        self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/leaf-1", spawn_role="manager"))
+        self.catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
 
-        landed = land_seats_for_leaf(
+        landed = land_seats_for_task(
             self.catalog,
-            leaf_key="repo/master-a/leaf-1",
+            SeatClosure(
+                reason="leaf integrated", edge="leaf-integration", at="2026-07-08T00:00:00+00:00"
+            ),
+            task_document_ref=LEAF_A1,
             roles=frozenset({"worker", "reviewer"}),
-            reason="leaf integrated",
-            edge="leaf-integration",
-            at="2026-07-08T00:00:00+00:00",
         )
 
         self.assertEqual({entry.id for entry in landed}, {"worker-1", "reviewer-1"})
@@ -616,26 +702,22 @@ class LandSeatsForLeafTests(unittest.TestCase):
 
     def test_terminated_seats_are_skipped_by_landing(self) -> None:
         self.catalog.upsert(
-            _entry(
-                "worker-1",
-                leaf_key="repo/master-a/leaf-1",
-                spawn_role="worker",
+            replace(
+                _entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"),
                 status="terminated",
             )
         )
-        landed = land_seats_for_leaf(
+        landed = land_seats_for_task(
             self.catalog,
-            leaf_key="repo/master-a/leaf-1",
+            SeatClosure(reason="x", edge="leaf-integration", at="2026-07-08T00:00:00+00:00"),
+            task_document_ref=LEAF_A1,
             roles=frozenset({"worker"}),
-            reason="x",
-            edge="leaf-integration",
-            at="2026-07-08T00:00:00+00:00",
         )
         self.assertEqual(landed, [])
 
 
 class AutoLandHookIntegrationTests(unittest.TestCase):
-    """The completion-edge wiring in ``controllers/worktree_tools.py``."""
+    """The completion-edge cleanup wiring in the detached integration owner."""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -670,163 +752,194 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
     def _catalog(self) -> TerminalCatalog:
         return TerminalCatalog(self.root / "logs" / "dashboard" / "terminal-sessions.json")
 
-    def test_worktree_integrate_auto_lands_worker_and_reviewer_seats(self) -> None:
-        catalog = self._catalog()
-        leaf_key = "repo/master-a/leaf-1"
-        catalog.upsert(_entry("worker-1", leaf_key=leaf_key, spawn_role="worker"))
-        catalog.upsert(_entry("reviewer-1", leaf_key=leaf_key, spawn_role="reviewer"))
-        catalog.upsert(_entry("mgr", leaf_key=leaf_key, spawn_role="manager"))
-
-        config = self._config()
-        with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
+    def _complete_integration(self, config: McpRuntimeConfig) -> dict[str, object]:
+        return integration_completion_payload(
+            config,
+            IntegrateOperationInput(
+                configPath=config.config_path.as_posix(),
+                contractPath=self.contract_path.as_posix(),
+                autoCompleteSeats=config.retirement.auto_land_on_integration,
             ),
-            mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
-        ):
-            result = worktree_tools.worktree_integrate_tool(
-                config, contract_path=str(self.contract_path)
+            WorktreeCommandResult(0, {"state": "integrated"}),
+        )
+
+    def _post_report(
+        self,
+        session_id: str,
+        *,
+        task_document_ref: TaskDocumentRef = LEAF_A1,
+        role: AgentRole = "worker",
+    ) -> None:
+        OperatorInboxStore(self.root / "logs" / "observer").append(
+            create_operator_inbox_entry(
+                InboxMessage(
+                    ask="Turn report",
+                    response=f"Completed by {session_id}",
+                    message_kind="turn-report",
+                    artifact_path=f"notes/reports/{session_id}.md",
+                    subject=InboxSubject(
+                        task_document_ref=task_document_ref,
+                        seat_role=role,
+                        agent_id=session_id,
+                    ),
+                ),
+                entry_id=f"report-{session_id}-{task_document_ref.key}",
+                now="2026-08-05T10:00:00+00:00",
+                routing=InboxRouting(address=InboxAddress(recipient_role="manager")),
+                poster=InboxPoster(
+                    created_by="model",
+                    created_via="cli",
+                    sender_agent_id=session_id,
+                    sender_role=role,
+                ),
             )
+        )
+
+    def test_integrate_closes_reported_leaf_roles_and_retains_transcript(self) -> None:
+        catalog = self._catalog()
+        seat_roles: tuple[tuple[str, AgentRole], ...] = (
+            ("worker-1", "worker"),
+            ("reviewer-1", "reviewer"),
+            ("curator-1", "curator"),
+        )
+        for session_id, role in seat_roles:
+            catalog.upsert(_entry(session_id, task_document_ref=LEAF_A1, spawn_role=role))
+            self._post_report(session_id, role=role)
+        catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
+        catalog.upsert(_entry("orch", task_document_ref=SPRINT, spawn_role="orchestrator"))
+        transcript = self.root / "logs" / "mcp" / "worker-1.jsonl"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        transcript.write_text('{"report":"retained"}\n', encoding="utf-8")
+        host = _FakeHost()
+
+        with (
+            mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
+            mock.patch.object(completion_cleanup, "TerminalHost", return_value=host),
+        ):
+            result = self._complete_integration(self._config())
+
+        closed = {"worker-1", "reviewer-1", "curator-1"}
         self.assertTrue(result["ok"])
-        self.assertEqual(set(result["autoLandedSeats"]), {"worker-1", "reviewer-1"})
-        self.assertEqual(_get(catalog, "worker-1").status, "landed")
-        self.assertEqual(_get(catalog, "worker-1").landed_reason, "leaf integrated into master")
-        self.assertEqual(_get(catalog, "reviewer-1").status, "landed")
+        self.assertEqual(set(cast(list[str], result["autoClosedSeats"])), closed)
+        self.assertEqual(result["autoCloseDeferredSeats"], [])
+        self.assertEqual(result["autoCloseFailedSeats"], [])
+        self.assertEqual(set(host.terminated), closed)
+        for session_id in closed:
+            entry = _get(catalog, session_id)
+            self.assertEqual(entry.status, "terminated")
+            self.assertEqual(entry.retired_reason, "auto-close: leaf integrated into master")
+            self.assertEqual(entry.retired_edge, "leaf-integration")
+        self.assertEqual(_get(catalog, "mgr").status, "running")
+        self.assertEqual(_get(catalog, "orch").status, "running")
+        self.assertEqual(transcript.read_text(encoding="utf-8"), '{"report":"retained"}\n')
+
+    def test_integrate_defers_missing_or_wrong_leaf_reports(self) -> None:
+        catalog = self._catalog()
+        catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
+        catalog.upsert(_entry("reviewer-1", task_document_ref=LEAF_A1, spawn_role="reviewer"))
+        self._post_report(
+            "reviewer-1",
+            task_document_ref=OTHER_LEAF_A,
+            role="reviewer",
+        )
+        host = _FakeHost()
+
+        with (
+            mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
+            mock.patch.object(completion_cleanup, "TerminalHost", return_value=host),
+        ):
+            result = self._complete_integration(self._config())
+
+        self.assertEqual(result["autoClosedSeats"], [])
+        self.assertEqual(
+            set(cast(list[str], result["autoCloseDeferredSeats"])),
+            {"worker-1", "reviewer-1"},
+        )
+        self.assertEqual(result["autoCloseFailedSeats"], [])
+        self.assertEqual(host.terminated, [])
+        self.assertEqual(_get(catalog, "worker-1").status, "running")
+        self.assertEqual(_get(catalog, "reviewer-1").status, "running")
+
+    def test_auto_close_opt_out_restores_landing_for_all_leaf_roles(self) -> None:
+        catalog = self._catalog()
+        for session_id, role in (
+            ("worker-1", "worker"),
+            ("reviewer-1", "reviewer"),
+            ("curator-1", "curator"),
+        ):
+            catalog.upsert(_entry(session_id, task_document_ref=LEAF_A1, spawn_role=role))
+        catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
+
+        with (
+            mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
+        ):
+            result = self._complete_integration(self._config(auto_close_completed_seats=False))
+
+        self.assertEqual(
+            set(cast(list[str], result["autoLandedSeats"])),
+            {"worker-1", "reviewer-1", "curator-1"},
+        )
+        self.assertNotIn("autoClosedSeats", result)
+        for session_id in ("worker-1", "reviewer-1", "curator-1"):
+            self.assertEqual(_get(catalog, session_id).status, "landed")
         self.assertEqual(_get(catalog, "mgr").status, "running")
 
-    def test_worktree_integrate_skips_auto_land_when_gated_off(self) -> None:
+    def test_integrate_skips_cleanup_when_edge_gate_is_off(self) -> None:
         catalog = self._catalog()
-        leaf_key = "repo/master-a/leaf-1"
-        catalog.upsert(_entry("worker-1", leaf_key=leaf_key, spawn_role="worker"))
+        catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
+        with (
+            mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
+        ):
+            result = self._complete_integration(self._config(auto_land_on_integration=False))
+        self.assertNotIn("autoClosedSeats", result)
+        self.assertNotIn("autoLandedSeats", result)
+        self.assertEqual(_get(catalog, "worker-1").status, "running")
 
-        config = self._config(auto_land_on_integration=False)
+    def test_integrate_skips_cleanup_on_dry_run(self) -> None:
+        catalog = self._catalog()
+        catalog.upsert(_entry("worker-1", task_document_ref=LEAF_A1, spawn_role="worker"))
         with (
             mock.patch.object(
                 worktree_tools.git_worktree_manager,
                 "integrate_result",
                 return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
             ),
-            mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
+            mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
         ):
             result = worktree_tools.worktree_integrate_tool(
-                config, contract_path=str(self.contract_path)
+                self._config(), contract_path=str(self.contract_path), dry_run=True
             )
+        self.assertNotIn("autoClosedSeats", result)
         self.assertNotIn("autoLandedSeats", result)
         self.assertEqual(_get(catalog, "worker-1").status, "running")
 
-    def test_worktree_integrate_skips_auto_land_on_a_dry_run(self) -> None:
+    def test_finalize_retries_leaf_roles_but_never_closes_manager(self) -> None:
         catalog = self._catalog()
-        leaf_key = "repo/master-a/leaf-1"
-        catalog.upsert(_entry("worker-1", leaf_key=leaf_key, spawn_role="worker"))
-
-        config = self._config()
-        with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
-            mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
-        ):
-            result = worktree_tools.worktree_integrate_tool(
-                config, contract_path=str(self.contract_path), dry_run=True
-            )
-        self.assertNotIn("autoLandedSeats", result)
-        self.assertEqual(_get(catalog, "worker-1").status, "running")
-
-    def test_lifecycle_finalize_auto_lands_manager_and_reviewer_seats(self) -> None:
-        catalog = self._catalog()
-        leaf_key = "repo/master-a/leaf-1"
-        catalog.upsert(_entry("mgr", leaf_key=leaf_key, spawn_role="manager"))
-        catalog.upsert(_entry("reviewer-1", leaf_key=leaf_key, spawn_role="reviewer"))
-
-        config = self._config()
+        catalog.upsert(_entry("mgr", task_document_ref=MASTER_A, spawn_role="manager"))
+        catalog.upsert(_entry("reviewer-1", task_document_ref=LEAF_A1, spawn_role="reviewer"))
+        catalog.upsert(_entry("curator-1", task_document_ref=LEAF_A1, spawn_role="curator"))
+        self._post_report("reviewer-1", role="reviewer")
+        self._post_report("curator-1", role="curator")
+        host = _FakeHost()
         with (
             mock.patch.object(
                 worktree_tools.git_worktree_manager,
                 "finalize_result",
                 return_value=mock.Mock(payload={"state": "finalized"}, returncode=0),
             ),
-            mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
+            mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
+            mock.patch.object(completion_cleanup, "TerminalHost", return_value=host),
         ):
             result = worktree_tools.lifecycle_finalize_task_tool(
-                config, contract_path=str(self.contract_path)
+                self._config(), str(self.contract_path)
             )
-        self.assertTrue(result["ok"])
-        self.assertEqual(set(result["autoLandedSeats"]), {"mgr", "reviewer-1"})
-        self.assertEqual(_get(catalog, "mgr").status, "landed")
-        self.assertEqual(_get(catalog, "reviewer-1").landed_edge, "master-finalization")
-
-    def test_auto_land_skips_silently_on_an_unreadable_contract(self) -> None:
-        catalog = self._catalog()
-        catalog.upsert(_entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"))
-        config = self._config()
-        with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
-            mock.patch.object(worktree_tools, "load_contract", side_effect=OSError("gone")),
-        ):
-            result = worktree_tools.worktree_integrate_tool(
-                config, contract_path=str(self.contract_path)
-            )
-        self.assertTrue(result["ok"])  # the integration edge itself is never blocked
-        self.assertEqual(result["autoLandedSeats"], [])
-        self.assertEqual(_get(catalog, "worker-1").status, "running")
-
-    def test_worktree_integrate_survives_a_raising_land_seats_for_leaf(self) -> None:
-        # The landing body's own catalog I/O (not just
-        # load_contract) must never propagate out of an already-succeeded integrate call.
-        catalog = self._catalog()
-        catalog.upsert(_entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"))
-        config = self._config()
-        with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "integrate_result",
-                return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
-            ),
-            mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
-            mock.patch.object(
-                worktree_tools,
-                "land_seats_for_leaf",
-                side_effect=OSError("catalog write failed"),
-            ),
-        ):
-            result = worktree_tools.worktree_integrate_tool(
-                config, contract_path=str(self.contract_path)
-            )
-        self.assertTrue(result["ok"])  # the integration edge itself is never blocked
-        self.assertEqual(result["autoLandedSeats"], [])
-        self.assertEqual(_get(catalog, "worker-1").status, "running")
-
-    def test_lifecycle_finalize_survives_a_raising_land_seats_for_leaf(self) -> None:
-        catalog = self._catalog()
-        catalog.upsert(_entry("mgr", leaf_key="repo/master-a/leaf-1", spawn_role="manager"))
-        config = self._config()
-        with (
-            mock.patch.object(
-                worktree_tools.git_worktree_manager,
-                "finalize_result",
-                return_value=mock.Mock(payload={"state": "finalized"}, returncode=0),
-            ),
-            mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
-            mock.patch.object(
-                worktree_tools,
-                "land_seats_for_leaf",
-                side_effect=RuntimeError("unexpected failure"),
-            ),
-        ):
-            result = worktree_tools.lifecycle_finalize_task_tool(
-                config, contract_path=str(self.contract_path)
-            )
-        self.assertTrue(result["ok"])  # the finalize edge itself is never blocked
-        self.assertEqual(result["autoLandedSeats"], [])
+        self.assertEqual(
+            set(cast(list[str], result["autoClosedSeats"])),
+            {"reviewer-1", "curator-1"},
+        )
+        self.assertEqual(set(host.terminated), {"reviewer-1", "curator-1"})
         self.assertEqual(_get(catalog, "mgr").status, "running")
+        self.assertEqual(_get(catalog, "reviewer-1").retired_edge, "master-finalization")
 
 
 class RetirementSettingsConfigTests(unittest.TestCase):
@@ -834,6 +947,7 @@ class RetirementSettingsConfigTests(unittest.TestCase):
         settings = RetirementSettings()
         self.assertTrue(settings.auto_land_on_integration)
         self.assertTrue(settings.auto_land_on_finalize)
+        self.assertTrue(settings.auto_close_completed_seats)
 
 
 if __name__ == "__main__":

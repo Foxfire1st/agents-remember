@@ -1,4 +1,4 @@
-"""Confirmed-gone reconciliation for ephemeral supervisor inbox alerts."""
+"""Confirmed-gone reconciliation for ephemeral agent-notifier inbox alerts."""
 
 from __future__ import annotations
 
@@ -7,8 +7,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
-from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
+from agents_remember.controlplane.operator_inbox_records import (
+    OperatorInboxEntry,
+    state_signal_landed,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 
 CONFIRMED_GONE_REASON = "subject-session-confirmed-gone"
 
@@ -78,7 +83,7 @@ def plan_confirmed_gone_reclamation(
     catalog_entries: Sequence[TerminalCatalogEntry],
     snapshotter: TmuxSessionNameSnapshotter,
 ) -> InboxReclamationPlan:
-    """Select only supervisor alerts whose exact subject session is positively gone."""
+    """Select only agent-notifier alerts whose exact subject session is positively gone."""
     candidates = [entry for entry in current.values() if _eligible(entry)]
     subjects = {entry.subjectAgentId for entry in candidates if entry.subjectAgentId is not None}
     gone_by_catalog, gone_by_tmux, snapshot = _confirmed_gone_subjects(
@@ -134,8 +139,10 @@ def _confirmed_gone_subjects(
 def _eligible(entry: OperatorInboxEntry) -> bool:
     return (
         entry.state == "pending"
-        and entry.createdBy == "supervisor"
+        # Both values are the same relay-authored alert until the rename window closes.
+        and entry.createdBy in {"supervisor", "agent-notifier"}
         and entry.messageKind in ("nudge", "escalation")
+        and not state_signal_landed(entry)
         and entry.subjectAgentId is not None
     )
 

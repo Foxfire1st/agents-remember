@@ -166,9 +166,11 @@ def grepai_docker_workspace_state(
     return prepare_grepai_workspace(
         layout,
         provider_settings,
-        dsn=state["dsn"],
-        project_paths=state["projectPaths"],
-        embedder_settings=state["embedder"],
+        GrepaiWorkspaceConfig(
+            dsn=state["dsn"],
+            project_paths=state["projectPaths"],
+            embedder_settings=state["embedder"],
+        ),
     )
 
 
@@ -190,19 +192,23 @@ def grepai_docker_start(
         args,
         runner=runner,
         network_name=grepai_network_name(provider_settings),
-        postgres_port=backend_result.get("ports", {}).get("postgres", {}).get("hostPort"),
-        ollama_port=embedder_result.get("ports", {}).get("http", {}).get("hostPort"),
+        ports=GrepaiServicePorts(
+            postgres=backend_result.get("ports", {}).get("postgres", {}).get("hostPort"),
+            ollama=embedder_result.get("ports", {}).get("http", {}).get("hostPort"),
+        ),
     )
     if not args.dry_run:
         write_json(
             layout.state_file,
             grepai_docker_state(
                 layout,
+                GrepaiStackResults(
+                    backend=backend_result,
+                    embedder=embedder_result,
+                    watcher=watcher_result,
+                ),
                 action="start",
                 runner=runner,
-                backend_result=backend_result,
-                embedder_result=embedder_result,
-                watcher_result=watcher_result,
             ),
         )
     return {
@@ -321,9 +327,7 @@ def grepai_run_docker(
         raise ValueError(action) from error
 
 
-def grepai_install_version(
-    args: argparse.Namespace, requirements_file: Path
-) -> tuple[Path, str]:
+def grepai_install_version(args: argparse.Namespace, requirements_file: Path) -> tuple[Path, str]:
     if args.dry_run and not requirements_file.exists():
         return requirements_file, GREPAI_PIN.split("==", 1)[1]
     resolved = ensure_grepai_requirements_file(args.coordination_root)
@@ -366,9 +370,11 @@ def grepai_install_workspace(
     return prepare_grepai_workspace(
         layout,
         provider_settings,
-        dsn=grepai_container_dsn(backend),
-        project_paths=grepai_container_project_paths(layout, runner),
-        embedder_settings=grepai_container_embedder_settings(provider_settings, embedder),
+        GrepaiWorkspaceConfig(
+            dsn=grepai_container_dsn(backend),
+            project_paths=grepai_container_project_paths(layout, runner),
+            embedder_settings=grepai_container_embedder_settings(provider_settings, embedder),
+        ),
     )
 
 

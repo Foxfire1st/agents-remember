@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.route_index_census import route_index_source_snapshot
+
 SCHEMA_VERSION = 1
 INDEX_FILE_NAME = "overview.index.json"
 ROUTE_OVERVIEW_NAME = "overview.md"
@@ -17,26 +20,6 @@ HOT_PATH_SUMMARY_HEADING = "Hot Path Summary"
 HOT_PATH_SUMMARY_LIMIT = 600
 CANDIDATE_HINT_LIMIT = 24
 ANCHOR_HINT_LIMIT = 48
-
-IGNORED_SOURCE_DIRS = {
-    ".codex",
-    ".git",
-    ".hg",
-    ".idea",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".svn",
-    ".venv",
-    ".vscode",
-    "__pycache__",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "venv",
-    "vendor",
-}
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
 CODE_SPAN_PATTERN = re.compile(r"`([^`\n]{2,120})`")
@@ -105,6 +88,7 @@ class RouteIndexBuildResult:
     written: int
     unchanged: int
     indexes: list[str]
+    stale_indexes: list[str]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,17 +96,105 @@ class RouteIndexBuildResult:
             "written": self.written,
             "unchanged": self.unchanged,
             "indexes": self.indexes,
+            "staleIndexes": self.stale_indexes,
         }
+
+
+@dataclass(frozen=True)
+class _RouteIndexSurvey:
+    """Everything discovered about the onboarding tree before a single index is rendered.
+
+    One survey feeds every route's document, which is why it is taken once and passed on:
+    each field is a whole-tree read (the overview walk, the Git-tracked source snapshot),
+    and doing them per route would turn a linear build into a quadratic one.
+    """
+
+    onboarding_root: Path
+    repository: str
+    route_overviews: dict[str, str]
+    covered_by_route: dict[str, list[str]]
+    child_routes: dict[str, list[str]]
+    source_counts: dict[str, int]
+
+
+def _survey_routes(
+    code_root: Path, onboarding_root: Path, repository: str, storage: StorageSettings
+) -> _RouteIndexSurvey:
+    """Read the onboarding tree and the Git-tracked source once."""
+    route_overviews = _discover_route_overviews(onboarding_root)
+    source_snapshot = route_index_source_snapshot(
+        code_root=code_root,
+        storage=storage,
+        scoped_repo_path=repository,
+    )
+    return _RouteIndexSurvey(
+        onboarding_root=onboarding_root,
+        repository=repository,
+        route_overviews=route_overviews,
+        covered_by_route=_discover_covered_files(
+            onboarding_root,
+            route_overviews.keys(),
+            repository_files=frozenset(source_snapshot.repository_paths),
+        ),
+        child_routes=_discover_child_routes(route_overviews.keys()),
+        source_counts=_count_source_files_by_route(
+            route_overviews.keys(),
+            source_files=source_snapshot.eligible_paths,
+        ),
+    )
+
+
+def _route_index_document(survey: _RouteIndexSurvey, route: str) -> dict[str, Any]:
+    """The index document for one route, exactly as it is written to disk."""
+    overview_rel = survey.route_overviews[route]
+    covered = survey.covered_by_route.get(route, [])
+    children = survey.child_routes.get(route, [])
+    overview_path = survey.onboarding_root / overview_rel
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "kind": "agents-remember-route-index",
+        "repository": survey.repository,
+        "route": route,
+        "overview": overview_rel,
+        "index": _route_index_path(route),
+        "sourceScope": [_source_scope(route)],
+        "childRoutes": [
+            {
+                "route": child,
+                "overview": survey.route_overviews[child],
+                "index": _route_index_path(child),
+            }
+            for child in children
+        ],
+        "coveredFiles": covered,
+        "coverageCounts": {
+            "sourceFilesInScope": survey.source_counts.get(route, 0),
+            "fileSidecars": len(covered),
+            "childRoutes": len(children),
+        },
+        "routingTerms": _routing_terms(overview_path, route, covered, children),
+        "hotPath": _hot_path(overview_path, route, covered, children),
+        "fallback": {
+            "governingOverview": overview_rel,
+            "sidecarAbsence": "inferFromCoveredFiles",
+        },
+    }
 
 
 def build_route_indexes(
     *,
     code_root: Path,
     onboarding_root: Path,
-    repository: str | None = None,
+    repository: str,
+    storage: StorageSettings,
     dry_run: bool = False,
 ) -> RouteIndexBuildResult:
-    """Build route indexes for every route-local onboarding overview."""
+    """Build route indexes using explicit Git and onboarding-storage authority.
+
+    ``sourceFilesInScope`` counts existing Git-tracked and nonignored candidate
+    files whose configured storage is not disabled. ``code_root`` must be the
+    repository root; the generator never falls back to a filesystem walk.
+    """
 
     code_root = code_root.resolve()
     onboarding_root = onboarding_root.resolve()
@@ -131,74 +203,35 @@ def build_route_indexes(
     if not onboarding_root.is_dir():
         raise FileNotFoundError(f"onboarding root does not exist: {onboarding_root}")
 
-    route_overviews = _discover_route_overviews(onboarding_root)
-    covered_by_route = _discover_covered_files(code_root, onboarding_root, route_overviews.keys())
-    child_routes = _discover_child_routes(route_overviews.keys())
-    source_counts = _count_source_files_by_route(code_root, route_overviews.keys())
+    survey = _survey_routes(code_root, onboarding_root, repository, storage)
 
     written = 0
     unchanged = 0
     indexes: list[str] = []
+    stale_indexes: list[str] = []
 
-    for route in sorted(route_overviews.keys(), key=_route_sort_key):
-        overview_rel = route_overviews[route]
+    for route in sorted(survey.route_overviews.keys(), key=_route_sort_key):
         index_rel = _route_index_path(route)
-        index = {
-            "schemaVersion": SCHEMA_VERSION,
-            "kind": "agents-remember-route-index",
-            "repository": repository,
-            "route": route,
-            "overview": overview_rel,
-            "index": index_rel,
-            "sourceScope": [_source_scope(route)],
-            "childRoutes": [
-                {
-                    "route": child,
-                    "overview": route_overviews[child],
-                    "index": _route_index_path(child),
-                }
-                for child in child_routes.get(route, [])
-            ],
-            "coveredFiles": covered_by_route.get(route, []),
-            "coverageCounts": {
-                "sourceFilesInScope": source_counts.get(route, 0),
-                "fileSidecars": len(covered_by_route.get(route, [])),
-                "childRoutes": len(child_routes.get(route, [])),
-            },
-            "routingTerms": _routing_terms(
-                onboarding_root / overview_rel,
-                route,
-                covered_by_route.get(route, []),
-                child_routes.get(route, []),
-            ),
-            "hotPath": _hot_path(
-                onboarding_root / overview_rel,
-                route,
-                covered_by_route.get(route, []),
-                child_routes.get(route, []),
-            ),
-            "fallback": {
-                "governingOverview": overview_rel,
-                "sidecarAbsence": "inferFromCoveredFiles",
-            },
-        }
-
-        rendered = json.dumps(index, indent=2, sort_keys=False) + "\n"
+        rendered = (
+            json.dumps(_route_index_document(survey, route), indent=2, sort_keys=False) + "\n"
+        )
         index_path = onboarding_root / index_rel
         indexes.append(index_rel)
         if index_path.exists() and index_path.read_text(encoding="utf-8") == rendered:
             unchanged += 1
             continue
+        stale_indexes.append(index_rel)
         if not dry_run:
             index_path.parent.mkdir(parents=True, exist_ok=True)
             index_path.write_text(rendered, encoding="utf-8")
         written += 1
 
     return RouteIndexBuildResult(
-        routes=len(route_overviews),
+        routes=len(survey.route_overviews),
         written=written,
         unchanged=unchanged,
         indexes=indexes,
+        stale_indexes=stale_indexes,
     )
 
 
@@ -226,9 +259,10 @@ def _discover_route_overviews(onboarding_root: Path) -> dict[str, str]:
 
 
 def _discover_covered_files(
-    code_root: Path,
     onboarding_root: Path,
     routes: Iterable[str],
+    *,
+    repository_files: frozenset[str],
 ) -> dict[str, list[str]]:
     route_set = set(routes)
     covered: dict[str, list[str]] = {route: [] for route in route_set}
@@ -237,7 +271,7 @@ def _discover_covered_files(
         if not sidecar.is_file() or not _is_file_sidecar(sidecar, onboarding_root):
             continue
         source_rel = _source_path_from_sidecar(sidecar, onboarding_root)
-        if not (code_root / Path(source_rel)).is_file():
+        if source_rel not in repository_files:
             continue
         route = _nearest_route(source_rel, route_set)
         covered.setdefault(route, []).append(source_rel)
@@ -260,25 +294,15 @@ def _discover_child_routes(routes: Iterable[str]) -> dict[str, list[str]]:
     return children
 
 
-def _count_source_files_by_route(code_root: Path, routes: Iterable[str]) -> dict[str, int]:
+def _count_source_files_by_route(
+    routes: Iterable[str],
+    *,
+    source_files: Iterable[str],
+) -> dict[str, int]:
     counts = {route: 0 for route in routes}
-    source_files = sorted(_iter_source_files(code_root))
     for route in counts:
         counts[route] = sum(1 for source_path in source_files if _route_covers(route, source_path))
     return counts
-
-
-def _iter_source_files(code_root: Path) -> Iterable[str]:
-    stack = [code_root]
-    while stack:
-        current = stack.pop()
-        for child in current.iterdir():
-            if child.is_dir():
-                if child.name not in IGNORED_SOURCE_DIRS:
-                    stack.append(child)
-                continue
-            if child.is_file():
-                yield _relative_posix(child, code_root)
 
 
 def _routing_terms(
@@ -405,20 +429,26 @@ def _identifier_hints(text: str) -> list[str]:
 
 
 def _is_source_anchor(token: str) -> bool:
-    if len(token) < 3:
+    """A hint worth indexing: long enough, not a generic word, and shaped like code."""
+    if len(token) < 3 or token.lower() in GENERIC_ANCHOR_WORDS:
         return False
-    lowered = token.lower()
-    if lowered in GENERIC_ANCHOR_WORDS:
-        return False
-    if "." in token or "/" in token:
-        return True
-    if "_" in token:
-        return True
-    if any(char.isdigit() for char in token):
-        return True
-    if token.isupper():
-        return True
-    return any(char.isupper() for char in token[1:])
+    return _has_code_shape(token)
+
+
+def _has_code_shape(token: str) -> bool:
+    """True when the token's own spelling marks it as an identifier rather than prose.
+
+    Any one signal is enough: a dotted or slashed path, snake_case, an embedded digit,
+    an all-caps constant, or an interior capital (camelCase / PascalCase).
+    """
+    return (
+        "." in token
+        or "/" in token
+        or "_" in token
+        or any(char.isdigit() for char in token)
+        or token.isupper()
+        or any(char.isupper() for char in token[1:])
+    )
 
 
 def _clean_hint(value: str) -> str:

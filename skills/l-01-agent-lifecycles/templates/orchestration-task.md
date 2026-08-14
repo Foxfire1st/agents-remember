@@ -1,8 +1,8 @@
 # Orchestration-Task Template
 
-The artifact a **strategist** drafts for the **orchestrator** (`roles/strategist.md`) — the sprint
+The artifact a **strategist** drafts for the **architect** (`roles/strategist.md`) — the sprint
 plan and the sprint scope. The architect proposes the strategist pass, and the strategist drafts
-this artifact only after developer approval; the orchestrator adopts the accepted draft into
+this artifact only after developer approval; the architect rules it and the orchestrator adopts the accepted draft into
 durable task form (the strategist is a reader, not a mutator). When the developer sanctions a
 strategist skip, `roles/orchestrator.md` owns the alternate author-and-adopt path. It is written
 under the series/coordination `notes/` path the brief names and revised across drawing-board
@@ -25,12 +25,17 @@ rounds.
    never silently guessed around (a merely not-yet-existing surface is NOT unplannable). Directional
    cross-master contradictions are flagged quo-vadis at the top of that section.
 4. This is a **draft for adoption**, not a mutation: the strategist never edits task docs; the
-   orchestrator (the portfolio owner) adopts the plan and records the adoption in the decision log.
+   architect rules the plan and the orchestrator records its adoption in the decision log.
 5. The plan is reviewed adversarially (the plan-review criteria catalog,
    `../criteria/plan-review.md`) before the developer's drawing board; revisions append round
    sections rather than rewriting history.
 6. Once adopted, this artifact is the sprint's standing scope: in-sprint additions before
    implementation starts trigger re-evaluation; out-of-sprint additions wait for the next sprint.
+7. **The adopted sprint document owns the super edge.** Before any manager dispatch, the
+   orchestrator creates or resolves the super integration branch and publishes its exact name as
+   the sprint document's `integrationBranch` through a previewed `task_doc set_field` operation.
+   Resuming an older sprint requires the same migration first; prose or agent memory is not a
+   substitute for that task identity.
 
 ## Shape
 
@@ -39,8 +44,9 @@ rounds.
 
 | Field            | Value                                            |
 | ---------------- | ------------------------------------------------ |
-| strategist       | <this session's agent id>                        |
+| strategist seat  | <sprint task_doc path> + strategist             |
 | masters in scope | <master ids>                                     |
+| integrationBranch | <exact super integration branch persisted on the sprint task doc> |
 | status           | draft | in-review | round-<n> | adopted           |
 | round            | <n> (3-round cap; the drawing board is the escalation) |
 | written          | <YYYY-MM-DDTHH:MM>                                |

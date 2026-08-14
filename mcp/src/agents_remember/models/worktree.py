@@ -4,40 +4,93 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
+from pydantic import Field
 
-WorktreeState = Literal["inactive", "active", "missingContract", "invalidContract"]
-WorkflowKind = Literal["chat", "light", "light-task"]
-MemoryMode = Literal["internal", "external", "disabled"]
+from agents_remember.kernel.coordination_context.models import MemoryMode
+from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
+from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+
+# Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
+WorkflowKind = Literal["chat-task", "light-task"]
 HumanReviewStatus = Literal["pending-review", "approved"]
-LifecycleStatus = Literal["not-started", "completed"]
+CloseoutStatus = Literal["not-started", "completed"]
+LifecycleStatus = CloseoutStatus  # the published wire name for the closeout status
 IntegrationStatus = Literal["not-started", "completed", "blocked"]
-CleanupStatus = Literal["pending", "completed", "abandoned"]
+CleanupStatus = Literal["pending", "completed", "abandoned", "reopened"]
 WorktreePhase = Literal[
-    "cleanup-completed",
-    "integration-blocked",
-    "cleanup-pending",
-    "commit-approval-pending",
-    "integration-pending",
-    "closeout-pending",
     "worktree-started",
+    "closeout-pending",
+    "integration-pending",
+    "integration-blocked",
+    "carryover-pending",
+    "cleanup-pending",
+    "cleanup-completed",
+    "abandoned",
 ]
 NextOperation = Literal[
-    "done",
-    "developer_decision",
-    "request_cleanup_decision",
-    "request_commit_approval",
-    "request_integration_decision",
-    "closeout",
     "continue_work",
+    "closeout",
+    "request_integration_decision",
+    "developer_decision",
+    "request_carryover_decision",
+    "request_cleanup_decision",
+    "done",
 ]
 NextTool = Literal[
-    "worktree_integrate",
-    "worktree_cleanup",
-    "worktree_closeout_preview",
-    "worktree_closeout_apply",
     "worktree_status",
+    "worktree_closeout_apply",
+    "worktree_integrate",
+    "memory_carryover_apply",
+    "worktree_cleanup",
 ]
+SourceLineageState = Literal["current", "blocked", "unavailable"]
+SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
+SourceLineageRelation = Literal["super-to-master", "master-to-leaf"]
+SourceLineageSide = Literal["code", "memory"]
+
+
+class SourceLineageEdge(StrictResponseModel):
+    """One plane-resolved ancestry edge; agents never supply or retain commit ids."""
+
+    relation: SourceLineageRelation
+    side: SourceLineageSide
+    state: SourceLineageEdgeState
+    sourceBranch: str
+    descendantBranch: str
+    ahead: int | None = None
+    behind: int | None = None
+    contractPath: str
+    syncContractPath: str
+    detail: str | None = None
+
+
+class SourceLineageRecovery(StrictResponseModel):
+    """One ordered recovery derived from task identity, not model-carried Git state."""
+
+    tool: Literal["worktree_sync"] = "worktree_sync"
+    contractPath: str
+    args: dict[str, object]
+
+
+class SourceLineageProjection(StrictResponseModel):
+    """Transitive super -> master -> leaf lineage projected into status and refusals."""
+
+    state: SourceLineageState
+    summary: str
+    edges: list[SourceLineageEdge]
+    recoveries: list[SourceLineageRecovery]
+
+
+# Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
+# is what these were, and the copies had drifted apart in six places at once: `chat-task`
+# (the kind `worktree_start`'s own docstring advertises, on 8 contracts), `reopened`,
+# `carryover-pending`, `abandoned`, `request_carryover_decision` and `memory_carryover_apply`
+# were all writable and none validated, which made this model reject 165 of the 213 series
+# contracts on disk with a ValidationError no handler on the tool path catches.
+
+# Produced entirely inside `application.worktree_status`, which constructs this model
+# directly, so the projection there is already the single writer the checker can see.
+WorktreeState = Literal["inactive", "active", "missingContract", "invalidContract"]
 
 
 class WorktreeSummary(StrictResponseModel):
@@ -67,8 +120,20 @@ class WorktreeSummary(StrictResponseModel):
     nextOperation: NextOperation | None = None
     nextTool: NextTool | None = None
     nextArgs: dict[str, Any] | None = None
+    # Absent means the next call needs nothing beyond `nextArgs` -- the same thing the empty
+    # list used to mean. `next_guidance` writes this key only when there is a required
+    # argument, and the projection reports what the producer said rather than filling in a
+    # value for it (`application.worktree_status._summary_from_status_payload` states the
+    # measurement).
     nextRequiredArgs: list[str] | None = None
+    # Present only when the contract file carried a cell outside its declared vocabulary, as
+    # "<field>=<raw token> read as <fallback>". The `state` is still `active` and every other
+    # field on this summary was computed from the substituted values -- this is the notice
+    # that they were substituted, and the file heals the next time a lifecycle tool writes it.
+    unknownContractCells: list[str] | None = None
     error: str | None = None
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    sourceLineage: SourceLineageProjection | None = None
 
 
 class WorktreeCommandResponse(FlexibleToolResponse):
@@ -91,6 +156,8 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # progress as running / stale (dead heartbeat) / ok /
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    source_lineage: SourceLineageProjection | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):
@@ -119,6 +186,16 @@ class WorktreeCloseoutApplyResponse(WorktreeCommandResponse):
 
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
+    # Declared even though the worktree envelope is intentionally flexible: these are stable
+    # completion-cleanup products, not incidental worktree-module details.
+    autoClosedSeats: list[str] = Field(default_factory=list)
+    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
+    autoCloseFailedSeats: list[str] = Field(default_factory=list)
+    autoLandedSeats: list[str] = Field(default_factory=list)
+
+
+class WorktreeOperationCancelResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_operation_cancel"] = "worktree_operation_cancel"
 
 
 class WorktreeCleanupResponse(WorktreeCommandResponse):

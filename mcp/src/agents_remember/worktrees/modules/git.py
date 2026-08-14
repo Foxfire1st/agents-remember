@@ -1,29 +1,58 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.git_command import run_git, run_git_with_index
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
+# This module used to define its own `run_git` -- the kernel's function with the
+# environment guard, the timeout and the explicit encoding all dropped -- and every
+# destructive worktree operation (commit, merge --ff-only, reset --hard, rebase,
+# branch -f, branch -D, worktree remove --force, push origin --delete) ran through
+# it. With GIT_DIR exported those landed in whatever repository GIT_DIR named. The
+# helpers below now call the one guarded runner; nothing else about them changed.
 
-def run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
-        cwd=repo,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
+
+def _transport_safe_git_diagnostic(text: str) -> str:
+    """Render surrogateescaped Git bytes without leaking invalid Unicode to MCP."""
+
+    return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
 def require_git(repo: Path, args: list[str]) -> str:
     result = run_git(repo, args)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+        detail = result.stderr.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(_transport_safe_git_diagnostic(detail))
     return result.stdout.strip()
+
+
+def worktree_candidate_tree(repo: Path, index_path: Path) -> str:
+    """Hash the full add-all candidate without touching the worktree's real index."""
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.unlink(missing_ok=True)
+    try:
+        for action, args in (
+            ("seed candidate index", ["read-tree", "HEAD"]),
+            ("materialize candidate tree", ["add", "-A"]),
+        ):
+            result = run_git_with_index(repo, args, index_path)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"could not {action}: "
+                    f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
+                )
+        result = run_git_with_index(repo, ["write-tree"], index_path)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "could not resolve candidate tree: "
+                f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
+            )
+        return result.stdout.strip()
+    finally:
+        index_path.unlink(missing_ok=True)
 
 
 def current_branch(repo: Path) -> str:
@@ -36,6 +65,18 @@ def head_commit(repo: Path, ref: str = "HEAD") -> str:
 
 def branch_exists(repo: Path, branch: str) -> bool:
     return run_git(repo, ["rev-parse", "--verify", "--quiet", branch]).returncode == 0
+
+
+def repository_identity(repo: Path | None) -> Path | None:
+    """Resolve Git's shared object-store identity for a checkout or linked worktree."""
+
+    if repo is None or not repo.is_dir():
+        return None
+    result = run_git(repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    common_dir = result.stdout.strip()
+    if result.returncode != 0 or not common_dir:
+        return None
+    return Path(common_dir).resolve()
 
 
 def has_changes(repo: Path) -> bool:
@@ -87,6 +128,30 @@ def commit_if_dirty(repo: Path, message: str) -> str:
         return head_commit(repo)
     require_git(repo, ["add", "-A"])
     require_git(repo, ["commit", "-m", message])
+    return head_commit(repo)
+
+
+def run_pre_commit_hook_if_configured(repo: Path) -> bool:
+    """Run the checkout's configured pre-commit hook, or report that none exists."""
+    hook_path = Path(require_git(repo, ["rev-parse", "--git-path", "hooks/pre-commit"]))
+    if not hook_path.is_absolute():
+        hook_path = repo / hook_path
+    if not hook_path.is_file():
+        return False
+    require_git(repo, ["hook", "run", "pre-commit"])
+    return True
+
+
+def commit_verified_staged(repo: Path, message: str) -> str:
+    """Commit exactly the staged tree a preceding strict gate certified.
+
+    The caller has already staged and verified the index.  In particular, this helper
+    must neither restage the working tree nor rerun a hook after the gate's pytest-final
+    subprocess.
+    """
+    if run_git(repo, ["diff", "--cached", "--quiet"]).returncode == 0:
+        return head_commit(repo)
+    require_git(repo, ["commit", "--no-verify", "-m", message])
     return head_commit(repo)
 
 

@@ -3,24 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context_resolver import normalize_rel_path
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     repo_root_placeholder,
 )
-
-
-def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo_root.as_posix()}", *args],
-        cwd=repo_root,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
 
 
 def current_branch_name(repo_root: Path) -> str:

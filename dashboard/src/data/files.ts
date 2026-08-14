@@ -1,4 +1,4 @@
-// Same-origin client for the L1 read-only files API (mcp/.../serving/files.py).
+// Same-origin client for the read-only files API (mcp/.../serving/files.py).
 // House style mirrors data/stream.ts / data/terminal.ts: a `base` arg (same-origin
 // default), typed results, a thrown status error, and NO store mutation — the File
 // Viewer owns its own component state. Endpoints (all GET, camelCase JSON):
@@ -6,6 +6,9 @@
 //   /api/files/list?repo&scope&path                   -> one dir level: code[] + onboarding[]
 //   /api/files/read?repo&scope&path                   -> one file: content + language + onboarding meta
 //   /api/files/onboarding?repo&scope&path&direction   -> 1:1 pairing (forward: code->sidecar; reverse: sidecar->code)
+
+import { fetchWithTimeout } from "./fetchWithTimeout";
+import { shareInflight } from "./inflight";
 
 export type Scope = string; // "mainline" | a worktree-group basename
 
@@ -80,10 +83,12 @@ export class FilesApiError extends Error {
   }
 }
 
-// Shared by the L1 files client and the L3 change-set client (data/changeset.ts) so the
+// Shared by the files client and the change-set client (data/changeset.ts) so the
 // serving error idiom (404 unknown-repo/unknown-scope/not-found, 400 bad-path) is mapped once.
-export async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+// `timeoutMs` bounds the socket for hung-transport-prone reads (see fetchRepos); omitted, the
+// request is unbounded exactly as before.
+export async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
+  const res = timeoutMs === undefined ? await fetch(url) : await fetchWithTimeout(url, timeoutMs);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { status?: string };
     throw new FilesApiError(res.status, body.status ?? res.statusText);
@@ -94,8 +99,16 @@ export async function getJson<T>(url: string): Promise<T> {
 export const qs = (params: Record<string, string>): string =>
   new URLSearchParams(params).toString();
 
+// The boot catalog read: the always-mounted File Viewer fires it per mount (StrictMode
+// doubles that), so concurrent callers share one in-flight GET — settle clears the slot,
+// so a retry after a failure re-fires. BOUNDED like the catalog poll: an unbounded hung
+// socket would wedge every caller single-flighted behind it.
+export const FILES_REPOS_REQUEST_TIMEOUT_MS = 10_000;
+
 export const fetchRepos = (base = ""): Promise<RepoCatalog> =>
-  getJson<RepoCatalog>(`${base}/api/files/repos`);
+  shareInflight(`files:repos:${base}`, () =>
+    getJson<RepoCatalog>(`${base}/api/files/repos`, FILES_REPOS_REQUEST_TIMEOUT_MS),
+  );
 
 export const listDir = (repo: string, scope: Scope, path = "", base = ""): Promise<DirListing> =>
   getJson<DirListing>(`${base}/api/files/list?${qs({ repo, scope, path })}`);

@@ -93,9 +93,7 @@ class FinalizePayloadTokensTests(unittest.TestCase):
 
     def test_fixpoint_converges_with_approximate_counter(self) -> None:
         counter = ApproximateTokenCounter()
-        payload = finalize_payload_tokens(
-            {"ok": True, "operation": "ping"}, token_counter=counter
-        )
+        payload = finalize_payload_tokens({"ok": True, "operation": "ping"}, token_counter=counter)
         self.assertEqual(payload["tokenizer"], counter.name)
         self.assertFalse(payload["tokenCountExact"])
         self.assertEqual(payload["tokens"], counter.count(payload))

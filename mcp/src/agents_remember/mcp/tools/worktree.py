@@ -4,62 +4,42 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.worktree_tools import (
+from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.worktree_tools import (
+    DEFAULT_START_EXECUTION,
+    DEFAULT_TASK_BASES,
+    CloseoutApproval,
+    CloseoutCommitMessages,
+    StartExecution,
+    TaskBases,
+    TaskIdentity,
+    summarized_worktree_start_tool,
     worktree_abandon_tool,
     worktree_attach_tool,
     worktree_cleanup_tool,
     worktree_closeout_apply_tool,
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
-    worktree_start_tool,
+    worktree_operation_cancel_tool,
     worktree_status_tool,
     worktree_sync_tool,
 )
-from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.lifecycles.operation import IntegrateStrategy
 
-from ..config import McpRuntimeConfig
 from .base import _tool_payload
 
 
 def worktree_start_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
-    task_name: str,
-    worktree_name: str,
+    identity: TaskIdentity,
     *,
-    leaf_id: str | None = None,
-    parent_task: str | None = None,
-    workflow_kind: str = "light-task",
-    source_branch: str | None = None,
-    work_branch: str | None = None,
-    memory_mode: str | None = None,
-    memory_choice: str | None = None,
-    stale_base_choice: str | None = None,
-    skip_provider_setup: bool = False,
-    retry_provider_setup: bool = False,
-    dry_run: bool = False,
+    bases: TaskBases = DEFAULT_TASK_BASES,
+    execution: StartExecution = DEFAULT_START_EXECUTION,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_start",
-        summarize_command_logs(
-            worktree_start_tool(
-                config,
-                repo_id=repo_id,
-                task_name=task_name,
-                worktree_name=worktree_name,
-                leaf_id=leaf_id,
-                parent_task=parent_task,
-                workflow_kind=workflow_kind,
-                source_branch=source_branch,
-                work_branch=work_branch,
-                memory_mode=memory_mode,
-                memory_choice=memory_choice,
-                stale_base_choice=stale_base_choice,
-                skip_provider_setup=skip_provider_setup,
-                retry_provider_setup=retry_provider_setup,
-                dry_run=dry_run,
-            )
-        ),
+        summarized_worktree_start_tool(config, identity, bases=bases, execution=execution),
     )
 
 
@@ -83,91 +63,40 @@ def worktree_sync_payload(
 
 def worktree_attach_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
+    task: TaskRef,
     *,
-    task_name: str | None = None,
-    contract_path: str | None = None,
-    leaf_id: str | None = None,
-    parent_task: str | None = None,
     on_unsaved: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_attach",
-        worktree_attach_tool(
-            config,
-            repo_id=repo_id,
-            task_name=task_name,
-            contract_path=contract_path,
-            leaf_id=leaf_id,
-            parent_task=parent_task,
-            on_unsaved=on_unsaved,
-        ),
+        worktree_attach_tool(config, task, on_unsaved=on_unsaved),
     )
 
 
-def worktree_status_payload(
-    config: McpRuntimeConfig,
-    repo_id: str,
-    *,
-    task_name: str | None = None,
-    contract_path: str | None = None,
-    leaf_id: str | None = None,
-    parent_task: str | None = None,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "worktree_status",
-        worktree_status_tool(
-            config,
-            repo_id=repo_id,
-            task_name=task_name,
-            contract_path=contract_path,
-            leaf_id=leaf_id,
-            parent_task=parent_task,
-        ),
-    )
+def worktree_status_payload(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
+    return _tool_payload("worktree_status", worktree_status_tool(config, task))
 
 
 def worktree_closeout_preview_payload(
     config: McpRuntimeConfig,
     contract_path: str,
-    code_commit_message: str,
-    *,
-    memory_commit_message: str = "",
-    ledger_commit_message: str = "",
+    messages: CloseoutCommitMessages,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_closeout_preview",
-        worktree_closeout_preview_tool(
-            config,
-            contract_path=contract_path,
-            code_commit_message=code_commit_message,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-        ),
+        worktree_closeout_preview_tool(config, contract_path, messages),
     )
 
 
 def worktree_closeout_apply_payload(
     config: McpRuntimeConfig,
     contract_path: str,
-    intent_note: str,
-    code_commit_message: str,
-    *,
-    memory_commit_message: str = "",
-    ledger_commit_message: str = "",
-    dry_run: bool = False,
+    messages: CloseoutCommitMessages,
+    approval: CloseoutApproval,
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_closeout_apply",
-        worktree_closeout_apply_tool(
-            config,
-            contract_path=contract_path,
-            intent_note=intent_note,
-            code_commit_message=code_commit_message,
-            memory_commit_message=memory_commit_message,
-            ledger_commit_message=ledger_commit_message,
-            dry_run=dry_run,
-        ),
+        worktree_closeout_apply_tool(config, contract_path, messages, approval),
     )
 
 
@@ -175,7 +104,7 @@ def worktree_integrate_payload(
     config: McpRuntimeConfig,
     contract_path: str,
     *,
-    strategy: str = "ff-only",
+    strategy: IntegrateStrategy = "ff-only",
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
@@ -186,6 +115,26 @@ def worktree_integrate_payload(
             contract_path=contract_path,
             strategy=strategy,
             ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def worktree_operation_cancel_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    operation_kind: str,
+    intent_note: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_operation_cancel",
+        worktree_operation_cancel_tool(
+            config,
+            contract_path=contract_path,
+            operation_kind=operation_kind,
+            intent_note=intent_note,
             dry_run=dry_run,
         ),
     )

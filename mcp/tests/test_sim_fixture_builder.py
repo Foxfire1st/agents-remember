@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,10 @@ def _load_builder():
     spec = importlib.util.spec_from_file_location("build_rich_sim", _BUILDER)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # Register before executing: the builder's dataclasses resolve their string annotations
+    # (PEP 563) through ``sys.modules[cls.__module__]``, which is absent for a module loaded
+    # straight off a path. This is the documented direct-from-path import recipe.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

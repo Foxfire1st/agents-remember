@@ -138,7 +138,9 @@ def cgc_visualize_command(
     return compose_plan(render, command_args, cwd=layout.coordination_root), render, command_args
 
 
-def cgc_visualize_dry_result(layout: CgcRuntimeLayout, command: dict[str, Any], url: str) -> dict[str, Any]:
+def cgc_visualize_dry_result(
+    layout: CgcRuntimeLayout, command: dict[str, Any], url: str
+) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "visualize",

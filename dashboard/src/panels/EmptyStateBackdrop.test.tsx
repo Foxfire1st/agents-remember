@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
@@ -72,5 +72,60 @@ describe("EmptyStateBackdrop (07b)", () => {
     );
     expect(queryByTestId("empty-backdrop")).toBeNull();
     expect(getByText("Reduced")).not.toBeNull();
+  });
+});
+
+// ── The kept-mounted DetailPanel empty state kept decoding while display:none ────
+// jsdom has no IntersectionObserver — a controllable mock drives the hide/show flips.
+const observed = new Map<Element, IntersectionObserverCallback>();
+class MockIntersectionObserver {
+  private readonly callback: IntersectionObserverCallback;
+  readonly root = null;
+  readonly rootMargin = "0px";
+  readonly thresholds = [0];
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+  }
+  observe = (element: Element) => observed.set(element, this.callback);
+  unobserve = (element: Element) => void observed.delete(element);
+  disconnect = () => observed.clear();
+  takeRecords = (): IntersectionObserverEntry[] => [];
+}
+
+function fireIntersection(element: Element, isIntersecting: boolean) {
+  act(() => {
+    observed.get(element)?.(
+      [{ isIntersecting, target: element } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
+  });
+}
+
+describe("EmptyStateBackdrop — video follows layer visibility (260721 C5)", () => {
+  it("pauses the boomerang video while its layer is hidden and resumes on re-show", () => {
+    observed.clear();
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = MockIntersectionObserver;
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play");
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause");
+    try {
+      const { container } = render(
+        <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4">x</EmptyStateBackdrop>,
+      );
+      const canvas = container.firstChild as Element; // the observed wrapper
+      expect(observed.has(canvas)).toBe(true);
+      expect(pauseSpy).not.toHaveBeenCalled(); // visible on mount → playing
+
+      fireIntersection(canvas, false); // the cockpit layer flips to display:none
+      expect(pauseSpy).toHaveBeenCalledTimes(1);
+
+      fireIntersection(canvas, true); // re-shown → resume
+      expect(playSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(pauseSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      observed.clear();
+      delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+    }
   });
 });

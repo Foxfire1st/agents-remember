@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
@@ -21,10 +22,20 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.benchmark_tools import CodexBenchmarkRun
+from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.application.provider_tools import (
+    GrepaiRepoScope,
+    GrepaiSearchQuery,
+    GrepaiTraceQuery,
+    ProviderQueryScope,
+)
+from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.controllers.runtime_install import RuntimeInstallRequest
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp import SERVER_VERSION
-from agents_remember.mcp.config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.mcp.tools import (
     PUBLIC_TOOLS,
@@ -53,6 +64,8 @@ from agents_remember.mcp.tools import core as core_tools
 from agents_remember.providers.settings import lifecycle_settings_from_config
 from test_config import settings_payload
 from test_provider_current_state import ready_status_payload
+
+DRY_RUN_SCOPE = ProviderQueryScope(dry_run=True)
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -140,7 +153,90 @@ class McpToolTests(unittest.TestCase):
             ]
             self.assertEqual(missing, [], f"tools missing a description: {missing}")
 
-    def test_context_packet_tool_delegates_to_controller(self) -> None:
+    def test_agent_control_surface_exposes_only_structural_addresses(self) -> None:
+        """L19 machine ban: models cannot request or retain private plane correlations."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            server = create_server(load_config(path))
+            tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+        self.assertTrue(
+            {
+                "dispatch_agent",
+                "message_parent",
+                "message_child",
+                "retire_child",
+                "rename_child",
+                "rename_self",
+                "lifecycle_gate",
+                "gate_decide",
+                "gate_list",
+            }.issubset(tools)
+        )
+        self.assertTrue(
+            {
+                "spawn_agent_session",
+                "attach_terminal_session_to_task",
+                "hosted_session_readiness",
+                "session_retire",
+                "session_rename",
+                "operator_inbox_post",
+                "operator_inbox_poll",
+                "operator_inbox_consume",
+                "operator_inbox_supersede",
+                "orchestration_nudge_manager",
+            }.isdisjoint(tools)
+        )
+
+        forbidden_fragments = (
+            "sessionid",
+            "lifecycleid",
+            "agentid",
+            "inboxrowid",
+            "adapterrequestid",
+            "vendorcorrelationid",
+            "gateid",
+        )
+        for name in (
+            "dispatch_agent",
+            "message_parent",
+            "message_child",
+            "retire_child",
+            "rename_child",
+            "rename_self",
+            "lifecycle_gate",
+            "gate_decide",
+            "gate_list",
+        ):
+            schema_text = json.dumps(tools[name].inputSchema).lower().replace("_", "")
+            with self.subTest(tool=name):
+                self.assertFalse(
+                    any(fragment in schema_text for fragment in forbidden_fragments),
+                    schema_text,
+                )
+        message_schema = json.dumps(tools["message_parent"].inputSchema)
+        self.assertNotIn("dispatch-brief", message_schema)
+        self.assertNotIn("state-signal", message_schema)
+
+    def test_closeout_tool_descriptions_pin_strict_quality_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            server = create_server(config)
+            tools = {tool.name: tool.description or "" for tool in asyncio.run(server.list_tools())}
+
+            self.assertIn("mandatory CRAP enforcement", tools["worktree_closeout_preview"])
+            self.assertIn("before the code commit", tools["worktree_closeout_preview"])
+            self.assertIn("mandatory CRAP enforcement", tools["worktree_closeout_apply"])
+            self.assertIn("before any code", tools["worktree_closeout_apply"])
+            self.assertIn("approval precede apply", tools["worktree_closeout_apply"])
+
+    def test_context_packet_tool_delegates_to_application(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
@@ -193,7 +289,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.provider_tools.lifecycle_service.run_watchers_lifecycle",
+                "agents_remember.providers.watcher_service.run_watchers_lifecycle",
                 return_value=ready_status_payload(root),
             ) as run_watchers:
                 payload = provider_watchers_payload(config, action="status")
@@ -277,6 +373,7 @@ class McpToolTests(unittest.TestCase):
             "resolve_context",
             "drift_check",
             "memory_quality_check",
+            "citation_fix",
             "route_index_refresh",
             "memory_init",
             "skills_install",
@@ -305,12 +402,14 @@ class McpToolTests(unittest.TestCase):
             "codex_benchmark_prepare",
             "codex_benchmark_run",
             "lifecycle_gate",
-            "operator_inbox_post",
-            "operator_inbox_poll",
-            "operator_inbox_consume",
-            "attach_terminal_session_to_leaf",
-            "spawn_agent_session",
-            "hosted_session_readiness",
+            "gate_decide",
+            "gate_list",
+            "dispatch_agent",
+            "retire_child",
+            "rename_child",
+            "rename_self",
+            "message_parent",
+            "message_child",
         }
         self.assertTrue(expected.issubset(set(PUBLIC_TOOLS)))
         for retired in (
@@ -318,6 +417,14 @@ class McpToolTests(unittest.TestCase):
             "gate_create",
             "gate_wait",
             "gate_response_wait",
+            "operator_inbox_post",
+            "operator_inbox_poll",
+            "operator_inbox_consume",
+            "attach_terminal_session_to_task",
+            "spawn_agent_session",
+            "hosted_session_readiness",
+            "session_retire",
+            "session_rename",
         ):
             self.assertNotIn(retired, PUBLIC_TOOLS)
         self.assertNotIn("cgc_query", PUBLIC_TOOLS)
@@ -332,7 +439,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.benchmark_tools.benchmark_runner.resolve_codex_executable",
+                "agents_remember.application.benchmark_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
@@ -349,14 +456,14 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["codexExecutionPolicy"]["benchmarkOnly"])
 
             with patch(
-                "agents_remember.controllers.benchmark_tools.benchmark_runner.resolve_codex_executable",
+                "agents_remember.application.benchmark_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
             ):
                 danger_payload = codex_benchmark_run_payload(
                     config,
-                    codex_sandbox="danger-full-access",
+                    run=CodexBenchmarkRun(codex_sandbox="danger-full-access"),
                 )
 
             self.assertEqual(
@@ -394,15 +501,15 @@ class McpToolTests(unittest.TestCase):
 
             with (
                 patch(
-                    "agents_remember.controllers.memory_tools.baseline.baseline_status",
+                    "agents_remember.application.memory_tools.baseline.baseline_status",
                     return_value={"state": "ready"},
                 ),
                 patch(
-                    "agents_remember.controllers.memory_tools.carryover.build_plan_for_request",
+                    "agents_remember.application.memory_tools.carryover.build_plan_for_request",
                     return_value={"state": "would-carryover"},
                 ),
                 patch(
-                    "agents_remember.controllers.benchmark_tools.benchmark_runner.prepare_benchmarks",
+                    "agents_remember.application.benchmark_tools.benchmark_runner.prepare_benchmarks",
                     return_value={
                         "ok": True,
                         "operation": "codex_benchmark_prepare",
@@ -414,13 +521,15 @@ class McpToolTests(unittest.TestCase):
                     memory_baseline_status_payload(config, "agents-remember"),
                     memory_carryover_plan_payload(
                         config,
-                        "agents-remember",
-                        source_memory=(
-                            root / "ar-coordination" / "memory-repos" / "branch-memory"
-                        ).as_posix(),
-                        official_code_ref="main",
-                        source_code_ref="feature",
-                        old_base="base",
+                        CarryoverSelection(
+                            repo_id="agents-remember",
+                            source_memory=(
+                                root / "ar-coordination" / "memory-repos" / "branch-memory"
+                            ).as_posix(),
+                            official_code_ref="main",
+                            source_code_ref="feature",
+                            old_base="base",
+                        ),
                     ),
                     codex_benchmark_prepare_payload(config),
                 ]
@@ -439,7 +548,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.benchmark_tools.benchmark_runner.prepare_benchmarks",
+                "agents_remember.application.benchmark_tools.benchmark_runner.prepare_benchmarks",
                 return_value={
                     "ok": True,
                     "operation": "codex_benchmark_prepare",
@@ -569,7 +678,7 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember",
                             "resolve_context",
-                            dry_run=True,
+                            scope=DRY_RUN_SCOPE,
                         ),
                         ["find", "name", "resolve_context"],
                     ),
@@ -579,7 +688,7 @@ class McpToolTests(unittest.TestCase):
                             "agents-remember",
                             "resolve_context",
                             file="mcp/src/agents_remember/mcp/tools.py",
-                            dry_run=True,
+                            scope=DRY_RUN_SCOPE,
                         ),
                         [
                             "analyze",
@@ -594,7 +703,7 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember",
                             "resolve_context",
-                            dry_run=True,
+                            scope=DRY_RUN_SCOPE,
                         ),
                         ["analyze", "calls", "resolve_context"],
                     ),
@@ -603,7 +712,7 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember",
                             "agents_remember.mcp",
-                            dry_run=True,
+                            scope=DRY_RUN_SCOPE,
                         ),
                         ["analyze", "deps", "agents_remember.mcp"],
                     ),
@@ -612,12 +721,12 @@ class McpToolTests(unittest.TestCase):
                             config,
                             "agents-remember",
                             function="resolve_context",
-                            dry_run=True,
+                            scope=DRY_RUN_SCOPE,
                         ),
                         ["analyze", "complexity", "resolve_context"],
                     ),
                     (
-                        cgc_complexity_payload(config, "agents-remember", dry_run=True),
+                        cgc_complexity_payload(config, "agents-remember", scope=DRY_RUN_SCOPE),
                         ["analyze", "complexity"],
                     ),
                 ]
@@ -657,16 +766,14 @@ class McpToolTests(unittest.TestCase):
 
             workspace_payload = grepai_search_payload(
                 config,
-                "provider lifecycle",
-                dry_run=True,
+                GrepaiSearchQuery(query="provider lifecycle"),
+                scope=DRY_RUN_SCOPE,
             )
             scoped_payload = grepai_search_payload(
                 config,
-                "provider lifecycle",
-                repo_ids=["agents-remember", "other-repo"],
-                limit=5,
-                output_format="toon",
-                dry_run=True,
+                GrepaiSearchQuery(query="provider lifecycle", limit=5, output_format="toon"),
+                repos=GrepaiRepoScope(repo_ids=["agents-remember", "other-repo"]),
+                scope=DRY_RUN_SCOPE,
             )
             workspace = grepai_workspace(config)
 
@@ -719,10 +826,16 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             configured = grepai_search_payload(
-                config, "automaton", repo_ids=["Cobalt"], dry_run=True
+                config,
+                GrepaiSearchQuery(query="automaton"),
+                repos=GrepaiRepoScope(repo_ids=["Cobalt"]),
+                scope=DRY_RUN_SCOPE,
             )
             lowercased = grepai_search_payload(
-                config, "automaton", repo_ids=["cobalt"], dry_run=True
+                config,
+                GrepaiSearchQuery(query="automaton"),
+                repos=GrepaiRepoScope(repo_ids=["cobalt"]),
+                scope=DRY_RUN_SCOPE,
             )
 
         for payload in (configured, lowercased):
@@ -740,13 +853,26 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with self.assertRaisesRegex(ValueError, "unknown repo_ids"):
-                grepai_search_payload(config, "provider lifecycle", repo_ids=["unknown-repo"])
+                grepai_search_payload(
+                    config,
+                    GrepaiSearchQuery(query="provider lifecycle"),
+                    repos=GrepaiRepoScope(repo_ids=["unknown-repo"]),
+                )
             with self.assertRaisesRegex(ValueError, "repo_ids is required"):
-                grepai_search_payload(config, "provider lifecycle", all_repos=False)
+                grepai_search_payload(
+                    config,
+                    GrepaiSearchQuery(query="provider lifecycle"),
+                    repos=GrepaiRepoScope(all_repos=False),
+                )
             with self.assertRaisesRegex(ValueError, "trace_action"):
-                grepai_trace_payload(config, "neighbors", "resolve_context")
+                grepai_trace_payload(
+                    config, GrepaiTraceQuery(trace_action="neighbors", symbol="resolve_context")
+                )
             with self.assertRaisesRegex(ValueError, "depth"):
-                grepai_trace_payload(config, "callers", "resolve_context", depth=2)
+                grepai_trace_payload(
+                    config,
+                    GrepaiTraceQuery(trace_action="callers", symbol="resolve_context", depth=2),
+                )
 
     def test_grepai_trace_builds_explicit_action_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -758,11 +884,9 @@ class McpToolTests(unittest.TestCase):
 
             payload = grepai_trace_payload(
                 config,
-                "graph",
-                "resolve_context",
-                repo_ids=["agents-remember"],
-                depth=3,
-                dry_run=True,
+                GrepaiTraceQuery(trace_action="graph", symbol="resolve_context", depth=3),
+                repos=GrepaiRepoScope(repo_ids=["agents-remember"]),
+                scope=DRY_RUN_SCOPE,
             )
             workspace = grepai_workspace(config)
 
@@ -787,6 +911,7 @@ class McpToolTests(unittest.TestCase):
 REAL_MCP_CONFIG = os.environ.get("AGENTS_REMEMBER_REAL_MCP_CONFIG")
 
 
+@pytest.mark.agents_remember_real_mcp_config
 @unittest.skipUnless(
     REAL_MCP_CONFIG,
     "set AGENTS_REMEMBER_REAL_MCP_CONFIG to run real MCP integration tests",
@@ -805,14 +930,21 @@ class RealMcpIntegrationTests(unittest.TestCase):
             )
         )
 
+        # The workspace name is derived from the settings file, not written here. It
+        # used to be the literal "agents-remember-memory", which stopped being anyone's
+        # workspace once provider instances became scoped -- `scoped_name` appends the
+        # instance id, so the real name depends on the config the server was handed.
+        # Nothing ran this suite, so the stale literal sat here unnoticed; asserting
+        # against the same derivation the server uses is what keeps it a real check.
         self.assertTrue(payload["ok"], payload)
+        expected_workspace = grepai_workspace(load_config(Path(str(REAL_MCP_CONFIG))))
         self.assertEqual(
             command_after(planned_command(payload), "grepai"),
             [
                 "search",
                 "provider lifecycle",
                 "--workspace",
-                "agents-remember-memory",
+                expected_workspace,
                 "--limit",
                 "1",
                 "--json",

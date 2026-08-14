@@ -13,13 +13,20 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _global_state import preserve_owned_mutable_state
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
-from agents_remember.mcp.config import DashboardSettings, McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import (
+    DashboardSettings,
+    McpRuntimeConfig,
+)
 from agents_remember.serving import daemon
+from agents_remember.serving.cadence import ProjectionCadence
+from agents_remember.serving.daemon import DaemonEndpoint
 
 
 def make_config(root: Path, *, auto_start: bool = False, port: int = 8765) -> McpRuntimeConfig:
@@ -123,15 +130,14 @@ class ProbeTests(unittest.TestCase):
 
 def _spawn_sleeper(*, ignore_term: bool) -> subprocess.Popen[bytes]:
     handler = "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else ""
-    code = (
-        "import signal, sys, time\n"
-        f"{handler}"
-        "print('ready', flush=True)\n"
-        "time.sleep(60)\n"
-    )
+    code = f"import signal, sys, time\n{handler}print('ready', flush=True)\ntime.sleep(60)\n"
     process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE)
     assert process.stdout is not None
     process.stdout.readline()  # handler installed before anyone signals
+    # The pipe exists only for that handshake, and the child never writes again. Closing it
+    # here is what ends its life: the caller keeps the Popen for its pid, so an open read end
+    # would otherwise be finalised by GC rather than by the code that opened it.
+    process.stdout.close()
     return process
 
 
@@ -185,9 +191,13 @@ class SpawnTests(unittest.TestCase):
             fake = mock.Mock()
             fake.pid = 777
             with mock.patch.object(daemon.subprocess, "Popen", return_value=fake) as popen:
-                state = daemon.spawn(config, host="127.0.0.1", port=9100, version="9.9.9")
+                state = daemon.spawn(
+                    config, DaemonEndpoint(host="127.0.0.1", port=9100, version="9.9.9")
+                )
             command = popen.call_args.args[0]
-            self.assertEqual(command[:4], [sys.executable, "-m", "agents_remember.cli", "dashboard"])
+            self.assertEqual(
+                command[:4], [sys.executable, "-m", "agents_remember.cli", "dashboard"]
+            )
             self.assertIn("--config", command)
             self.assertEqual(command[command.index("--config") + 1], str(config.config_path))
             self.assertEqual(command[command.index("--port") + 1], "9100")
@@ -205,7 +215,11 @@ class SpawnTests(unittest.TestCase):
             fake = mock.Mock()
             fake.pid = 779
             with mock.patch.object(daemon.subprocess, "Popen", return_value=fake) as popen:
-                daemon.spawn(config, host="127.0.0.1", port=9100, version="9.9.9", heartbeat=20.0)
+                daemon.spawn(
+                    config,
+                    DaemonEndpoint(host="127.0.0.1", port=9100, version="9.9.9"),
+                    cadence=ProjectionCadence(heartbeat=20.0),
+                )
             command = popen.call_args.args[0]
             self.assertEqual(command[command.index("--heartbeat") + 1], "20.0")
             self.assertIn("--no-access-log", command)
@@ -221,7 +235,7 @@ class SpawnTests(unittest.TestCase):
             fake = mock.Mock()
             fake.pid = 778
             with mock.patch.object(daemon.subprocess, "Popen", return_value=fake):
-                daemon.spawn(config, host="127.0.0.1", port=9100, version="9.9.9")
+                daemon.spawn(config, DaemonEndpoint(host="127.0.0.1", port=9100, version="9.9.9"))
             rotated = directory / "dashboard.log.1"
             self.assertEqual(rotated.read_text(encoding="utf-8"), "old run\n")
             daemon._spawned.remove(fake)
@@ -241,11 +255,15 @@ class EnsureTests(unittest.TestCase):
             mock.patch.object(daemon, "_wait_ready", return_value=True),
             mock.patch.object(daemon, "stop") as stop,
         ):
-            result = daemon.ensure(self.config, host="127.0.0.1", port=9000, version="1.0")
+            result = daemon.ensure(
+                self.config, DaemonEndpoint(host="127.0.0.1", port=9000, version="1.0")
+            )
         self.assertEqual(result.action, "started")
         self.assertEqual(result.state, spawned)
         spawn.assert_called_once_with(
-            self.config, host="127.0.0.1", port=9000, version="1.0", interval=1.0, heartbeat=None
+            self.config,
+            DaemonEndpoint(host="127.0.0.1", port=9000, version="1.0"),
+            cadence=ProjectionCadence(interval=1.0, heartbeat=None),
         )
         stop.assert_not_called()
 
@@ -255,7 +273,9 @@ class EnsureTests(unittest.TestCase):
             mock.patch.object(daemon, "probe", return_value=(current, True)),
             mock.patch.object(daemon, "spawn") as spawn,
         ):
-            result = daemon.ensure(self.config, host="127.0.0.1", port=9000, version="1.0")
+            result = daemon.ensure(
+                self.config, DaemonEndpoint(host="127.0.0.1", port=9000, version="1.0")
+            )
         self.assertEqual(result.action, "adopted")
         self.assertEqual(result.state, current)
         spawn.assert_not_called()
@@ -269,7 +289,9 @@ class EnsureTests(unittest.TestCase):
             mock.patch.object(daemon, "spawn", return_value=fresh) as spawn,
             mock.patch.object(daemon, "_wait_ready", return_value=True),
         ):
-            result = daemon.ensure(self.config, host="127.0.0.1", port=9000, version="2.0")
+            result = daemon.ensure(
+                self.config, DaemonEndpoint(host="127.0.0.1", port=9000, version="2.0")
+            )
         self.assertEqual(result.action, "restarted")
         self.assertIn("version 1.0 -> 2.0", result.detail)
         stop.assert_called_once()
@@ -284,13 +306,17 @@ class EnsureTests(unittest.TestCase):
             mock.patch.object(daemon, "spawn", return_value=fresh),
             mock.patch.object(daemon, "_wait_ready", return_value=True),
         ):
-            result = daemon.ensure(self.config, host="127.0.0.1", port=9001, version="1.0")
+            result = daemon.ensure(
+                self.config, DaemonEndpoint(host="127.0.0.1", port=9001, version="1.0")
+            )
         self.assertEqual(result.action, "restarted")
         self.assertIn("port 9000 -> 9001", result.detail)
         stop.assert_called_once()
 
     def test_child_dying_during_startup_fails_and_clears_state(self) -> None:
-        def fake_spawn(config: McpRuntimeConfig, **kwargs: object) -> daemon.DaemonState:
+        def fake_spawn(
+            config: McpRuntimeConfig, _endpoint: object, **kwargs: object
+        ) -> daemon.DaemonState:
             state = make_state(pid=407)
             daemon.write_state(daemon.daemon_dir(config), state)
             return state
@@ -301,13 +327,17 @@ class EnsureTests(unittest.TestCase):
             mock.patch.object(daemon, "_pid_alive", return_value=False),
             mock.patch.object(daemon, "_log_tail", return_value="boom"),
         ):
-            result = daemon.ensure(self.config, host="127.0.0.1", port=8765, version="1.0")
+            result = daemon.ensure(
+                self.config, DaemonEndpoint(host="127.0.0.1", port=8765, version="1.0")
+            )
         self.assertEqual(result.action, "failed")
         self.assertIn("boom", result.detail)
         self.assertIsNone(daemon.read_state(self.directory))
 
     def test_slow_start_fails_but_keeps_state(self) -> None:
-        def fake_spawn(config: McpRuntimeConfig, **kwargs: object) -> daemon.DaemonState:
+        def fake_spawn(
+            config: McpRuntimeConfig, _endpoint: object, **kwargs: object
+        ) -> daemon.DaemonState:
             state = make_state(pid=408)
             daemon.write_state(daemon.daemon_dir(config), state)
             return state
@@ -317,7 +347,9 @@ class EnsureTests(unittest.TestCase):
             mock.patch.object(daemon, "_wait_ready", return_value=False),
             mock.patch.object(daemon, "_pid_alive", return_value=True),
         ):
-            result = daemon.ensure(self.config, host="127.0.0.1", port=8765, version="1.0")
+            result = daemon.ensure(
+                self.config, DaemonEndpoint(host="127.0.0.1", port=8765, version="1.0")
+            )
         self.assertEqual(result.action, "failed")
         self.assertIn("may still be starting", result.detail)
         self.assertIsNotNone(daemon.read_state(self.directory))
@@ -328,7 +360,7 @@ class EnsureTests(unittest.TestCase):
             fcntl.flock(held, fcntl.LOCK_EX)
             try:
                 with mock.patch.object(daemon, "spawn") as spawn:
-                    result = daemon.ensure(self.config, host="127.0.0.1", port=8765)
+                    result = daemon.ensure(self.config, DaemonEndpoint(host="127.0.0.1", port=8765))
             finally:
                 fcntl.flock(held, fcntl.LOCK_UN)
         self.assertEqual(result.action, "lock-held")
@@ -356,7 +388,9 @@ class AutostartTests(unittest.TestCase):
                 self.assertIsNotNone(worker)
                 assert worker is not None
                 worker.join(timeout=10)
-            ensure.assert_called_once_with(config, host="127.0.0.1", port=9321)
+            ensure.assert_called_once_with(
+                config, daemon.DaemonEndpoint(host="127.0.0.1", port=9321)
+            )
             self.assertIn("dashboard autostart: adopted", stderr.getvalue())
 
     def test_autostart_swallows_ensure_failures(self) -> None:
@@ -389,14 +423,14 @@ def _write_settings(root: Path, *, dashboard: dict | None = None) -> Path:
 
 class CliDaemonDispatchTests(unittest.TestCase):
     def _run(self, root: Path, *flags: str) -> tuple[int, str]:
-        settings = _write_settings(root) if not (root / "settings.json").exists() else (
-            root / "settings.json"
+        settings = (
+            _write_settings(root)
+            if not (root / "settings.json").exists()
+            else (root / "settings.json")
         )
-        args = cli_main.build_parser().parse_args(
-            ["dashboard", "--config", str(settings), *flags]
-        )
+        args = cli_main.build_parser().parse_args(["dashboard", "--config", str(settings), *flags])
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        with contextlib.redirect_stdout(stdout), preserve_owned_mutable_state():
             code = cli_dashboard.run(args)
         return code, stdout.getvalue()
 
@@ -441,7 +475,7 @@ class CliDaemonDispatchTests(unittest.TestCase):
                 code, out = self._run(root, "--daemon")
         self.assertEqual(code, 0)
         self.assertIn("started", out)
-        self.assertEqual(ensure.call_args.kwargs["port"], 9555)
+        self.assertEqual(ensure.call_args.args[1].port, 9555)
 
     def test_daemon_explicit_port_wins(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -451,7 +485,7 @@ class CliDaemonDispatchTests(unittest.TestCase):
             with mock.patch.object(daemon, "ensure", return_value=outcome) as ensure:
                 code, _ = self._run(root, "--daemon", "--port", "9666")
         self.assertEqual(code, 0)
-        self.assertEqual(ensure.call_args.kwargs["port"], 9666)
+        self.assertEqual(ensure.call_args.args[1].port, 9666)
 
     def test_daemon_failure_exits_nonzero(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

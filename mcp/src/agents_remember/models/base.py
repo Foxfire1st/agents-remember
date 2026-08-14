@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,7 +23,7 @@ class NextStep(StrictResponseModel):
     """The single computed next move for the active lifecycle (task 27).
 
     Attached to every in-lifecycle tool response at the ``_tool_payload`` choke
-    point by the next-step engine (``mcp.tools.next_step``). It mirrors the
+    point by the next-step engine (``application.next_step``). It mirrors the
     worktree ``guidance.lifecycle_guidance`` shape so operational hints and
     gate-raise hints share one vocabulary: a gate junction is simply
     ``nextTool="lifecycle_gate"`` with ``nextArgs={"kind": ...}``. Strict, so it
@@ -49,6 +49,15 @@ class ResponseModel(StrictResponseModel):
     # choke point for every response emitted inside an active lifecycle. Optional
     # (``exclude_none``) so lifecycle-less calls stay unchanged.
     nextStep: NextStep | None = None
+    # The stale-agent-notifier banner (260707-HFX2-L2 R5), set at the same choke point when
+    # the agent-notifier's heartbeat row has gone quiet past the cutoff. Declared here for
+    # the same reason ``nextStep`` is: a key the choke point writes is a key of THIS
+    # envelope, so the emitted object stays inside its own contract instead of being
+    # stamped onto an already-dumped dict. Optional -- a live agent-notifier emits nothing.
+    agentNotifierBanner: str | None = None
+    # Legacy alias emitted alongside the current key during the rename window; the choke
+    # point writes both, and consumers may read either. Removed with the window.
+    supervisorBanner: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -69,6 +78,12 @@ class FlexibleResponseEnvelope(FlexibleResponseModel):
     tokenCountExact: bool = False
     # Same lifecycle next-step hint as the strict envelope (task 27).
     nextStep: NextStep | None = None
+    # Same stale-agent-notifier banner as the strict envelope. ``extra="allow"`` would have
+    # accepted it undeclared, which is exactly the hole: a tolerated-drift surface tolerates
+    # the PROVIDER's fields, not ours. What this package writes, this package declares.
+    agentNotifierBanner: str | None = None
+    # Legacy alias during the rename window (same value as ``agentNotifierBanner``).
+    supervisorBanner: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -78,3 +93,15 @@ class FlexibleToolResponse(FlexibleResponseEnvelope):
     """Flexible operation-bearing response for raw/detail tool surfaces."""
 
     operation: str
+
+
+ResponseEnvelope: TypeAlias = ResponseModel | FlexibleResponseEnvelope
+"""The two envelope families every registered tool response belongs to.
+
+The strict/flexible split is about ``extra``, not about the envelope: both families
+carry the same ``ok``/``tokens``/``nextStep``/``agentNotifierBanner`` header (plus the
+legacy ``supervisorBanner`` alias during the rename window). Naming the
+union lets ``models.tool_registry`` say what it holds, which is what lets
+``_tool_payload`` set the two choke-point fields on the validated response *before*
+dumping it rather than writing them into the dump afterwards.
+"""

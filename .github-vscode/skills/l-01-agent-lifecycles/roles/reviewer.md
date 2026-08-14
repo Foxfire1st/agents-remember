@@ -7,15 +7,19 @@
 
 ## What This Seat Is
 
-**Short-lived, spawned at exactly two adversarial seams — and as any three-party loop's
-reviewer seat (below)** (seams: developer decision 2026-07-03; loop reuse: ruling 2026-07-06):
+**Short-lived, spawned for mandatory leaf route review, at exactly two adversarial seams, and as
+any three-party loop's reviewer seat (below)** (seams: developer decision 2026-07-03; loop reuse:
+ruling 2026-07-06):
 
 1. **Master-exit** — before a **manager** hands its completed master integration branch to the
    **orchestrator**.
 2. **Super-exit** — before the **orchestrator** hands the accumulated super integration branch to the
    **architect** for the developer review.
 
-Leaf-level review is the manager's own duty — **not** an adversarial seam. At the seams the
+Leaf-level task completion remains the manager's duty, but every code-change session also has a
+mandatory independent route review before curator handoff. That leaf review is not a delegated
+seam decision: this reviewer chairs the review, partitions the affected major routes, fans out one
+independent reviewer per route, and returns evidence to the manager. At the adversarial seams the
 reviewer reviews an **accumulated change set**, not a single leaf.
 
 **The same role file is also every three-party loop's reviewer seat** (developer ruling
@@ -63,6 +67,7 @@ lenses owed; default 2). Which catalogs bind:
 | --- | --- |
 | master-exit seam | `code-seam` · `onboarding-memory` · `report-verification` (+ `doctrine` when doctrine/skill/docs files are in the change set) |
 | super-exit seam | `code-seam` · `doctrine` · `onboarding-memory` · `report-verification` (wholesale) |
+| leaf code-change review | `code-seam` · `report-verification` (+ `doctrine` or `onboarding-memory` when those surfaces ride) |
 | leaf full-loop review | `report-verification` + `code-seam` and/or `doctrine` per the change set + `onboarding-memory` when onboarding rides |
 | plan review (orchestration task) | `plan-review` · `report-verification` |
 
@@ -75,13 +80,21 @@ graduates into a gate.)
 
 ## The Three Review Lenses
 
-Fan out sub-agents (each writing a durable report) across three lenses. The posture is always
+Fan out sub-agents (each writing a durable report) across three lenses. For a leaf code-change
+review, first partition the change by material major route and assign one independent reviewer
+sub-agent to every route; each route report must cover its changed files plus surrounding owners,
+tests, and side effects. The final verdict carries a route-coverage table so no route disappears
+inside a generic whole-diff review. The posture is always
 **refute-or-confirm**: try to disprove the change set, keep only findings that survive that attempt,
 and make every finding traceable to a durable evidence file.
 
 1. **Completion vs task docs** — every requirement/step addressed; deltas justified in decision logs.
    (`../templates/impact-analysis.md` for the surface swept.)
-2. **Code quality** — the resolved `system/tools.md` suite (lint · typecheck · tests · complexity) and
+2. **Code quality** — the resolved `system/tools.md` suite (lint · typecheck · tests · complexity),
+   **guideline adherence** (the change set's added lines read against the memory layer's
+   `system/coding-guidelines.md`: file/function budgets, responsibility and anti-pattern rules,
+   source-comment scope, typed-boundary (DTO) rules, D1/D2/D3 — the wrapper proves none of this,
+   so this read is the only place adherence is independently verified), and
    regressions **vs the past** (route indexes, cgc, grepai — the "fixed one, broke two" surface).
 3. **Onboarding-vs-code** — changed files' sidecars updated in the same pass · drift clean · route
    overviews current. This is the paired `read_ar_files` + `memory_quality_check` + `drift_check`
@@ -137,7 +150,8 @@ integrated on super.
 ## Duties
 
 1. **Scope** the review to the seam or loop (diff · task docs · rubric · the bound criteria
-   catalogs).
+   catalogs). For code changes, enumerate every materially affected major route and name its
+   independent route reviewer before reviewing.
 2. **Run the standing catalogs + the three lenses**, fanning out sub-agents that write durable
    reports; adopt the refute-or-confirm posture — a finding that cannot survive an attempt to
    refute it is not a finding. Owe the exploratory mandate on top of the catalog.
@@ -145,15 +159,19 @@ integrated on super.
    an explicit **pass / block** recommendation, durable under the series `notes/reports/` directory —
    including the per-criterion catalog results and any proposed catalog amendments (the promotion
    ratchet).
-4. **Attach the verdict as judge evidence** on the handover gate — the decider decides; the reviewer
+4. **For leaf route review, hand the owner the complete route table** so it can call
+   `task_doc.record_route_review`; never invent or carry a candidate-tree hash yourself. The plane
+   binds the current tree only after all referenced report files exist.
+5. **Attach the verdict as judge evidence** on the handover gate — the decider decides; the reviewer
    does not. (A loop review's verdict goes to the loop owner the same way: evidence, never a
    decision.)
-5. **Decompose a blocking verdict into fix leaves** — concrete, **leaf-shaped** findings the owning
+6. **Decompose a blocking verdict into fix leaves** — concrete, **leaf-shaped** findings the owning
    manager (master-exit) or orchestrator (super-exit) can dispatch. A block is **never prose-only**; if
    it cannot be named as fix leaves, it is not yet a block.
-6. **Serve delta-verifies when resumed:** confirm the landed residuals of a round you already
+7. **Serve delta-verifies when resumed:** confirm the landed residuals of a round you already
    reviewed via the follow-up channel, appending the delta section to your own verdict artifact —
-   never a fresh full round in disguise.
+   never a fresh full round in disguise. Reuse the same route reviewers; add a reviewer only when
+   the repair opens a new major route.
 
 ## Artifact Obligations
 
@@ -165,8 +183,9 @@ integrated on super.
 
 ## Comms Protocol
 
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — receive the seam's change-set context; post
-  the verdict reference to the seam's decider.
+- **Structural parent message** (`message_parent`) — ask for missing review context or report a
+  blocking routing problem. The verdict artifact plus terminal/finalizer truth is the completion
+  signal; do not author a second completion row or carry the decider's runtime identity.
 - **Stdin push** — not a driver here; the reviewer is short-lived and reports through its verdict.
 - **Escalation** — the reviewer does not escalate; it **reports a verdict**. If the change set is
   un-reviewable (missing diff, missing task docs), that itself is a **blocking finding** in the verdict,

@@ -2,6 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../data/store";
+import { observerEvent } from "../test/fixtures/wire";
 import type { ObserverEvent } from "../types/event";
 import type {
   Analytics,
@@ -44,15 +45,13 @@ beforeEach(() =>
   }),
 );
 
-function ev(partial: Partial<ObserverEvent> & { kind: string }): ObserverEvent {
-  return {
-    schema: "ar-observer-event/v1",
-    id: partial.id ?? `e-${partial.kind}-${Math.random().toString(36).slice(2)}`,
+function ev(partial: Partial<ObserverEvent> & Pick<ObserverEvent, "kind">): ObserverEvent {
+  return observerEvent({
+    id: `e-${partial.kind}-${Math.random().toString(36).slice(2)}`,
     ts: "2026-06-23T10:11:12+00:00",
-    trust: "observed",
     actor: "model",
     ...partial,
-  } as ObserverEvent;
+  });
 }
 
 function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): LifecycleProjection {
@@ -65,6 +64,7 @@ function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): Life
     lastEventTs: "2026-06-23T10:11:12+00:00",
     phase: "build",
     startedAt: "2026-06-23T10:00:00+00:00",
+    stateEnteredAt: "2026-06-23T10:00:00+00:00",
     state: "running",
     tokenSeries: [],
     tokens: 0,
@@ -101,6 +101,8 @@ function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNo
     codeExamples: [],
     decisions: [],
     docPath,
+    bodyRevision: "rev-fixture",
+    createdAt: "2026-06-23T10:00:00+00:00",
     id: "20",
     kind: "subTask",
     objective: "",
@@ -115,15 +117,18 @@ function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNo
     stepsTotal: 21,
     subTasks: [],
     title: "Event River Readable Activity Feed",
+    orchestrates: [],
     ...rest,
   };
 }
 
 function analyticsWithTaskDocuments(taskDocuments: TaskDocNode[]): Analytics {
   return {
+    agentPickups: [],
     attentionQueue: [],
     driftSnapshots: [],
     engineProcesses: [],
+    expectationRows: [],
     ledgers: [],
     routeCoverage: [],
     series: [],

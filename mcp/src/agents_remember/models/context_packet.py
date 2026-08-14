@@ -6,19 +6,24 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from agents_remember.kernel.git_facts import RepoState
+from agents_remember.kernel.git_freshness import FreshnessState
 from agents_remember.models.base import StrictResponseModel, ToolResponse
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
-from agents_remember.models.worktree import WorktreeSummary
+from agents_remember.models.worktree import MemoryMode, WorktreeSummary
 
 
 class RepoSummary(StrictResponseModel):
+    # `RepoState` comes from `kernel.git_facts`, the module that decides it: this packet is
+    # assembled by `RepoSummary.model_validate(git_facts_to_packet(...))`, an untyped dict, so a
+    # retyped copy here would let a new degrade path reach pydantic before it reaches a reviewer.
     id: str
     root: str
     branch: str
     head: str
     dirty: bool
-    state: Literal["available", "detached", "unavailable"]
+    state: RepoState
     error: str | None = None
 
 
@@ -72,20 +77,25 @@ class CrossRepoSummary(StrictResponseModel):
 
 
 class MemorySummary(StrictResponseModel):
-    mode: Literal["internal", "external"]
+    # `CoordinationContext.memory_mode` -- which is `WorktreeContract.memory_mode` whenever a
+    # contract is in scope -- has always been able to be `disabled`, and `WorktreeSummary`
+    # below in the same response declares it. This field was the only copy that did not, so
+    # one packet could pass `memoryMode="disabled"` and fail `memory.mode` on the same value.
+    mode: MemoryMode
     storage: StorageSummary
     crossRepo: CrossRepoSummary = Field(default_factory=CrossRepoSummary)
 
 
 class BranchFreshness(StrictResponseModel):
+    # The wire face of `kernel.git_freshness.BranchFreshness`, whose `FreshnessState` this
+    # imports: `freshness_to_packet` hands over a plain dict, and half that vocabulary exists
+    # only on degrade paths that a hand-copied Literal here would be the last to hear about.
     branch: str
     upstream: str | None = None
     fetched: bool = False
     ahead: int | None = None
     behind: int | None = None
-    state: Literal[
-        "current", "behind", "ahead", "diverged", "no-upstream", "no-branch", "unknown", "unavailable"
-    ]
+    state: FreshnessState
     error: str | None = None
 
 

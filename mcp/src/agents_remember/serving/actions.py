@@ -119,7 +119,13 @@ class ActionOutcome:
 
 @dataclass(frozen=True)
 class ActionEvaluationContext:
-    """Shared request context that all pure action evaluators echo into intents."""
+    """Shared request context that all pure action evaluators echo into intents.
+
+    Who asked, when, and every identifier the specific verb needs to name its object -- the gate,
+    the note, the attention item, its kind. Each evaluator reads a different subset, which is
+    exactly why they arrive as one request context instead of six optional parameters repeated at
+    every layer.
+    """
 
     actor: str
     now: str
@@ -129,9 +135,7 @@ class ActionEvaluationContext:
     kind: str | None = None
 
 
-def _find_actions(
-    projection: WorkspaceProjection, target: str
-) -> list[ActionAvailability] | None:
+def _find_actions(projection: WorkspaceProjection, target: str) -> list[ActionAvailability] | None:
     """The target node's precomputed actions (lifecycle by id, enclosure by name), or None."""
     for lifecycle in projection.lifecycles:
         if lifecycle.id == target:
@@ -146,13 +150,7 @@ def evaluate_action(
     projection: WorkspaceProjection,
     action: str,
     target: str | None,
-    *,
-    actor: str,
-    now: str,
-    gate_id: str | None = None,
-    note: str | None = None,
-    item_id: str | None = None,
-    kind: str | None = None,
+    context: ActionEvaluationContext,
 ) -> ActionOutcome:
     """Map (action, target) onto a status + body; gate-decision verbs carry an intent (6b).
 
@@ -162,14 +160,6 @@ def evaluate_action(
     that scopes their acknowledgement row, except the repo-level ``actionable-drift``
     signal whose snapshot timestamp scopes the occurrence.
     """
-    context = ActionEvaluationContext(
-        actor=actor,
-        now=now,
-        gate_id=gate_id,
-        note=note,
-        item_id=item_id,
-        kind=kind,
-    )
     if action == DISMISS_ACTION:
         return _dismiss_action_outcome(action, target, context)
     if action in GATE_DECISION_ACTIONS:
@@ -191,8 +181,7 @@ def _dismiss_action_outcome(
             },
         )
     if target is None and not (
-        (context.kind == "gate-open" and context.gate_id)
-        or context.kind == "actionable-drift"
+        (context.kind == "gate-open" and context.gate_id) or context.kind == "actionable-drift"
     ):
         return ActionOutcome(
             400,

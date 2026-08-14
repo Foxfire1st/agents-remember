@@ -1,190 +1,478 @@
-// TypeScript mirror of the served projection contract
-// (mcp/src/agents_remember/observer/projection.py). camelCase to match the wire form;
-// the server dumps with `exclude_none=True`, so `T | None` fields are omitted when null —
-// modelled here as optional (`?:`). `projection.py` is the source of truth (D7: codegen
-// from pydantic is deferred; keep these in lockstep by hand for now).
+// TypeScript mirror of WorkspaceProjection — GENERATED FILE; DO NOT EDIT.
+// Canonical core model: WorkspaceProjection.model_json_schema().
+// Schema artifact: dashboard/src/types/projection.schema.json.
+// Served-only tail: ServedWorkspaceProjection.model_json_schema().
+// Generator: scripts/sync-projection-types.py.
+// Regenerate: PYTHONPATH=mcp/src python scripts/sync-projection-types.py
+// Drift check: PYTHONPATH=mcp/src python scripts/sync-projection-types.py --check
 
-export type State = "running" | "paused" | "blocked" | "completed" | "abandoned";
+export const LIVE_STATES = ["running", "paused", "blocked", "awaiting-developer"] as const;
 
-export type Phase =
-  | "request"
-  | "trust-checkpoint"
-  | "reframe-research"
-  | "decide"
-  | "build"
-  | "close";
+export const TERMINAL_STATES = ["completed", "abandoned"] as const;
+
+export const LIFECYCLE_STATES = [...LIVE_STATES, ...TERMINAL_STATES] as const;
+
+export type State = (typeof LIFECYCLE_STATES)[number];
+
+export type TerminalState = (typeof TERMINAL_STATES)[number];
+
+export type ActiveState = (typeof LIVE_STATES)[number];
+
+export const ACTIVE_STATES: readonly ActiveState[] = LIVE_STATES;
+
+type FiledOnce<S extends never> = S;
+
+export type StatesAreFiledOnce = FiledOnce<ActiveState & TerminalState>;
+
+export const PHASES = ["request", "trust-checkpoint", "reframe-research", "decide", "build", "close"] as const;
+
+export type Phase = (typeof PHASES)[number];
+
+export const ATTENTION_SEVERITIES = ["alarm", "warn", "info"] as const;
+
+export type AttentionSeverity = (typeof ATTENTION_SEVERITIES)[number];
+
+export const ATTENTION_LANES = ["repo", "worktree", "lifecycle"] as const;
+
+export type AttentionLane = (typeof ATTENTION_LANES)[number];
+
+export const PROCESS_FACT_STATES = ["observed", "derived", "planned", "missing", "stale", "not-applicable"] as const;
+
+export type ProcessFactState = (typeof PROCESS_FACT_STATES)[number];
+
+export const PROCESS_HEALTHS = ["nominal", "running", "blocked", "failed", "stale", "skipped", "unknown", "complete"] as const;
+
+export type ProcessHealth = (typeof PROCESS_HEALTHS)[number];
 
 export interface ActionAvailability {
   action: string;
-  enabled: boolean;
   disabledReason?: string;
+  enabled: boolean;
   nextSafeAction?: string;
 }
 
-export interface TokenSample {
-  ts: string;
-  cumulative: number;
+export interface AgentNotifierHeartbeat {
+  ageSeconds: number | null;
+  lastSweepDurationSeconds: number | null;
+  lastTickAt: string | null;
+  pendingInboxCount: number;
+  redeliverableInboxCount: number;
+  stale: boolean;
+  staleCutoffSeconds: number;
 }
 
-export interface GateNode {
+export interface AgentPickupNode {
+  ageSeconds?: number;
+  agentId?: string;
+  artifactPath?: string;
+  attemptCount: number;
+  deliveredToSession?: string;
+  deliveryState: string;
+  entryId: string;
+  escalatedAt?: string;
+  gateId?: string;
+  id: string;
+  lastAttemptAt?: string;
+  lifecycleId?: string;
+  messageKind: string;
+  nextAttemptAt?: string;
+  ownerAgentId?: string;
+  ownerLifecycleId?: string;
+  ownerRole?: string;
+  ownerTaskDocumentRef?: TaskDocumentRef;
+  recipientRole?: string;
+  senderAgentId?: string;
+  senderRole?: string;
+  state: string;
+  subjectTaskDocumentRef?: TaskDocumentRef;
+  taskDocumentRef?: TaskDocumentRef;
+  ttlSeconds: number;
+}
+
+export interface Analytics {
+  agentPickups: AgentPickupNode[];
+  attentionQueue: AttentionItem[];
+  driftSnapshots: DriftSnapshotNode[];
+  engineProcesses: EngineProcessNode[];
+  expectationRows: ExpectationRowNode[];
+  ledgers: LedgerNode[];
+  routeCoverage: RouteCoverageNode[];
+  series: SeriesNode[];
+  setupProgress: SetupProgressNode[];
+  setupSummaries: SetupSummaryNode[];
+  stalestSidecars: SidecarStaleNode[];
+  taskDocuments: TaskDocNode[];
+  toolReports: ToolReportNode[];
+}
+
+export interface AttentionItem {
+  detail?: string;
+  enclosure?: string;
+  gateId?: string;
   id: string;
   kind: string;
-  state: string;
-  decidedBy?: string;
-  decidedVia?: string;
-  decisions: string[];
-  packet: Record<string, unknown>;
-  ts: string;
+  lane: AttentionLane;
+  lifecycleId?: string;
+  providerId?: string;
+  repoId?: string;
+  severity: AttentionSeverity;
+  signalTs?: string;
+  title: string;
+  waitSeconds?: number;
 }
 
-export interface LifecycleProjection {
-  id: string;
-  state: State;
-  phase: Phase;
-  fleeting: boolean;
-  enclosure?: string;
-  repoId?: string;
-  scope?: string;
-  tokens: number;
-  startedAt: string;
-  lastEventTs: string;
-  staleSeconds?: number;
-  inferred: boolean;
-  ask?: Record<string, unknown>;
-  gate?: GateNode;
-  actions: ActionAvailability[];
-  tokenSeries: TokenSample[];
+export interface CommitRefNode {
+  behindSource?: number;
+  branch?: string;
+  commit?: string;
+  dirty?: boolean;
+  exists?: boolean;
+  factState: ProcessFactState;
+  path?: string;
+}
+
+export interface DriftSnapshotNode {
+  actionableCount: number;
+  branch: string;
+  checkedAt?: string;
+  counts: Record<string, number>;
+  memoryRoot?: string;
+  reportPath?: string;
+  repository: string;
+  snapshotStaleSeconds?: number;
+  sourceRoot?: string;
 }
 
 export interface EnclosureNode {
+  actions: ActionAvailability[];
+  cleanup: string;
+  closeoutStatus: string;
+  codeWorktreeExists: boolean;
   enclosure: string;
   enclosureId: string;
+  humanReviewStatus: string;
+  integrationStatus: string;
   leafId: string;
-  taskRoot: string;
+  lifecycleId: string;
+  lifecycleOperation?: LifecycleOperationProjection;
+  memoryWorktreeExists: boolean;
+  repoName: string;
   taskId: string;
   taskName: string;
-  repoName: string;
-  lifecycleId: string;
+  taskRoot: string;
   worktreeGroup: string;
-  humanReviewStatus: string;
-  closeoutStatus: string;
-  integrationStatus: string;
-  cleanup: string;
-  // Worktree-existence truth (L11): stat'ed server-side at snapshot time (never inferred from
-  // cleanup state). The tasks surface renders a leaf ONLY while a worktree physically exists —
-  // cleanup=reopened means contract-reset-awaiting-restart, not live work.
-  codeWorktreeExists: boolean;
-  memoryWorktreeExists: boolean;
+}
+
+export interface EngineProcessEdge {
+  detail?: string;
+  fromNode: string;
+  id: string;
+  kind: string;
+  label: string;
+  state: string;
+  toNode: string;
+}
+
+export interface EngineProcessNode {
   actions: ActionAvailability[];
+  carryoverDoneAt?: string;
+  cleanup: string;
+  closeoutStatus: string;
+  codeSource: CommitRefNode;
+  codeWorktree: CommitRefNode;
+  completedPhases: string[];
+  currentPhase?: string;
+  edges: EngineProcessEdge[];
+  enclosure: string;
+  failedPhases: string[];
+  health: ProcessHealth;
+  heartbeatAgeSeconds?: number;
+  humanReviewStatus: string;
+  id: string;
+  integrationStatus: string;
+  integrationStrategy?: string;
+  landing: LandingRefNode[];
+  leafId: string;
+  ledgerPath?: string;
+  ledgerRowCount: number;
+  ledgerRows: LedgerRefNode[];
+  lifecycleId?: string;
+  memoryMode: string;
+  memorySource?: CommitRefNode;
+  memoryWorktree?: CommitRefNode;
+  missingFacts: string[];
+  nextAction?: string;
+  phase: string;
+  providers: ProviderBootNode[];
+  repoName: string;
+  retryArgs?: Record<string, unknown>;
+  seedFallback: boolean;
+  setupState?: string;
+  sourceFiles: string[];
+  sourceLineage?: SourceLineageProjection;
+  summary: string;
+  taskId: string;
+  taskName: string;
+  worktreeGroup: string;
+}
+
+export interface ExpectationRowNode {
+  dueAt: string;
+  id: string;
+  kind: string;
+  note?: string;
+  overdue: boolean;
+  sourceId: string;
+  state: string;
+  subjectAgentId?: string;
+  subjectLifecycleId?: string;
+  taskDocumentRef?: TaskDocumentRef;
+}
+
+export interface GateNode {
+  decidedBy?: string;
+  decidedVia?: string;
+  decisions: string[];
+  evidenceRefs: Record<string, unknown>[];
+  id: string;
+  kind: string;
+  packet: Record<string, unknown>;
+  state: string;
+  ts: string;
+}
+
+export interface LandingRefNode {
+  at?: string;
+  detail?: string;
+  factState: ProcessFactState;
+  kind: string;
+  label: string;
+  lastAttemptAt?: string;
+  observedAt?: string;
+  staleSeconds?: number;
+  state: string;
+}
+
+export interface LedgerNode {
+  baseCodeCommit: string;
+  closeoutCount: number;
+  lastVerifiedCodeCommit: string;
+  repository: string;
+  rows: LedgerRefNode[];
+}
+
+export interface LedgerRefNode {
+  codeCommit: string;
+  codeDate?: string;
+  codeSubject?: string;
+  memoryCommit: string;
+  memoryDate?: string;
+  memorySubject?: string;
+}
+
+export interface LifecycleOperationProjection {
+  cancellable: boolean;
+  currentCommand: string;
+  elapsedSeconds: number;
+  failure?: string;
+  finishedAt?: string;
+  guidance?: string;
+  heartbeatAt?: string;
+  kind: "closeout" | "integrate";
+  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "completed" | "failed" | "cancelled";
+  reportPath: string;
+  result?: Record<string, unknown>;
+  startedAt?: string;
+  status: "queued" | "running" | "input-required" | "completed" | "failed" | "cancelled";
+}
+
+export interface LifecycleProjection {
+  actions: ActionAvailability[];
+  ask?: Record<string, unknown>;
+  enclosure?: string;
+  fleeting: boolean;
+  gate?: GateNode;
+  id: string;
+  inferred: boolean;
+  lastEventTs: string;
+  phase: Phase;
+  repoId?: string;
+  scope?: string;
+  staleSeconds?: number;
+  startedAt: string;
+  state: State;
+  stateEnteredAt: string;
+  tokenSeries: TokenSample[];
+  tokens: number;
+}
+
+type Camel<S extends string> = S extends `${infer Head}-${infer Tail}`
+  ? `${Head}${Capitalize<Camel<Tail>>}`
+  : S;
+
+export type StateCountField<S extends ActiveState> = `${Camel<S>}Count`;
+
+export type LifecycleStateCounts = { [S in ActiveState as StateCountField<S>]: number };
+
+export function stateCountField<S extends ActiveState>(state: S): StateCountField<S> {
+  const [head, ...rest] = state.split("-");
+  const camel = head + rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
+  return `${camel}Count` as StateCountField<S>;
+}
+
+function lifecycleStateCounts(
+  lifecycles: readonly Pick<LifecycleProjection, "state">[],
+): LifecycleStateCounts {
+  return Object.fromEntries(
+    ACTIVE_STATES.map((state) => [
+      stateCountField(state),
+      lifecycles.filter((entry) => entry.state === state).length,
+    ]),
+  ) as LifecycleStateCounts;
+}
+
+export interface Metrics extends LifecycleStateCounts {
+  lifecycleCount: number;
+  stalenessHistogram: Record<string, number>;
+  totalTokens: number;
+}
+
+export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics {
+  return {
+    lifecycleCount: lifecycles.length,
+    totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
+    stalenessHistogram: {},
+    ...lifecycleStateCounts(lifecycles),
+  };
+}
+
+export interface ProviderBootNode {
+  factState: ProcessFactState;
+  id: string;
+  role: string;
+  runtimeState: string;
 }
 
 export interface ProviderNode {
   id: string;
-  state: string;
-  ok?: boolean;
-  watcherUp: boolean;
   indexingState: string;
+  ok?: boolean;
+  repoId?: string;
+  role?: string;
+  scope: string;
   snapshotStaleSeconds?: number;
-  scope: string; // "workspace" | "worktree"
-  role?: string; // "code" (CGC) | "memory" (GrepAI)
-  repoId?: string; // covered repo for workspace providers, owning repo for worktree providers
-  worktreeGroup?: string; // join key to the enclosure; takes precedence over repoId
+  state: string;
+  watcherUp: boolean;
+  worktreeGroup?: string;
 }
 
-export interface Metrics {
-  lifecycleCount: number;
-  runningCount: number;
-  blockedCount: number;
-  pausedCount: number;
-  totalTokens: number;
-  stalenessHistogram: Record<string, number>;
+export interface RouteCoverageNode {
+  childRoutes: number;
+  fileSidecars: number;
+  repository?: string;
+  route: string;
+  sourceFilesInScope: number;
 }
 
-export interface DriftSnapshotNode {
-  repository: string;
-  branch: string;
-  counts: Record<string, number>;
-  actionableCount: number;
-  checkedAt?: string;
-  sourceRoot?: string;
-  memoryRoot?: string;
-  reportPath?: string;
-  snapshotStaleSeconds?: number;
-}
-
-export interface SidecarStaleNode {
-  onboardingFile: string;
-  repository: string;
-  lastVerifiedDate: string;
+export interface SeriesNode {
   ageSeconds?: number;
+  createdAt: string;
+  decisions: TaskDecisionNode[];
+  docPath: string;
+  doneCount: number;
+  objective: string;
+  repository: string;
+  sections: SeriesSectionNode[];
+  seriesId: string;
+  seriesTokenTotal: number;
+  status: string;
+  subTasks: SeriesSubTaskNode[];
+  title: string;
+  totalCount: number;
+}
+
+export interface SeriesSectionNode {
+  body: string;
+  heading: string;
+  kind: string;
+}
+
+export interface SeriesSubTaskNode {
+  createdAt?: string;
+  file: string;
+  name: string;
+  number: string;
+  scope: string;
+  status: string;
+}
+
+export interface ServingBuild {
+  bootedAt: string;
+  commit?: string;
+  dashboardBuild?: string;
+  dirty?: boolean;
+  version: string;
+}
+
+export interface SetupProgressNode {
+  completedCount: number;
+  currentPhase?: string;
+  failedPhases: string[];
+  group: string;
+  heartbeatAgeSeconds?: number;
+  state: string;
 }
 
 export interface SetupSummaryNode {
   action: string;
+  generatedAt?: string;
   ok?: boolean;
   ready?: boolean;
-  state?: string;
-  generatedAt?: string;
-  snapshotStaleSeconds?: number;
   resultCounts: Record<string, number>;
+  snapshotStaleSeconds?: number;
+  state?: string;
 }
 
-export interface SetupProgressNode {
-  group: string;
-  state: string;
-  currentPhase?: string;
-  heartbeatAgeSeconds?: number;
-  completedCount: number;
-  failedPhases: string[];
-}
-
-export interface RouteCoverageNode {
-  repository?: string;
-  route: string;
-  sourceFilesInScope: number;
-  fileSidecars: number;
-  childRoutes: number;
-}
-
-export interface ToolReportNode {
-  tool: string;
-  path: string;
-  label: string;
+export interface SidecarStaleNode {
   ageSeconds?: number;
-}
-
-export interface LedgerNode {
+  lastVerifiedDate: string;
+  onboardingFile: string;
   repository: string;
-  closeoutCount: number; // the FULL row total (the popover "+N more" footer derives from it)
-  lastVerifiedCodeCommit: string;
-  baseCodeCommit: string;
-  rows: LedgerRefNode[]; // newest window for the official coupler popover (5h)
 }
 
-// One memory.md ledger row — a code→memory commit mapping (5h coupler popover). Full SHAs; the popover
-// shortens them for display and highlights this enclosure's row.
-export interface LedgerRefNode {
-  codeCommit: string;
-  memoryCommit: string;
-  // best-effort per-side commit message + committer ISO date (5h Tier 2); omitted when the commit
-  // isn't in the local repo or the probe failed — the row falls back to the hash alone (never faked)
-  codeSubject?: string;
-  codeDate?: string;
-  memorySubject?: string;
-  memoryDate?: string;
+export interface SourceLineageEdge {
+  ahead?: number;
+  behind?: number;
+  contractPath: string;
+  descendantBranch: string;
+  detail?: string;
+  relation: "super-to-master" | "master-to-leaf";
+  side: "code" | "memory";
+  sourceBranch: string;
+  state: "current" | "behind" | "diverged" | "unavailable";
+  syncContractPath: string;
 }
 
-export interface TaskSubStepNode {
+export interface SourceLineageProjection {
+  edges: SourceLineageEdge[];
+  recoveries: SourceLineageRecovery[];
+  state: "current" | "blocked" | "unavailable";
+  summary: string;
+}
+
+export interface SourceLineageRecovery {
+  args: Record<string, unknown>;
+  contractPath: string;
+  tool: "worktree_sync";
+}
+
+export interface TaskCodeExampleNode {
+  distinctChange: string;
   id: string;
+  language: string;
+  snippet: string;
   title: string;
-  status: string;
-}
-
-export interface TaskStepNode {
-  id: string;
-  title: string;
-  status: string;
-  substeps: TaskSubStepNode[];
+  why: string;
 }
 
 export interface TaskDecisionNode {
@@ -193,280 +481,101 @@ export interface TaskDecisionNode {
   rationale: string;
 }
 
-export interface TaskCodeExampleNode {
+export interface TaskDocNode {
+  ageSeconds?: number;
+  bodyRevision: string;
+  codeExamples: TaskCodeExampleNode[];
+  createdAt: string;
+  currentStep?: string;
+  decisions: TaskDecisionNode[];
+  design?: string;
+  docPath: string;
   id: string;
+  kind: string;
+  lifecycleId?: string;
+  masterLifecycleId?: string;
+  objective: string;
+  openQuestions: string[];
+  orchestrates: string[];
+  references: string[];
+  repository: string;
+  requirements: string[];
+  sections: TaskSectionNode[];
+  status: string;
+  steps: TaskStepNode[];
+  stepsDone: number;
+  stepsTotal: number;
+  subTasks: TaskSubTaskRefNode[];
   title: string;
-  distinctChange: string;
-  why: string;
-  language: string;
-  snippet: string;
 }
 
-// Series index rows are master-only; sections also carry non-master freeform task-doc prose.
-export interface TaskSubTaskRefNode {
-  number: string;
-  name: string;
-  file: string; // drill-in match key: its stem resolves to the slice doc's slug
-  status: string;
-  scope: string;
-  createdAt?: string;
-  linkedLifecycleId?: string; // set when `file` points at another master → a "→" cross-series jump
+export interface TaskDocumentRef {
+  path: string;
+  repository: string;
 }
 
 export interface TaskSectionNode {
-  kind: string; // "freeform" | "subTasks" | "sharedDecisions"
-  heading: string;
   body: string;
-}
-
-export interface TaskDocNode {
-  id: string;
-  lifecycleId?: string;
-  repository: string;
-  title: string;
-  status: string;
+  heading: string;
   kind: string;
-  stepsDone: number;
-  stepsTotal: number;
-  currentStep?: string;
-  docPath: string;
-  bodyRevision?: string;
-  createdAt?: string;
-  ageSeconds?: number;
-  steps: TaskStepNode[];
-  objective: string;
-  requirements: string[];
-  design?: string;
-  codeExamples: TaskCodeExampleNode[];
-  decisions: TaskDecisionNode[];
-  openQuestions: string[];
-  references: string[];
-  subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
-  sections: TaskSectionNode[]; // master render plan or non-master freeform sections
-  masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
-  // The orchestration-command relation (L14): non-empty only on a master doc that IS an orchestration
-  // task — the master task names it commands. Optional so projections persisted before L14 still parse.
-  orchestrates?: string[];
 }
 
-export interface SeriesNode {
-  seriesId: string;
-  repository: string;
-  title: string;
+export interface TaskStepDispositionNode {
+  kind: "intentionalSkip";
+  lifecycleId?: string;
+  reason: string;
+  recordedAt: string;
+  recordedVia: "task_doc.skip_step";
+}
+
+export interface TaskStepNode {
+  disposition?: TaskStepDispositionNode;
+  id: string;
   status: string;
-  createdAt?: string;
-  objective: string;
-  subTasks: TaskSubTaskRefNode[];
-  doneCount: number;
-  totalCount: number;
-  seriesTokenTotal: number;
-  sections: TaskSectionNode[];
-  decisions: TaskDecisionNode[];
-  docPath: string;
-  ageSeconds?: number;
-}
-
-export interface AttentionItem {
-  id: string;
-  kind: string; // blocked-gate | provider-down | actionable-drift | failed-setup | stale-session | dormant-fleeting | …
-  severity: "alarm" | "warn" | "info";
-  lane: "repo" | "worktree" | "lifecycle";
+  substeps: TaskSubStepNode[];
   title: string;
-  detail?: string;
-  waitSeconds?: number; // server-computed age (never render time)
-  lifecycleId?: string; // cross-refs into the structural tree → queue↔tree coupling
-  gateId?: string;
-  enclosure?: string;
-  repoId?: string;
-  providerId?: string;
-  signalTs?: string; // triggering-signal time — current-occurrence acknowledgement anchor (leaf-28 S5.2)
 }
 
-export interface AgentPickupNode {
+export interface TaskSubStepNode {
+  disposition?: TaskStepDispositionNode;
   id: string;
-  entryId: string;
-  lifecycleId?: string;
-  agentId?: string;
-  senderAgentId?: string;
-  senderRole?: string;
-  recipientRole?: string;
-  gateId?: string;
-  messageKind: string;
-  artifactPath?: string;
-  deliveryState: "queued" | "no-hosted-session" | "delivered" | "unconfirmed" | string;
-  deliveredToSession?: string;
-  state: "waiting-for-agent" | "check-chat" | string;
+  status: string;
+  title: string;
+}
+
+export interface TaskSubTaskRefNode {
+  file: string;
+  linkedLifecycleId?: string;
+  name: string;
+  number: string;
+  scope: string;
+  status: string;
+}
+
+export interface TokenSample {
+  cumulative: number;
+  ts: string;
+}
+
+export interface ToolReportNode {
   ageSeconds?: number;
-  ttlSeconds: number;
-}
-
-// --- engine room process map (slice 5e) --------------------------------------
-
-// The honesty axis: observed = checkout exists on disk; derived = recorded contract
-// field whose checkout is absent; planned = expected-but-not-yet; missing = unobservable;
-// not-applicable = a lane that does not exist (memory on a disabled contract).
-export type ProcessFactState =
-  | "observed"
-  | "derived"
-  | "planned"
-  | "missing"
-  | "stale"
-  | "not-applicable";
-
-export type ProcessHealth =
-  | "nominal"
-  | "running"
-  | "blocked"
-  | "failed"
-  | "stale"
-  | "skipped"
-  | "unknown"
-  | "complete";
-
-export interface CommitRefNode {
-  branch?: string;
-  commit?: string;
-  path?: string;
-  exists?: boolean;
-  dirty?: boolean;
-  behindSource?: number; // commits behind the local source tip (fetch-free); 0/absent when current
-  factState: ProcessFactState;
-}
-
-export interface ProviderBootNode {
-  id: string;
-  role: string; // "code" (CGC) | "memory" (GrepAI)
-  runtimeState: string; // nominal | indexing | down | configured | missing | unknown
-  factState: ProcessFactState;
-}
-
-export interface EngineProcessEdge {
-  id: string;
-  fromNode: string;
-  toNode: string;
-  kind: string; // worktree-add | ledger-map | cgc-seed | grepai-clone | sync | …
-  state: string; // nominal | running | blocked | failed | stale | skipped | complete | planned | refused | unknown
   label: string;
-  detail?: string;
-  // 05o — refused-conduit flash polarity (T9B/T9C/T14C): amber = a reroute/fallback (CGC seed → reindex),
-  // red = a fault/conflict (GrepAI seed fault, integration conflict). Carried only on a `refused`-state edge
-  // (the explicit reroute). A `failed`/`stale` seed/integration edge derives its polarity in the renderer.
-  refusedPolarity?: "amber" | "red";
+  path: string;
+  tool: string;
 }
 
-// One remote/PR participant in the successful-landing arc (slice 5h). `factState` is the honesty
-// axis (like CommitRefNode): observed = a live git/gh probe confirmed it; planned = expected but not
-// yet; missing = the probe could not run (e.g. gh absent). The cockpit never animates a planned PR
-// as a live one.
-export interface LandingRefNode {
-  kind: string; // origin-main | origin-feat | origin-mem-main | pr
-  label: string; // "origin/main" | "PR #128"
-  state: string; // behind | tip | open | merged | pushed | planned | unknown
-  factState: ProcessFactState;
-  detail?: string;
-  observedAt?: string;
-  lastAttemptAt?: string;
-  staleSeconds?: number;
-}
-
-export interface EngineProcessNode {
-  id: string; // the contract path — the stable enclosure id (== EnclosureNode.enclosure)
-  enclosure: string;
-  worktreeGroup: string;
-  taskId: string;
-  leafId: string;
-  taskName: string;
-  repoName: string;
-  lifecycleId?: string;
-  phase: string; // worktree-started | provider-setup | sync-needed | commit-approval-pending | … | completed | unknown
-  health: ProcessHealth;
-  codeSource: CommitRefNode;
-  codeWorktree: CommitRefNode;
-  memoryMode: string; // "external" | "internal" | "disabled"
-  memorySource?: CommitRefNode;
-  memoryWorktree?: CommitRefNode;
-  ledgerPath?: string;
-  // The memory.md ledger window for the WORKTREE coupler popover (5h): newest rows mapping this
-  // worktree's code↔memory commits + the total count (for the "+N more in memory.md" footer).
-  ledgerRows: LedgerRefNode[];
-  ledgerRowCount: number;
-  humanReviewStatus: string;
-  closeoutStatus: string;
-  integrationStatus: string;
-  integrationStrategy?: string; // ff-only | replay; absent until the integration decision is recorded (5h)
-  cleanup: string;
-  setupState?: string; // running | stale | failed | failed-unchecked | ok | complete | prepared
-  currentPhase?: string;
-  completedPhases: string[];
-  failedPhases: string[];
-  heartbeatAgeSeconds?: number;
-  seedFallback: boolean;
-  retryArgs?: Record<string, unknown>;
-  providers: ProviderBootNode[];
-  edges: EngineProcessEdge[];
-  landing?: LandingRefNode[]; // the successful-landing arc (slice 5h); absent in pre-5h/persisted projections, empty until closeout/integration
-  actions: ActionAvailability[];
-  nextAction?: string; // the lifecycle-guidance next operation (display/copy only until slice 06)
-  summary: string;
-  missingFacts: string[];
-  sourceFiles: string[];
-}
-
-export interface Analytics {
-  driftSnapshots: DriftSnapshotNode[];
-  stalestSidecars: SidecarStaleNode[];
-  setupSummaries: SetupSummaryNode[];
-  setupProgress: SetupProgressNode[];
-  routeCoverage: RouteCoverageNode[];
-  toolReports: ToolReportNode[];
-  agentPickups?: AgentPickupNode[];
-  ledgers: LedgerNode[];
-  taskDocuments: TaskDocNode[];
-  series: SeriesNode[];
-  attentionQueue: AttentionItem[]; // derived surface — composed by the reducer (slice 05)
-  engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map (slice 5e)
-}
-
-// The boot-time serving stamp (260703-L15, serving/build_info.py): which build/process is
-// answering. Injected app-side onto /api/state and the SSE snapshot (NOT reducer truth, so it
-// is optional here and absent from persisted latest-state.json). `commit` is best-effort —
-// omitted when the server runs off-checkout (an installed wheel).
-export interface ServingBuild {
-  version: string;
-  bootedAt: string;
-  commit?: string;
-}
-
-// The supervisor sweep's self-liveness tick (260707-HFX2-L2 R5, serving/supervisor_heartbeat.py):
-// "the watcher must be code AND watched" (#15). Injected app-side onto /api/state and the SSE
-// snapshot at RESPONSE time (deliberately volatile — never gates the projection's ETag change
-// revision), so `lastTickAt`/`ageSeconds` are as-of-request, not as-of-last-projection-change.
-// `lastTickAt: null` means the supervisor has never ticked in this workspace (dashboard/supervisor
-// autostart is opt-in) — that is NOT the same as `stale: true`, and the header renders nothing for
-// it rather than a false alarm.
-export interface SupervisorHeartbeat {
-  lastTickAt: string | null;
-  ageSeconds: number | null;
-  staleCutoffSeconds: number;
-  stale: boolean;
-  pendingInboxCount: number;
-  redeliverableInboxCount: number;
-  lastSweepDurationSeconds: number | null;
-}
+export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;
 
 export interface WorkspaceProjection {
-  version: number;
+  activeWorktreeGroups: string[];
+  analytics: Analytics;
+  enclosures: EnclosureNode[];
   generatedAt: string;
   lifecycles: LifecycleProjection[];
-  enclosures: EnclosureNode[];
-  providers: ProviderNode[];
-  // Worktree-group basenames whose enclosure lifecycle is still active — the bounded set the
-  // Topology constellation filters on (the shared lifecycles/enclosures arrays keep all-time
-  // history for other views). Join key = worktree ProviderNode.worktreeGroup / basename of
-  // EnclosureNode.worktreeGroup. Source of truth: projection.py activeWorktreeGroups.
-  activeWorktreeGroups: string[];
   metrics: Metrics;
-  analytics: Analytics;
-  servingBuild?: ServingBuild; // app-injected on the wire only — see ServingBuild
-  supervisorHeartbeat?: SupervisorHeartbeat; // app-injected on the wire only — see SupervisorHeartbeat
+  providers: ProviderNode[];
+  version: number;
+  agentNotifierHeartbeat?: AgentNotifierHeartbeat;
+  servingBuild?: ServingBuild;
+  supervisorHeartbeat?: AgentNotifierHeartbeat;
 }

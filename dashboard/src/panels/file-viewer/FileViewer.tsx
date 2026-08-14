@@ -1,9 +1,9 @@
 // The File Viewer center tab (full-bleed): a repo selector + a mainline/enclosure scope
-// selector drive two Headless Tree explorers (code + onboarding) over the L1 files API; the
+// selector drive two Headless Tree explorers (code + onboarding) over the files API; the
 // right side is the reusable DualPane. Pairing is bidirectional: opening a code file derives
 // its sidecar (forward); opening a sidecar opens its partner code file (reverse), or shows an
 // overview placeholder. View-mode (split/single) persists across file switches.
-import { useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Button, ListBox, ListBoxItem, Popover, Select, SelectValue } from "react-aria-components";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
@@ -148,7 +148,61 @@ function PickList({
   );
 }
 
-export function FileViewer() {
+function openCodeEntry(
+  repo: string,
+  scope: Scope,
+  currentPath: string | undefined,
+  entry: DirEntry,
+  setError: (error: string | null) => void,
+  setCode: (content: FileContent | null) => void,
+  setSidecar: (view: SidecarView) => void,
+): void {
+  if (entry.kind !== "file" || entry.path === currentPath) return;
+  setError(null);
+  readFile(repo, scope, entry.path)
+    .then((f) => {
+      setCode(f);
+      return resolveForward(repo, scope, entry.path);
+    })
+    .then((p) =>
+      setSidecar(
+        p.status === "found" && p.body != null ? { state: "markdown", body: p.body } : { state: "missing" },
+      ),
+    )
+    .catch((e) => setError(describeError(e)));
+}
+
+function openSidecarEntry(
+  repo: string,
+  scope: Scope,
+  entry: DirEntry,
+  setError: (error: string | null) => void,
+  setCode: (content: FileContent | null) => void,
+  setSidecar: (view: SidecarView) => void,
+  openCode: (entry: DirEntry) => void,
+): void {
+  if (entry.kind !== "file") return;
+  setError(null);
+  resolveReverse(repo, scope, entry.path)
+    .then((p) => {
+      if (p.kind === "sidecar" && p.exists) {
+        openCode({ name: p.codePath.split("/").pop() ?? "", path: p.codePath, kind: "file" });
+      } else {
+        // An overview/entities/index doc has no code partner — render its OWN markdown instead of an
+        // empty placeholder (a route overview must be readable). Fall back to the placeholder only if
+        // the body could not be read (binary/unreadable) or there is genuinely no onboarding here.
+        setCode(null);
+        setSidecar(
+          p.kind === "overview" && p.body != null
+            ? { state: "markdown", body: p.body }
+            : { state: "overview" },
+        );
+      }
+    })
+    .catch((e) => setError(describeError(e)));
+}
+
+function FileViewerImpl({ active = true }: { active?: boolean }) {
   const [repos, setRepos] = useState<RepoCatalogEntry[]>([]);
   const [repo, setRepo] = useState<string>("");
   const [scope, setScope] = useState<Scope>("mainline");
@@ -156,23 +210,37 @@ export function FileViewer() {
   const [sidecar, setSidecar] = useState<SidecarView>({ state: "empty" });
   const [split, setSplit] = usePersistedFlag("fileviewer.split", true);
   const [error, setError] = useState<string | null>(null);
+  // The Cockpit keeps this layer mounted-but-hidden until its view is selected; the boot catalog
+  // read waits for the FIRST real showing. `settled` marks a completed attempt (success OR
+  // failure) so later hide/show cycles never re-read — the same once-per-lifetime posture the
+  // mount effect had before — while StrictMode's replayed effect simply re-joins the shared
+  // in-flight read (data/inflight.ts) instead of firing a second GET.
+  const settledRef = useRef(false);
 
   useEffect(() => {
+    if (!active || settledRef.current) return;
     let alive = true;
     fetchRepos()
       .then((cat) => {
         if (!alive) return;
-        setRepos(cat.repos);
-        const first = cat.repos[0];
+        settledRef.current = true;
+        // Defensive: a catalog response without `repos` (unexpected server shape, generic test
+        // stubs) must degrade to the empty list — `undefined` here put every later render's
+        // `repos.find` into a crash loop.
+        const list = cat.repos ?? [];
+        setRepos(list);
+        const first = list[0];
         if (first) setRepo((r) => r || first.repo);
       })
       .catch((e) => {
-        if (alive) setError(describeError(e));
+        if (!alive) return;
+        settledRef.current = true;
+        setError(describeError(e));
       });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [active]);
 
   // Reset the open file when the scope root changes.
   useEffect(() => {
@@ -188,43 +256,10 @@ export function FileViewer() {
       ]
     : [{ id: "mainline", label: "mainline" }];
 
-  function openCode(entry: DirEntry) {
-    if (entry.kind !== "file" || entry.path === code?.path) return;
-    setError(null);
-    readFile(repo, scope, entry.path)
-      .then((f) => {
-        setCode(f);
-        return resolveForward(repo, scope, entry.path);
-      })
-      .then((p) =>
-        setSidecar(
-          p.status === "found" && p.body != null ? { state: "markdown", body: p.body } : { state: "missing" },
-        ),
-      )
-      .catch((e) => setError(describeError(e)));
-  }
-
-  function openSidecar(entry: DirEntry) {
-    if (entry.kind !== "file") return;
-    setError(null);
-    resolveReverse(repo, scope, entry.path)
-      .then((p) => {
-        if (p.kind === "sidecar" && p.exists) {
-          openCode({ name: p.codePath.split("/").pop() ?? "", path: p.codePath, kind: "file" });
-        } else {
-          // An overview/entities/index doc has no code partner — render its OWN markdown instead of an
-          // empty placeholder (a route overview must be readable). Fall back to the placeholder only if
-          // the body could not be read (binary/unreadable) or there is genuinely no onboarding here.
-          setCode(null);
-          setSidecar(
-            p.kind === "overview" && p.body != null
-              ? { state: "markdown", body: p.body }
-              : { state: "overview" },
-          );
-        }
-      })
-      .catch((e) => setError(describeError(e)));
-  }
+  const openCode = (entry: DirEntry) =>
+    openCodeEntry(repo, scope, code?.path, entry, setError, setCode, setSidecar);
+  const openSidecar = (entry: DirEntry) =>
+    openSidecarEntry(repo, scope, entry, setError, setCode, setSidecar, openCode);
 
   return (
     <div className={shell} data-testid="file-viewer">
@@ -257,3 +292,8 @@ export function FileViewer() {
     </div>
   );
 }
+
+// Memoized (tab-switch CPU): a keep-alive cockpit layer — the shell re-renders on every
+// view switch, and the memo gate skips this whole subtree unless `active` (or another prop)
+// actually changed; the viewer's own store subscriptions still drive its updates.
+export const FileViewer = memo(FileViewerImpl);

@@ -49,7 +49,9 @@ from agents_remember.providers.lifecycle.state_files import (
 )
 
 
-def cgc_install_commands(args: argparse.Namespace, layout: CgcRuntimeLayout) -> tuple[Path, list[dict[str, Any]]]:
+def cgc_install_commands(
+    args: argparse.Namespace, layout: CgcRuntimeLayout
+) -> tuple[Path, list[dict[str, Any]]]:
     _, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     render = cgc_compose_render(provider_settings, layouts)
     return layout.image_build_root, [
@@ -62,7 +64,9 @@ def cgc_install_commands(args: argparse.Namespace, layout: CgcRuntimeLayout) -> 
     ]
 
 
-def cgc_install_dry_run_result(layout: CgcRuntimeLayout, commands: list[dict[str, Any]]) -> dict[str, Any]:
+def cgc_install_dry_run_result(
+    layout: CgcRuntimeLayout, commands: list[dict[str, Any]]
+) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "install",
@@ -76,7 +80,9 @@ def cgc_install_dry_run_result(layout: CgcRuntimeLayout, commands: list[dict[str
     }
 
 
-def cgc_failed_install_result(layout: CgcRuntimeLayout, results: list[dict[str, Any]]) -> dict[str, Any]:
+def cgc_failed_install_result(
+    layout: CgcRuntimeLayout, results: list[dict[str, Any]]
+) -> dict[str, Any]:
     return {
         "provider": "codegraphcontext",
         "action": "install",
@@ -86,7 +92,9 @@ def cgc_failed_install_result(layout: CgcRuntimeLayout, results: list[dict[str, 
     }
 
 
-def cgc_install_backend(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
+def cgc_install_backend(
+    args: argparse.Namespace, layout: CgcRuntimeLayout
+) -> dict[str, Any] | None:
     backend_result = cgc_backend_start(args) if cgc_uses_settings(args) else None
     if backend_result is not None and not backend_result.get("ok"):
         return {**backend_result, "action": "install", "ok": False, "repoId": layout.repo_id}
@@ -330,9 +338,7 @@ def cgc_status(args: argparse.Namespace) -> dict[str, Any]:
         "watchCwd": layout.watch_cwd.as_posix(),
         "watchLog": layout.watch_log_file.as_posix(),
         "lastRefresh": state.get("lastRefresh"),
-        "indexingState": cgc_indexing_state_probe(
-            layout, inspect_data, watcher_running=running
-        ),
+        "indexingState": cgc_indexing_state_probe(layout, inspect_data, watcher_running=running),
         "sourceArtifacts": artifacts,
         "patch": patch,
         "process": {

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -165,30 +166,57 @@ def _cwd_matches(records: list[dict[str, object]], harness: str, cwd: Path) -> b
     return False
 
 
+def _claude_user_text(record: dict[str, object]) -> str | None:
+    """The developer-typed text of one Claude ``user`` record, or ``None`` if it is not one.
+
+    Meta records and the ``<command-name>`` / ``<local-command-*>`` wrappers are harness bookkeeping
+    rather than submitted input; a delivery id found inside one of those would not prove acceptance.
+    """
+
+    if record.get("type") != "user" or record.get("isMeta") is True:
+        return None
+    message = record.get("message")
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return None
+    text = _content_text(message.get("content"))
+    if "<command-name>" in text or "<local-command-" in text:
+        return None
+    return text
+
+
+def _codex_user_text(record: dict[str, object]) -> str | None:
+    """The developer-typed text of one Codex rollout record, or ``None`` if it is not one.
+
+    Codex writes the same submission twice under different envelopes -- a ``response_item`` message
+    and an ``event_msg`` ``user_message`` -- and both are accepted here.
+    """
+
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    if record.get("type") == "response_item" and payload.get("type") == "message":
+        if payload.get("role") != "user":
+            return None
+        return _content_text(payload.get("content"))
+    if record.get("type") == "event_msg" and payload.get("type") == "user_message":
+        message = payload.get("message")
+        if isinstance(message, str):
+            return message
+    return None
+
+
+_USER_MESSAGE_READERS: dict[str, Callable[[dict[str, object]], str | None]] = {
+    "claude": _claude_user_text,
+    "codex": _codex_user_text,
+}
+
+
 def _user_messages(records: list[dict[str, object]], harness: str) -> list[str]:
-    messages: list[str] = []
-    for record in records:
-        if harness == "claude":
-            if record.get("type") != "user" or record.get("isMeta") is True:
-                continue
-            message = record.get("message")
-            if not isinstance(message, dict) or message.get("role") != "user":
-                continue
-            text = _content_text(message.get("content"))
-            if "<command-name>" not in text and "<local-command-" not in text:
-                messages.append(text)
-        elif harness == "codex":
-            payload = record.get("payload")
-            if not isinstance(payload, dict):
-                continue
-            if record.get("type") == "response_item" and payload.get("type") == "message":
-                if payload.get("role") == "user":
-                    messages.append(_content_text(payload.get("content")))
-            elif record.get("type") == "event_msg" and payload.get("type") == "user_message":
-                message = payload.get("message")
-                if isinstance(message, str):
-                    messages.append(message)
-    return messages
+    read = _USER_MESSAGE_READERS.get(harness)
+    if read is None:
+        return []
+    texts = (read(record) for record in records)
+    return [text for text in texts if text is not None]
 
 
 def _content_text(content: object) -> str:

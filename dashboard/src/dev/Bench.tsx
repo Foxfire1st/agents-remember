@@ -5,6 +5,10 @@ import { TerminalSocketContext } from "../data/terminal";
 import { mockTerminalSocketFactory } from "./mockTerminalSocket";
 import { ScenarioPlayer } from "./ScenarioPlayer";
 import { SCENARIOS } from "./scenarios";
+import {
+  CockpitScenarioExitBoundary,
+  CockpitScenarioHarness,
+} from "./CockpitScenarioHarness";
 
 // The dev bench (note 15 / slice 5i): the exact model-C shell driven through phase-transition timelines.
 // A scenario player (bottom) walks each mode's frames through the REAL store so the integrated motion is
@@ -32,8 +36,15 @@ export function Bench() {
     { label: "Resting states", entries: SCENARIOS.filter((entry) => entry.frames.length === 1) },
   ].filter((group) => group.entries.length > 0);
 
+  const shell = (
+    <>
+      <CockpitShell initialView={scenario.cockpit ? "chats" : "operations"} />
+      <ScenarioPlayer key={scenario.name} scenario={scenario} />
+    </>
+  );
+
   return (
-    // The dev mock socket makes the Chats view (slice 6e) render a live-looking terminal with no
+    // The dev mock socket makes the Chats cockpit render a live-looking terminal with no
     // backend; production has no provider, so the real cockpit uses a same-origin WebSocket.
     <TerminalSocketContext.Provider value={mockTerminalSocketFactory}>
       <div className="bench-overlay bench__picker">
@@ -60,8 +71,13 @@ export function Bench() {
           ))}
         </select>
       </div>
-      <CockpitShell />
-      <ScenarioPlayer key={scenario.name} scenario={scenario} />
+      {scenario.cockpit ? (
+        <CockpitScenarioHarness key={scenario.name} scenario={scenario.cockpit}>
+          {shell}
+        </CockpitScenarioHarness>
+      ) : (
+        <CockpitScenarioExitBoundary key={scenario.name}>{shell}</CockpitScenarioExitBoundary>
+      )}
     </TerminalSocketContext.Provider>
   );
 }

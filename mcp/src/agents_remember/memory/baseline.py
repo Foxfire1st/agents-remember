@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.coordination_context.models import CoordinationRequest
+from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
@@ -21,6 +23,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 
 @dataclass(frozen=True)
@@ -54,9 +57,13 @@ def resolve_request_context(request: BaselineRequest):
     return resolver.resolve_coordination_context(
         code_repository_name=request.code_repository_name,
         workspace_root=request.workspace_root,
-        requested_topology=request.topology,
-        coordination_root=request.coordination_root,
         code_repository_root=request.code_repository_root,
+        request=CoordinationRequest(
+            hints=CoordinationHints(
+                topology=request.topology, coordination_root=request.coordination_root
+            ),
+            contract_reader=WorktreeContractReader(),
+        ),
     )
 
 
@@ -279,7 +286,9 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         "--topology", choices=("internal", "external"), help="Optional topology override."
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
-    parser.add_argument("--report", type=Path, help="Optional c-02-memory-quality-control drift report path.")
+    parser.add_argument(
+        "--report", type=Path, help="Optional c-02-memory-quality-control drift report path."
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

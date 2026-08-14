@@ -92,9 +92,7 @@ async def call_tool_over_stdio(
     ):
         await asyncio.wait_for(session.initialize(), timeout=INITIALIZE_TIMEOUT)
         result = await asyncio.wait_for(session.call_tool(tool, arguments), timeout=timeout)
-    text = "".join(
-        block.text for block in result.content if isinstance(block, TextContent)
-    )
+    text = "".join(block.text for block in result.content if isinstance(block, TextContent))
     return json.loads(text)
 
 

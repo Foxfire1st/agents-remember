@@ -1,6 +1,29 @@
+// The slice of Pi's extension API this file uses. Pi ships no type package to install beside a
+// project-local extension, so the contract it hands us is written down here instead of being
+// implied by untyped parameters -- `tsconfig.json` in this directory checks the file against it.
+interface BeforeAgentStartEvent {
+  systemPrompt: string;
+}
+
+interface BeforeAgentStartResult {
+  systemPrompt: string;
+  message?: {
+    customType: string;
+    content: string;
+    display: boolean;
+  };
+}
+
+interface Pi {
+  on(
+    event: "before_agent_start",
+    handler: (event: BeforeAgentStartEvent) => BeforeAgentStartResult,
+  ): void;
+}
+
 const WORKSPACE_ROOT = "<PATH/TO/YOUR/PROJECTS_FOLDER>";
 
-function setupRequired(systemPrompt) {
+function setupRequired(systemPrompt: string): BeforeAgentStartResult {
   const message = [
     "Agents Remember setup is incomplete.",
     "Replace <PATH/TO/YOUR/PROJECTS_FOLDER> in .pi/extensions/agents-remember-start.ts before using this starter package."
@@ -16,8 +39,8 @@ function setupRequired(systemPrompt) {
   };
 }
 
-export default function (pi) {
-  pi.on("before_agent_start", (event) => {
+export default function (pi: Pi): void {
+  pi.on("before_agent_start", (event: BeforeAgentStartEvent): BeforeAgentStartResult => {
     if (WORKSPACE_ROOT.startsWith("<")) {
       return setupRequired(event.systemPrompt);
     }
@@ -29,13 +52,11 @@ export default function (pi) {
       "orchestrating agent: **ignore this notice entirely — your brief is your session",
       "start.**",
       "",
-      "Otherwise you are the developer-facing session, i.e. the **architect**: read",
+      "Otherwise you are the developer-facing **free chat** session: read",
       `\`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` and treat those rules as workspace`,
-      "instructions, then run your lifecycle at",
-      "`skills/l-01-agent-lifecycles/roles/architect.md` — trust checkpoint before",
-      "relying on memory, `read_ar_files` (paired source+onboarding) until the build",
-      "decision, retrieval-strategy tally as evidence, notify-and-stop at every",
-      "developer hand-off."
+      "instructions. Answer research inline; for role-shaped work, create or resolve the",
+      "durable sprint and first leaf, then open its sprint-bound architect seat. Free chat",
+      "never becomes a global architect identity."
     ].join("\n");
 
     return {

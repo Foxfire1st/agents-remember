@@ -1,5 +1,6 @@
 import { FlowTab } from "../panels/FlowTab";
 import { Bench } from "./Bench";
+import { PtyRenderBench } from "./PtyRenderBench";
 import { Reference } from "./Reference";
 
 import "./dev.css";
@@ -11,6 +12,7 @@ import "./dev.css";
 export default function DevApp() {
   const path = window.location.pathname;
   if (path.startsWith("/dev/reference")) return <Reference />;
+  if (path.startsWith("/dev/pty-bench")) return <PtyRenderBench />;
   if (path.startsWith("/dev/bench")) return <Bench />;
   if (path.startsWith("/dev/flows")) {
     return (

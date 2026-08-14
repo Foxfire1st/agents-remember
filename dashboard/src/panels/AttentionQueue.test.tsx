@@ -39,6 +39,8 @@ const taskDoc: TaskDocNode = {
   stepsDone: 1,
   stepsTotal: 4,
   docPath: "/tasks/agents-remember/260610_browser-dashboard/19_gate-interaction-polish.json",
+  bodyRevision: "rev-fixture",
+  createdAt: "2026-06-23T10:00:00+00:00",
   steps: [],
   objective: "Make gate responses human-usable.",
   requirements: [],
@@ -48,6 +50,7 @@ const taskDoc: TaskDocNode = {
   references: [],
   subTasks: [],
   sections: [],
+  orchestrates: [],
 };
 
 function seed(queue: AttentionItem[], docs: TaskDocNode[] = []) {

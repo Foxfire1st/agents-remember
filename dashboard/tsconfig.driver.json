@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    "src/dev/benchProbes.ts",
+    "e2e",
+    "e2e-chats",
+    "e2e-production",
+    "perf",
+    "playwright.config.ts",
+    "playwright.chats-e2e.config.ts",
+    "playwright.perf.config.ts",
+    "playwright.production.config.ts"
+  ]
+}

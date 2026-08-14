@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { HARNESS_CATALOG_REQUEST_TIMEOUT_MS } from "./harnessCatalog";
 import {
-  attachSessionToLeaf,
+  attachSessionToTask,
   bracketedPaste,
   cleanupLandedTerminalSessions,
   connectTerminal,
@@ -15,9 +16,20 @@ import {
   submitAndConfirm,
   terminateTerminalSession,
   terminalSocketUrl,
+  TERMINAL_CATALOG_REQUEST_TIMEOUT_MS,
   uploadSessionImage,
   type TerminalSink,
 } from "./terminal";
+
+// A half-dead socket (live wedge class): never settles on its own; rejects only when
+// the request's abort signal fires — what a REAL fetch does when the fetchWithTimeout bound
+// aborts it. Unbounded, every caller single-flighted behind this promise wedges with it.
+const hungSocketImplementation = (_url: string, init?: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("The operation was aborted.", "AbortError")),
+    );
+  });
 
 // A minimal WebSocket stand-in: records sends, lets the test push frames + close events.
 class FakeSocket {
@@ -36,6 +48,7 @@ class FakeSocket {
   }
   close(): void {
     this.closed = true;
+    this.readyState = 2;
   }
 
   pushBinary(bytes: Uint8Array): void {
@@ -45,9 +58,11 @@ class FakeSocket {
     this.onmessage?.({ data: text } as MessageEvent);
   }
   fireClose(): void {
+    this.readyState = 3;
     this.onclose?.();
   }
   fireOpen(): void {
+    this.readyState = 1;
     this.onopen?.();
   }
 }
@@ -180,10 +195,141 @@ describe("connectTerminal", () => {
     expect(s.exits).toBe(1);
   });
 
-  it("ends the session on an unexpected socket close", () => {
+  it("reports an unexpected transport close without falsely ending the durable session", () => {
     const s = sink();
-    const { socket } = connect(s);
+    const states: string[] = [];
+    let socket!: FakeSocket;
+    connectTerminal("lc-1", s, {
+      socketFactory: (url) => {
+        socket = new FakeSocket(url);
+        return socket as unknown as WebSocket;
+      },
+      onSocketState: (state) => states.push(state),
+    });
     socket.fireClose();
+    expect(s.exits).toBe(0);
+    expect(states).toEqual(["dropped"]);
+  });
+
+  it("reattaches exactly once when explicitly asked after a drop and replays buffered state", () => {
+    const s = sink();
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+    const conn = connectTerminal("lc-1", s, {
+      socketFactory: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+      onSocketState: (state) => states.push(state),
+    });
+    const first = sockets[0];
+    conn.sendResize(120, 40);
+    first.fireClose();
+    conn.sendInput("kept while down");
+
+    expect(conn.reattach("boot-2")).toBe(true);
+    expect(conn.reattach("boot-2")).toBe(false); // the same boot cannot duplicate its attach
+    expect(sockets).toHaveLength(2);
+    const second = sockets[1];
+    second.fireOpen();
+
+    expect(states).toEqual(["dropped", "reconnecting", "connected"]);
+    expect(second.sent).toEqual([
+      JSON.stringify({ type: "resize", cols: 120, rows: 40 }),
+      JSON.stringify({ type: "stdin", data: "kept while down" }),
+    ]);
+    first.fireClose(); // a stale close cannot overwrite the replacement's connected state
+    expect(states).toEqual(["dropped", "reconnecting", "connected"]);
+  });
+
+  it("lets one new boot supersede a stale CONNECTING socket and ignores all stale callbacks", () => {
+    const s = sink();
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+    const conn = connectTerminal("lc-1", s, {
+      socketFactory: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+      onSocketState: (state) => states.push(state),
+    });
+    const stale = sockets[0];
+    stale.readyState = 0;
+
+    expect(conn.reattach("boot-2")).toBe(true);
+    expect(conn.reattach("boot-2")).toBe(false);
+    expect(sockets).toHaveLength(2);
+    expect(stale.closed).toBe(true);
+
+    stale.fireOpen();
+    stale.pushBinary(new Uint8Array([1]));
+    stale.fireClose();
+    expect(states).toEqual(["reconnecting"]);
+    expect(s.written).toEqual([]);
+
+    sockets[1].fireOpen();
+    sockets[1].pushBinary(new Uint8Array([2]));
+    expect(states).toEqual(["reconnecting", "connected"]);
+    expect(s.written.map((bytes) => Array.from(bytes))).toEqual([[2]]);
+  });
+
+  it("lets a changed boot supersede a stale OPEN socket before its delayed close arrives", () => {
+    const s = sink();
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+    const conn = connectTerminal("lc-1", s, {
+      socketFactory: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+      onSocketState: (state) => states.push(state),
+    });
+    const stale = sockets[0];
+    expect(stale.readyState).toBe(1);
+
+    expect(conn.reattach("boot-2", { supersedeOpen: true })).toBe(true);
+    expect(conn.reattach("boot-2", { supersedeOpen: true })).toBe(false);
+    expect(sockets).toHaveLength(2);
+    expect(stale.closed).toBe(true);
+
+    // The prior process's close arrives after the replacement exists. It cannot demote that socket.
+    stale.fireClose();
+    expect(states).toEqual(["reconnecting"]);
+    sockets[1].fireOpen();
+    expect(states).toEqual(["reconnecting", "connected"]);
+  });
+
+  it("adopts a first observed boot without replacing an already-open initial socket", () => {
+    const sockets: FakeSocket[] = [];
+    const conn = connectTerminal("lc-1", sink(), {
+      socketFactory: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+    });
+
+    expect(conn.reattach("boot-1")).toBe(false);
+    expect(conn.reattach("boot-1", { supersedeOpen: true })).toBe(false);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("does not reattach after an authoritative terminal exit frame", () => {
+    const s = sink();
+    const sockets: FakeSocket[] = [];
+    const conn = connectTerminal("lc-1", s, {
+      socketFactory: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+    });
+    sockets[0].pushText(JSON.stringify({ type: "exit" }));
+    expect(conn.reattach("boot-2")).toBe(false);
+    expect(sockets).toHaveLength(1);
     expect(s.exits).toBe(1);
   });
 
@@ -207,14 +353,35 @@ describe("connectTerminal", () => {
 });
 
 describe("openTerminalSession", () => {
-  it("POSTs the kind and catalog metadata to the session route and returns true on ok", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+  it("POSTs raw metadata and accepts the exact server-owned row", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: "t 1",
+          label: "Terminal 1",
+          kind: "terminal",
+          lifecycleId: "LC1",
+          taskDocumentRef: null,
+          status: "running",
+        }),
+        { status: 200 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
-    const ok = await openTerminalSession("t 1", "terminal", "", undefined, {
+    const result = await openTerminalSession("t 1", "terminal", "", undefined, {
       label: "Terminal 1",
       lifecycleId: "LC1",
     });
-    expect(ok).toBe(true);
+    expect(result).toMatchObject({
+      outcome: "opened",
+      session: {
+        id: "t 1",
+        label: "Terminal 1",
+        kind: "terminal",
+        lifecycleId: "LC1",
+        status: "running",
+      },
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/t%201",
       expect.objectContaining({
@@ -222,27 +389,157 @@ describe("openTerminalSession", () => {
         body: JSON.stringify({ kind: "terminal", label: "Terminal 1", lifecycleId: "LC1" }),
       }),
     );
-    vi.unstubAllGlobals();
   });
 
-  it("returns false on a non-ok response or a network error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    expect(await openTerminalSession("t1")).toBe(false);
+  it("classifies a network failure without inventing an HTTP response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    expect(await openTerminalSession("t1")).toBe(false);
-    vi.unstubAllGlobals();
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "network",
+      httpStatus: null,
+    });
   });
 
-  it("includes the harness id in the body for kind=harness", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+  it("classifies non-OK HTTP and harness refusals separately", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "leaf-ref-not-found", detail: "missing leaf" }), {
+          status: 400,
+        }),
+      ),
+    );
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "http",
+      httpStatus: 400,
+      responseStatus: "leaf-ref-not-found",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "bad-kind", detail: "harness not installed" }), {
+          status: 400,
+        }),
+      ),
+    );
+    expect(await openTerminalSession("h1", "harness", "", "claude")).toMatchObject({
+      outcome: "failed",
+      failure: "harness",
+      httpStatus: 400,
+      responseStatus: "bad-kind",
+    });
+  });
+
+  it("classifies empty, malformed, and identity-mismatched success responses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 200 })));
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "missing-response",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "another-id",
+            label: "Terminal 1",
+            kind: "terminal",
+            status: "running",
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+  });
+
+  it.each([
+    ["a harness identity", { harness: "claude" }],
+    ["an empty harness identity", { harness: "" }],
+    ["a harness control state", { harness: null, controlState: "ready" }],
+  ])("rejects a raw response carrying %s", async (_name, contradiction) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "raw-1",
+            label: "Terminal 1",
+            kind: "terminal",
+            status: "running",
+            ...contradiction,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    expect(await openTerminalSession("raw-1", "terminal")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+  });
+
+  it("accepts an explicit null harness and control state for a raw response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "raw-1",
+            label: "Terminal 1",
+            kind: "terminal",
+            harness: null,
+            status: "running",
+            controlState: null,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    expect(await openTerminalSession("raw-1", "terminal")).toMatchObject({
+      outcome: "opened",
+      session: { id: "raw-1", kind: "terminal" },
+    });
+  });
+
+  it("includes the harness id and accepts only the matching server harness identity", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: "s1",
+          label: "Claude Code 1",
+          kind: "harness",
+          harness: "claude",
+          status: "running",
+          controlState: "starting",
+        }),
+        { status: 200 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
-    const ok = await openTerminalSession("s1", "harness", "", "claude");
-    expect(ok).toBe(true);
+    const result = await openTerminalSession("s1", "harness", "", "claude");
+    expect(result).toMatchObject({
+      outcome: "opened",
+      session: { id: "s1", kind: "harness", harness: "claude", controlState: "starting" },
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/s1",
       expect.objectContaining({ body: JSON.stringify({ kind: "harness", harness: "claude" }) }),
     );
-    vi.unstubAllGlobals();
   });
 });
 
@@ -286,6 +583,46 @@ describe("fetchTerminalSessions", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await fetchTerminalSessionsOrNull()).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("shares one in-flight catalog read between concurrent callers (boot/poll single-flight)", async () => {
+    const sessions = [{ id: "s1", kind: "terminal" }];
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ sessions }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const [one, two] = await Promise.all([
+      fetchTerminalSessionsOrNull(),
+      fetchTerminalSessionsOrNull(),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(one).toEqual(sessions);
+    expect(two).toEqual(sessions);
+    // Settle cleared the slot: the next poll beat re-fires.
+    expect(await fetchTerminalSessionsOrNull()).toEqual(sessions);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("a hung catalog socket expires within the bound as a failed beat; the next beat re-fires on a fresh socket", async () => {
+    vi.useFakeTimers();
+    try {
+      const sessions = [{ id: "s1", kind: "terminal" }];
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(hungSocketImplementation)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ sessions }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const hung = fetchTerminalSessionsOrNull();
+      await vi.advanceTimersByTimeAsync(TERMINAL_CATALOG_REQUEST_TIMEOUT_MS);
+      await expect(hung).resolves.toBeNull(); // an expired beat is the ordinary null failure, not a wedge
+
+      // The bound released the single-flight slot: the next read fires a fresh request and succeeds.
+      await expect(fetchTerminalSessionsOrNull()).resolves.toEqual(sessions);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -348,17 +685,18 @@ describe("cleanupLandedTerminalSessions", () => {
   });
 });
 
-describe("attachSessionToLeaf", () => {
-  it("posts the leaf and explicit seat role as one binding move", async () => {
+describe("attachSessionToTask", () => {
+  it("posts the canonical task document and explicit seat role as one binding move", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(attachSessionToLeaf("s 1", "repo/master/leaf", "curator")).resolves.toBe("ok");
+    const taskDocumentRef = { repository: "repo", path: "master/leaf.json" };
+    await expect(attachSessionToTask("s 1", taskDocumentRef, "curator")).resolves.toBe("ok");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/terminal/s%201/attach-leaf",
+      "/api/terminal/s%201/attach-task",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ leafKey: "repo/master/leaf", role: "curator" }),
+        body: JSON.stringify({ taskDocumentRef, role: "curator" }),
       }),
     );
     vi.unstubAllGlobals();
@@ -560,5 +898,39 @@ describe("fetchHarnesses", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await fetchHarnesses()).toEqual([]);
     vi.unstubAllGlobals();
+  });
+
+  it("shares one in-flight catalog read between concurrent signal-less callers (boot single-flight)", async () => {
+    const harnesses = [{ id: "claude", name: "Claude Code", detected: true }];
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ harnesses }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const [one, two] = await Promise.all([fetchHarnesses(), fetchHarnesses()]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(one).toEqual(harnesses);
+    expect(two).toEqual(harnesses);
+    vi.unstubAllGlobals();
+  });
+
+  it("a hung boot catalog socket expires within the bound instead of wedging every signal-less caller", async () => {
+    vi.useFakeTimers();
+    try {
+      const harnesses = [{ id: "claude", name: "Claude Code", detected: true }];
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(hungSocketImplementation)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ harnesses }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const hung = fetchHarnesses();
+      await vi.advanceTimersByTimeAsync(HARNESS_CATALOG_REQUEST_TIMEOUT_MS);
+      await expect(hung).resolves.toEqual([]); // the ordinary "daemon did not answer" read, not a wedge
+
+      // Slot released: the retry fires a fresh request and succeeds.
+      await expect(fetchHarnesses()).resolves.toEqual(harnesses);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });

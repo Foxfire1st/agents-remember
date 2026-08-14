@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 
 
 def _create_missing_dirs(paths: list[Path], *, dry_run: bool) -> list[str]:
@@ -41,14 +43,10 @@ def _git_init_result(memory_root: Path, *, dry_run: bool, initialize_git: bool) 
         return git
     if (memory_root / ".git").exists():
         return git
-    result = subprocess.run(
-        ["git", "init"],
-        cwd=memory_root,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
+    # Through the one runner so GIT_DIR is stripped: `git init` honours GIT_DIR over
+    # its cwd, so an inherited one would initialise the repository somewhere else
+    # entirely and then report success for a memory root that never became a repo.
+    result = run_git(memory_root, ["init"])
     git.update(
         {
             "ran": True,

@@ -74,9 +74,7 @@ class EnsureModelTests(unittest.TestCase):
                 embedder_module, "docker_wait_for_ollama", return_value={"stdout": "x"}
             ),
             mock.patch.object(embedder_module, "docker_command", return_value="docker"),
-            mock.patch.object(
-                embedder_module, "ollama_model_present", side_effect=[False, True]
-            ),
+            mock.patch.object(embedder_module, "ollama_model_present", side_effect=[False, True]),
             mock.patch.object(
                 embedder_module, "run_command", return_value={"returncode": 0}
             ) as run,

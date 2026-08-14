@@ -1,4 +1,4 @@
-// The Notes Reader screen (L17): the L9 coordination-notes reading experience rebuilt on the SAME
+// The Notes Reader screen: the coordination-notes reading experience rebuilt on the SAME
 // full-view pattern the Change-Set / File Viewer use — a task-scoped takeover whose LEFT RAIL is the
 // master's notes tree (from /api/notes/list, reports/ included) with the open note highlighted, and
 // whose content pane renders the opened note by REUSING the File Viewer's `DualPane` primitive:
@@ -9,7 +9,7 @@
 // There is no second bespoke reader: the layout is the ChangeSetViewer rail+pane+back idiom and the
 // content is `DualPane`. The view is CONTROLLED — the open `path` and rail `onSelectNote` are lifted
 // to CockpitShell (like the File Viewer's persisted state) so selection survives back/forward.
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import { css } from "../../../styled-system/css";
@@ -98,7 +98,7 @@ const placeholder = css({ height: "100%", display: "grid", placeItems: "center",
 // Content-pane fill + the truncation banner (mirrors DualPane's own `fill`/`banner`): a truncated
 // MARKDOWN note takes DualPane's partnerless-markdown path, which has no banner (only CodeSide does),
 // so a >2-MiB markdown note -- the dominant note type -- would silently drop its "showing the first
-// 2 MiB" contract. We render the same banner here, above the pane, for that case (L18 finding 2).
+// 2 MiB" contract. We render the same banner here, above the pane, for that case.
 const paneFill = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
 const paneBody = css({ flex: "1", minHeight: "0" });
 const truncBanner = css({
@@ -134,7 +134,72 @@ function dualPaneProps(note: NoteContent): { code: FileContent | null; sidecar: 
     : { code: noteAsFileContent(note), sidecar: { state: "empty" } };
 }
 
-export function NotesReaderViewer({
+function NotesRail({
+  notes,
+  truncated,
+  activePath,
+  onSelectNote,
+}: {
+  notes: NotesListing["notes"];
+  truncated: boolean;
+  activePath: string;
+  onSelectNote: (path: string) => void;
+}) {
+  return (
+    <div className={railCol}>
+      <div className={railScroll} data-testid="notes-rail">
+        <div className={railHead}>notes ({notes.length})</div>
+        {notes.map((entry, index) => (
+          <button
+            key={entry.path}
+            type="button"
+            className={railRow}
+            data-active={entry.path === activePath}
+            data-testid={`note-rail-${index + 1}`}
+            onClick={() => onSelectNote(entry.path)}
+          >
+            <span className={railPath}>{entry.path}</span>
+            <span className={railSize}>{entry.size.toLocaleString()} B</span>
+          </button>
+        ))}
+        {truncated ? (
+          <div className={railHint}>deeper subfolders exist but are beyond the list cap</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function NotePane({ failed, note }: { failed: boolean; note: NoteContent | null }) {
+  if (failed) {
+    return (
+      <div className={placeholder} data-testid="note-status">
+        Could not load this note.
+      </div>
+    );
+  }
+  if (note === null) {
+    return (
+      <div className={placeholder} data-testid="note-status">
+        Loading…
+      </div>
+    );
+  }
+  return (
+    <div className={paneFill}>
+      {note.truncated && note.language === "markdown" ? (
+        <div className={truncBanner} data-testid="notes-trunc-banner">
+          Showing the first 2 MiB of {note.size.toLocaleString()} bytes
+        </div>
+      ) : null}
+      <div className={paneBody}>
+        <DualPane {...dualPaneProps(note)} split={false} />
+      </div>
+    </div>
+  );
+}
+
+function NotesReaderViewerImpl({
   repo,
   master,
   path,
@@ -187,52 +252,23 @@ export function NotesReaderViewer({
       </header>
       <PanelGroup direction="horizontal" autoSaveId="notesreader.outer" className={css({ flex: "1", minHeight: "0" })}>
         <Panel defaultSize={26} minSize={16}>
-          <div className={railCol}>
-            <div className={railScroll} data-testid="notes-rail">
-              <div className={railHead}>notes ({notes.length})</div>
-              {notes.map((entry, index) => (
-                <button
-                  key={entry.path}
-                  type="button"
-                  className={railRow}
-                  data-active={entry.path === path}
-                  data-testid={`note-rail-${index + 1}`}
-                  onClick={() => onSelectNote(entry.path)}
-                >
-                  <span className={railPath}>{entry.path}</span>
-                  <span className={railSize}>{entry.size.toLocaleString()} B</span>
-                </button>
-              ))}
-              {listing?.truncated ? (
-                <div className={railHint}>deeper subfolders exist but are beyond the list cap</div>
-              ) : null}
-            </div>
-          </div>
+          <NotesRail
+            notes={notes}
+            truncated={listing?.truncated === true}
+            activePath={path}
+            onSelectNote={onSelectNote}
+          />
         </Panel>
         <PanelResizeHandle className={handle} />
         <Panel minSize={30}>
-          {failed ? (
-            <div className={placeholder} data-testid="note-status">
-              Could not load this note.
-            </div>
-          ) : note === null ? (
-            <div className={placeholder} data-testid="note-status">
-              Loading…
-            </div>
-          ) : (
-            <div className={paneFill}>
-              {note.truncated && note.language === "markdown" ? (
-                <div className={truncBanner} data-testid="notes-trunc-banner">
-                  Showing the first 2 MiB of {note.size.toLocaleString()} bytes
-                </div>
-              ) : null}
-              <div className={paneBody}>
-                <DualPane {...dualPaneProps(note)} split={false} />
-              </div>
-            </div>
-          )}
+          <NotePane failed={failed} note={note} />
         </Panel>
       </PanelGroup>
     </div>
   );
 }
+
+// Memoized (tab-switch CPU): kept mounted (hidden) once opened — the shell re-renders on
+// every view switch with unchanged props, and the memo gate skips this subtree then; the reader's
+// own state still drives its updates.
+export const NotesReaderViewer = memo(NotesReaderViewerImpl);

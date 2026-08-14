@@ -20,7 +20,9 @@ from agents_remember.benchmarks.runner_modules.mcp_registration import (
     disarm_stale_benchmark_registrations,
 )
 from agents_remember.benchmarks.runner_modules.models import (
+    BenchmarkCase,
     BenchmarkPrepareRequest,
+    BenchmarkRunOutcome,
     BenchmarkRunRequest,
 )
 from agents_remember.benchmarks.runner_modules.workspace import prepare_case
@@ -35,7 +37,8 @@ def _capture_messages(run: Any) -> tuple[Any, list[str]]:
 
 
 def prepare_benchmarks(request: BenchmarkPrepareRequest) -> dict[str, Any]:
-    benchmarks_root = request.benchmarks_root.resolve()
+    preparation = request.preparation
+    benchmarks_root = preparation.benchmarks_root
     cases = select_cases(load_cases(benchmarks_root), request.target, request.case_id)
 
     def run_prepare() -> None:
@@ -43,16 +46,7 @@ def prepare_benchmarks(request: BenchmarkPrepareRequest) -> dict[str, Any]:
         # fleet kill-switch cannot reach — every touch of the benchmarks sweeps them.
         disarm_stale_benchmark_registrations(benchmarks_root, request.allowed_provider_ids)
         for case in cases:
-            prepare_case(
-                benchmarks_root,
-                case,
-                dry_run=request.dry_run,
-                skill_exposure_mode=request.skill_exposure_mode,
-                force_clone=request.force_clone,
-                provider_timeout=request.provider_timeout,
-                provider_ids=selected_provider_ids(case),
-                allowed_provider_ids=request.allowed_provider_ids,
-            )
+            prepare_case(preparation, case, provider_ids=selected_provider_ids(case))
 
     _, messages = _capture_messages(run_prepare)
     return {
@@ -78,48 +72,31 @@ def run_codex_benchmark(request: BenchmarkRunRequest) -> dict[str, Any]:
     return benchmark_run_payload(
         request,
         benchmarks_root,
-        cases,
-        output_roots,
-        messages,
-        resolved_codex_executable,
+        BenchmarkRunOutcome(
+            cases=cases,
+            output_roots=output_roots,
+            messages=messages,
+            codex_executable=resolved_codex_executable,
+        ),
     )
 
 
 def run_selected_cases(
     request: BenchmarkRunRequest,
     benchmarks_root: Path,
-    cases: list[Any],
+    cases: list[BenchmarkCase],
 ) -> list[Path]:
     output_roots: list[Path] = []
     disarm_stale_benchmark_registrations(benchmarks_root, request.allowed_provider_ids)
     for case in cases:
-        output_roots.append(
-            run_case(
-                benchmarks_root,
-                case,
-                prompt_id=request.prompt,
-                variant_id=request.variant,
-                repetitions=request.repetitions,
-                jobs=request.jobs,
-                dry_run=request.dry_run,
-                skip_prepare=request.skip_prepare,
-                skill_exposure_mode=request.skill_exposure_mode,
-                force_clone=request.force_clone,
-                provider_timeout=request.provider_timeout,
-                codex_sandbox=request.codex_sandbox,
-                allowed_provider_ids=request.allowed_provider_ids,
-            )
-        )
+        output_roots.append(run_case(request, case))
     return output_roots
 
 
 def benchmark_run_payload(
     request: BenchmarkRunRequest,
     benchmarks_root: Path,
-    cases: list[Any],
-    output_roots: list[Path],
-    messages: list[str],
-    resolved_codex_executable: str,
+    outcome: BenchmarkRunOutcome,
 ) -> dict[str, Any]:
     return {
         "ok": True,
@@ -131,10 +108,10 @@ def benchmark_run_payload(
         "variant": request.variant or "",
         "dryRun": request.dry_run,
         "codexExecutionPolicy": codex_execution_policy(
-            resolved_codex_executable,
+            outcome.codex_executable,
             codex_sandbox=request.codex_sandbox,
         ),
-        "cases": [case.case_id for case in cases],
-        "runOutputRoots": [path.as_posix() for path in output_roots],
-        "messages": messages,
+        "cases": [case.case_id for case in outcome.cases],
+        "runOutputRoots": [path.as_posix() for path in outcome.output_roots],
+        "messages": outcome.messages,
     }

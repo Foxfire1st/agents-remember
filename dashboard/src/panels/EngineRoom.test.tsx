@@ -1,10 +1,18 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
 import type { LifecycleProjection, ProviderNode, WorkspaceProjection } from "../types/projection";
 import { EngineRoom } from "./EngineRoom";
+import { buildEngineRoomModel } from "./engine-room/buildEngineRoomModel";
+
+// Delegate-to-real spy: proves WHEN the model is rebuilt (memo) without changing behavior.
+vi.mock("./engine-room/buildEngineRoomModel", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./engine-room/buildEngineRoomModel")>();
+  return { ...mod, buildEngineRoomModel: vi.fn(mod.buildEngineRoomModel) };
+});
+const buildSpy = vi.mocked(buildEngineRoomModel);
 
 function seed(name: string) {
   const projection = GALLERY.find((entry) => entry.name === name)?.projection;
@@ -23,6 +31,7 @@ function seedGateRoom() {
     tokens: 0,
     startedAt: "2026-06-23T10:00:00+00:00",
     lastEventTs: "2026-06-23T10:01:00+00:00",
+    stateEnteredAt: "2026-06-23T10:00:00+00:00",
     inferred: false,
     actions: [],
     tokenSeries: [],
@@ -30,6 +39,7 @@ function seedGateRoom() {
       id: "G1",
       kind: "cleanup-approval",
       state: "open",
+      evidenceRefs: [],
       decisions: [],
       packet: { question: "cleanup?" },
       ts: "2026-06-23T10:01:00+00:00",
@@ -121,6 +131,30 @@ function seedParallelLeafRoom() {
   });
 }
 
+function seedSourceLineageRoom() {
+  const fixture = GALLERY.find((entry) => entry.name === "engine-bootstrap");
+  if (!fixture) throw new Error("fixture not found: engine-bootstrap");
+  const process = fixture.projection.analytics.engineProcesses[0];
+  if (!process) throw new Error("engine-bootstrap fixture missing process");
+  dashboardStore.getState().applySnapshot({
+    ...fixture.projection,
+    analytics: {
+      ...fixture.projection.analytics,
+      engineProcesses: [
+        {
+          ...process,
+          sourceLineage: {
+            state: "blocked",
+            summary: "master code is behind the super-integration branch",
+            edges: [],
+            recoveries: [],
+          },
+        },
+      ],
+    },
+  });
+}
+
 // Freeze motion so the phase-activity flag (not the pulse) is what's asserted.
 beforeEach(() => {
   document.documentElement.dataset.effects = "off";
@@ -148,6 +182,17 @@ describe("EngineRoom lifecycle phase motion (5f S5, T12–T18)", () => {
     const { getByTestId } = render(<EngineRoom />);
     expect(getByTestId("engine-gate-responder").textContent).toContain("Respond");
     expect(getByTestId("enclosure-canvas").getAttribute("data-gate-kind")).toBe("cleanup-approval");
+  });
+
+  it("renders task-resolved source lineage before an agent reads from the enclosure", () => {
+    seedSourceLineageRoom();
+    const { getByText } = render(<EngineRoom />);
+
+    const label = getByText("Source lineage");
+    expect(label.parentElement?.textContent).toContain("blocked");
+    expect(label.parentElement?.getAttribute("title")).toBe(
+      "master code is behind the super-integration branch",
+    );
   });
 
   it("aggregates same-state official CGC engines into one strip chip", () => {
@@ -207,5 +252,54 @@ describe("EngineRoom lifecycle phase motion (5f S5, T12–T18)", () => {
     expect(getByTestId("engine-room-header").textContent).toContain(
       "16_engine-room-stack-entry-height",
     );
+  });
+});
+
+describe("EngineRoom — memoized model + narrowed analytics subscription (260721 C3)", () => {
+  beforeEach(() => {
+    buildSpy.mockClear();
+  });
+
+  it("does not rebuild the model on a re-render with unchanged slices (identical inputs → no rebuild)", () => {
+    seed("engine-bootstrap");
+    const view = render(<EngineRoom />);
+    const calls = buildSpy.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    view.rerender(<EngineRoom />);
+    expect(buildSpy.mock.calls.length).toBe(calls);
+  });
+
+  it("ignores an analytics delta that leaves engineProcesses + ledgers untouched", () => {
+    seed("engine-bootstrap");
+    render(<EngineRoom />);
+    const calls = buildSpy.mock.calls.length;
+    const analytics = dashboardStore.getState().analytics;
+    if (!analytics) throw new Error("analytics missing");
+    // A wholesale analytics replacement (the wire protocol) touching only the attention queue: the
+    // stableEquals slice selectors keep the previous identities → no re-render, no model rebuild.
+    act(() =>
+      dashboardStore.getState().applyDelta("analytics", {
+        ...analytics,
+        attentionQueue: [{ id: "att-1", severity: "warn" }],
+      }),
+    );
+    expect(buildSpy.mock.calls.length).toBe(calls);
+  });
+
+  it("rebuilds when an engineProcesses field actually changes (the memo invalidates honestly)", () => {
+    seed("engine-bootstrap");
+    render(<EngineRoom />);
+    const calls = buildSpy.mock.calls.length;
+    const analytics = dashboardStore.getState().analytics;
+    if (!analytics) throw new Error("analytics missing");
+    act(() =>
+      dashboardStore.getState().applyDelta("analytics", {
+        ...analytics,
+        engineProcesses: analytics.engineProcesses.map((process, index) =>
+          index === 0 ? { ...process, summary: "changed summary" } : process,
+        ),
+      }),
+    );
+    expect(buildSpy.mock.calls.length).toBeGreaterThan(calls);
   });
 });

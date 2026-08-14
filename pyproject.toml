@@ -1,6 +1,7 @@
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+# Match the package's supported Python floor and the lowest CI interpreter.
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -13,14 +14,15 @@ select = [
   "ARG",
   "PL",
   "RUF",
+  "C901", # Enforce [tool.ruff.lint.mccabe] max-complexity.
 ]
 ignore = [
-  "E501",    # Ruff format owns wrapping; long literals stay readable as-is.
-  "PLR0911", # Radon reports complexity pressure for refactor planning.
-  "PLR0912", # Radon reports complexity pressure for refactor planning.
-  "PLR0915", # Radon reports complexity pressure for refactor planning.
+  "E501", # Ruff format owns wrapping; long literals stay readable as-is.
+  # PLR0911/PLR0912/PLR0915 remain enforced with C901 by Ruff in the wrapper, hooks, and CI.
+  # They have no baseline, per-file ignore, noqa, or allowlist; refactor each offender.
   "PLR2004", # Numeric parser/state-machine sentinels are clearer inline.
-  "PLR0913", # too many arguments: useful warning, noisy during refactor
+  # PLR0913 uses Ruff's default maximum of five arguments. The guarded registration-only
+  # exemption below covers published MCP tool signatures.
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -29,12 +31,19 @@ ignore = [
   "ARG005", # Test doubles intentionally match patched callable signatures.
   "E402",   # Tests insert mcp/src before importing the package under test.
 ]
+# FastMCP derives the published flat input schema from each ``@server.tool()`` signature;
+# replacing it with a model parameter changes the wire shape to a nested object. This exemption
+# is limited to registration modules. ``ToolSignatureExemptionTests`` rejects ordinary logic,
+# a widened path, or any second PLR0913 exemption.
+"mcp/src/agents_remember/mcp/registration/*.py" = ["PLR0913"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.pyright]
-include = ["mcp/src/agents_remember", "mcp/tests"]
+# Bare Pyright and editors cover the whole checkout. The quality wrapper supplies its validated
+# index-known file scope explicitly.
+include = ["."]
 exclude = [
   "**/__pycache__",
   ".cache",
@@ -47,12 +56,25 @@ exclude = [
 ]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
-venvPath = "."
-venv = ".venv"
+# The wrapper supplies its selected interpreter through ``--pythonpath`` so primary and linked
+# worktrees resolve the same environment; do not add checkout-local venvPath/venv declarations.
 executionEnvironments = [
   { root = "mcp/src", extraPaths = ["mcp/src"] },
   { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/tests"] },
+  { root = "scripts", extraPaths = ["mcp/src"] },
 ]
+
+[tool.coverage.run]
+# CRAP and diff coverage consume Coverage.py statement and branch units. The CRAP reader
+# refuses JSON whose ``meta.branch_coverage`` is not true; keep branch measurement enabled.
+branch = true
+
+[tool.agents_remember]
+# S4 (260731-EFA-L7): armed at full scope after L16 landed and worktree_sync completed
+# (manager signal 01KZAMC4CWQXF2ZVTW2N9PC7AG). Arming is not a threshold change and carries
+# no baseline, allowlist, or per-file exemption. Any file at or above the 1,200-line hard
+# limit in the detector's scope fails the wrapper.
+file_size_armed = true
 
 [tool.radon]
 # Show only functions/classes that are at least mildly complex.
@@ -74,11 +96,120 @@ mi_max = "C"
 show_mi = true
 
 # Keep generated/cache/vendor-ish paths out of the report.
-# Use comma-separated strings rather than TOML arrays; Radon has had
-# pyproject parsing rough edges with arrays.
-exclude = "tests/*,*/tests/*,.venv/*,venv/*,build/*,dist/*,.git/*,__pycache__/*"
+# Radon expects comma-separated exclusion strings.
+#
+# Exclude only vendor/cache/build paths. The wrapper command selects the production report
+# population, while an explicit ``radon cc mcp/tests`` remains able to inspect tests.
+exclude = ".venv/*,venv/*,build/*,dist/*,.git/*,__pycache__/*"
 ignore = ".git,.hg,.mypy_cache,.pytest_cache,.ruff_cache,.venv,venv,node_modules,dist,build,__pycache__"
 
 # Usually better for real complexity pressure:
 # asserts should count as branches unless you intentionally use them as non-runtime checks.
 no_assert = false
+
+[tool.pytest.ini_options]
+# The first pytest configuration this repository has ever had. There was no
+# `pytest.ini`, `setup.cfg` or `tox.ini` either, so every strictness switch below was
+# off by default and there was nowhere to declare a marker.
+minversion = "9.0"
+
+# The single declaration of where the suite lives. `code_quality/check.py` reads this
+# key to build its pytest step, so the wrapper no longer carries a second copy that can
+# drift out of step with pytest itself.
+testpaths = ["mcp/tests"]
+
+addopts = [
+  # Use every logical CPU by default. pytest-xdist gives each worker its own temp root;
+  # mcp/tests/conftest.py also confines process-global application caches per worker.
+  "-n=auto",
+  # An unregistered marker is a typo that quietly selects nothing. Fail on it.
+  "--strict-markers",
+  # An unknown or misspelled ini key is a setting that quietly does nothing. Fail on it.
+  "--strict-config",
+]
+
+# The house convention is `<Subject>Tests`, not pytest's default `Test<Subject>`. All
+# 485 such classes currently reach `unittest.TestCase`, which pytest collects whatever
+# `python_classes` says, so this changes nothing today -- 3077 tests collected with and
+# without it on 2026-07-31. It closes the prospective hole: a plain `PlainTests` class
+# that does not subclass TestCase is silently skipped, with no error and no report.
+python_classes = ["Test*", "*Tests"]
+
+# An xfail that starts passing is either a bug someone fixed without noticing or a test
+# that stopped testing. Both should be seen rather than absorbed.
+xfail_strict = true
+
+# Warnings are errors, with named exceptions.
+#
+# Measured rather than assumed. A bare `filterwarnings = ["error"]` does not merely fail
+# this suite, it *hangs* it: uvicorn's websockets shim emits a DeprecationWarning while
+# importing `websockets.server`, and raising that inside the server startup path leaves
+# the conversation-active tests blocked in `epoll_wait` for good (observed 2026-07-31 --
+# the run stopped at test 496 of 3077 and never advanced). Every entry below was found
+# by running the whole suite under `filterwarnings = ["always"]` and reading the
+# summary, so the list is exactly what this tree emits and nothing wider.
+#
+# Each ignore is pinned to a message *and* a category, so an ignore can only ever silence
+# the exact notice it was measured against and never a class of them.
+#
+# Every entry left is third party and unreachable from here. The two that were ours were
+# fixed rather than ignored, in this same change: `providers/grepai/seed.py` now enters its
+# `Popen` as a context manager, so a `stdout=PIPE` caller's read end is closed by the code
+# that opened it (test_seed_timeouts StallWatchdogTests, 4 tests); `_spawn_sleeper` in
+# test_dashboard_daemon.py closes the readiness pipe it reads one line from (StopTests, 2
+# tests); and the dashboard sim's throwaway coordination root is now closed by its owner --
+# `cli/dashboard.py::run` after the server stops, and `SimReplayTests._build_sim` via
+# addCleanup (test_serving.py, 5 tests). `mcp/tests/test_code_quality_check.py::
+# test_the_warning_ignore_list_is_capped` asserts the exact remaining count, so an entry
+# cannot be added or paid off without a visible edit to a test.
+filterwarnings = [
+  "error",
+
+  # --- third party: not fixable from this repository -------------------------
+  # starlette warns at import of `starlette.testclient` that httpx2 is the supported
+  # client, and fastapi's TestClient re-exports it. This fires at *collection* of the
+  # eleven serving test modules, so without this line the run dies before it starts.
+  "ignore::starlette.exceptions.StarletteDeprecationWarning",
+  # uvicorn's websockets protocol module imports `websockets.server.WebSocketServerProtocol`
+  # and `websockets.legacy`, both deprecated in websockets >= 14. These are the two that
+  # hang the suite when raised. Gone when uvicorn moves to the new websockets API, which is
+  # a dependency bump rather than a change here.
+  "ignore:websockets.server.WebSocketServerProtocol is deprecated:DeprecationWarning",
+  "ignore:websockets.legacy is deprecated:DeprecationWarning",
+]
+
+# Environment-gated integration paths. Eight of them, guarding fifteen tests: each is
+# guarded by an `AR_*` variable and skips when it is unset, so nothing exercises them
+# unless something sets it.
+#
+# Registering a marker is not the same as applying one, and for a while this list was
+# only the first. Every entry below was registered and documented while the tests
+# carried no `@pytest.mark.<name>` at all, so `pytest -m ar_run_pi_rpc_smoke` selected
+# *nothing* -- 0 of 3402, reported as a successful run of an empty selection, because
+# `--strict-markers` rejects an unknown marker and has nothing to say about a registered
+# one that decorates no test. All eight are applied now, and
+# `mcp/tests/test_gated_integration_runner.py` fails if any of them selects zero tests
+# again.
+#
+# `scripts/run-gated-integration.py` is the one selector per path. The two
+# credential-free paths can participate in lifecycle-owned Dagger acceptance:
+# `ar_run_pi_rpc_smoke`, which installs its own Pi build and drives it offline against
+# 127.0.0.1, and `agents_remember_real_mcp_config`, which spawns this repository's own
+# MCP server against a generated settings file. The other six need an installed,
+# signed-in vendor CLI and four bill for real model turns. They remain explicit opt-ins,
+# and like every pytest path they refuse execution outside the pinned Dagger graph.
+#
+# `mcp/tests/test_code_quality_check.py` asserts this list and the suite's actual
+# environment gates stay in step in both directions.
+markers = [
+  "fitness: inherited S1-S4 architecture fitness checks that run in the ordinary pytest suite",
+  "ar_run_pi_rpc_smoke: opt in with AR_RUN_PI_RPC_SMOKE=1 -- installs and drives the pinned Pi RPC build (test_pi_rpc_real_smoke.py: 1 class)",
+  "ar_run_control_plane_installed: opt in with AR_RUN_CONTROL_PLANE_INSTALLED=1 -- drives installed Codex and Pi runtimes through the control-plane seam (test_harness_control_plane_installed.py: 2 classes)",
+  "ar_run_control_installed: opt in with AR_RUN_CONTROL_INSTALLED=1 -- drives installed runtimes through the L3 control routes (test_conversation_control_installed.py: 2 classes)",
+  "ar_run_evidence_installed: opt in with AR_RUN_EVIDENCE_INSTALLED=1 -- drives installed runtimes through the production evidence seam (test_harness_control_evidence_installed.py: 2 classes)",
+  "ar_claude_stream_smoke: opt in with AR_CLAUDE_STREAM_SMOKE=1 -- live Claude stream-json smoke against the installed binary (test_harness_control_claude_smoke.py: 1 class)",
+  "ar_codex_app_server_live_smoke: opt in with AR_CODEX_APP_SERVER_LIVE_SMOKE=1 -- credential-safe live Codex app-server handshake, sends no prompt (test_codex_app_server_live.py: 1 test)",
+  "ar_codex_app_server_live_conformance: opt in with AR_CODEX_APP_SERVER_LIVE_CONFORMANCE=1 -- bounded live Codex conformance, sends two tiny turns (test_codex_app_server_live.py: 1 test)",
+  # Same hazard, older naming: an environment-gated integration path that predates the AR_ prefix.
+  "agents_remember_real_mcp_config: opt in by pointing AGENTS_REMEMBER_REAL_MCP_CONFIG at a real MCP config -- real MCP server integration (test_tools.py: 1 class)",
+]

@@ -110,36 +110,34 @@ export function buildEventSummaryContext(
   };
 }
 
+const SUMMARIZERS: Record<
+  string,
+  (event: ObserverEvent, context: EventSummaryContext) => EventSummary
+> = {
+  "read.packet": summarizeReadPacket,
+  "tool.completed": summarizeToolCompleted,
+  "lifecycle.phase-changed": summarizePhaseChanged,
+  "lifecycle.started": (event, context) => summarizeLifecycleEvent(event, context, "Started lifecycle"),
+  "lifecycle.resumed": (event, context) => summarizeLifecycleEvent(event, context, "Resumed lifecycle"),
+  "lifecycle.paused": (event, context) => summarizeLifecycleEvent(event, context, "Paused lifecycle"),
+  "lifecycle.promoted": (event, context) => summarizeLifecycleEvent(event, context, "Saved task lifecycle"),
+  "lifecycle.ended": summarizeEnded,
+  "lifecycle.blocked": summarizeBlocked,
+  "lifecycle.heartbeat": summarizeHeartbeat,
+};
+
+function summarizeDefault(event: ObserverEvent, context: EventSummaryContext): EventSummary {
+  return event.kind.startsWith("gate.")
+    ? summarizeGateEvent(event, context)
+    : summarizeUnknown(event, context);
+}
+
 export function summarizeEvent(
   event: ObserverEvent,
   context: EventSummaryContext,
 ): EventSummary {
-  switch (event.kind) {
-    case "read.packet":
-      return summarizeReadPacket(event, context);
-    case "tool.completed":
-      return summarizeToolCompleted(event, context);
-    case "lifecycle.phase-changed":
-      return summarizePhaseChanged(event, context);
-    case "lifecycle.started":
-      return summarizeLifecycleEvent(event, context, "Started lifecycle");
-    case "lifecycle.resumed":
-      return summarizeLifecycleEvent(event, context, "Resumed lifecycle");
-    case "lifecycle.paused":
-      return summarizeLifecycleEvent(event, context, "Paused lifecycle");
-    case "lifecycle.promoted":
-      return summarizeLifecycleEvent(event, context, "Saved task lifecycle");
-    case "lifecycle.ended":
-      return summarizeEnded(event, context);
-    case "lifecycle.blocked":
-      return summarizeBlocked(event, context);
-    case "lifecycle.heartbeat":
-      return summarizeHeartbeat(event, context);
-    default:
-      return event.kind.startsWith("gate.")
-        ? summarizeGateEvent(event, context)
-        : summarizeUnknown(event, context);
-  }
+  const summarizer = SUMMARIZERS[event.kind] ?? summarizeDefault;
+  return summarizer(event, context);
 }
 
 export function eventSummaryContextReady(
@@ -308,51 +306,72 @@ function summarizeUnknown(event: ObserverEvent, context: EventSummaryContext): E
   };
 }
 
+function enclosureLabel(enclosure: EnclosureNode, fallback: string): string {
+  return enclosure.leafId || enclosure.taskName || fallback;
+}
+
+function lifecycleBranch(
+  context: EventSummaryContext,
+  lifecycle: LifecycleProjection,
+): LifecycleContext {
+  const directDocs = taskDocsForLifecycle(lifecycle, context.analytics?.taskDocuments ?? []);
+  const enclosure = findLifecycleEnclosure(
+    lifecycle,
+    context.enclosures,
+    context.enclosuresByLifecycle,
+  );
+  return {
+    enclosure: lifecycle.enclosure,
+    label: taskLabel(lifecycle, directDocs, enclosure),
+    lifecycleId: lifecycle.id,
+    repoId: lifecycle.repoId,
+  };
+}
+
+function enclosureBranch(
+  event: ObserverEvent,
+  context: EventSummaryContext,
+): LifecycleContext {
+  const enclosure = context.enclosures[event.enclosure ?? ""];
+  if (!enclosure) {
+    return { enclosure: event.enclosure, repoId: event.repoId };
+  }
+  return {
+    enclosure: event.enclosure,
+    label: enclosureLabel(enclosure, event.enclosure ?? ""),
+    lifecycleId: event.lifecycleId ?? enclosure.lifecycleId,
+    repoId: enclosure.repoName,
+  };
+}
+
+function docsBranch(
+  event: ObserverEvent,
+  context: EventSummaryContext,
+  lifecycleId: string,
+): LifecycleContext {
+  const directDocs = context.taskDocsByLifecycle.get(lifecycleId) ?? [];
+  return {
+    enclosure: event.enclosure,
+    label: taskDocumentLabel(directDocs, event.enclosure ?? lifecycleId),
+    lifecycleId,
+    repoId: event.repoId ?? directDocs[0]?.repository,
+  };
+}
+
 function lifecycleContext(
   event: ObserverEvent,
   context: EventSummaryContext,
 ): LifecycleContext {
   if (event.lifecycleId) {
     const lifecycle = context.lifecycles[event.lifecycleId];
-    if (lifecycle) {
-      const directDocs = taskDocsForLifecycle(lifecycle, context.analytics?.taskDocuments ?? []);
-      const enclosure = findLifecycleEnclosure(
-        lifecycle,
-        context.enclosures,
-        context.enclosuresByLifecycle,
-      );
-      return {
-        enclosure: lifecycle.enclosure,
-        label: taskLabel(lifecycle, directDocs, enclosure),
-        lifecycleId: lifecycle.id,
-        repoId: lifecycle.repoId,
-      };
-    }
+    if (lifecycle) return lifecycleBranch(context, lifecycle);
     if (event.enclosure && context.enclosures[event.enclosure]) {
-      const enclosure = context.enclosures[event.enclosure];
-      return {
-        enclosure: event.enclosure,
-        label: enclosure.leafId || enclosure.taskName || event.enclosure,
-        lifecycleId: event.lifecycleId,
-        repoId: enclosure.repoName,
-      };
+      return enclosureBranch(event, context);
     }
-    const directDocs = context.taskDocsByLifecycle.get(event.lifecycleId) ?? [];
-    return {
-      enclosure: event.enclosure,
-      label: taskDocumentLabel(directDocs, event.enclosure ?? event.lifecycleId),
-      lifecycleId: event.lifecycleId,
-      repoId: event.repoId ?? directDocs[0]?.repository,
-    };
+    return docsBranch(event, context, event.lifecycleId);
   }
   if (event.enclosure && context.enclosures[event.enclosure]) {
-    const enclosure = context.enclosures[event.enclosure];
-    return {
-      enclosure: event.enclosure,
-      label: enclosure.leafId || enclosure.taskName || event.enclosure,
-      lifecycleId: enclosure.lifecycleId,
-      repoId: enclosure.repoName,
-    };
+    return enclosureBranch(event, context);
   }
   return { enclosure: event.enclosure, repoId: event.repoId };
 }

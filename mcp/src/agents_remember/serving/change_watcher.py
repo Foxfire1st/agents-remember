@@ -5,8 +5,8 @@
 a quiet-but-large tree. This module makes waking *change-driven*: a filesystem watcher
 (``watchfiles``, inotify-backed) over the projection's actual input surfaces feeds a
 small debounce/coalesce state machine (:class:`ChangePacer`), and a slow heartbeat
-covers everything a watcher cannot see. The projector's tick body is untouched -- only
-*when* it wakes changes, never *what* a tick does.
+covers everything a watcher cannot see. Each accepted path now carries its reader domain
+through the pacer so unrelated inputs stay retained instead of rebuilding the whole world.
 
 The authoritative input list (R1), derived reader-by-reader from
 ``observer.projection_store.project_and_write``:
@@ -47,8 +47,11 @@ blind spots:
 Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`` /
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
 every watched subdirectory, so a tick cannot re-wake itself. Inside ``<obs>/workspace``
-the non-input churn (the raw event river + cursor/lock, the supervisor heartbeat) is
-name-filtered. TTL-gated writers that run inside a tick (gate-log compaction, event
+the non-input churn (the raw event river + cursor/lock, the agent-notifier heartbeat) is
+name-filtered, and the control-plane lockfiles are suffix-filtered in every watched
+directory (they are the busiest writes in the tree -- every durable-store append and every
+rewrite opens one ``a+b`` -- and none is an input). TTL-gated writers that run inside a tick
+(gate-log compaction, event
 retention, provider current-state refresh) cost at most one debounced echo tick per TTL
 window, whose diff emits nothing.
 
@@ -73,20 +76,28 @@ import asyncio
 import logging
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from agents_remember.observer.paths import drift_snapshot_dir, observer_logs_root
-from agents_remember.observer.projection_store import LATEST_METRICS, LATEST_STATE
+from agents_remember.controlplane.durable_store import lock_path_for
 from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
-from agents_remember.serving.supervisor_heartbeat import supervisor_heartbeat_path
+from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_heartbeat_path
+from agents_remember.serving.projections.paths import drift_snapshot_dir, observer_logs_root
+from agents_remember.serving.projections.projection_inputs import (
+    ALL_PROJECTION_DOMAINS,
+    ProjectionDomain,
+)
+from agents_remember.serving.projections.projection_store import LATEST_METRICS, LATEST_STATE
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from watchfiles import Change
 
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 try:  # R7: a missing wheel must degrade the daemon loudly, never crash it at import time.
     import watchfiles
@@ -117,19 +128,34 @@ WATCH_REFRESH_SECONDS = 30.0
 _EXCLUDED_NAMES = frozenset({LATEST_STATE, LATEST_METRICS})
 
 #: ``<obs>/workspace`` files that are NOT projection inputs: the raw event river (served
-#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, the
-#: operator-inbox flock file (opened ``a+b`` by every inbox access, including each tick's
-#: ``read_agent_pickups`` -- its boot-time creation would emit one spurious change-tick),
-#: and the supervisor's own heartbeat (written every sweep on its own cadence).
+#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, and the
+#: agent-notifier's own heartbeat (written every sweep on its own cadence). The control-plane
+#: lockfiles used to be listed here by name; they are derived instead -- see
+#: :data:`_DURABLE_LOG_LOCK_SUFFIX`.
 _EXCLUDED_WORKSPACE_NAMES = frozenset(
     {
         "events.jsonl",
         WORKSPACE_CURSOR_FILE,
         WORKSPACE_LOCK_FILE,
-        "operator-inbox.lock",
-        supervisor_heartbeat_path(Path(".")).name,
+        agent_notifier_heartbeat_path(Path(".")).name,
     }
 )
+
+#: The suffix ``controlplane.durable_store.lock_path_for`` gives a ``.jsonl`` control-plane log,
+#: DERIVED from that function rather than spelled out, because spelling it out is what broke:
+#: this filter carried the literal ``"operator-inbox.lock"`` while ``lock_path_for`` had moved to
+#: ``operator-inbox.jsonl.lock``, so the exclusion silently stopped matching anything.
+#:
+#: Every append and every rewrite of the six durable logs opens its lockfile ``a+b`` (including
+#: each projection tick's own ``read_agent_pickups``), so these are the highest-frequency writes
+#: in the watched tree and none of them is a projection input. Matched by SUFFIX and in EVERY
+#: watched directory rather than by name under ``workspace/``, which is what the old list could
+#: not express: five of the six logs live only under ``workspace/``, but ``gates.jsonl`` lives
+#: there AND once per lifecycle under ``<obs>/lifecycles/<id>/``, so ``gates.jsonl.lock`` appears
+#: in every lifecycle directory too. A suffix rule needs no list to keep in step with the stores,
+#: and no projection input is named ``*.jsonl.lock``: the inputs are the ``.jsonl`` logs
+#: themselves and ``.json`` sidecars.
+_DURABLE_LOG_LOCK_SUFFIX = lock_path_for(Path("log.jsonl")).name.removeprefix("log")
 
 
 def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
@@ -163,11 +189,14 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
 def is_projection_input_event(path: str) -> bool:
     """Filter one raw watch event down to genuine projection inputs.
 
-    Drops atomic-write temp files, dot-prefixed sidecar temps, the projection's own
-    outputs, and the ``workspace/`` non-input churn (see :data:`_EXCLUDED_WORKSPACE_NAMES`).
+    Drops atomic-write temp files, dot-prefixed sidecar temps, the projection's own outputs,
+    every control-plane lockfile (:data:`_DURABLE_LOG_LOCK_SUFFIX`, in any watched directory),
+    and the ``workspace/`` non-input churn (see :data:`_EXCLUDED_WORKSPACE_NAMES`).
     """
     name = os.path.basename(path.rstrip("/\\"))
     if name.endswith(".tmp") or name.startswith("."):
+        return False
+    if name.endswith(_DURABLE_LOG_LOCK_SUFFIX):
         return False
     if name in _EXCLUDED_NAMES:
         return False
@@ -178,10 +207,67 @@ def is_projection_input_event(path: str) -> bool:
     return True
 
 
+def projection_domains_for_paths(
+    config: McpRuntimeConfig, paths: set[str]
+) -> frozenset[ProjectionDomain]:
+    """Map accepted watcher paths to the reader domains they invalidate.
+
+    Watch roots are intentionally explicit. If an accepted path does not match one of
+    them, return every domain: watcher reconciliation must fail open to a full refresh,
+    never silently retain an input whose source mapping was missed.
+    """
+    coordination_root = config.coordination_root.resolve()
+    observer = observer_logs_root(coordination_root).resolve()
+    roots = (
+        (coordination_root / "tasks", ProjectionDomain.TASKS),
+        (observer / "lifecycles", ProjectionDomain.LIFECYCLES),
+        (observer / "workspace", ProjectionDomain.WORKSPACE),
+        (drift_snapshot_dir(coordination_root), ProjectionDomain.DRIFT),
+        (
+            coordination_root / "logs" / "providers" / "status",
+            ProjectionDomain.PROVIDERS,
+        ),
+        (
+            coordination_root / "logs" / "providers" / "setup",
+            ProjectionDomain.PROVIDERS,
+        ),
+        (
+            coordination_root / "temp" / "worktree-start",
+            ProjectionDomain.START_PROGRESS,
+        ),
+        (
+            coordination_root / "temp" / "tool-reports",
+            ProjectionDomain.TOOL_REPORTS,
+        ),
+    )
+    domains: set[ProjectionDomain] = set()
+    for raw_path in paths:
+        path = Path(raw_path).resolve()
+        matched = False
+        for root, domain in roots:
+            if path == root or root in path.parents:
+                domains.add(domain)
+                matched = True
+                break
+        if not matched:
+            return ALL_PROJECTION_DOMAINS
+    return frozenset(domains)
+
+
+@dataclass(frozen=True)
+class ProjectionWake:
+    """One due projection and the reader domains accumulated for it."""
+
+    reason: str
+    domains: frozenset[ProjectionDomain]
+
+
 class WakeTarget(Protocol):
     """What a watcher drives: the pacer's change/health inputs (structural, test-fakeable)."""
 
-    def notify_change(self) -> None: ...
+    def notify_change(
+        self, domains: frozenset[ProjectionDomain] = ALL_PROJECTION_DOMAINS
+    ) -> None: ...
 
     def set_watcher_healthy(self, healthy: bool) -> None: ...
 
@@ -229,18 +315,20 @@ class ChangePacer:
         self._event = asyncio.Event()
         self._first_pending: float | None = None
         self._last_pending: float | None = None
+        self._pending_domains: set[ProjectionDomain] = set()
         # Start degraded: until the watcher reports its watches established, pace at the
         # fixed interval so there is no detection blind spot at boot (heartbeat would be
         # too slow a floor for changes racing the watcher startup).
         self._watcher_healthy = False
         self._last_wake = time.monotonic()
 
-    def notify_change(self) -> None:
+    def notify_change(self, domains: frozenset[ProjectionDomain] = ALL_PROJECTION_DOMAINS) -> None:
         """Record a (batch of) input change(s); wakes :meth:`wait` to reschedule."""
         now = time.monotonic()
         if self._first_pending is None:
             self._first_pending = now
         self._last_pending = now
+        self._pending_domains.update(domains)
         self._event.set()
 
     def set_watcher_healthy(self, healthy: bool) -> None:
@@ -259,8 +347,8 @@ class ChangePacer:
             return min(max(settle, floor), max(bound, floor)), "change"
         return self._last_wake + self._heartbeat, "heartbeat"
 
-    async def wait(self) -> str:
-        """Sleep until the next projection is due; returns the wake reason.
+    async def wait(self) -> ProjectionWake:
+        """Sleep until the next projection is due; return its reason and domains.
 
         Pending changes are consumed at wake: changes observed *during* the following
         projection accumulate for the next cycle, so nothing is ever lost to a tick.
@@ -269,11 +357,19 @@ class ChangePacer:
             now = time.monotonic()
             deadline, reason = self._next_deadline()
             if now >= deadline:
+                domains = (
+                    frozenset(self._pending_domains)
+                    if reason == "change"
+                    else ALL_PROJECTION_DOMAINS
+                    if reason == "interval"
+                    else frozenset()
+                )
                 self._first_pending = None
                 self._last_pending = None
+                self._pending_domains.clear()
                 self._event.clear()
                 self._last_wake = now
-                return reason
+                return ProjectionWake(reason=reason, domains=domains)
             self._event.clear()
             try:
                 async with asyncio.timeout(deadline - now):
@@ -348,7 +444,7 @@ class ProjectionInputWatcher:
             if reconcile:
                 # inotify has no replay: reconcile whatever happened while the watch
                 # was down or being re-registered with one debounced projection.
-                pacer.notify_change()
+                pacer.notify_change(ALL_PROJECTION_DOMAINS)
             async for changes in watchfiles.awatch(
                 *roots,
                 watch_filter=self._watch_filter(),
@@ -361,7 +457,10 @@ class ProjectionInputWatcher:
                 ignore_permission_denied=True,
             ):
                 if changes:
-                    pacer.notify_change()
+                    domains = projection_domains_for_paths(
+                        self._config, {path for _change, path in changes}
+                    )
+                    pacer.notify_change(domains)
         finally:
             refresher.cancel()
             try:

@@ -1,11 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { servedAgeSeconds, stableEquals, stampServed, VOLATILE_AGE_FIELDS } from "./servedAges";
+import {
+  servedAgeSeconds,
+  stableEquals,
+  stampServed,
+  useNowMs,
+  VOLATILE_AGE_FIELDS,
+} from "./servedAges";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("VOLATILE_AGE_FIELDS", () => {
   it("mirrors serving/delta.py exactly (keep the two sets in lockstep)", () => {
     expect([...VOLATILE_AGE_FIELDS].sort()).toEqual([
       "ageSeconds",
+      "elapsedSeconds",
       "heartbeatAgeSeconds",
       "snapshotStaleSeconds",
       "staleSeconds",
@@ -75,5 +87,35 @@ describe("servedAgeSeconds", () => {
   it("handles a missing node (optional chains at call sites)", () => {
     expect(servedAgeSeconds(undefined, 30, Date.now())).toBe(30);
     expect(servedAgeSeconds(null, undefined, Date.now())).toBeUndefined();
+  });
+});
+
+describe("useNowMs", () => {
+  it("freezes while its kept-mounted layer is hidden and catches up once on re-show", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const clock = renderHook(
+      ({ active }: { active: boolean }) => useNowMs(10_000, active),
+      { initialProps: { active: false } },
+    );
+    expect(clock.result.current).toBe(1_000);
+
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    expect(clock.result.current).toBe(1_000);
+
+    clock.rerender({ active: true });
+    expect(clock.result.current).toBe(21_000);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(clock.result.current).toBe(31_000);
+
+    clock.rerender({ active: false });
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    expect(clock.result.current).toBe(31_000);
   });
 });

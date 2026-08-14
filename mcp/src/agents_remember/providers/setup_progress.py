@@ -165,9 +165,7 @@ class SetupProgressFile(SetupProgress):
         self._state["updatedAt"] = self._now()
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(
-                json.dumps(self._state, indent=2) + "\n", encoding="utf-8"
-            )
+            self._path.write_text(json.dumps(self._state, indent=2) + "\n", encoding="utf-8")
         except OSError as error:
             self._write_error = str(error)
 
@@ -223,15 +221,11 @@ def progress_status(
         if not phase.get("ok") and not phase.get("skipped")
     ]
     if failed:
-        status["failedPhases"] = [
-            _phase_line(phase) for phase in failed
-        ]
+        status["failedPhases"] = [_phase_line(phase) for phase in failed]
     return status
 
 
-def _project_running(
-    status: dict[str, Any], progress: dict[str, Any], now: datetime
-) -> None:
+def _project_running(status: dict[str, Any], progress: dict[str, Any], now: datetime) -> None:
     heartbeat_age = _age_seconds(progress.get("updatedAt"), now)
     if heartbeat_age is not None:
         status["heartbeatAgeSeconds"] = round(heartbeat_age, 1)
@@ -240,9 +234,7 @@ def _project_running(
     current = progress.get("currentPhase")
     if isinstance(current, dict):
         status["currentPhase"] = {
-            key: value
-            for key, value in current.items()
-            if value is not None and key != "startedAt"
+            key: value for key, value in current.items() if value is not None and key != "startedAt"
         }
         elapsed = _age_seconds(current.get("startedAt"), now)
         if elapsed is not None:

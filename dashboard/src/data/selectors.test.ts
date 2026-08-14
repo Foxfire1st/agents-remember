@@ -13,6 +13,7 @@ const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): Lifecyc
     tokens: 0,
     startedAt: "t",
     lastEventTs: "t",
+    stateEnteredAt: "t",
     inferred: false,
     actions: [],
     tokenSeries: [],

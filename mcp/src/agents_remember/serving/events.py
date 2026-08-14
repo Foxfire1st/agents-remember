@@ -30,11 +30,11 @@ from typing import TYPE_CHECKING
 
 from fastapi.sse import ServerSentEvent
 
+from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.observer.event_retention import (
     initial_event_offsets,
     prune_expired_lifecycle_event_logs,
 )
-from agents_remember.observer.paths import observer_root
 from agents_remember.observer.store import (
     WORKSPACE_SOURCE,
     workspace_base_offset,
@@ -44,18 +44,17 @@ from agents_remember.observer.store import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
 
 # The workspace log has no lifecycle id; this reserved cursor key routes it. A lifecycle
 # id can never collide (lifecycle ids are ULIDs -- Crockford base32, never "workspace").
 _WORKSPACE = WORKSPACE_SOURCE
 
 # Heartbeats are a liveness signal (already carried by the projection's status file), not agent
-# activity, so the river never streams them. The compact on-disk wire form (``model_dump_json``)
-# has no spaces, so the substring test is the fast path; non-heartbeat lines never carry the
-# marker text and so are never parsed.
+# activity, so the river never streams them.
 _HEARTBEAT_KIND = "lifecycle.heartbeat"
-_HEARTBEAT_MARKER = f'"kind":"{_HEARTBEAT_KIND}"'
 # A fresh connect streams its (already window-bounded) backlog in chunks, so the loop is never
 # blocked materializing thousands of records before the first byte.
 DEFAULT_EVENT_BATCH = 500
@@ -67,15 +66,16 @@ PRUNE_INTERVAL_SECONDS = 60.0
 class RawEvent:
     """One raw event line plus the resume cursor a client would send to continue after it.
 
-    ``data`` is the verbatim JSONL line (already the camelCase wire form on disk). It is parsed
-    to an object at the SSE boundary (``stream_raw_events``) so ServerSentEvent single-encodes it
-    like the state channel, rather than double-encoding the already-serialized string. ``cursor``
-    is the encoded per-source offset map *after* this event, i.e. the ``Last-Event-ID`` to resume
-    the whole stream from this point.
+    ``data`` is the verbatim JSONL line (already the camelCase wire form on disk). ``payload`` is
+    the same line parsed once and proven to be a top-level JSON object; the SSE boundary uses it
+    directly so ServerSentEvent single-encodes it like the state channel. ``cursor`` is the encoded
+    per-source offset map *after* this event, i.e. the ``Last-Event-ID`` to resume the whole stream
+    from this point.
     """
 
     source: str
     data: str
+    payload: dict[str, object]
     cursor: str
 
 
@@ -124,28 +124,42 @@ def _discover_sources(root: Path) -> list[str]:
     return sources
 
 
-def _read_lines_from(path: Path, start: int) -> tuple[list[tuple[str, int]], int]:
-    """Complete lines (text, byte-offset-after) from ``start`` to the last newline, + the end.
+def _read_lines_from(path: Path, start: int) -> tuple[list[tuple[bytes, int]], int]:
+    """Complete records (bytes, byte-offset-after) from an authoritative boundary, + the end.
 
     A trailing partial line (no terminating newline) is left unconsumed so a half-written
-    append is never emitted; the end offset stays at the last complete-line boundary.
+    append is never emitted; the end offset stays at the last complete-line boundary.  A nonzero
+    client offset is accepted only when its preceding byte is a newline.  Otherwise the suffix of
+    that client-sliced record is consumed and reading resumes at the next server-owned boundary.
+    Offsets beyond EOF settle at the current EOF.
     """
     with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        start = min(start, size)
+        if start > 0:
+            handle.seek(start - 1)
+            if handle.read(1) != b"\n":
+                handle.seek(start)
+                handle.readline()
+                start = handle.tell()
         handle.seek(start)
         chunk = handle.read()
-    lines: list[tuple[str, int]] = []
+    lines: list[tuple[bytes, int]] = []
     consumed = 0
     while True:
         newline = chunk.find(b"\n", consumed)
         if newline == -1:
             break
-        text = chunk[consumed:newline].decode("utf-8").strip()
+        record = chunk[consumed:newline]
         consumed = newline + 1
-        lines.append((text, start + consumed))
+        lines.append((record, start + consumed))
     return lines, start + consumed
 
 
-def _read_source_lines(root: Path, source: str, virtual_start: int) -> tuple[list[tuple[str, int]], int]:
+def _read_source_lines(
+    root: Path, source: str, virtual_start: int
+) -> tuple[list[tuple[bytes, int]], int]:
     """Read complete lines and return offsets in the source's cursor coordinate system.
 
     Lifecycle logs remain physical-offset streams. The workspace river is physically compacted while
@@ -164,24 +178,14 @@ def _read_source_lines(root: Path, source: str, virtual_start: int) -> tuple[lis
             size = 0
         physical_start = min(max(virtual_start - base, 0), size)
         lines, physical_end = _read_lines_from(path, physical_start)
-        return [(text, base + offset_after) for text, offset_after in lines], base + physical_end
+        return [
+            (record, base + offset_after) for record, offset_after in lines
+        ], base + physical_end
 
 
-def _is_heartbeat_line(text: str) -> bool:
-    """True when a raw JSONL line is a ``lifecycle.heartbeat`` (liveness, not activity).
-
-    Fast path: the compact on-disk wire form matches the substring marker directly. A
-    tolerant parse is the fallback so alternate spacing/formatting can never let a heartbeat
-    slip into the river. Lines that do not even contain the kind text are never parsed.
-    """
-    if _HEARTBEAT_MARKER in text:
-        return True
-    if _HEARTBEAT_KIND not in text:
-        return False
-    try:
-        return json.loads(text).get("kind") == _HEARTBEAT_KIND
-    except (ValueError, TypeError, AttributeError):
-        return False
+def _is_heartbeat_event(payload: dict[str, object]) -> bool:
+    """True when a parsed observer-event object is a heartbeat (liveness, not activity)."""
+    return payload.get("kind") == _HEARTBEAT_KIND
 
 
 def read_new_events(
@@ -200,11 +204,25 @@ def read_new_events(
     events: list[RawEvent] = []
     for source in _discover_sources(root):
         lines, end = _read_source_lines(root, source, current.get(source, 0))
-        for text, offset_after in lines:
+        for record, offset_after in lines:
             current[source] = offset_after
-            if not text or _is_heartbeat_line(text):
+            try:
+                text = record.decode("utf-8").strip()
+            except UnicodeDecodeError:
                 continue
-            events.append(RawEvent(source=source, data=text, cursor=encode_cursor(current)))
+            if not text:
+                continue
+            try:
+                payload: object = json.loads(text)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if _is_heartbeat_event(payload):
+                continue
+            events.append(
+                RawEvent(source=source, data=text, payload=payload, cursor=encode_cursor(current))
+            )
             if limit is not None and len(events) >= limit:
                 return events, current
         current[source] = end
@@ -246,12 +264,9 @@ async def stream_raw_events(
         )
         for event in events:
             # ServerSentEvent JSON-encodes whatever it is given (the state channel passes dicts),
-            # so emit the *parsed* object -- passing the pre-serialized JSONL string would
-            # double-encode the wire (`data: "{...}"`) and force every client (dashboard, TUI,
-            # agent) to JSON.parse twice. Single-encoded here matches `/api/stream`.
-            yield ServerSentEvent(
-                data=json.loads(event.data), event="event", id=event.cursor, retry=2000
-            )
+            # so emit the object parsed and validated by ``read_new_events`` -- passing the
+            # pre-serialized JSONL string would double-encode the wire (`data: "{...}"`).
+            yield ServerSentEvent(data=event.payload, event="event", id=event.cursor, retry=2000)
         if events:
             # More backlog may remain; drain it promptly but yield to the loop between chunks.
             await asyncio.sleep(0)

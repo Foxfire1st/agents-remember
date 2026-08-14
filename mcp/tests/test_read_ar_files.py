@@ -3,7 +3,7 @@
 Three layers:
 
 * ranged-read helper unit tests (full / range / clamp / start>EOF / binary),
-* controller onboarding/status + path-confinement + front-door dedup, driving a
+* application-layer onboarding/status + path-confinement + front-door dedup, driving a
   directly-constructed ``CoordinationContext`` so each storage mode is isolated,
 * the served-ledger + ``read.packet`` emission through the ambient lifecycle, and
   the marker/refresh reset.
@@ -26,7 +26,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.controllers.read_files import read_ar_files_tool
+from agents_remember.application.read_files import read_ar_files_tool
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context.models import (
@@ -34,7 +34,9 @@ from agents_remember.kernel.coordination_context.models import (
     CrossRepoSettings,
     StorageSettings,
 )
-from agents_remember.mcp.config import load_config
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp.tools import read_ar_files_payload
 from agents_remember.observer import (
     AmbientLifecycle,
@@ -43,6 +45,7 @@ from agents_remember.observer import (
     observer_root,
     reset_ambient,
 )
+from agents_remember.observer.ambient import AmbientTiming
 from agents_remember.observer.served_store import ServedStore, served_key
 from test_config import settings_payload
 
@@ -74,7 +77,7 @@ def _build_context(
     coordination_root: Path,
     storage_mode: str,
 ) -> CoordinationContext:
-    """A minimal context with the fields the controller reads, isolating storage."""
+    """A minimal context with the fields the application layer reads, isolating storage."""
     storage = StorageSettings(mode=storage_mode, default=storage_mode)
     return CoordinationContext(
         topology="external",
@@ -130,9 +133,7 @@ def _write_overview(onboarding_root: Path, route: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _write_route_index(
-    onboarding_root: Path, route: str, *, covered: list[str]
-) -> None:
+def _write_route_index(onboarding_root: Path, route: str, *, covered: list[str]) -> None:
     rel = "overview.index.json" if route == "" else f"{route}/overview.index.json"
     scope = "**" if route == "" else f"{route}/**"
     path = onboarding_root / rel
@@ -183,11 +184,11 @@ class RangedReadTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# controller: status semantics, path confinement, source independence
+# application layer: status semantics, path confinement, source independence
 # --------------------------------------------------------------------------
 
 
-class ControllerStatusTests(unittest.TestCase):
+class ApplicationStatusTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = Path(tempfile.mkdtemp())
         self.code = self._dir / "workspace" / REPO
@@ -210,9 +211,7 @@ class ControllerStatusTests(unittest.TestCase):
             coordination_root=self.config.coordination_root,
             storage_mode=storage_mode,
         )
-        return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, _context=ctx
-        )
+        return read_ar_files_tool(self.config, repo_id=REPO, files=files, _context=ctx)
 
     def test_found_when_sidecar_present_and_covered(self) -> None:
         _write_sidecar(self.onb, "pkg/mod.py", "Body of mod.")
@@ -269,7 +268,7 @@ class ControllerStatusTests(unittest.TestCase):
         self.assertNotIn("onboarding", file)
 
     def test_index_absent_falls_back_to_mirror_probe(self) -> None:
-        # No governing overview.index.json exists at all, so the controller
+        # No governing overview.index.json exists at all, so the application layer
         # degrades to a direct mirror-path probe: a present sidecar resolves
         # found, an absent one resolves missing.
         (self.code / "loose.py").write_text("p = 1\n", encoding="utf-8")
@@ -336,7 +335,7 @@ class ControllerStatusTests(unittest.TestCase):
         self.assertNotIn("source", result["files"][0])
 
     def test_inverted_range_rejected(self) -> None:
-        # The controller rejects an inverted range up front (it never reaches the
+        # The application layer rejects an inverted range up front (it never reaches the
         # helper, which would otherwise return "" -- a silent, confusing result).
         with self.assertRaises(AuthorityError):
             self._read(
@@ -411,7 +410,7 @@ class FrontDoorDedupTests(unittest.TestCase):
         )
         reset_ambient()
         amb = AmbientLifecycle(
-            EventStore(observer_root(self.config)), heartbeat_seconds=3600
+            EventStore(observer_root(self.config)), timing=AmbientTiming(heartbeat_seconds=3600)
         )
         amb.start(fleeting=True)
         install_ambient(amb)
@@ -487,7 +486,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
         )
         reset_ambient()
         self.store = EventStore(observer_root(self.config))
-        amb = AmbientLifecycle(self.store, heartbeat_seconds=3600)
+        amb = AmbientLifecycle(self.store, timing=AmbientTiming(heartbeat_seconds=3600))
         amb.start(fleeting=True)
         install_ambient(amb)
         self.amb = amb
@@ -498,9 +497,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
         reset_ambient()
 
     def _read(self, files):
-        return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, _context=self.ctx
-        )
+        return read_ar_files_tool(self.config, repo_id=REPO, files=files, _context=self.ctx)
 
     def test_served_jsonl_records_pieces(self) -> None:
         self._read([{"path": "pkg/mod.py"}])
@@ -555,7 +552,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
                     "source": "SECRET SOURCE CONTENT",
                     "onboarding": "SECRET ONBOARDING",
                 }
-            ]
+            ],
         )
         events = self.store.read(self.lifecycle_id)
         packet = next(e for e in events if e.kind == "read.packet")
@@ -598,7 +595,7 @@ class FiveFileCapAndPayloadTests(unittest.TestCase):
         payload = read_ar_files_payload(self.config, REPO, files)
         self.assertEqual(payload["operation"], "read_ar_files")
         self.assertEqual(len(payload["files"]), 5)
-        # Token metadata is stamped by the choke point, never by the controller.
+        # Token metadata is stamped by the choke point, never by the application layer.
         self.assertIn("tokens", payload)
         self.assertTrue(payload["tokenCountExact"])
 

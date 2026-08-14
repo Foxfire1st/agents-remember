@@ -22,6 +22,7 @@ import itertools
 import json
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.tasks.document import TaskDocument
@@ -46,37 +47,96 @@ def write_json(path: Path, obj: object) -> None:
     write_text(path, json.dumps(obj, indent=2))
 
 
+@dataclass(frozen=True)
+class ContractSite:
+    """Where one contract sits in the simulated coordination root.
+
+    Not five arguments but one address: every path a contract records -- its task root, its
+    own file, the worktree group, the code and memory worktrees -- is derived from these
+    fields, and a series contract differs from its leaf enclosures only here. The builders
+    that write a contract, stat its path and materialize its worktrees all take the same
+    site, so the three can never disagree about where a leaf lives.
+    """
+
+    root: Path
+    repo: str
+    task: str
+    contract_kind: str = "leaf"
+    leaf_id: str | None = None
+
+    @property
+    def is_series(self) -> bool:
+        return self.contract_kind == "series"
+
+    @property
+    def leaf(self) -> str:
+        return self.leaf_id or self.task
+
+    @property
+    def group(self) -> str:
+        return f"{self.leaf}-ar"
+
+    @property
+    def task_root(self) -> Path:
+        return self.root / "tasks" / self.repo / self.task
+
+    @property
+    def group_root(self) -> Path:
+        return self.root / "worktrees" / self.repo / self.group
+
+    @property
+    def contract_path(self) -> Path:
+        if self.is_series:
+            return self.task_root / "series-contract.md"
+        return self.task_root / "enclosures" / self.leaf / "series-contract.md"
+
+    @property
+    def worktree_group(self) -> Path:
+        return self.task_root / "enclosures" if self.is_series else self.group_root
+
+    @property
+    def code_worktree(self) -> Path:
+        if self.is_series:
+            return self.root / "repos" / self.repo
+        return self.group_root / self.leaf
+
+    @property
+    def memory_worktree(self) -> Path:
+        return self.group_root / f"memory-{self.leaf}"
+
+
+@dataclass(frozen=True)
+class ContractStatus:
+    """How far one contract has travelled through the gates it records.
+
+    The four fields are a single position on the review -> closeout -> integration ->
+    cleanup path (a landed leaf is `completed/completed/completed/completed`, an abandoned
+    one `pending-review/not-started/not-started/abandoned`), which is why the fixture varies
+    them as whole named states rather than four loose strings.
+    """
+
+    review: str = "approved"
+    closeout: str = "completed"
+    integration: str = "not-started"
+    cleanup: str = "pending"
+
+
+AWAITING_INTEGRATION = ContractStatus()
+"""The default fixture state: reviewed and closed out, not yet integrated or cleaned up."""
+
+
 def contract_md(
-    root: Path,
-    repo: str,
-    task: str,
+    site: ContractSite,
     *,
     lifecycle_id: str = "",
-    contract_kind: str = "leaf",
-    leaf_id: str | None = None,
     kind: str = "light-task",
-    review: str = "approved",
-    closeout: str = "completed",
-    integration: str = "not-started",
-    cleanup: str = "pending",
+    status: ContractStatus = AWAITING_INTEGRATION,
 ) -> str:
+    root, repo, task = site.root, site.repo, site.task
     taskid = task.upper().replace("-", "_")
-    leaf = leaf_id or task
-    group = f"{leaf}-ar"
-    task_root = root / "tasks" / repo / task
-    contract_path = (
-        task_root / "series-contract.md"
-        if contract_kind == "series"
-        else task_root / "enclosures" / leaf / "series-contract.md"
-    )
-    worktree_group = (
-        task_root / "enclosures" if contract_kind == "series" else root / "worktrees" / repo / group
-    )
-    code_worktree = (
-        root / "repos" / repo
-        if contract_kind == "series"
-        else root / "worktrees" / repo / group / leaf
-    )
+    contract_path = site.contract_path
+    worktree_group = site.worktree_group
+    code_worktree = site.code_worktree
     memory_lines = [
         "memory:",
         "  mode: external",
@@ -85,18 +145,18 @@ def contract_md(
         f"  work_branch: ar/{task}",
         f"  base_commit: {SHA}",
     ]
-    if contract_kind == "series":
+    if site.is_series:
         memory_lines.append(f"  ledger: {root.as_posix()}/memory-repos/ar-{repo}/memory.md")
     else:
         memory_lines.extend(
             [
-                f"  worktree: {root.as_posix()}/worktrees/{repo}/{group}/memory-{leaf}",
-                f"  ledger: {root.as_posix()}/worktrees/{repo}/{group}/memory-{leaf}/memory.md",
+                f"  worktree: {site.memory_worktree.as_posix()}",
+                f"  ledger: {site.memory_worktree.as_posix()}/memory.md",
             ]
         )
     return f"""---
 schema: ar-series-contract/v1
-kind: {contract_kind}
+kind: {site.contract_kind}
 task_id: {taskid}
 task_name: {task}
 repo_name: {repo}
@@ -105,12 +165,12 @@ memory_mode: external
 
 coordination:
   root: {root.as_posix()}
-  task_root: {task_root.as_posix()}
+  task_root: {site.task_root.as_posix()}
   series_contract_path: {contract_path.as_posix()}
-  task_artifact: {task_root.as_posix()}/task.md
+  task_artifact: {site.task_root.as_posix()}/task.md
   worktree_group: {worktree_group.as_posix()}
-  leaf_id: {leaf if contract_kind == "leaf" else ""}
-  parent_contract_path: {task_root.as_posix()}/series-contract.md
+  leaf_id: {site.leaf if site.contract_kind == "leaf" else ""}
+  parent_contract_path: {site.task_root.as_posix()}/series-contract.md
 
 code:
   repo_path: {root.as_posix()}/repos/{repo}
@@ -125,27 +185,22 @@ lifecycle:
 {chr(10).join(memory_lines)}
 
 human_review:
-  status: {review}
+  status: {status.review}
   approved_for_commit: no
 
 closeout:
-  status: {closeout}
+  status: {status.closeout}
 
 integration:
-  status: {integration}
-  cleanup: {cleanup}
+  status: {status.integration}
+  cleanup: {status.cleanup}
 ---
 
 # Series Contract - {taskid}
 """
 
 
-def contract_path(root: Path, repo: str, task: str, *, leaf_id: str | None = None) -> Path:
-    leaf = leaf_id or task
-    return root / "tasks" / repo / task / "enclosures" / leaf / "series-contract.md"
-
-
-def materialize_worktrees(root: Path, repo: str, task: str, *, leaf_id: str | None = None) -> None:
+def materialize_worktrees(site: ContractSite) -> None:
     """Create the worktree dirs a live leaf contract records.
 
     L11 renders a leaf on the tasks surface ONLY while its worktree physically
@@ -153,10 +208,8 @@ def materialize_worktrees(root: Path, repo: str, task: str, *, leaf_id: str | No
     must ship the directories its contract points at — recording the paths
     without creating them replays as an empty Hangar (L11R-1).
     """
-    leaf = leaf_id or task
-    group = f"{leaf}-ar"
-    (root / "worktrees" / repo / group / leaf).mkdir(parents=True, exist_ok=True)
-    (root / "worktrees" / repo / group / f"memory-{leaf}").mkdir(parents=True, exist_ok=True)
+    site.code_worktree.mkdir(parents=True, exist_ok=True)
+    site.memory_worktree.mkdir(parents=True, exist_ok=True)
 
 
 def event(
@@ -191,7 +244,24 @@ _STEP_TITLES = [
 ]
 
 
-def steps(done: int, total: int, current_in_progress: bool = True) -> list[dict]:
+@dataclass(frozen=True)
+class Progress:
+    """How far a task's step list has run: ``done`` of ``total`` steps.
+
+    One number is meaningless without the other -- ``done == total`` is what makes a slice
+    Completed -- so they travel as a pair through every doc builder that renders steps.
+    """
+
+    done: int
+    total: int
+
+    @property
+    def complete(self) -> bool:
+        return self.done >= self.total
+
+
+def steps(progress: Progress, current_in_progress: bool = True) -> list[dict]:
+    done, total = progress.done, progress.total
     out: list[dict] = []
     for i in range(total):
         status = (
@@ -217,7 +287,7 @@ def steps(done: int, total: int, current_in_progress: bool = True) -> list[dict]
     return out
 
 
-def light_doc(repo: str, task: str, lc: str, *, status: str, done: int, total: int) -> dict:
+def light_doc(repo: str, task: str, lc: str, *, status: str, progress: Progress) -> dict:
     return {
         "schema": "ar-task-document/v1",
         "id": task.upper().replace("-", "_"),
@@ -242,7 +312,7 @@ def light_doc(repo: str, task: str, lc: str, *, status: str, done: int, total: i
             "Reuse the existing reducer seam rather than adding a new call edge; the change rides the "
             "existing analytics delta, so no stream/store wiring changes."
         ),
-        "steps": steps(done, total),
+        "steps": steps(progress),
         "codeExamples": [
             {
                 "id": "C1",
@@ -270,31 +340,60 @@ def light_doc(repo: str, task: str, lc: str, *, status: str, done: int, total: i
     }
 
 
-def subtask_doc(
-    repo: str, master_slug: str, num: str, name: str, lc: str, *, done: int, total: int
-) -> dict:
+@dataclass(frozen=True)
+class SeriesSlice:
+    """One numbered slice of a master series, with how far it has run.
+
+    The master it belongs to, its number and its name are what make a subTask addressable
+    (``id`` is master + number, ``slug`` and ``title`` are number + name), and its progress
+    is what decides whether the series shows it as Completed. The fixture defines its slices
+    once as these objects and both the master's subTask refs and each subTask doc read them.
+    """
+
+    master_slug: str
+    number: str
+    name: str
+    progress: Progress
+
+    @property
+    def label(self) -> str:
+        return self.name.replace("-", " ")
+
+    @property
+    def status(self) -> str:
+        return "Completed" if self.progress.complete else "inProgress"
+
+    def master_reference(self) -> dict:
+        """The row the master doc carries for this slice."""
+        return {"number": self.number, "name": self.name, "status": self.status}
+
+
+def subtask_doc(repo: str, slice_: SeriesSlice, lc: str) -> dict:
     return {
         "schema": "ar-task-document/v1",
-        "id": f"{master_slug.upper()}_{num}",
-        "slug": f"{num}_{name}",
-        "title": f"{num} · {name.replace('-', ' ').title()}",
+        "id": f"{slice_.master_slug.upper()}_{slice_.number}",
+        "slug": f"{slice_.number}_{slice_.name}",
+        "title": f"{slice_.number} · {slice_.name.replace('-', ' ').title()}",
         "kind": "subTask",
-        "status": "inProgress" if done < total else "Completed",
+        "status": slice_.status,
         "repo": repo,
         "createdAt": ts(),
-        "master": master_slug,
+        "master": slice_.master_slug,
         "lifecycleId": lc,
-        "objective": f"Series slice {num}: {name.replace('-', ' ')} — one reviewable commit behind its own gate.",
+        "objective": (
+            f"Series slice {slice_.number}: {slice_.label} — "
+            "one reviewable commit behind its own gate."
+        ),
         "requirements": [
             "Gate green before the slice commit.",
             "Onboarding lockstep for every changed file.",
         ],
         "design": "Builds on the prior slice's seam; no new call edges.",
-        "steps": steps(done, total),
+        "steps": steps(slice_.progress),
         "decisions": [
             {
                 "at": "2026-06-13T09:00",
-                "decision": f"Cut {name.replace('-', ' ')} as its own slice.",
+                "decision": f"Cut {slice_.label} as its own slice.",
                 "rationale": "Fails the single-page test if bundled with its siblings.",
             }
         ],
@@ -350,28 +449,28 @@ def drift_snapshot(repo: str, *, current: int, drifted: int, missing: int) -> di
     }
 
 
-def main(out: Path) -> None:
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+def write_paused_lifecycles(out: Path) -> None:
+    """~26 persistent paused lifecycles: worktree contracts and no events.
 
-    # --- ~26 persistent paused lifecycles (worktree contracts, no events) --------------------
-    # Varied closeout/integration/cleanup so the hangar + phase grouping show a full range.
+    Varied closeout/integration/cleanup so the hangar + phase grouping show a full range.
+    """
     statuses = [
-        dict(closeout="completed", integration="completed", cleanup="completed"),  # fully landed
-        dict(
+        ContractStatus(
+            closeout="completed", integration="completed", cleanup="completed"
+        ),  # landed
+        ContractStatus(
             closeout="completed", integration="completed", cleanup="pending"
         ),  # uncleaned (hangar)
-        dict(
+        ContractStatus(
             closeout="completed", integration="not-started", cleanup="pending"
         ),  # awaiting integrate
-        dict(
+        ContractStatus(
             closeout="not-started",
             integration="not-started",
             cleanup="pending",
             review="pending-review",
         ),
-        dict(
+        ContractStatus(
             closeout="not-started",
             integration="not-started",
             cleanup="abandoned",
@@ -390,64 +489,72 @@ def main(out: Path) -> None:
         for i in range(5 if repo != "agents-remember" else 6):  # 26 total
             task = f"2606{r:02d}_{repo.split('-')[0]}-task-{i}"
             st = statuses[(r + i) % len(statuses)]
+            site = ContractSite(out, repo, task)
             # half the persistent paused get a real lifecycle id + a light task doc (single-task content)
             give_doc = (r + i) % 2 == 0
             lc = f"L-paused-{paused:02d}" if give_doc else ""
-            write_text(
-                contract_path(out, repo, task), contract_md(out, repo, task, lifecycle_id=lc, **st)
-            )
-            if st["cleanup"] == "pending":
-                materialize_worktrees(out, repo, task)
+            write_text(site.contract_path, contract_md(site, lifecycle_id=lc, status=st))
+            if st.cleanup == "pending":
+                materialize_worktrees(site)
             if give_doc:
                 write_json(
                     out / "tasks" / repo / task / f"{task}.json",
-                    light_doc(repo, task, lc, status="inProgress", done=(i % 4), total=4),
+                    light_doc(repo, task, lc, status="inProgress", progress=Progress(i % 4, 4)),
                 )
             paused += 1
 
-    # --- a multi-task master series (one lifecycle, master doc + subTask slices) --------------
+
+def write_master_series(out: Path) -> None:
+    """A multi-task master series: one lifecycle, a master doc and its subTask slices."""
     series_repo, series_task, series_lc = (
         "agents-remember",
         "260610_browser-dashboard",
         "L-series-dashboard",
     )
     (out / "repos" / series_repo).mkdir(parents=True, exist_ok=True)
+    site = ContractSite(out, series_repo, series_task, contract_kind="series")
     write_text(
-        out / "tasks" / series_repo / series_task / "series-contract.md",
+        site.contract_path,
         contract_md(
-            out,
-            series_repo,
-            series_task,
+            site,
             lifecycle_id=series_lc,
-            contract_kind="series",
-            kind="master",
-            closeout="completed",
-            cleanup="pending",
+            # The task *format*, not the series role -- `contract_kind="series"` above already
+            # carries that. It has to be a real `WorkflowKind`, and this fixture is the only
+            # thing that can make it one: `load_contract` does *not* reject an off-vocabulary
+            # value, it degrades to the declared fallback and records the raw token on
+            # `unknown_cells`. The refusal lives at `validate_contract`, the write boundary --
+            # which writing the document as markdown text bypasses entirely. So a wrong value
+            # here would not fail anything; it would quietly produce a whole simulated
+            # workspace of contracts each carrying a quarantined cell.
+            kind="light-task",
+            status=ContractStatus(closeout="completed", cleanup="pending"),
         ),
     )
-    subs = [
-        ("01", "lifecycle-event-gate-design", 4, 4),
-        ("02", "lifecycle-tools-and-events", 6, 6),
-        ("03", "observer-projection", 5, 5),
-        ("04", "serving-layer", 3, 3),
-        ("05", "cockpit-v1", 7, 10),
-    ]
-    sub_refs = [
-        {"number": n, "name": nm, "status": "Completed" if d >= t else "inProgress"}
-        for n, nm, d, t in subs
+    slices = [
+        SeriesSlice(series_task, "01", "lifecycle-event-gate-design", Progress(4, 4)),
+        SeriesSlice(series_task, "02", "lifecycle-tools-and-events", Progress(6, 6)),
+        SeriesSlice(series_task, "03", "observer-projection", Progress(5, 5)),
+        SeriesSlice(series_task, "04", "serving-layer", Progress(3, 3)),
+        SeriesSlice(series_task, "05", "cockpit-v1", Progress(7, 10)),
     ]
     write_json(
         out / "tasks" / series_repo / series_task / f"{series_task}.json",
-        master_doc(series_repo, series_task, sub_refs),
+        master_doc(series_repo, series_task, [s.master_reference() for s in slices]),
     )
-    for n, nm, d, t in subs:
+    for slice_ in slices:
         write_json(
-            out / "tasks" / series_repo / series_task / f"{n}_{nm}.json",
-            subtask_doc(series_repo, series_task, n, nm, series_lc, done=d, total=t),
+            out / "tasks" / series_repo / series_task / f"{slice_.number}_{slice_.name}.json",
+            subtask_doc(series_repo, slice_, series_lc),
         )
 
-    # --- ~8 event-backed lifecycles (the active/fleeting variety + the attention queue) -------
-    logs = out / "logs" / "observer" / "lifecycles"
+
+def lifecycle_logs_root(out: Path) -> Path:
+    return out / "logs" / "observer" / "lifecycles"
+
+
+def write_event_backed_lifecycles(out: Path) -> None:
+    """~8 event-backed lifecycles: the active/fleeting variety plus the attention queue."""
+    logs = lifecycle_logs_root(out)
 
     def log(lc: str, events: list[dict]) -> None:
         write_text(logs / lc / "events.jsonl", "\n".join(json.dumps(e) for e in events) + "\n")
@@ -459,15 +566,16 @@ def main(out: Path) -> None:
         ("L-blocked-plan", "agents-remember-md", "reframe-research", True),
         ("L-blocked-rebase", "device-management", "build", True),
     ]:
-        enc = contract_path(out, repo, f"active-{lc}").as_posix()
+        site = ContractSite(out, repo, f"active-{lc}")
+        enc = site.contract_path.as_posix()
         write_text(
-            contract_path(out, repo, f"active-{lc}"),
-            contract_md(out, repo, f"active-{lc}", lifecycle_id=lc, cleanup="pending"),
+            site.contract_path,
+            contract_md(site, lifecycle_id=lc, status=ContractStatus(cleanup="pending")),
         )
-        materialize_worktrees(out, repo, f"active-{lc}")
+        materialize_worktrees(site)
         write_json(
             out / "tasks" / repo / f"active-{lc}" / f"active-{lc}.json",
-            light_doc(repo, f"active-{lc}", lc, status="inProgress", done=2, total=5),
+            light_doc(repo, f"active-{lc}", lc, status="inProgress", progress=Progress(2, 5)),
         )
         evs = [
             event("lifecycle.started", lc, data_phase="request", fleeting=True, phase="request"),
@@ -525,17 +633,16 @@ def main(out: Path) -> None:
     )
     # completed (terminal)
     for lc, repo in [("L-done-1", "ctec-firmware"), ("L-done-2", "helpdesk-portal")]:
-        enc = contract_path(out, repo, f"active-{lc}").as_posix()
+        site = ContractSite(out, repo, f"active-{lc}")
+        enc = site.contract_path.as_posix()
         write_text(
-            contract_path(out, repo, f"active-{lc}"),
+            site.contract_path,
             contract_md(
-                out,
-                repo,
-                f"active-{lc}",
+                site,
                 lifecycle_id=lc,
-                closeout="completed",
-                integration="completed",
-                cleanup="completed",
+                status=ContractStatus(
+                    closeout="completed", integration="completed", cleanup="completed"
+                ),
             ),
         )
         log(
@@ -560,7 +667,9 @@ def main(out: Path) -> None:
             ],
         )
 
-    # --- provider current-state (workspace) + per-worktree stacks ----------------------------
+
+def write_provider_state(out: Path) -> None:
+    """Provider current-state (workspace), per-worktree stacks, and setup progress."""
     write_json(
         out / "logs" / "providers" / "status" / "workspace" / "projects" / "current.json",
         {
@@ -640,7 +749,9 @@ def main(out: Path) -> None:
         },
     )
 
-    # --- memory ledgers + drift snapshots (memory mirror + actionable-drift attention) -------
+
+def write_memory_ledgers_and_drift(out: Path) -> None:
+    """Memory ledgers and drift snapshots: the memory mirror + actionable-drift attention."""
     for repo, rows in [
         ("agents-remember", 95),
         ("agents-remember-md", 60),
@@ -656,7 +767,9 @@ def main(out: Path) -> None:
         drift_snapshot("device-management", current=140, drifted=0, missing=0),
     )
 
-    # --- self-check: every contract + task doc validates -------------------------------------
+
+def validate_and_report(out: Path) -> None:
+    """Self-check: every contract and task doc the fixture wrote must validate."""
     contracts = list(out.glob("tasks/**/*.md"))
     contracts = [path for path in contracts if path.name == "series-contract.md"]
     for c in contracts:
@@ -664,10 +777,23 @@ def main(out: Path) -> None:
     docs = list(out.glob("tasks/*/*/*.json"))
     for d in docs:
         TaskDocument.model_validate(json.loads(d.read_text()))
+    logs = lifecycle_logs_root(out)
     print(f"rich sim fixture written to {out}")
     print(
         f"  contracts: {len(contracts)}  task docs: {len(docs)}  event logs: {len(list(logs.glob('*/events.jsonl')))}"
     )
+
+
+def main(out: Path) -> None:
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    write_paused_lifecycles(out)
+    write_master_series(out)
+    write_event_backed_lifecycles(out)
+    write_provider_state(out)
+    write_memory_ledgers_and_drift(out)
+    validate_and_report(out)
 
 
 if __name__ == "__main__":

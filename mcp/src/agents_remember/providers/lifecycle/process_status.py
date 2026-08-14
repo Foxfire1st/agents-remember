@@ -51,4 +51,3 @@ def require_durable_process_namespace(action: str) -> None:
         f"{action} manages long-running provider processes and must run outside this ephemeral process namespace: "
         f"{warning}. Run the lifecycle command from a normal host terminal or another durable host execution context."
     )
-

@@ -1,8 +1,7 @@
-"""Per-harness failure diagnostics for the one log-verified delivery path.
+"""Per-harness pane diagnostics retained outside the protocol authority path.
 
-No pane text participates in delivery acceptance. The adapter may label a final failure capture so
-an operator can distinguish a known modal from an empty/dead pane; harness session JSONL remains the
-only acceptance authority.
+No pane text participates in readiness, delivery acceptance, liveness, or approvals. These labels
+exist only so migration diagnostics can distinguish a known modal from an empty/dead pane.
 """
 
 from __future__ import annotations

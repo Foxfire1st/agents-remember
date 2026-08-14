@@ -1,42 +1,46 @@
-"""Hosted-session delivery for durable operator inbox messages.
-
-260707-HFX2-L3 (R1 + R3): pushing an inbox row into a hosted session now goes through the ONE
-delivery path (``serving/injector.deliver``) every other payload class uses -- this module's job
-narrows to translating that path's four-way ``DeliveryOutcome`` back onto the ``OperatorInboxEntry``
-schema's existing ``InboxDeliveryState`` (``"queued" | "no-hosted-session" | "delivered" |
-"unconfirmed"``), which this leaf leaves UNCHANGED (it rides through the dashboard, the backoff
-predicate, and the L2 supervisor -- widening it is a bigger-blast-radius leaf than this one). A
-``blocked`` outcome (a modal dialog trap -- codex quota/rate-limit (#20), a permission prompt) maps
-to ``"unconfirmed"`` with a ``NEEDS-ATTENTION:`` prefixed detail, so it stays structured and
-diagnosable in the durable row's ``deliveryDetail`` without a schema change.
-"""
+"""Inbox-rooted delivery through exact-session harness protocol adapters."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.operator_inbox_records import (
+    AdapterDeliveryState,
     InboxDeliveryState,
     OperatorInboxEntry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import (
+    AdapterReceipt,
+    DeliveryAttempt,
+    RedeliveryFloor,
+)
+from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import (
+    SubmissionReceipt,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+    seat_at_turn_boundary,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.dispatch_brief import (
     DISPATCH_BRIEF_KIND,
     DispatchBriefGate,
-    dispatch_paste_policy,
-    verify_launch_commands,
     with_prompt_keywords,
 )
-from agents_remember.serving.harness_logs import HarnessSessionLog
-from agents_remember.serving.injector import DeliveryResult, DeliveryRow, deliver
-from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
+    reconcile_control_prompt,
+    submit_control_prompt,
+)
+from agents_remember.serving.harness_control_models import (
+    ReconciliationResult,
+)
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.terminal_paste import TerminalPaster
-
-_CAPTURE_EVIDENCE_LIMIT = 2000
-"""Durable-row bound for an attached pane capture: keep the TAIL (the freshest pane output)."""
 
 
 @dataclass(frozen=True)
@@ -48,164 +52,350 @@ class InboxDeliveryResult:
     detail: str | None = None
 
 
-def deliver_inbox_entry(
-    *,
-    store: OperatorInboxStore,
-    catalog: TerminalCatalog,
-    host: TerminalHost,
-    paster: TerminalPaster,
+@dataclass(frozen=True)
+class _DeliveryOutcome:
+    """What one delivery attempt amounted to, in exactly the fields ``_record`` writes.
+
+    A refusal, an adapter receipt and a reconciliation all reduce to this triple, which is why it
+    is one value: the three fields are always decided together and are meaningless apart (a
+    delivery state with someone else's detail is a lie in the durable record).
+    """
+
+    delivery_state: InboxDeliveryState
+    adapter_state: AdapterDeliveryState | None
+    detail: str
+
+
+@dataclass(frozen=True)
+class _AdapterCorrelation:
+    """How the adapter identifies the submission this attempt produced, if it produced one."""
+
+    request_id: str | None = None
+    vendor_correlation_id: str | None = None
+    accepted_at: str | None = None
+
+
+@dataclass(frozen=True)
+class InboxDeliveryLog:
+    """One durable row's delivery journal: which row, where attempts are written, and when.
+
+    Every recorder in this module writes through the same journal, so it travels as one value and
+    each recorder supplies only what is genuinely different about its own outcome.
+    """
+
+    store: OperatorInboxStore
+    entry: OperatorInboxEntry
+    at: str = field(default_factory=now_iso)
+    floor: RedeliveryFloor = field(default_factory=RedeliveryFloor)
+
+
+@dataclass(frozen=True)
+class DeliveryAdmission:
+    """Whether this push is allowed to reach the wire at all.
+
+    Both checks settle before any adapter call: ``submit`` is the caller's commitment to a real
+    adapter submission, ``dispatch_gate`` is the exact-once gate a durable brief must pass, and
+    ``boundary`` is the availability gate state signals hold behind until the target seat is at
+    a turn boundary (turn-ended / awaiting-input / ready-idle).
+    """
+
+    submit: bool = True
+    dispatch_gate: DispatchBriefGate | None = None
+    boundary: bool = False
+
+
+_NO_ADAPTER_CORRELATION = _AdapterCorrelation()
+DEFAULT_DELIVERY_ADMISSION = DeliveryAdmission()
+"""The ordinary committed push: a real adapter submission with the default brief gate."""
+
+
+def _delivery_refusal(
     entry: OperatorInboxEntry,
-    submit: bool = True,
-    current: dict[str, OperatorInboxEntry] | None = None,
-    redelivery_floor_seconds: float | None = None,
-    delivery_at: str | None = None,
-    dispatch_gate: DispatchBriefGate | None = None,
-) -> OperatorInboxEntry:
-    """Push an inbox message into the target hosted session and record the delivery state."""
-    timestamp = delivery_at or now_iso()
-    target = _target_session(catalog, entry)
-    if target is None:
-        return store.record_delivery(
-            entry.id,
-            now=timestamp,
-            delivery_state="no-hosted-session",
-            delivery_detail="no running hosted session matched the inbox address",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
+    *,
+    sessions: HostedSessionRuntime,
+    target: TerminalCatalogEntry,
+    admission: DeliveryAdmission,
+) -> _DeliveryOutcome | None:
+    """The refusal to durably record for an addressed target, or ``None`` to go submit.
+
+    Every check here is settled before any adapter call is made, so a dead pane, a legacy session
+    with no bridge, an uncommitted caller or a closed dispatch-brief gate never reaches the wire.
+    """
+
+    if not sessions.host.has_session(target.tmux_name):
+        return _DeliveryOutcome(
+            "no-hosted-session", None, "catalog row exists but tmux session is not running"
         )
-    if not host.has_session(target.tmux_name):
-        return store.record_delivery(
-            entry.id,
-            now=timestamp,
-            delivery_state="no-hosted-session",
-            delivered_to_session=target.id,
-            delivery_detail="catalog row exists but tmux session is not running",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
+    if target.kind != "harness" or target.control_endpoint is None:
+        return _DeliveryOutcome(
+            "unconfirmed",
+            "unsupported",
+            "legacy or ordinary terminal session has no protocol delivery adapter",
+        )
+    if not admission.submit:
+        return _DeliveryOutcome(
+            "unconfirmed",
+            "rejected",
+            "durable inbox delivery requires a committed adapter submission",
         )
     if entry.messageKind == DISPATCH_BRIEF_KIND:
-        gate_detail = (dispatch_gate or DispatchBriefGate()).check(
-            catalog,
-            host,
+        gate_detail = (admission.dispatch_gate or DispatchBriefGate()).check(
+            sessions.catalog,
+            sessions.host,
             target,
             recovery=entry.attemptCount > 0,
         )
         if gate_detail is not None:
-            return store.record_delivery(
-                entry.id,
-                now=timestamp,
-                delivery_state="unconfirmed",
-                delivered_to_session=target.id,
-                delivery_detail=gate_detail,
-                current=current,
-                redelivery_floor_seconds=redelivery_floor_seconds,
-            )
+            return _DeliveryOutcome("unconfirmed", "rejected", gate_detail)
+    # Fail-closed availability gate: state-signal rows are gated BY ROW KIND regardless of
+    # which caller drives the delivery (first post, redelivery, or a boundary drain) --
+    # a mid-turn push would make acceptance terminal without the N1 gate, which is exactly
+    # what landed-terminality must never mean. Other kinds use the caller's admission flag.
+    if (entry.messageKind == "state-signal" or admission.boundary) and not seat_at_turn_boundary(
+        target
+    ):
+        reason = (
+            "availability gate: state-signal rows push only at a turn boundary"
+            if entry.messageKind == "state-signal"
+            else "availability gate: target seat is not at a turn boundary"
+        )
+        return _DeliveryOutcome(
+            "queued",
+            "queued",
+            reason,
+        )
+    return None
+
+
+def deliver_inbox_entry(
+    log: InboxDeliveryLog,
+    *,
+    sessions: HostedSessionRuntime,
+    paster: TerminalPaster,
+    admission: DeliveryAdmission = DEFAULT_DELIVERY_ADMISSION,
+) -> OperatorInboxEntry:
+    """Deliver a pre-existing durable row and record adapter evidence without consuming it.
+
+    ``paster`` remains in the public composition signature for callers shared with ordinary
+    terminal plumbing, but harness delivery never invokes it and has no raw-input fallback.
+
+    Landing (N16) is decided HERE, where the target's boundary state is still live: a
+    correlated adapter ``accepted`` receipt while ``seat_at_turn_boundary(target)`` holds
+    writes the formal ``landed`` terminal state. ``acceptance=queued`` from a busy adapter is
+    never a landing, and acceptance outside a boundary leaves the row on its redelivery
+    schedule so the next boundary can drain it.
+    """
+
+    del paster  # compatibility composition parameter; protocol delivery never uses terminal input
+    entry = log.entry
+    target = _target_session(sessions.catalog, entry)
+    if target is None:
+        return _record(
+            log,
+            None,
+            _DeliveryOutcome(
+                "no-hosted-session",
+                None,
+                "no running hosted session matched the inbox address",
+            ),
+        )
+    refusal = _delivery_refusal(entry, sessions=sessions, target=target, admission=admission)
+    if refusal is not None:
+        return _record(log, target, refusal, landed=False)
+
+    at_boundary = seat_at_turn_boundary(target)
+    if entry.adapterRequestId is not None:
+        return _redelivery(log, target, at_boundary=at_boundary)
+
     text = _push_text(entry)
-    policy = None
     if entry.messageKind == DISPATCH_BRIEF_KIND:
         text = with_prompt_keywords(target, text)
-        policy = dispatch_paste_policy(entry, target)
-    row = DeliveryRow(
-        kind=entry.messageKind,
-        entry_id=entry.id,
-        text=text,
-        submit=submit,
-        envelope=False,  # _push_text already renders this payload's own header (below).
-        dispatch_policy=policy,
-    )
-    session_log = HarnessSessionLog(
-        harness=target.harness or "",
-        cwd=target.cwd,
-        started_at=datetime.fromisoformat(target.created_at),
-        bound_path=target.session_log_path,
-    )
-    result = deliver(
-        row,
-        tmux_name=target.tmux_name,
-        paster=paster,
-        harness=target.harness,
-        session_log=session_log,
-    )
-    if result.session_log_path is not None and result.bound_entry_id is not None:
-        catalog.bind_session_log(
-            target.id,
-            entry_id=result.bound_entry_id,
-            path=result.session_log_path,
-        )
-    if entry.messageKind == DISPATCH_BRIEF_KIND and result.outcome == "acked":
-        command_proof = verify_launch_commands(
+    try:
+        receipt = submit_control_prompt(
             target,
-            paster=paster,
-            session_log=session_log,
+            text,
+            ControlSubmission(source="durable", request_id=entry.id, submitted_at=log.at),
         )
-        if not command_proof.allows_brief:
-            detail = f"launch session commands unconfirmed: {command_proof.detail}"
-            if command_proof.capture:
-                detail += f"; {_capture_detail(command_proof.capture)}"
-            return store.record_delivery(
-                entry.id,
-                now=timestamp,
-                delivery_state="unconfirmed",
-                delivered_to_session=target.id,
-                delivery_detail=detail,
-                current=current,
-                redelivery_floor_seconds=redelivery_floor_seconds,
-            )
-    return store.record_delivery(
-        entry.id,
-        now=timestamp,
-        delivery_state=_delivery_state(result),
-        delivered_to_session=target.id,
-        delivery_detail=_delivery_detail(result),
-        current=current,
-        redelivery_floor_seconds=redelivery_floor_seconds,
+    except HarnessControlError as exc:
+        reconciliation = _try_reconcile(target, entry.id)
+        return _record_reconciliation(
+            log,
+            target,
+            reconciliation,
+            fallback_detail=f"ambiguous adapter transport: {exc}",
+            at_boundary=at_boundary,
+        )
+    return _record_receipt(log, target, receipt, at_boundary=at_boundary)
+
+
+def _redelivery(
+    log: InboxDeliveryLog, target: TerminalCatalogEntry, *, at_boundary: bool
+) -> OperatorInboxEntry:
+    entry = log.entry
+    if entry.adapterDeliveryState in {"accepted", "queued", "completed"}:
+        return _record(
+            log,
+            target,
+            _DeliveryOutcome(
+                "delivered",
+                entry.adapterDeliveryState,
+                f"adapter-{entry.adapterDeliveryState}: already correlated",
+            ),
+            landed=at_boundary and entry.adapterDeliveryState == "accepted",
+        )
+    request_id = entry.adapterRequestId
+    assert request_id is not None  # this helper is entered only for an already-correlated row
+    return _record_reconciliation(
+        log,
+        target,
+        _try_reconcile(target, request_id),
+        fallback_detail="adapter request remains ambiguous; not resubmitted",
+        at_boundary=at_boundary,
     )
 
 
-def _delivery_state(result: DeliveryResult) -> InboxDeliveryState:
-    """Map the R1 ``DeliveryOutcome`` onto the unchanged ``InboxDeliveryState`` vocabulary."""
-    return "delivered" if result.outcome == "acked" else "unconfirmed"
+def _try_reconcile(target: TerminalCatalogEntry, request_id: str) -> ReconciliationResult | None:
+    try:
+        return reconcile_control_prompt(target, request_id)
+    except HarnessControlError:
+        return None
 
 
-def _delivery_detail(result: DeliveryResult) -> str:
-    if result.outcome == "acked":
-        return "harness-log-confirmed"
-    if result.outcome == "blocked":
-        return f"NEEDS-ATTENTION: blocked ({result.reason}); {_capture_detail(result.capture)}"
-    if result.outcome == "landed-unacked":
-        return f"draft landed but was not submitted ({result.reason})"
-    return _unconfirmed_detail(result.capture)
+def _record_receipt(
+    log: InboxDeliveryLog,
+    target: TerminalCatalogEntry,
+    receipt: SubmissionReceipt,
+    *,
+    at_boundary: bool,
+) -> OperatorInboxEntry:
+    adapter_state: AdapterDeliveryState = (
+        "accepted" if receipt.acceptance == "immediate" else receipt.acceptance
+    )
+    delivery_state: InboxDeliveryState = (
+        "delivered" if adapter_state in {"accepted", "queued"} else "unconfirmed"
+    )
+    detail = f"adapter-{adapter_state}"
+    if receipt.detail:
+        detail += f": {receipt.detail}"
+    return _record(
+        log,
+        target,
+        _DeliveryOutcome(delivery_state, adapter_state, detail),
+        _AdapterCorrelation(
+            request_id=receipt.request_id,
+            vendor_correlation_id=receipt.vendor_correlation_id,
+            accepted_at=receipt.accepted_at,
+        ),
+        landed=at_boundary and adapter_state == "accepted",
+    )
 
 
-def _capture_detail(capture: str) -> str:
-    if not capture:
-        return "empty pane capture"
-    return "pane capture (tail):\n" + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+def _record_reconciliation(
+    log: InboxDeliveryLog,
+    target: TerminalCatalogEntry,
+    reconciliation: ReconciliationResult | None,
+    *,
+    fallback_detail: str,
+    at_boundary: bool,
+) -> OperatorInboxEntry:
+    if reconciliation is None or reconciliation.state == "unresolved":
+        state: AdapterDeliveryState = "unknown"
+        detail = fallback_detail
+    elif reconciliation.state == "accepted":
+        state = "accepted"
+        detail = reconciliation.detail or "adapter reconciliation accepted the request"
+    else:
+        state = reconciliation.state
+        detail = reconciliation.detail or f"adapter reconciliation {reconciliation.state}"
+    return _record(
+        log,
+        target,
+        _DeliveryOutcome("delivered" if state == "accepted" else "unconfirmed", state, detail),
+        _AdapterCorrelation(
+            request_id=(
+                reconciliation.request_id
+                if reconciliation is not None
+                else log.entry.adapterRequestId or log.entry.id
+            ),
+            vendor_correlation_id=(
+                reconciliation.vendor_correlation_id if reconciliation is not None else None
+            ),
+        ),
+        landed=at_boundary and state == "accepted",
+    )
 
 
-def _unconfirmed_detail(capture: str) -> str:
-    """The 260707-HFX-L3 loud-failure detail: an unverified push carries its pane capture.
-
-    Never a bare "not echoed" -- the durable row is the forensic record a re-briefing operator
-    reads, so the evidence (what the pane actually showed) rides along, tail-bounded.
-    """
-    if not capture:
-        return "input was not harness-log-confirmed; empty failure capture"
-    return (
-        "input was not harness-log-confirmed; pane failure capture (tail):\n"
-        + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+def _record(
+    log: InboxDeliveryLog,
+    target: TerminalCatalogEntry | None,
+    outcome: _DeliveryOutcome,
+    correlation: _AdapterCorrelation = _NO_ADAPTER_CORRELATION,
+    *,
+    landed: bool = False,
+) -> OperatorInboxEntry:
+    return inbox_transitions.record_delivery(
+        log.store,
+        log.entry.id,
+        DeliveryAttempt(
+            delivery_state=outcome.delivery_state,
+            delivered_to_session=target.id if target is not None else None,
+            detail=outcome.detail,
+            landed=landed,
+            adapter=AdapterReceipt(
+                delivery_state=outcome.adapter_state,
+                request_id=log.entry.adapterRequestId or correlation.request_id,
+                vendor_correlation_id=correlation.vendor_correlation_id,
+                accepted_at=correlation.accepted_at,
+                detail=outcome.detail,
+            ),
+        ),
+        now=log.at,
+        floor=log.floor,
     )
 
 
 def _target_session(
-    catalog: TerminalCatalog,
+    catalog: TerminalCatalogPort,
     entry: OperatorInboxEntry,
 ) -> TerminalCatalogEntry | None:
-    if entry.messageKind == DISPATCH_BRIEF_KIND:
-        if entry.agentId is None:
-            return None
-        target = catalog.get(entry.agentId)
-        return target if target is not None and target.status == "running" else None
+    return target_session_for_entry(catalog, entry)
+
+
+def _structural_target(
+    catalog: TerminalCatalogPort,
+    entry: OperatorInboxEntry,
+) -> TerminalCatalogEntry | None:
+    document = entry.taskDocumentRef
+    role = entry.recipientRole
+    if document is None or role is None:
+        return None
+    primary = [
+        target
+        for target in catalog.list()
+        if target.status == "running"
+        and target.binding_role == role
+        and target.task_document_ref == document
+    ]
+    if len(primary) > 1:
+        raise ValueError(f"ambiguous structural inbox target: {document.key} as {role}")
+    if primary:
+        return primary[0]
+    replacements = [
+        target
+        for target in catalog.list()
+        if target.status == "running"
+        and target.binding_role == role
+        and target.replacement_for_task_document_ref == document
+    ]
+    if len(replacements) > 1:
+        raise ValueError(f"ambiguous structural inbox replacement: {document.key} as {role}")
+    return replacements[0] if replacements else None
+
+
+def _correlated_target(
+    catalog: TerminalCatalogPort,
+    entry: OperatorInboxEntry,
+) -> TerminalCatalogEntry | None:
     if entry.agentId:
         target = catalog.get(entry.agentId)
         if target is not None and target.status == "running":
@@ -222,15 +412,32 @@ def _target_session(
     return None
 
 
+def target_session_for_entry(
+    catalog: TerminalCatalogPort,
+    entry: OperatorInboxEntry,
+) -> TerminalCatalogEntry | None:
+    """Resolve the current occupant of the row's structural seat.
+
+    An initial dispatch brief is the sole exact-pinned exception: it creates the first message in
+    a newly spawned session before replacement semantics can apply. Every later row resolves from
+    task document + role, so an occupant change is transparent to the sender.
+    """
+    if entry.messageKind == DISPATCH_BRIEF_KIND:
+        if entry.agentId is None:
+            return None
+        target = catalog.get(entry.agentId)
+        return target if target is not None and target.status == "running" else None
+    if entry.taskDocumentRef is not None and entry.recipientRole is not None:
+        return _structural_target(catalog, entry)
+    return _correlated_target(catalog, entry)
+
+
 def _push_text(entry: OperatorInboxEntry) -> str:
     sender = entry.senderRole or "operator"
-    if entry.senderAgentId:
-        sender = f"{sender}:{entry.senderAgentId}"
     parts = [
         f"[Agents Remember inbox:{entry.messageKind}]",
         f"from: {sender}",
-        f"entry: {entry.id}",
-        f"ack: reply in this chat -- entry {entry.id} is the mechanical ack target",
+        "ack: reply in this chat; the control plane correlates acceptance automatically",
     ]
     if entry.artifactPath:
         parts.append(f"artifact: {entry.artifactPath}")

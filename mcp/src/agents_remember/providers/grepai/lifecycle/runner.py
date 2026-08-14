@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.providers.grepai.lifecycle.backend import grepai_project_migration
@@ -188,18 +189,35 @@ def grepai_watcher_status_ok(
     )
 
 
+@dataclass(frozen=True)
+class GrepaiWatcherStart:
+    """Everything a watcher start has in hand before compose brings it up.
+
+    The layout the watcher indexes from, its resolved runner settings, the
+    compose network it joins and the runner image build it runs — resolved once
+    by ``grepai_watcher_start_prerequisites`` and reported verbatim in every
+    watcher-start result.
+    """
+
+    layout: GrepaiRuntimeLayout
+    runner: dict[str, Any]
+    network: dict[str, Any]
+    image: dict[str, Any]
+
+
 def grepai_watcher_start_prerequisites(
     args: argparse.Namespace,
     *,
     runner: dict[str, Any],
     network_name: str,
-) -> tuple[GrepaiRuntimeLayout, dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+) -> tuple[GrepaiWatcherStart, dict[str, Any] | None]:
     _, _, layout = grepai_layout_from_args(args)
     network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
     image = grepai_runner_image_build(args, runner=runner)
+    start = GrepaiWatcherStart(layout=layout, runner=runner, network=network_result, image=image)
     if network_result.get("ok") and image.get("ok"):
-        return layout, network_result, image, None
-    return layout, network_result, image, {
+        return start, None
+    return start, {
         "provider": "grepai",
         "action": "watcher-start",
         "ok": False,
@@ -209,10 +227,7 @@ def grepai_watcher_start_prerequisites(
 
 
 def grepai_watcher_dry_run_start_result(
-    *,
-    runner: dict[str, Any],
-    network_result: dict[str, Any],
-    image: dict[str, Any],
+    start: GrepaiWatcherStart,
     commands: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -220,9 +235,9 @@ def grepai_watcher_dry_run_start_result(
         "action": "watcher-start",
         "ok": True,
         "dryRun": True,
-        "containerName": runner["containerName"],
-        "network": network_result,
-        "image": image,
+        "containerName": start.runner["containerName"],
+        "network": start.network,
+        "image": start.image,
         "commands": commands,
     }
 
@@ -232,35 +247,23 @@ def grepai_watcher_container_start(
     *,
     runner: dict[str, Any],
     network_name: str,
-    postgres_port: int | str | None = None,
-    ollama_port: int | str | None = None,
+    ports: GrepaiServicePorts = UNRESOLVED_SERVICE_PORTS,
 ) -> dict[str, Any]:
-    layout, network_result, image, error = grepai_watcher_start_prerequisites(
+    start, error = grepai_watcher_start_prerequisites(
         args, runner=runner, network_name=network_name
     )
     if error:
         return error
-    return grepai_watcher_create_start_result(
-        args,
-        runner=runner,
-        network_result=network_result,
-        image=image,
-        layout=layout,
-        postgres_port=postgres_port,
-        ollama_port=ollama_port,
-    )
+    return grepai_watcher_create_start_result(args, start, ports)
 
 
 def grepai_watcher_create_start_result(
     args: argparse.Namespace,
-    *,
-    runner: dict[str, Any],
-    network_result: dict[str, Any],
-    image: dict[str, Any],
-    layout: GrepaiRuntimeLayout,
-    postgres_port: int | str | None,
-    ollama_port: int | str | None,
+    start: GrepaiWatcherStart,
+    ports: GrepaiServicePorts,
 ) -> dict[str, Any]:
+    layout = start.layout
+    runner = start.runner
     _, provider_settings, _ = grepai_layout_from_args(args)
     backend = grepai_backend_settings(provider_settings, layout)
     render = grepai_compose_render(
@@ -268,19 +271,18 @@ def grepai_watcher_create_start_result(
         layout,
         runner,
         backend,
-        postgres_port=postgres_port,
-        ollama_port=ollama_port,
+        ports,
     )
     command_args = ["up", "-d", "watcher"]
     migration = grepai_project_migration(args, provider_settings, layout, backend)
     if args.dry_run:
         return grepai_watcher_dry_run_start_result(
-            runner=runner,
-            network_result=network_result,
-            image=image,
-            commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
+            start,
+            [compose_plan(render, command_args, cwd=layout.coordination_root)],
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     inspect_data = docker_inspect_container(
         runner["containerName"], cwd=layout.coordination_root, timeout=args.timeout
     )
@@ -289,8 +291,8 @@ def grepai_watcher_create_start_result(
         "action": "watcher-start",
         "ok": up_result["returncode"] == 0 and docker_container_running(inspect_data),
         "containerName": runner["containerName"],
-        "network": network_result,
-        "image": image,
+        "network": start.network,
+        "image": start.image,
         "commands": {"migration": migration, "up": up_result},
         "compose": grepai_compose_summary(render),
     }
@@ -334,14 +336,21 @@ def grepai_watcher_container_stop(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class GrepaiStackResults:
+    """The lifecycle result of each container in the GrepAI stack."""
+
+    backend: dict[str, Any] | None = None
+    embedder: dict[str, Any] | None = None
+    watcher: dict[str, Any] | None = None
+
+
 def grepai_docker_state(
     layout: GrepaiRuntimeLayout,
+    stack: GrepaiStackResults,
     *,
     action: str,
     runner: dict[str, Any],
-    backend_result: dict[str, Any] | None,
-    embedder_result: dict[str, Any] | None,
-    watcher_result: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "provider": "grepai",
@@ -362,8 +371,8 @@ def grepai_docker_state(
             "logDir": layout.logs_root.as_posix(),
         },
         "lastAction": action,
-        "backend": backend_result,
-        "embedder": embedder_result,
-        "watcher": watcher_result,
+        "backend": stack.backend,
+        "embedder": stack.embedder,
+        "watcher": stack.watcher,
         "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

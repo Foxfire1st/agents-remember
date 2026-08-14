@@ -10,14 +10,16 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.identity import (
+    provider_instance_id,
+)
+from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
     load_config,
     require_config_path,
 )
 from agents_remember.providers.cgc.context.core import cgc_runner_image
-from agents_remember.providers.identity import provider_instance_id
 from agents_remember.providers.settings import lifecycle_settings_from_config
 
 
@@ -67,9 +69,7 @@ class LifecycleSettingsDerivationTests(unittest.TestCase):
         # L12: per-repo managed exclusions ride the generated roots so the materialized
         # .cgcignore excludes the committed dashboard bundle from watch/index work.
         ar_root = next(r for r in cgc["roots"] if r["repoId"] == "agents-remember")
-        self.assertEqual(
-            ar_root["cgcignorePatterns"], ["mcp/src/agents_remember/package_data/"]
-        )
+        self.assertEqual(ar_root["cgcignorePatterns"], ["mcp/src/agents_remember/package_data/"])
 
 
 class McpConfigTests(unittest.TestCase):
@@ -559,7 +559,7 @@ class ProviderDegradationSettingsTests(unittest.TestCase):
 
 
 class RetirementSettingsTests(unittest.TestCase):
-    """260707-HFX2-L11: the auto-land hook gates, both default ON."""
+    """Completion cleanup edge gates plus the default-on ARG-L1 close behavior."""
 
     def _load(self, retirement: object | None) -> McpRuntimeConfig:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -575,18 +575,22 @@ class RetirementSettingsTests(unittest.TestCase):
         config = self._load(None)
         self.assertTrue(config.retirement.auto_land_on_integration)
         self.assertTrue(config.retirement.auto_land_on_finalize)
+        self.assertTrue(config.retirement.auto_close_completed_seats)
 
     def test_parses_both_flags_explicitly_off(self) -> None:
-        config = self._load(
-            {"autoLandOnIntegration": False, "autoLandOnFinalize": False}
-        )
+        config = self._load({"autoLandOnIntegration": False, "autoLandOnFinalize": False})
         self.assertFalse(config.retirement.auto_land_on_integration)
         self.assertFalse(config.retirement.auto_land_on_finalize)
+        self.assertTrue(config.retirement.auto_close_completed_seats)
+
+    def test_auto_close_can_restore_the_previous_landed_behavior(self) -> None:
+        config = self._load({"autoCloseCompletedSeats": False})
+        self.assertFalse(config.retirement.auto_close_completed_seats)
+        self.assertTrue(config.retirement.auto_land_on_integration)
+        self.assertTrue(config.retirement.auto_land_on_finalize)
 
     def test_parses_legacy_auto_retire_flags_as_aliases(self) -> None:
-        config = self._load(
-            {"autoRetireOnIntegration": False, "autoRetireOnFinalize": False}
-        )
+        config = self._load({"autoRetireOnIntegration": False, "autoRetireOnFinalize": False})
         self.assertFalse(config.retirement.auto_land_on_integration)
         self.assertFalse(config.retirement.auto_land_on_finalize)
 
@@ -601,6 +605,10 @@ class RetirementSettingsTests(unittest.TestCase):
     def test_auto_land_on_finalize_must_be_a_boolean(self) -> None:
         with self.assertRaisesRegex(ConfigError, "autoLandOnFinalize must be a boolean"):
             self._load({"autoLandOnFinalize": 1})
+
+    def test_auto_close_completed_seats_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoCloseCompletedSeats must be a boolean"):
+            self._load({"autoCloseCompletedSeats": "yes"})
 
     def test_legacy_auto_retire_alias_must_be_a_boolean(self) -> None:
         with self.assertRaisesRegex(ConfigError, "autoRetireOnIntegration must be a boolean"):
@@ -652,9 +660,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             config = self._load(
-                global_orchestration={
-                    "gateDelegation": {"policy": "manager-decides-leaf-gates"}
-                }
+                global_orchestration={"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
             )
 
         policy = config.orchestration.gate_policy
@@ -664,9 +670,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
         self.assertEqual(caught, [])
 
     def test_authority_gate_delegation_is_legacy_fallback_with_warning(self) -> None:
-        with self.assertWarnsRegex(
-            UserWarning, "moved to the global agentic settings file"
-        ):
+        with self.assertWarnsRegex(UserWarning, "moved to the global agentic settings file"):
             config = self._load(
                 authority={"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
             )
@@ -682,9 +686,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
             )
 
         # The global (all-human) value wins over the shadowed authority value.
-        self.assertIsNone(
-            config.orchestration.gate_policy.rule_for("plan-approval").delegated_role
-        )
+        self.assertIsNone(config.orchestration.gate_policy.rule_for("plan-approval").delegated_role)
 
     def test_loops_in_authority_file_is_rejected_naming_the_new_home(self) -> None:
         with self.assertRaisesRegex(
@@ -750,9 +752,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
     def test_human_pinned_kind_in_legacy_authority_fallback_still_fails(self) -> None:
         with self.assertRaisesRegex(ConfigError, "human-pinned"):
             self._load(
-                authority={
-                    "gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}
-                }
+                authority={"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}}
             )
 
     def test_malformed_global_agentic_file_fails_boot_naming_the_file(self) -> None:

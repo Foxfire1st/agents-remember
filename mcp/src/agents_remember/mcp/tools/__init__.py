@@ -25,6 +25,9 @@ from .gates import (
     gate_response_wait_payload,
     gate_wait_payload,
     lifecycle_gate_payload,
+    structural_gate_decide_payload,
+    structural_gate_list_payload,
+    structural_lifecycle_gate_payload,
 )
 from .hosted_readiness import hosted_session_readiness_payload
 from .lifecycle import (
@@ -38,6 +41,7 @@ from .lifecycle import (
 )
 from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
+    citation_fix_payload,
     drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
@@ -51,6 +55,7 @@ from .operator_inbox import (
     operator_inbox_consume_payload,
     operator_inbox_poll_payload,
     operator_inbox_post_payload,
+    operator_inbox_supersede_payload,
 )
 from .orchestration import orchestration_nudge_manager_payload
 from .providers import (
@@ -67,9 +72,17 @@ from .providers import (
     provider_watchers_payload,
 )
 from .read_files import read_ar_files_payload
+from .structural_agent import (
+    dispatch_agent_payload,
+    message_child_payload,
+    message_parent_payload,
+    rename_child_payload,
+    rename_self_payload,
+    retire_child_payload,
+)
 from .task_doc import task_doc_payload, task_reopen_payload
 from .terminal import (
-    attach_terminal_session_to_leaf_payload,
+    attach_terminal_session_to_task_payload,
     session_rename_payload,
     session_retire_payload,
     spawn_agent_session_payload,
@@ -81,6 +94,7 @@ from .worktree import (
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
+    worktree_operation_cancel_payload,
     worktree_start_payload,
     worktree_status_payload,
     worktree_sync_payload,
@@ -94,16 +108,18 @@ __all__ = [
     "PUBLIC_TOOLS",
     "RESERVED_TOOLS",
     "TRANSPORT",
-    "attach_terminal_session_to_leaf_payload",
+    "attach_terminal_session_to_task_payload",
     "cgc_callees_payload",
     "cgc_callers_payload",
     "cgc_complexity_payload",
     "cgc_dependencies_payload",
     "cgc_symbol_search_payload",
     "cgc_visualize_payload",
+    "citation_fix_payload",
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",
     "context_packet_payload",
+    "dispatch_agent_payload",
     "drift_check_payload",
     "gate_create_payload",
     "gate_decide_payload",
@@ -127,16 +143,22 @@ __all__ = [
     "memory_carryover_plan_payload",
     "memory_init_payload",
     "memory_quality_check_payload",
+    "message_child_payload",
+    "message_parent_payload",
     "operator_inbox_consume_payload",
     "operator_inbox_poll_payload",
     "operator_inbox_post_payload",
+    "operator_inbox_supersede_payload",
     "orchestration_nudge_manager_payload",
     "ping_payload",
     "provider_diagnostics_payload",
     "provider_status_payload",
     "provider_watchers_payload",
     "read_ar_files_payload",
+    "rename_child_payload",
+    "rename_self_payload",
     "resolve_context_payload",
+    "retire_child_payload",
     "route_index_refresh_payload",
     "runtime_install_payload",
     "server_info_payload",
@@ -144,6 +166,9 @@ __all__ = [
     "session_retire_payload",
     "skills_install_payload",
     "spawn_agent_session_payload",
+    "structural_gate_decide_payload",
+    "structural_gate_list_payload",
+    "structural_lifecycle_gate_payload",
     "switch_lifecycle_payload",
     "task_doc_payload",
     "task_reopen_payload",
@@ -153,6 +178,7 @@ __all__ = [
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",
     "worktree_integrate_payload",
+    "worktree_operation_cancel_payload",
     "worktree_start_payload",
     "worktree_status_payload",
     "worktree_sync_payload",

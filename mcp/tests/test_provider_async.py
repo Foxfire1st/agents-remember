@@ -14,34 +14,43 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers.worktree_tools import _settings_owned_by_background
+import agents_remember.providers.provider_setup as provider_setup_api
+from agents_remember.application import provider_runtime as provider_async
+from agents_remember.application.worktree_tools import _settings_owned_by_background
 from agents_remember.providers.setup_progress import read_setup_progress
 from agents_remember.worktrees.modules import abandon as worktree_abandon
 from agents_remember.worktrees.modules import cleanup as worktree_cleanup
-from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.guidance import projected_status_payload
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 
 
 def make_contract(root: Path):
     coordination_root = root / "ar-coordination"
     contract = default_contract(
-        task_name="async-task",
-        repo_name="repo-a",
-        workflow_kind="light-task",
-        memory_mode="disabled",
-        coordination_root=coordination_root,
-        code_repo_path=root / "repo-a",
-        code_source_branch="main",
-        code_work_branch="ar/async-task",
-        code_base_commit="abc123",
-        worktree_name="async-task",
-        memory_repo_path=None,
-        memory_source_branch="",
-        memory_work_branch="",
-        memory_base_commit="",
+        ContractTask(
+            name="async-task",
+            repo_name="repo-a",
+            coordination_root=coordination_root,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="async-task"),
+        code=RepoBranchPlan(
+            repo_path=root / "repo-a",
+            source_branch="main",
+            work_branch="ar/async-task",
+            base_commit="abc123",
+        ),
+        memory=RepoBranchPlan(repo_path=None, source_branch="", work_branch="", base_commit=""),  # type: ignore[arg-type]
     )
     contract.worktree_group.mkdir(parents=True, exist_ok=True)
     return contract
@@ -76,10 +85,12 @@ class LaunchProviderSetupTests(unittest.TestCase):
 
         threads = CapturedThreads()
         result = provider_async.launch_provider_setup(
-            request=mock.Mock(),
-            contract=contract,
-            write_state_file=write_state_file,
-            settings_cleanup=settings_cleanup,
+            provider_async.ProviderSetupJob(
+                request=mock.Mock(),
+                contract=contract,
+                write_state_file=write_state_file,
+                settings_cleanup=settings_cleanup,
+            ),
             runner=runner,
             thread_factory=threads,
         )
@@ -99,9 +110,7 @@ class LaunchProviderSetupTests(unittest.TestCase):
                 progress.phase_done({"ok": True, "provider": "grepai", "action": "install"})
                 return {"ok": True, "state": "ok", "resultCounts": {"total": 1, "ok": 1}}
 
-            _, result, state_files = self._launch(
-                root, runner, settings_cleanup=settings
-            )
+            _, result, state_files = self._launch(root, runner, settings_cleanup=settings)
 
             self.assertEqual(result["state"], "starting")
             self.assertIn("progressFile", result)
@@ -110,9 +119,7 @@ class LaunchProviderSetupTests(unittest.TestCase):
             assert progress is not None
             self.assertEqual(progress["state"], "ok")
             self.assertEqual(progress["repoName"], "repo-a")
-            self.assertEqual(
-                progress["summary"]["providerStateFile"], state_files[0].as_posix()
-            )
+            self.assertEqual(progress["summary"]["providerStateFile"], state_files[0].as_posix())
             self.assertFalse(settings.exists(), "thread owns the settings unlink")
 
     def test_failed_payload_finishes_failed_without_state_file(self) -> None:
@@ -137,9 +144,7 @@ class LaunchProviderSetupTests(unittest.TestCase):
             def runner(request, progress):
                 raise RuntimeError("docker exploded")
 
-            _, result, state_files = self._launch(
-                root, runner, settings_cleanup=settings
-            )
+            _, result, state_files = self._launch(root, runner, settings_cleanup=settings)
             progress = read_setup_progress(Path(result["progressFile"]))
             assert progress is not None
             self.assertEqual(progress["state"], "failed")
@@ -161,9 +166,22 @@ class ProviderSetupStatusTests(unittest.TestCase):
             state_file = contract.worktree_group / "provider-runtime" / "provider-state.json"
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_file.write_text("{}", encoding="utf-8")
-            self.assertEqual(
-                provider_async.provider_setup_status(contract), {"state": "prepared"}
-            )
+            self.assertEqual(provider_async.provider_setup_status(contract), {"state": "prepared"})
+
+    def test_a_prepared_stack_reaches_the_status_payload(self) -> None:
+        """`providers` is only attached when there is something to report, and it was never
+        proven to reach the payload -- only that `provider_setup_status` computes it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = make_contract(Path(tmp))
+            without = projected_status_payload(contract, landing=None)
+            self.assertNotIn("providers", without)
+
+            state_file = contract.worktree_group / "provider-runtime" / "provider-state.json"
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text("{}", encoding="utf-8")
+
+            payload = projected_status_payload(contract, landing=None)
+            self.assertEqual(payload.get("providers"), {"state": "prepared"})
 
     def test_failed_progress_carries_retry_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -174,10 +192,12 @@ class ProviderSetupStatusTests(unittest.TestCase):
                 return {"ok": False, "state": "failed"}
 
             provider_async.launch_provider_setup(
-                request=mock.Mock(),
-                contract=contract,
-                write_state_file=lambda payload: Path(tmp) / "unused.json",
-                settings_cleanup=None,
+                provider_async.ProviderSetupJob(
+                    request=mock.Mock(),
+                    contract=contract,
+                    write_state_file=lambda payload: Path(tmp) / "unused.json",
+                    settings_cleanup=None,
+                ),
                 runner=runner,
                 thread_factory=threads,
             )
@@ -218,9 +238,8 @@ class StartOrderingTests(unittest.TestCase):
             args = WorktreeArgs(task_name="async-task", worktree_name="async-task")
             with (
                 mock.patch.object(worktree_start, "resolve_context", return_value=context),
-                mock.patch.object(
-                    worktree_start, "build_start_contract", return_value=contract
-                ),
+                mock.patch.object(worktree_start, "build_start_contract", return_value=contract),
+                mock.patch.object(worktree_start, "parent_source_lineage", return_value=None),
                 mock.patch.object(worktree_start, "ensure_worktree", return_value="created"),
                 mock.patch.object(
                     worktree_start,
@@ -256,13 +275,11 @@ class StartOrderingTests(unittest.TestCase):
                     worktree_start, "_provider_setup_request", return_value=mock.Mock()
                 ),
                 mock.patch.object(
-                    worktree_start.provider_setup,
+                    provider_setup_api,
                     "run_provider_setup",
                     return_value={"ok": True, "results": []},
                 ) as run_mock,
-                mock.patch.object(
-                    worktree_start.provider_async, "launch_provider_setup"
-                ) as launch_mock,
+                mock.patch.object(provider_async, "launch_provider_setup") as launch_mock,
             ):
                 state = worktree_start.run_or_launch_provider_setup(
                     Namespace(), contract, args, {"state": "enabled", "paths": paths}
@@ -289,16 +306,12 @@ class StartOrderingTests(unittest.TestCase):
                     mock.patch.object(
                         worktree_start, "_provider_setup_request", return_value=mock.Mock()
                     ),
-                    mock.patch.object(
-                        worktree_start.provider_async, "launch_provider_setup"
-                    ) as launch_mock,
+                    mock.patch.object(provider_async, "launch_provider_setup") as launch_mock,
                 ):
                     worktree_start.run_or_launch_provider_setup(
                         Namespace(), contract, args, {"state": "enabled", "paths": paths}
                     )
-                self.assertEqual(
-                    launch_mock.call_args.kwargs["settings_cleanup"], expected_cleanup
-                )
+                self.assertEqual(launch_mock.call_args.args[0].settings_cleanup, expected_cleanup)
 
 
 class RetryProviderSetupTests(unittest.TestCase):
@@ -312,12 +325,8 @@ class RetryProviderSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._existing_contract(Path(tmp))
             args = WorktreeArgs(task_name="async-task", retry_provider_setup=True)
-            with mock.patch.object(
-                worktree_start.provider_async, "provider_setup_running", return_value=True
-            ):
-                result = worktree_start._retry_provider_setup_result(
-                    Namespace(), contract, args
-                )
+            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
+                result = worktree_start._retry_provider_setup_result(Namespace(), contract, args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
             self.assertEqual(result.payload["nextTool"], "worktree_status")
@@ -328,7 +337,7 @@ class RetryProviderSetupTests(unittest.TestCase):
             args = WorktreeArgs(task_name="async-task", retry_provider_setup=True)
             with (
                 mock.patch.object(
-                    worktree_start.provider_async,
+                    provider_async,
                     "provider_setup_running",
                     return_value=False,
                 ),
@@ -343,9 +352,7 @@ class RetryProviderSetupTests(unittest.TestCase):
                     return_value={"state": "starting", "progressFile": "x"},
                 ),
             ):
-                result = worktree_start._retry_provider_setup_result(
-                    Namespace(), contract, args
-                )
+                result = worktree_start._retry_provider_setup_result(Namespace(), contract, args)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.payload["state"], "provider-setup-retried")
             providers = cast(dict[str, Any], result.payload["providers"])
@@ -366,23 +373,17 @@ class TeardownGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._integrated_contract(Path(tmp))
             args = WorktreeArgs(contract_path=contract.contract_path, approved=True)
-            with mock.patch.object(
-                worktree_cleanup.provider_async, "provider_setup_running", return_value=True
-            ):
+            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
                 result = worktree_cleanup.cleanup_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
-            self.assertIn(
-                "Provider setup is still running", cast(str, result.payload["summary"])
-            )
+            self.assertIn("Provider setup is still running", cast(str, result.payload["summary"]))
 
     def test_abandon_blocks_without_force_while_setup_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._integrated_contract(Path(tmp))
             args = WorktreeArgs(contract_path=contract.contract_path, approved=True)
-            with mock.patch.object(
-                worktree_abandon.provider_async, "provider_setup_running", return_value=True
-            ):
+            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
                 result = worktree_abandon.abandon_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")

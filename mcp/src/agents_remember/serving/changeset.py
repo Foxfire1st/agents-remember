@@ -24,15 +24,25 @@ the ``task_changeset`` shape. Selection precedence is ``leaf > master > scope``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+)
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.serving.response_contract import (
+    SCOPED_READ_RESPONSES,
+    FileDiff,
+    LeafChangeSet,
+    MasterChangeSet,
+    TaskChangeSet,
+)
 from agents_remember.serving.scope import FileScope, language_for, run_scoped
 from agents_remember.worktrees.modules.git import (
     branch_exists,
@@ -141,9 +151,7 @@ def _master_task_root(config: McpRuntimeConfig, repo_id: str, master: str) -> Pa
     return config.coordination_root / "tasks" / repo_id / master
 
 
-def _master_enclosure_contracts(
-    config: McpRuntimeConfig, repo_id: str, master: str
-) -> list[Path]:
+def _master_enclosure_contracts(config: McpRuntimeConfig, repo_id: str, master: str) -> list[Path]:
     """Leaf contracts directly under ``tasks/<repo>/<master>/enclosures`` only."""
     task_root = _master_task_root(config, repo_id, master)
     if task_root is None:
@@ -405,18 +413,36 @@ def leaf_changeset(
     }
 
 
-def leaf_file_diff(
-    config: McpRuntimeConfig, repo_id: str, master: str, leaf: str, kind: str, rel: str, mode: str
-) -> dict[str, Any]:
+@dataclass(frozen=True)
+class ChangesetFileRef:
+    """Which file, in which change-set, seen through which lens.
+
+    A file diff is only answerable once all of it is known: the repo and the leaf (or master)
+    locate the change-set, ``kind`` picks the code or memory half of it, ``mode`` picks committed
+    or working, and ``path`` names the file inside it. Any one of them alone selects nothing, so
+    the selector travels as one value from the query string down to the diff.
+    """
+
+    repo: str
+    path: str
+    kind: str = "code"
+    scope: str = "mainline"
+    master: str = ""
+    leaf: str = ""
+    mode: str = ""
+
+
+def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str, Any]:
     """BEFORE + AFTER content for one file in a leaf's ``committed`` or ``working`` change-set.
 
     ``committed`` = ``base`` vs ``code_commit`` (or the worktree HEAD when live and not yet
     committed). ``working`` = the worktree HEAD vs the (dirty) worktree file. Mirrors
     :func:`file_diff`'s response so the L4 MergeView feeds it directly.
     """
-    contract = _load_leaf_contract(config, repo_id, master, leaf)
+    kind, rel, mode = ref.kind, ref.path, ref.mode
+    contract = _load_leaf_contract(config, ref.repo, ref.master, ref.leaf)
     if contract is None:
-        raise FileNotFoundError(f"no leaf contract for {leaf!r}")
+        raise FileNotFoundError(f"no leaf contract for {ref.leaf!r}")
     if kind == "memory":
         worktree, repo = contract.memory_worktree, contract.memory_repo_path
         base, committed = contract.memory_base_commit, contract.memory_content_commit
@@ -483,7 +509,13 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     JSONResponse 400/404 idiom rather than ``run_scoped``.
     """
 
-    @app.get("/api/changeset/task")
+    # Two success shapes: the leaf view adds ``mode`` to the enclosure view's body, and the
+    # ``leaf`` selector is what picks between them.
+    @app.get(
+        "/api/changeset/task",
+        response_model=LeafChangeSet | TaskChangeSet,
+        responses=SCOPED_READ_RESPONSES,
+    )
     def api_changeset_task(
         repo: str, scope: str = "mainline", master: str = "", leaf: str = "", mode: str = ""
     ) -> Response:
@@ -493,34 +525,27 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
             )
         return run_scoped(task_changeset, config, repo, scope)
 
-    @app.get("/api/changeset/file-diff")
-    def api_changeset_file_diff(
-        repo: str,
-        scope: str = "mainline",
-        kind: str = "code",
-        path: str = "",
-        master: str = "",
-        leaf: str = "",
-        mode: str = "",
-    ) -> Response:
-        if leaf:
-            return _leaf_json(
-                lambda: leaf_file_diff(config, repo, master, leaf, kind, path, mode), master, mode
-            )
-        if master:
+    @app.get("/api/changeset/file-diff", response_model=FileDiff, responses=SCOPED_READ_RESPONSES)
+    def api_changeset_file_diff(ref: Annotated[ChangesetFileRef, Depends()]) -> Response:
+        if ref.leaf:
+            return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
+        if ref.master:
             # Series net diff (master base -> source-branch tip); no enclosure scope, so it does
             # not go through run_scoped -- map its domain errors to the same status idiom.
             try:
                 return JSONResponse(
-                    master_file_diff(config, repo, master, kind, path), status_code=200
+                    master_file_diff(config, ref.repo, ref.master, ref.kind, ref.path),
+                    status_code=200,
                 )
             except AuthorityError as err:
                 return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
             except FileNotFoundError as err:
                 return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
-        return run_scoped(lambda fs: file_diff(fs, kind, path), config, repo, scope)
+        return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
-    @app.get("/api/changeset/master")
+    # An unresolvable master degrades to empty lists rather than refusing, so this route has no
+    # refusal shape to declare.
+    @app.get("/api/changeset/master", response_model=MasterChangeSet)
     def api_changeset_master(
         repo: str,
         master: str,

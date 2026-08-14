@@ -1,12 +1,12 @@
 ---
 name: c-12-closeout
-description: "Close out approved Agents Remember edits by preserving the applicable approval authority, missing-onboarding checks, external-memory onboarding refresh, memory quality, ledger alignment, and no automatic push for worktree-backed tasks."
+description: "Close out approved Agents Remember edits by preserving approval authority, mandatory strict code quality before code commit, missing-onboarding checks, external-memory refresh, memory quality, ledger alignment, and no automatic push."
 ---
 
 # c-12-closeout Closeout
 
-Use this skill when approved Agents Remember edits need to be committed and the
-repository uses external memory.
+Use this skill when approved Agents Remember edits in an external- or
+internal-memory worktree need to be committed.
 
 The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 **Closeout is worktree-only:** every change affecting the code repo runs through a
@@ -26,6 +26,15 @@ onboarding inline to make a failing check pass. A check that still fails after t
 closeout failure — respawn/rerun the curator, do not patch onboarding from the closeout seat. This
 distinction does not apply outside that chain (e.g. a solo flat session with no separate curator
 seat still runs `c-05-create-or-update-onboarding-files` itself before closing out).
+
+**Candidate-bound route-review gate:** every code-changing leaf reaches this skill only after an
+independent reviewer has written the verdict and per-major-route reports and the owner has called
+`task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})`. The plane
+stamps the exact current Git candidate tree and verifies the task-relative artifacts. Curator
+dispatch and both closeout preview/apply recompute that tree and refuse when the record is absent,
+blocking, stale, or points at missing evidence. Direct/solo and builder-verified tiers still require
+another agent's review; loop knobs change depth, not this gate. Never supply or remember the tree
+hash yourself, and never treat chat prose as a substitute for the task-bound record.
 
 ## MCP Tools
 
@@ -64,6 +73,59 @@ cannot be repaired inside the leaf, or when a quo-vadis decision is required.
 Real closeout uses the matching apply tool with an `intent_note`. The note records the applicable
 authority: either explicit developer commit approval or delegated accepted-series authority. Agents
 must not treat a vague "looks good" or their own preference as authority.
+
+Approval remains outside and before apply: preview, relay, and the applicable explicit or delegated
+authority must be complete before `worktree_closeout_apply`. Once apply begins, it reruns its
+read-only validations and — when code would commit **and repository policy configures an integrated
+acceptance adapter** — resets the index, stages the whole task worktree, and runs the leaf
+change-set-scoped acceptance contract over exactly that staged content as the first
+apply-time gate, before any code, memory, ledger, contract, or applied-gate **commit**. That index
+write is the one mutation that precedes the gate, and it is why the gate can see files the task
+created rather than only the ones it edited: the adapter receives that staged candidate, and closeout
+commits with `git add -A`, so anything not in the index was committed unread.
+
+**Quality altitude ladder.** Leaf acceptance stays mandatory and change-set-scoped: closeout runs
+the repository-prescribed acceptance implementation exactly once before creating the leaf code
+commit. Leaf integration lands that certified commit without rerunning acceptance. The
+repository-prescribed full check runs exactly once per master at the master integration gate;
+series/master closeout does not rerun it. `memory_quality_check` is explicitly carved out: it stays
+a per-leaf closeout gate. A missing or failed required acceptance implementation refuses loudly,
+never passes silently.
+
+The concrete executor, permitted environment, command arguments, retry semantics, resource policy,
+and evidence contract belong to the resolved repository memory, especially
+`system/git-workflow.md`, `system/coding-guidelines.md`, and `system/tools.md`. Read those files and
+follow their one path. Do not infer an executor from this skill, substitute a familiar test runner,
+or add a compatibility fallback.
+
+The durable evidence location, publication semantics, payload fields, and reclamation lifecycle
+belong to the repository's resolved acceptance policy. Relay exactly the evidence reference that
+policy requires; do not invent a universal filename or assume another repository's report store.
+
+Any retry or proof-reuse behavior is repository policy, not seat discretion. A retry may consume
+only the evidence and conditions explicitly authorized by the repository's concrete acceptance
+implementation; otherwise rerun that implementation or fail closed.
+
+Staging is **not** undone if the gate refuses. The worktree stays fully staged, nothing is
+committed, and that is the intended end state rather than a gap: the checkout being staged is the
+task's own worktree, created by `worktree_start` and destroyed by `lifecycle_finalize_task`, so no
+one is holding a partial staging in it — and a retry does not inherit that index, because each gate
+run begins with `git reset` and restages from the working tree. The reset is what makes the retry
+equivalent to a first run rather than an assertion that it is. `git add -A` on its own is not
+enough: git applies ignore rules only to paths it does not already track or hold staged, so a file
+staged by a refused attempt stays staged even after the retry adds it to `.gitignore`, and the
+commit carries it. Resetting first recomputes what gets staged on every run under the ignore rules
+in force at that moment, and `--mixed` is index-only, so no file content is touched.
+
+Two refusals guard that staging step, and because they guard it they run exactly where the gate
+runs. With the integrated adapter present, closeout refuses outright, before staging anything, when the code
+checkout is **not** a task worktree (git reports the same `--git-dir` and `--git-common-dir`, which
+is what the repository's own checkout looks like; a series/master contract records that path), and
+when the code worktree has unresolved merge conflicts. A consuming repository carrying **no** adapter runs
+no gate, so neither refusal applies to it: its closeout stages nothing early and reaches the
+ordinary commit step's own `git add -A` exactly as it always has. The preview reports that state as
+`wrapper-unavailable` rather than passing it off as checked. Repository memory owns the required
+scope, risk, and evidence thresholds at each altitude.
 
 For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
 preview/dry-run first, then call
@@ -144,9 +206,11 @@ Rules:
 
 ## Preconditions
 
-The `c-12-closeout` skill resolves or consumes the current `c-08-ar-coordination-context-resolver` context, requires external memory
-mode, and requires the code checkout/worktree and memory repo/worktree to be on
-the same selected branch.
+The `c-12-closeout` skill resolves or consumes the current
+`c-08-ar-coordination-context-resolver` context. External-memory closeout
+requires the code checkout/worktree and memory repo/worktree to be on the same
+selected branch; internal-memory closeout commits its memory changes with the
+code worktree.
 
 Ledger compatibility is based on code-to-memory commit mappings, not branch
 metadata.
@@ -176,6 +240,18 @@ stale content defeats the commit-hash-based drift check. In the curator chain, c
 updated during the curator's memory pass, not at the metadata-refresh step, and not by the builder
 during implementation.
 
+The change set also reads against the resolved memory layer's
+`system/coding-guidelines.md` (when present) before the closeout preview. The repository's
+acceptance implementation certifies its configured machine checks; it does not read for guideline adherence — a
+task identifier in a shipped comment, a new positional boolean flag, an `object`-typed boundary
+parameter, or an already-oversize file growing again all pass every rail. Read the change set's
+added lines against the guideline file- and function-size budgets, the responsibility and
+anti-pattern rules, the source-comment scope, the typed-boundary (DTO) rules, and the D1/D2/D3
+stability doctrine; repair what falls inside the task's scope and relay everything else as named
+findings at the commit-approval gate. A guideline contradiction that lands unmentioned is a
+closeout failure, and in the manager -> builder -> reviewer -> curator chain this read is part of
+the reviewer seat's evidence, not something to patch silently at closeout time.
+
 The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
 contract's recorded closeout commit, falling back to the task base) and the
@@ -193,23 +269,59 @@ deliberately through the `c-05-create-or-update-onboarding-files` skill.
 
 External-memory closeout order is:
 
+Before step 1, require the current passing task-bound route review. Any code edit after review
+invalidates its candidate-tree binding and returns to the same route reviewer(s) before curator or
+closeout work resumes.
+
 1. run `check_missing_onboarding` against current additions (in the curator chain, this confirms the
    curator's pass already covered them — it is not the cue to author onboarding here)
 2. if onboarding is still missing, escalate to run/rerun the curator's memory pass through the
    `c-05-create-or-update-onboarding-files` skill before committing code (solo flat sessions with no
    separate curator seat create it directly)
-3. commit code changes and capture `C2` plus its commit date
-4. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
-5. verify each changed source file's sidecar content was updated in this task (by the curator's pass
+3. after preview and the applicable commit authority are complete, call
+   `worktree_closeout_apply`; its initial checks are read-only
+4. the citation gate runs BEFORE the leaf acceptance contract and the code commit: `range_resolution` and
+   `claim_reopen` over the working tree — a changed construct whose citation is current is only
+   the report-only review surface, while a stale pointer, an absent or ambiguous anchor, or
+   unverifiable provenance refuses in seconds. The curator clears the same
+   `memory_quality_check` during the leaf, so findings here are the exception, not the rule
+5. when code would commit and repository policy configures integrated acceptance, reset the index, stage the whole
+   task worktree, and run the leaf change-set-scoped acceptance contract over exactly
+   that staged content, before any commit; a refusal leaves the worktree staged and commits
+   nothing, and the next run's reset means it starts from the working tree either way. The full
+   repository check is NOT a leaf gate — it runs once per master at the master
+   integration gate. If policy requires an adapter, a missing adapter refuses; otherwise the
+   repository's documented no-adapter behavior applies and must be reported explicitly.
+6. commit code changes and capture `C2` plus its commit date
+7. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
+8. verify each changed source file's sidecar content was updated in this task (by the curator's pass
    in the chain above), then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
-6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
-7. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
-8. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
-9. run MCP `memory_quality_check`; fix reported memory findings before continuing
-10. commit memory-content changes and capture `M2`
-11. prepend `C2 | M2` to `memory.md`
-12. commit the ledger update as `L2`
-13. update the task contract closeout state
+9. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
+10. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
+11. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
+12. run MCP `memory_quality_check` (the post-refresh sanity phase: drift, document shape, history order); fix reported memory findings before continuing
+13. commit memory-content changes and capture `M2`
+14. prepend `C2 | M2` to `memory.md`
+15. commit the ledger update as `L2`
+16. update the task contract closeout state
+
+## Internal-Memory Order
+
+Internal-memory closeout order is:
+
+Before step 1, require the same current passing task-bound route review for every code change.
+
+1. run the same missing-onboarding and changed-sidecar preconditions before preview
+2. complete preview and the applicable explicit or delegated commit authority
+3. call `worktree_closeout_apply`; its initial validations are read-only
+4. when code would commit and the checkout carries the integrated adapter, reset the index, stage the whole
+   task worktree, and run the leaf change-set-scoped acceptance contract over exactly
+   that staged content, before any commit — a refusal leaves the worktree staged and commits
+   nothing, and the next run's reset restages from the working tree regardless. A checkout with no
+   configured integrated adapter reports that state explicitly; repository policy decides whether
+   absence is permitted or must refuse.
+5. commit the code and internal-memory changes together
+6. update the task contract closeout state
 
 Entity fingerprints must be refreshed after the code commit and before the
 memory-content commit because `git-blob-set-v1` uses `HEAD:<path>` Git blobs.
@@ -241,6 +353,44 @@ verification metadata is missing, external memory is not resolved, the code and
 memory checkouts are on different selected branches, or no code or memory
 changes exist.
 
+For a repository whose policy requires integrated acceptance, closeout also fails without any
+commit when the leaf change-set-scoped acceptance contract is unavailable or exits non-zero.
+It is "without any
+commit" rather than "without mutation": closeout resets the index and stages the
+whole task worktree before the gate so the gate can see created files, and
+**leaves it staged** when the gate refuses. Nothing needs undoing — the next run
+resets and restages from the working tree, so it reaches the index a first run
+would have reached, and `commit_if_dirty` stages everything regardless. Fix the
+reported source, test, coverage, or environment issue, rerun the repository-prescribed acceptance
+and closeout preview, and only then retry apply; never bypass the failure with a
+direct commit.
+
+The next two refusals are preconditions of that staging step, so they run where the integrated gate
+runs. A repository whose policy does not require or provide that adapter reaches the ordinary
+commit step. A repository that requires the adapter refuses if the candidate removes or disables
+   it; a candidate cannot turn required acceptance into an optional no-adapter result.
+
+Where the gate runs, closeout refuses before staging anything when the code
+checkout is not a task worktree. The test is git's own: in a linked worktree
+`--git-dir` and `--git-common-dir` differ, and in a repository's own checkout
+they are the same path. `default_series_contract` records `code_worktree` as the
+repository path itself, so a series/master contract reaching
+`worktree_closeout_apply` would otherwise stage in a checkout a person works in —
+overwriting a partial `git add -p` selection, staging files deliberately held
+back, and resolving any merge in progress to whatever is on disk. Close out the
+leaf contract whose `code_worktree` is the task worktree instead.
+
+Where the gate runs, closeout also refuses before staging anything when the code
+worktree has unresolved merge conflicts (an in-progress merge, rebase,
+cherry-pick, or revert with unmerged index entries). The refusal names the
+conflicted paths. This is a deliberate refusal, not an incidental one:
+`git add -A` over an unmerged index resolves every conflict to whatever the
+working tree holds, so without this check closeout committed the `<<<<<<<`
+markers. Both refusals run before the reset as well as before the add — a
+`git reset` drops the unmerged entries and `MERGE_HEAD`, so running it first
+would erase the very state the conflict check reads. Resolve the conflicts, stage
+the resolutions, then rerun closeout.
+
 Closeout also fails without mutation when a changed source file's existing
 sidecar body was not updated in the current task, so verification metadata is
 never advanced over stale onboarding content. This applies to committed-range
@@ -266,7 +416,13 @@ curator seat runs that skill itself.
 4. The `c-12-closeout` skill must not commit without the applicable authority after a closeout
    preview: explicit developer commit approval for standalone/final work, or recorded delegated
    series authority for subordinate accepted-series work.
-5. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
-6. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
-7. The `c-12-closeout` skill must not push automatically.
-8. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
+5. The `c-12-closeout` skill must not create a code commit until the repository-prescribed leaf
+   change-set-scoped acceptance contract passes for the current candidate. The full check belongs to the
+   master integration gate only.
+6. The `c-12-closeout` skill must not defer or skip `memory_quality_check`; it stays a per-leaf
+   closeout gate even though full repository acceptance belongs to the master integration gate.
+7. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
+8. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
+9. The `c-12-closeout` skill must not push automatically.
+10. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
+11. The `c-12-closeout` skill must not close out a change set that contradicts the memory layer's `system/coding-guidelines.md` without the contradiction being repaired in scope or named at the commit-approval relay; green acceptance evidence is not evidence of guideline adherence.

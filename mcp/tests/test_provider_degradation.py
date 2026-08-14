@@ -12,8 +12,16 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import McpRuntimeConfig, load_config
-from agents_remember.mcp.provider_degradation_settings import ProviderDegradationSettings
+from agents_remember.kernel.primitives.provider_degradation_settings import (
+    ProviderDegradationSettings,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    load_config,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
 from agents_remember.observer import observer_root
 from agents_remember.providers.degradation import (
     ProviderDegradationStore,
@@ -26,13 +34,24 @@ from agents_remember.providers.metrics import (
     MetricsSnapshot,
     ProviderMetricsStore,
 )
+from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
-    TerminalCatalogEntry,
     terminal_catalog_path,
 )
 
 T1 = "2026-07-07T12:00:00+00:00"
+
+
+def unreachable_stopper(_: McpRuntimeConfig) -> dict[str, Any]:
+    """The failsafe action for evaluations that must never reach the critical branch.
+
+    ``evaluate_provider_degradation`` requires the stop action rather than defaulting to one,
+    so a test that is about some other transition still has to say what would happen if the
+    failsafe fired. Saying "this must not fire" is the honest answer, and it fails loudly if
+    the evaluation the test is about ever starts firing it.
+    """
+    raise AssertionError("the critical failsafe must not fire in this evaluation")
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -269,17 +288,22 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         delivery_attempts: list[dict[str, Any]] = []
 
-        def deliver_entry(**kwargs: Any) -> Any:
-            delivery_attempts.append(kwargs)
-            return kwargs["entry"]
+        def deliver_entry(log: Any, **kwargs: Any) -> Any:
+            delivery_attempts.append({"log": log, **kwargs})
+            return log.entry
 
-        with patch("agents_remember.providers.degradation.deliver_inbox_entry", side_effect=deliver_entry):
+        with patch(
+            "agents_remember.serving.degradation_delivery.deliver_inbox_entry",
+            side_effect=deliver_entry,
+        ):
             result = evaluate_provider_degradation(
                 self.config,
+                degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
                 stop_provider_stacks=stop_provider_stacks,
             )
             second = evaluate_provider_degradation(
                 self.config,
+                degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
                 stop_provider_stacks=stop_provider_stacks,
             )
 
@@ -304,10 +328,12 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         inbox_entries = OperatorInboxStore(observer_root(self.config)).current().values()
         self.assertEqual({entry.messageKind for entry in inbox_entries}, {"degradation-alert"})
-        self.assertEqual({entry.agentId for entry in inbox_entries}, {"orchestrator-1", "manager-1"})
+        self.assertEqual(
+            {entry.agentId for entry in inbox_entries}, {"orchestrator-1", "manager-1"}
+        )
         self.assertEqual(len(delivery_attempts), 2)
         self.assertEqual(
-            {attempt["entry"].agentId for attempt in delivery_attempts},
+            {attempt["log"].entry.agentId for attempt in delivery_attempts},
             {"orchestrator-1", "manager-1"},
         )
         responses = {entry.recipientRole: entry.response for entry in inbox_entries}
@@ -323,6 +349,7 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         result = evaluate_provider_degradation(
             self.config,
+            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
             stop_provider_stacks=stop_provider_stacks,
         )
 
@@ -343,18 +370,28 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         )
         self.assertEqual(state_payload["state"], "critical")
         inbox_entries = OperatorInboxStore(observer_root(self.config)).current().values()
-        self.assertEqual({entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"})
+        self.assertEqual(
+            {entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"}
+        )
 
     def test_recovery_transition_survives_restart_and_posts_role_addressed_all_clear(self) -> None:
         record_memory_sample(self.config, name="grepai-1", ratio=0.80)
         record_memory_sample(self.config, name="grepai-2", ratio=0.82)
-        degraded = evaluate_provider_degradation(self.config)
+        degraded = evaluate_provider_degradation(
+            self.config,
+            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
+            stop_provider_stacks=unreachable_stopper,
+        )
         self.assertEqual(degraded["state"], "degraded")
 
         record_memory_sample(self.config, name="grepai-3", ratio=0.20)
         record_memory_sample(self.config, name="grepai-4", ratio=0.20)
 
-        recovered = evaluate_provider_degradation(self.config)
+        recovered = evaluate_provider_degradation(
+            self.config,
+            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
+            stop_provider_stacks=unreachable_stopper,
+        )
 
         self.assertEqual(recovered["state"], "healthy")
         event = recovered["event"]
@@ -364,7 +401,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         event_rows = read_event_rows(self.config)
         self.assertEqual([row["to"] for row in event_rows], ["degraded", "healthy"])
         inbox_entries = list(OperatorInboxStore(observer_root(self.config)).current().values())
-        self.assertEqual({entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"})
+        self.assertEqual(
+            {entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"}
+        )
         self.assertEqual({entry.agentId for entry in inbox_entries}, {None})
 
 

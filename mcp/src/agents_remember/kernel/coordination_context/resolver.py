@@ -6,9 +6,16 @@ from typing import Literal
 from agents_remember.kernel.coordination_context.contracts import resolve_contract
 from agents_remember.kernel.coordination_context.cross_repo import resolve_cross_repo_settings
 from agents_remember.kernel.coordination_context.models import (
+    CodeRepository,
+    ContractReaderPort,
     CoordinationContext,
+    CoordinationHints,
+    CoordinationRequest,
+    CoordinationRoots,
     CoordinationSelection,
     CrossRepoSettings,
+    EnclosureResolution,
+    EnclosureSelector,
     MissingMemoryError,
     StorageSettings,
 )
@@ -25,12 +32,6 @@ from agents_remember.kernel.coordination_context.paths import (
     settings_path_for_roots,
 )
 from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
-from agents_remember.worktrees.task_resolver import resolve_active_task_root
-from agents_remember.worktrees.worktree_contract import (
-    ContractError,
-    load_contract,
-    worktree_group_for,
-)
 
 
 def detect_coordination_selection(
@@ -147,201 +148,168 @@ def _missing_memory_error(code_repository_name: str, roots: dict[str, Path]) -> 
 def resolve_coordination_context(
     code_repository_name: str | None = None,
     workspace_root: Path | None = None,
-    requested_topology: Literal["internal", "external"] | None = None,
-    coordination_root: Path | None = None,
-    settings_path: Path | None = None,
-    onboarding_root: Path | None = None,
     code_repository_root: Path | None = None,
-    contract_path: Path | None = None,
-    task_name: str | None = None,
-    parent_task: str | None = None,
-    leaf_id: str | None = None,
-    worktree_name: str | None = None,
+    *,
+    request: CoordinationRequest,
 ) -> CoordinationContext:
+    hints = request.hints or CoordinationHints()
+    selector = request.selector or EnclosureSelector()
+    if request.contract_reader is None:
+        raise ValueError("coordination resolution requires a contract reader")
     repo = _resolve_code_repository(code_repository_name, workspace_root, code_repository_root)
-    if onboarding_root is not None:
+    if hints.onboarding_root is not None:
         return _context_from_onboarding_root(
-            repo,
-            requested_topology,
-            settings_path,
-            onboarding_root,
-            contract_path,
-            task_name,
-            parent_task,
-            leaf_id,
-            worktree_name,
+            repo, hints, hints.onboarding_root, selector, request.contract_reader
         )
-    return _context_from_selection(
-        repo,
-        requested_topology,
-        coordination_root,
-        settings_path,
-        contract_path,
-        task_name,
-        parent_task,
-        leaf_id,
-        worktree_name,
-    )
+    return _context_from_selection(repo, hints, selector, request.contract_reader)
 
 
 def _resolve_code_repository(
     code_repository_name: str | None,
     workspace_root: Path | None,
     code_repository_root: Path | None,
-) -> dict[str, Path | str]:
+) -> CodeRepository:
     resolved_workspace_root = (workspace_root or Path.cwd()).resolve()
     if code_repository_root is not None:
         resolved_code_root = code_repository_root.resolve()
-        return {
-            "name": code_repository_name or resolved_code_root.name,
-            "root": resolved_code_root,
-            "workspace": workspace_root.resolve() if workspace_root else resolved_code_root.parent,
-        }
+        return CodeRepository(
+            name=code_repository_name or resolved_code_root.name,
+            root=resolved_code_root,
+            workspace=(workspace_root.resolve() if workspace_root else resolved_code_root.parent),
+        )
     if not code_repository_name:
         raise ValueError(
             "code_repository_name is required when code_repository_root is not supplied"
         )
-    return {
-        "name": code_repository_name,
-        "root": find_code_repository_root(resolved_workspace_root, code_repository_name),
-        "workspace": resolved_workspace_root,
-    }
+    return CodeRepository(
+        name=code_repository_name,
+        root=find_code_repository_root(resolved_workspace_root, code_repository_name),
+        workspace=resolved_workspace_root,
+    )
 
 
 def _context_from_onboarding_root(
-    repo: dict[str, Path | str],
-    requested_topology: Literal["internal", "external"] | None,
-    settings_path: Path | None,
+    repo: CodeRepository,
+    hints: CoordinationHints,
     onboarding_root: Path,
-    contract_path: Path | None,
-    task_name: str | None,
-    parent_task: str | None,
-    leaf_id: str | None,
-    worktree_name: str | None,
+    selector: EnclosureSelector,
+    contract_reader: ContractReaderPort,
 ) -> CoordinationContext:
     resolved_onboarding_root = onboarding_root.resolve()
     resolved_settings = (
-        settings_path.resolve() if settings_path else infer_settings_path(resolved_onboarding_root)
+        hints.settings_path.resolve()
+        if hints.settings_path
+        else infer_settings_path(resolved_onboarding_root)
     )
-    topology = requested_topology or infer_topology_from_onboarding_root(resolved_onboarding_root)
+    topology = hints.topology or infer_topology_from_onboarding_root(resolved_onboarding_root)
     coordination_root, memory_root = memory_roots_from_settings(
-        resolved_settings, Path(repo["root"]), str(repo["name"]), topology
+        resolved_settings, repo.root, repo.name, topology
     )
     storage, cross_repo = parse_coordination_settings(resolved_settings, topology)
     return build_coordination_context(
-        code_repository_name=str(repo["name"]),
-        code_repository_root=Path(repo["root"]),
-        topology=topology,
-        coordination_root=coordination_root,
-        memory_root=memory_root,
-        onboarding_root=resolved_onboarding_root,
-        settings_path=resolved_settings,
+        repo,
+        roots=CoordinationRoots(
+            topology=topology,
+            coordination_root=coordination_root,
+            memory_root=memory_root,
+            onboarding_root=resolved_onboarding_root,
+            settings_path=resolved_settings,
+        ),
         storage=storage,
         cross_repo=cross_repo,
-        contract_path=contract_path,
-        task_name=task_name,
-        parent_task=parent_task,
-        leaf_id=leaf_id,
-        worktree_name=worktree_name,
-        workspace_root=Path(repo["workspace"]),
+        resolution=EnclosureResolution(selector=selector, contract_reader=contract_reader),
     )
 
 
 def _context_from_selection(
-    repo: dict[str, Path | str],
-    requested_topology: Literal["internal", "external"] | None,
-    coordination_root: Path | None,
-    settings_path: Path | None,
-    contract_path: Path | None,
-    task_name: str | None,
-    parent_task: str | None,
-    leaf_id: str | None,
-    worktree_name: str | None,
+    repo: CodeRepository,
+    hints: CoordinationHints,
+    selector: EnclosureSelector,
+    contract_reader: ContractReaderPort,
 ) -> CoordinationContext:
-    contract_coordination_root = _contract_coordination_root(contract_path, coordination_root)
-    selection = detect_coordination_selection(
-        code_repository_name=str(repo["name"]),
-        code_repository_root=Path(repo["root"]),
-        requested_topology=requested_topology,
-        coordination_root_hint=contract_coordination_root,
-        settings_path=settings_path,
+    contract_coordination_root = _contract_coordination_root(
+        selector.contract_path, hints.coordination_root, contract_reader
     )
-    resolved_settings = settings_path.resolve() if settings_path else selection.settings_path
+    selection = detect_coordination_selection(
+        code_repository_name=repo.name,
+        code_repository_root=repo.root,
+        requested_topology=hints.topology,
+        coordination_root_hint=contract_coordination_root,
+        settings_path=hints.settings_path,
+    )
+    resolved_settings = (
+        hints.settings_path.resolve() if hints.settings_path else selection.settings_path
+    )
     storage, cross_repo = parse_coordination_settings(resolved_settings, selection.topology)
     return build_coordination_context(
-        code_repository_name=str(repo["name"]),
-        code_repository_root=Path(repo["root"]),
-        topology=selection.topology,
-        coordination_root=selection.coordination_root,
-        memory_root=selection.memory_root,
-        onboarding_root=selection.memory_root / "onboarding",
-        settings_path=resolved_settings,
+        repo,
+        roots=CoordinationRoots(
+            topology=selection.topology,
+            coordination_root=selection.coordination_root,
+            memory_root=selection.memory_root,
+            onboarding_root=selection.memory_root / "onboarding",
+            settings_path=resolved_settings,
+        ),
         storage=storage,
         cross_repo=cross_repo,
-        contract_path=contract_path,
-        task_name=task_name,
-        parent_task=parent_task,
-        leaf_id=leaf_id,
-        worktree_name=worktree_name,
-        workspace_root=Path(repo["workspace"]),
+        resolution=EnclosureResolution(selector=selector, contract_reader=contract_reader),
     )
 
 
 def _contract_coordination_root(
-    contract_path: Path | None, coordination_root: Path | None
+    contract_path: Path | None,
+    coordination_root: Path | None,
+    contract_reader: ContractReaderPort,
 ) -> Path | None:
     if contract_path is None or not contract_path.exists():
         return coordination_root
     try:
-        return load_contract(contract_path.resolve()).coordination_root
-    except ContractError:
+        return contract_reader.load_contract(contract_path.resolve()).coordination_root
+    except Exception:
         return coordination_root
 
 
 def build_coordination_context(
-    code_repository_name: str,
-    code_repository_root: Path,
-    topology: Literal["internal", "external"],
-    coordination_root: Path,
-    memory_root: Path,
-    onboarding_root: Path,
-    settings_path: Path,
+    repo: CodeRepository,
+    *,
+    roots: CoordinationRoots,
     storage: StorageSettings,
     cross_repo: CrossRepoSettings,
-    contract_path: Path | None = None,
-    task_name: str | None = None,
-    parent_task: str | None = None,
-    leaf_id: str | None = None,
-    worktree_name: str | None = None,
-    workspace_root: Path | None = None,
+    resolution: EnclosureResolution,
 ) -> CoordinationContext:
+    selector = resolution.selector or EnclosureSelector()
+    contract_reader = resolution.contract_reader
+    if contract_reader is None:
+        raise ValueError("coordination resolution requires a contract reader")
+    coordination_root = roots.coordination_root
+    memory_root = roots.memory_root
     contract, resolved_contract_path = resolve_contract(
-        contract_path,
-        coordination_root,
-        code_repository_name,
-        task_name,
-        parent_task,
-        leaf_id,
-        worktree_name,
+        selector, coordination_root, repo.name, contract_reader
     )
     task_root = _task_root(
-        coordination_root, code_repository_name, task_name, parent_task, contract
+        coordination_root,
+        repo.name,
+        selector,
+        contract,
+        contract_reader,
     )
     worktree_group = _worktree_group(
-        coordination_root, code_repository_name, worktree_name, contract
+        coordination_root, repo.name, selector.worktree_name, contract, contract_reader
     )
-    memory_mode = contract.memory_mode if contract is not None else _memory_mode(topology)
+    memory_mode = contract.memory_mode if contract is not None else _memory_mode(roots.topology)
     effective_memory_root = _effective_memory_root(memory_root, contract)
     system_root = _system_root(memory_root, coordination_root)
     return CoordinationContext(
-        topology=topology,
-        code_repository_name=code_repository_name,
-        code_repository_root=code_repository_root,
+        topology=roots.topology,
+        code_repository_name=repo.name,
+        code_repository_root=repo.root,
         coordination_root=coordination_root,
         memory_root=effective_memory_root,
-        onboarding_root=_effective_child_root(effective_memory_root, onboarding_root, "onboarding"),
-        settings_path=settings_path,
-        path_settings_path=_existing_path_settings(settings_path),
+        onboarding_root=_effective_child_root(
+            effective_memory_root, roots.onboarding_root, "onboarding"
+        ),
+        settings_path=roots.settings_path,
+        path_settings_path=_existing_path_settings(roots.settings_path),
         task_root=task_root,
         temp_root=coordination_root / "temp",
         docs_root=_effective_child_root(effective_memory_root, coordination_root / "docs", "docs"),
@@ -350,41 +318,48 @@ def build_coordination_context(
         tools_path=system_root / "tools.md",
         storage=storage,
         path_rules=storage.path_rules,
-        cross_repo=resolve_cross_repo_settings(
-            cross_repo, workspace_root or code_repository_root.parent, coordination_root
-        ),
+        cross_repo=resolve_cross_repo_settings(cross_repo, repo.workspace, coordination_root),
         memory_mode=memory_mode,
         contract_path=resolved_contract_path,
         worktree_group=worktree_group,
         code_worktree=contract.code_worktree if contract is not None else None,
         memory_worktree=contract.memory_worktree if contract is not None else None,
-        ledger_path=_ledger_path(memory_root, topology, contract),
+        ledger_path=_ledger_path(memory_root, roots.topology, contract),
     )
 
 
 def _task_root(
     coordination_root: Path,
     code_repository_name: str,
-    task_name: str | None,
-    parent_task: str | None,
+    selector: EnclosureSelector,
     contract,
+    contract_reader: ContractReaderPort,
 ) -> Path:
     if contract is not None:
         return contract.task_root
-    if task_name:
-        return resolve_active_task_root(
-            coordination_root, code_repository_name, task_name, parent_task=parent_task
+    if selector.task_name:
+        return contract_reader.resolve_active_task_root(
+            coordination_root,
+            code_repository_name,
+            selector.task_name,
+            parent_task=selector.parent_task,
         )
     return coordination_root / "tasks" / code_repository_name
 
 
 def _worktree_group(
-    coordination_root: Path, code_repository_name: str, worktree_name: str | None, contract
+    coordination_root: Path,
+    code_repository_name: str,
+    worktree_name: str | None,
+    contract,
+    contract_reader: ContractReaderPort,
 ) -> Path | None:
     if contract is not None:
         return contract.worktree_group
     if worktree_name:
-        return worktree_group_for(coordination_root, code_repository_name, worktree_name)
+        return contract_reader.worktree_group_for(
+            coordination_root, code_repository_name, worktree_name
+        )
     return None
 
 

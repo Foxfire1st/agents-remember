@@ -12,13 +12,13 @@ promotion ratchet keep the catalog alive.
 ### CS-1 — Production-wiring walk
 
 **Trace the real call path, never a hand-aligned harness.** A claim that a consumer or an
-enforcement point exists must be walked through the PRODUCTION call path — the controller, the
-tool registration, the store fold — not through a test that hand-assembles the pieces into
-alignment. A test can pass while the production consumer is inert.
+enforcement point exists must be walked through the PRODUCTION call path — the application
+entry point, the tool registration, the store fold — not through a test that hand-assembles
+the pieces into alignment. A test can pass while the production consumer is inert.
 
 - Catching evidence: 260703-L8 review 3 (AR3-1) — the integrate consumer was proven **inert**: the
-  policy was omitted at the controller and the gate was looked up on the wrong lifecycle, while a
-  hand-aligned test passed (L8 decision log, cycle-6 entry).
+  policy was omitted at the application entry point and the gate was looked up on the wrong
+  lifecycle, while a hand-aligned test passed (L8 decision log, cycle-6 entry).
 
 ### CS-2 — Fail-open hunt
 
@@ -76,8 +76,8 @@ foreign artifact's consumer.
 3. (D3 — reclamation) Who reclaims this data, is that reclamation landed in THIS change, and is it tested by scaling (>=2 sizes), not a single-N smoke?
 4. (D4 — quiescence) With ALL external inputs at zero (no acks, no live seats, no operator), does every feedback actor reach a fixed point? Any actor whose OUTPUT is a member of its own INPUT class (an escalation about an escalation, a retry row that is itself retryable, an event emitted while folding events) must prove convergence with a multi-cycle zero-input simulation — a per-cycle budget is a rate limiter, NOT a convergence proof, and per-zone verdicts cannot see a loop that lives on the edge BETWEEN zones.
 
-- Ruled invariant (developer, 2026-07-09, supersedes any per-row durability doctrine): **no event, message, or row outranks system health.** Notification rows coalesce — a re-firing condition updates its ONE existing row (date, tries, rung), never appends a sibling. Every store is purgeable: pending rows age out, hard caps evict oldest-first, and the durable record is the artifact on disk, never the queue row. A reviewer who finds "keep it all" semantics on a queue-like store files it as a defect regardless of what older doctrine says.
-- Catching evidence: 260707-HFX2-L7 — the supervisor sweep re-folded a 61 MB append-only inbox once per finding (O(n^2)) over 4,298 never-reclaimed dead-seat rows, freezing the heartbeat and pegging a core while every correctness test passed. Style/CRAP/cyclomatic gates were all green.
+- Ruled invariant (developer, 2026-07-09, supersedes any per-row durability doctrine): **no event, message, or row outranks system health.** Notification rows coalesce — a re-firing condition updates its ONE existing row (date, tries, attempt), never appends a sibling. Every store is purgeable: pending rows age out, hard caps evict oldest-first, and the durable record is the artifact on disk, never the queue row. A reviewer who finds "keep it all" semantics on a queue-like store files it as a defect regardless of what older doctrine says.
+- Catching evidence: 260707-HFX2-L7 — the agent-notifier sweep re-folded a 61 MB append-only inbox once per finding (O(n^2)) over 4,298 never-reclaimed dead-seat rows, freezing the heartbeat and pegging a core while every correctness test passed. Style/CRAP/cyclomatic gates were all green.
 - Catching evidence (D4's seed, the promotion catch): 2026-07-09 escalation-storm meltdown — every ladder rung transition minted a NEW pending, ladder-eligible inbox row addressed to an absent developer; rows were compaction-exempt by doctrine ("pending is immortal"). Each zone passed D1-D3 (budget landed, snapshot fold landed, compactor wired — the L12 audit REFUTED the operator-inbox zone), yet the composed system diverged: 67,925 lines / 227 MB / 20,553 pending rows in one evening, host down. The quiescence regression (`test_unacked_backlog_reaches_a_fixed_point_with_absent_developer`) is D4's executable counterpart.
 - Mechanization seam: 260707-HFX2-L8 owns the doctrine; 260707-HFX2-L7 owns the first executable counterparts (`assert_subquadratic` scaling test R5 and the O(1)-inbox-read invariant R2). D1-D3 graduate into a gate once a reusable repo-wide scaling-test helper exists; D4's reusable shape is the zero-input multi-cycle fixed-point simulation.
 

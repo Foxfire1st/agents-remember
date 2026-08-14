@@ -1,0 +1,6 @@
+{"type":"agent_start"}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"overloaded"}
+{"type":"auto_retry_end","success":true,"attempt":1}
+{"type":"compaction_start","reason":"overflow"}
+{"type":"compaction_end","reason":"overflow","result":{"summary":"compact","firstKeptEntryId":"entry-1","tokensBefore":10,"estimatedTokensAfter":5,"details":{}},"aborted":false,"willRetry":true}
+{"type":"agent_settled"}

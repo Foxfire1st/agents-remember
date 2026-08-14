@@ -7,6 +7,7 @@ import argparse
 import shlex
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from agents_remember.providers.grepai.lifecycle.compose import (
 from agents_remember.providers.grepai.lifecycle.core import *
 from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
+    BackendStartReconciliation,
     compose_plan,
     run_compose,
 )
@@ -163,9 +165,7 @@ def grepai_embedder_runtime_details(
     inspect_data: dict[str, Any] | None,
 ) -> dict[str, Any]:
     http_mapping = (
-        docker_container_port(inspect_data, embedder["httpContainerPort"])
-        if inspect_data
-        else None
+        docker_container_port(inspect_data, embedder["httpContainerPort"]) if inspect_data else None
     )
     actual_data_mount = docker_data_mount_source(inspect_data, embedder["dataDestination"])
     connected_networks = sorted(docker_container_networks(inspect_data))
@@ -260,12 +260,31 @@ def grepai_embedder_backend_status(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def grepai_embedder_start_context(
-    args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout, dict[str, Any], str]:
+@dataclass(frozen=True)
+class GrepaiEmbedderContext:
+    """The GrepAI embedder resolved from one lifecycle invocation's settings.
+
+    Which settings file the invocation read, the provider entry it found, the
+    runtime layout, the resolved embedder settings, and the docker network the
+    Ollama container joins. Every embedder command needs all of it.
+    """
+
+    settings_path: Path
+    provider_settings: dict[str, Any]
+    layout: GrepaiRuntimeLayout
+    embedder: dict[str, Any]
+    network_name: str
+
+
+def grepai_embedder_start_context(args: argparse.Namespace) -> GrepaiEmbedderContext:
     settings_path, provider_settings, layout = grepai_layout_from_args(args)
-    embedder = grepai_embedder_backend_settings(provider_settings, layout)
-    return settings_path, provider_settings, layout, embedder, grepai_network_name(provider_settings)
+    return GrepaiEmbedderContext(
+        settings_path=settings_path,
+        provider_settings=provider_settings,
+        layout=layout,
+        embedder=grepai_embedder_backend_settings(provider_settings, layout),
+        network_name=grepai_network_name(provider_settings),
+    )
 
 
 def grepai_embedder_external_start_result(
@@ -306,12 +325,16 @@ def grepai_embedder_remove_mismatched_container(
         timeout=args.timeout,
     )
     if result["returncode"] != 0:
-        return inspect_data, result, {
-            "provider": "grepai",
-            "action": "embedder-start",
-            "ok": False,
-            "command": result,
-        }
+        return (
+            inspect_data,
+            result,
+            {
+                "provider": "grepai",
+                "action": "embedder-start",
+                "ok": False,
+                "command": result,
+            },
+        )
     return None, result, None
 
 
@@ -338,25 +361,24 @@ def grepai_embedder_host_port(
 
 
 def grepai_embedder_dry_run_result(
+    context: GrepaiEmbedderContext,
+    reconciliation: BackendStartReconciliation,
     *,
-    settings_path: Path,
-    embedder: dict[str, Any],
-    network_result: dict[str, Any],
     commands: list[dict[str, Any]],
     http_port: int,
     compose: dict[str, Any] | None = None,
-    migration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    embedder = context.embedder
     return {
         "provider": "grepai",
         "action": "embedder-start",
         "ok": True,
         "dryRun": True,
-        "settingsFile": settings_path.as_posix(),
-        "network": network_result,
+        "settingsFile": context.settings_path.as_posix(),
+        "network": reconciliation.network,
         "commands": commands,
         "compose": compose,
-        "migration": migration,
+        "migration": reconciliation.migration,
         "ports": {
             "http": {
                 "bindHost": embedder["httpHost"],
@@ -368,15 +390,13 @@ def grepai_embedder_dry_run_result(
 
 
 def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
-    settings_path, provider_settings, layout, embedder, network_name = (
-        grepai_embedder_start_context(args)
-    )
-    external_result = grepai_embedder_external_start_result(settings_path, embedder)
+    context = grepai_embedder_start_context(args)
+    layout, embedder = context.layout, context.embedder
+    external_result = grepai_embedder_external_start_result(context.settings_path, embedder)
     if external_result:
         return external_result
-    network_result = {"ok": True, "name": network_name, "managedBy": "docker-compose"}
     grepai_embedder_prepare_storage(args, embedder)
-    migration = grepai_project_migration(args, provider_settings, layout)
+    migration = grepai_project_migration(args, context.provider_settings, layout)
     inspect_data = grepai_embedder_inspect(args, layout, embedder)
     inspect_data, forced_remove_result, error = grepai_embedder_remove_mismatched_container(
         args, layout, embedder, inspect_data
@@ -385,14 +405,13 @@ def grepai_embedder_backend_start(args: argparse.Namespace) -> dict[str, Any]:
         return error
     return grepai_embedder_create_start_result(
         args,
-        settings_path=settings_path,
-        provider_settings=provider_settings,
-        embedder=embedder,
+        context,
+        BackendStartReconciliation(
+            network={"ok": True, "name": context.network_name, "managedBy": "docker-compose"},
+            migration=migration,
+            forced_remove=forced_remove_result,
+        ),
         inspect_data=inspect_data,
-        layout=layout,
-        network_result=network_result,
-        forced_remove_result=forced_remove_result,
-        migration=migration,
     )
 
 
@@ -408,16 +427,15 @@ def grepai_embedder_inspect(
 
 def grepai_embedder_create_start_result(
     args: argparse.Namespace,
+    context: GrepaiEmbedderContext,
+    reconciliation: BackendStartReconciliation,
     *,
-    settings_path: Path,
-    provider_settings: dict[str, Any],
-    embedder: dict[str, Any],
     inspect_data: dict[str, Any] | None,
-    layout: GrepaiRuntimeLayout,
-    network_result: dict[str, Any],
-    forced_remove_result: dict[str, Any] | None,
-    migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    layout = context.layout
+    embedder = context.embedder
+    provider_settings = context.provider_settings
+    migration = reconciliation.migration
     http_port = grepai_embedder_host_port(args, embedder, inspect_data)
     backend = grepai_backend_settings(provider_settings, layout)
     runner = grepai_runner_settings(provider_settings, layout)
@@ -426,20 +444,20 @@ def grepai_embedder_create_start_result(
         layout,
         runner,
         backend,
-        ollama_port=http_port,
+        GrepaiServicePorts(ollama=http_port),
     )
     command_args = ["up", "-d", "ollama"]
     if args.dry_run:
         return grepai_embedder_dry_run_result(
-            settings_path=settings_path,
-            embedder=embedder,
-            network_result=network_result,
+            context,
+            reconciliation,
             commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
             http_port=http_port,
             compose=grepai_compose_summary(render),
-            migration=migration,
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     if up_result["returncode"] != 0:
         return {
             "provider": "grepai",
@@ -464,7 +482,7 @@ def grepai_embedder_create_start_result(
         "action": "embedder-start",
         "ok": bool(model.get("ok")),
         "containerName": embedder["containerName"],
-        "network": network_result,
+        "network": reconciliation.network,
         "ports": {
             "http": {
                 "bindHost": embedder["httpHost"],
@@ -473,7 +491,7 @@ def grepai_embedder_create_start_result(
             },
         },
         "commands": {
-            "forcedRemove": forced_remove_result,
+            "forcedRemove": reconciliation.forced_remove,
             "migration": migration,
             "up": up_result,
         },

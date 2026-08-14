@@ -219,16 +219,26 @@ def assert_command_rendering(case: dict[str, Any], workspace: Path) -> None:
         assert python_executable in command
         assert f"{workspace_posix}/.cursor/hooks/agents-remember-session-start.py" in command
     elif case["name"] == "vscode-copilot":
-        data = json.loads((workspace / ".github/hooks/agents-remember-session-start.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (workspace / ".github/hooks/agents-remember-session-start.json").read_text(
+                encoding="utf-8"
+            )
+        )
         hook = data["hooks"]["SessionStart"][0]
-        expected_key = {"windows": "windows", "darwin": "osx"}.get(platform.system().lower(), "linux")
+        expected_key = {"windows": "windows", "darwin": "osx"}.get(
+            platform.system().lower(), "linux"
+        )
         assert hook["command"] == hook[expected_key]
         assert python_executable in hook["command"]
-        assert f"{workspace_posix}/.github/hooks/agents-remember-session-start.py" in hook["command"]
+        assert (
+            f"{workspace_posix}/.github/hooks/agents-remember-session-start.py" in hook["command"]
+        )
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["name"])
-def test_starter_renderers_fill_placeholders_and_settings(tmp_path: Path, case: dict[str, Any]) -> None:
+def test_starter_renderers_fill_placeholders_and_settings(
+    tmp_path: Path, case: dict[str, Any]
+) -> None:
     workspace = render_case(tmp_path, case)
 
     assert_settings(workspace / case["settings"], workspace)

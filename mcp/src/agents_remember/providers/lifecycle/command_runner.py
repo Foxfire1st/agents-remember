@@ -16,12 +16,13 @@ def run_command(
     command: list[str],
     *,
     cwd: Path,
-    env: dict[str, str] | None = None,
     stdin_text: str | None = None,
     timeout: int = 60,
     allow_timeout: bool = False,
 ) -> dict[str, Any]:
-    merged_env = subprocess_env(env)
+    # Provider commands always run under the sanitized provider environment;
+    # no caller has ever supplied its own, so there is no env override here.
+    merged_env = subprocess_env(None)
     started = time.monotonic()
     stdin_kwargs: dict[str, Any] = (
         {"input": stdin_text} if stdin_text is not None else {"stdin": subprocess.DEVNULL}

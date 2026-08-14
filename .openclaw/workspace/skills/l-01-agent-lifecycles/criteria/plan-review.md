@@ -63,7 +63,7 @@ when it catches in a second engagement (the ratchet below).
 2. (D2 — bounded) What is the planned worst-case time and on-disk / in-memory size? Where are the per-cycle cap and the store's cap+eviction defined? Does any layer re-read a growing store per item?
 3. (D3 — reclamation) Who owns reclamation, does the same plan land that reclamation with the data it creates, and how will scaling be proven across >=2 input sizes rather than a single-N smoke?
 
-- Catching evidence: 260707-HFX2-L7/L8 — the plan surface had not made worst-case inbox fold cost, retention, or reclamation owner a required design-time question before an O(n^2) supervisor sweep over never-reclaimed dead-seat rows passed correctness gates and froze the heartbeat. A plan that introduces a store/loop/log without naming its cap, budget, and compactor fails PR-6.
+- Catching evidence: 260707-HFX2-L7/L8 — the plan surface had not made worst-case inbox fold cost, retention, or reclamation owner a required design-time question before an O(n^2) agent-notifier sweep over never-reclaimed dead-seat rows passed correctness gates and froze the heartbeat. A plan that introduces a store/loop/log without naming its cap, budget, and compactor fails PR-6.
 
 ## Exploratory Mandate
 

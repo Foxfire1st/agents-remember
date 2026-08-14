@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -47,9 +48,7 @@ def _write_cgc_settings(root: Path) -> tuple[Path, Path]:
                 "providers": {
                     "codegraphcontext-code": {
                         "enabled": True,
-                        "instance": _provider_instance(
-                            "codegraphcontext-code", coordination_root
-                        ),
+                        "instance": _provider_instance("codegraphcontext-code", coordination_root),
                         "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                         "instanceRootTemplate": "<runtimeRoot>/<repoId>",
                         "requirementsFile": (
@@ -105,7 +104,11 @@ class CgcInstallDryRunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             args = _scoped_install_args(Path(tmp_dir))
 
-            result = cgc_install(args)
+            with mock.patch(
+                "agents_remember.providers.lifecycle.compose_runtime.docker_command",
+                return_value="docker",
+            ):
+                result = cgc_install(args)
 
         self.assertEqual(result["provider"], "codegraphcontext")
         self.assertEqual(result["action"], "install")
@@ -154,7 +157,11 @@ class CgcInstallDryRunTests(unittest.TestCase):
                 ]
             )
 
-            result = cgc_install(args)
+            with mock.patch(
+                "agents_remember.providers.lifecycle.compose_runtime.docker_command",
+                return_value="docker",
+            ):
+                result = cgc_install(args)
 
         self.assertEqual(result["action"], "install-all")
         self.assertTrue(result["ok"])
@@ -172,9 +179,7 @@ class CgcInstallPreflightTests(unittest.TestCase):
             layout = cgc_layout_from_args(args)
             _, commands = cgc_install_commands(args, layout)
 
-            results, early_result, backend_result = cgc_install_preflight(
-                args, layout, commands
-            )
+            results, early_result, backend_result = cgc_install_preflight(args, layout, commands)
 
         self.assertEqual(results, [])
         self.assertIsNone(backend_result)

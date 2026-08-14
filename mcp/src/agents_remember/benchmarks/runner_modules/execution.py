@@ -27,10 +27,14 @@ from agents_remember.benchmarks.runner_modules.manifest import (
     prompt_variant,
     selected_provider_ids,
 )
-from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
+from agents_remember.benchmarks.runner_modules.models import (
+    BenchmarkCase,
+    BenchmarkPreparation,
+    BenchmarkRun,
+    BenchmarkRunRequest,
+    BenchmarkTask,
+)
 from agents_remember.benchmarks.runner_modules.workspace import prepare_case
-
-BenchmarkTask = tuple[dict[str, Any], dict[str, Any], int]
 
 
 def run_id() -> str:
@@ -185,35 +189,28 @@ def write_metadata(path: Path, metadata: dict[str, Any], dry_run: bool) -> None:
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def run_one(
-    *,
-    benchmarks_root: Path,
-    case: BenchmarkCase,
-    prompt: dict[str, Any],
-    variant: dict[str, Any],
-    repetition: int,
-    output_root: Path,
-    dry_run: bool,
-    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
-) -> None:
-    prompt_id = str(prompt["id"])
-    variant_id = str(variant["id"])
+def run_one(run: BenchmarkRun, task: BenchmarkTask) -> None:
+    case = run.case
+    dry_run = run.dry_run
+    prompt_id = str(task.prompt["id"])
+    variant_id = str(task.variant["id"])
+    repetition = task.repetition
     prompt_path = case.path.parent / manifest_relative_path(
-        variant["promptPath"],
+        task.variant["promptPath"],
         f"{case.case_id}.{prompt_id}.{variant_id}.promptPath",
     )
     prompt_text = prompt_path.read_text(encoding="utf-8")
-    cwd = benchmarks_root / manifest_relative_path(
-        variant["cwd"],
+    cwd = run.benchmarks_root / manifest_relative_path(
+        task.variant["cwd"],
         f"{case.case_id}.{prompt_id}.{variant_id}.cwd",
     )
-    run_prefix = output_root / prompt_id / variant_id / f"run-{repetition:03d}"
+    run_prefix = run.output_root / prompt_id / variant_id / f"run-{repetition:03d}"
     jsonl_path = run_prefix.with_suffix(".jsonl")
     stderr_path = run_prefix.with_suffix(".stderr")
     metadata_path = run_prefix.with_suffix(".metadata.json")
     final_message_path = run_prefix.with_suffix(".final.md")
-    command = codex_command(cwd, final_message_path, codex_sandbox=codex_sandbox)
-    execution_policy = codex_execution_policy(command[0], codex_sandbox=codex_sandbox)
+    command = codex_command(cwd, final_message_path, codex_sandbox=run.codex_sandbox)
+    execution_policy = codex_execution_policy(command[0], codex_sandbox=run.codex_sandbox)
 
     if dry_run:
         print(f"Would write JSONL to {jsonl_path}")
@@ -278,29 +275,19 @@ def run_one(
 
 
 def maybe_prepare_case(
-    benchmarks_root: Path,
+    preparation: BenchmarkPreparation,
     case: BenchmarkCase,
     *,
     prompt_id: str | None,
     variant_id: str | None,
-    dry_run: bool,
     skip_prepare: bool,
-    skill_exposure_mode: str,
-    force_clone: bool,
-    provider_timeout: int,
-    allowed_provider_ids: tuple[str, ...] | None = None,
 ) -> None:
     if skip_prepare:
         return
     prepare_case(
-        benchmarks_root,
+        preparation,
         case,
-        dry_run=dry_run,
-        skill_exposure_mode=skill_exposure_mode,
-        force_clone=force_clone,
-        provider_timeout=provider_timeout,
         provider_ids=selected_provider_ids(case, prompt_id=prompt_id, variant_id=variant_id),
-        allowed_provider_ids=allowed_provider_ids,
     )
 
 
@@ -336,56 +323,26 @@ def task_batches_for_prompt(
 ) -> list[list[BenchmarkTask]]:
     prompt_runs = int(repetitions or prompt.get("runs") or 3)
     return [
-        [(prompt, variant, repetition) for variant in variants]
+        [
+            BenchmarkTask(prompt=prompt, variant=variant, repetition=repetition)
+            for variant in variants
+        ]
         for repetition in range(1, prompt_runs + 1)
     ]
 
 
-def run_dry_batches(
-    *,
-    benchmarks_root: Path,
-    case: BenchmarkCase,
-    task_batches: list[list[BenchmarkTask]],
-    output_root: Path,
-    codex_sandbox: str,
-) -> None:
+def run_dry_batches(run: BenchmarkRun, task_batches: list[list[BenchmarkTask]]) -> None:
     for task_batch in task_batches:
-        for prompt, variant, repetition in task_batch:
-            run_one(
-                benchmarks_root=benchmarks_root,
-                case=case,
-                prompt=prompt,
-                variant=variant,
-                repetition=repetition,
-                output_root=output_root,
-                dry_run=True,
-                codex_sandbox=codex_sandbox,
-            )
+        for task in task_batch:
+            run_one(run, task)
 
 
 def submit_task_batch(
     executor: concurrent.futures.Executor,
-    *,
-    benchmarks_root: Path,
-    case: BenchmarkCase,
+    run: BenchmarkRun,
     task_batch: list[BenchmarkTask],
-    output_root: Path,
-    codex_sandbox: str,
 ) -> dict[concurrent.futures.Future[None], BenchmarkTask]:
-    return {
-        executor.submit(
-            run_one,
-            benchmarks_root=benchmarks_root,
-            case=case,
-            prompt=prompt,
-            variant=variant,
-            repetition=repetition,
-            output_root=output_root,
-            dry_run=False,
-            codex_sandbox=codex_sandbox,
-        ): (prompt, variant, repetition)
-        for prompt, variant, repetition in task_batch
-    }
+    return {executor.submit(run_one, run, task): task for task in task_batch}
 
 
 def completed_task_failures(
@@ -393,34 +350,27 @@ def completed_task_failures(
 ) -> list[str]:
     failures: list[str] = []
     for future in concurrent.futures.as_completed(future_to_task):
-        prompt, variant, repetition = future_to_task[future]
+        task = future_to_task[future]
         try:
             future.result()
         except Exception as error:
-            failures.append(f"{prompt.get('id')}/{variant.get('id')}/run-{repetition:03d}: {error}")
+            failures.append(
+                f"{task.prompt.get('id')}/{task.variant.get('id')}/"
+                f"run-{task.repetition:03d}: {error}"
+            )
     return failures
 
 
 def run_task_batches(
-    *,
-    benchmarks_root: Path,
-    case: BenchmarkCase,
+    run: BenchmarkRun,
     task_batches: list[list[BenchmarkTask]],
-    output_root: Path,
+    *,
     max_workers: int,
-    codex_sandbox: str,
 ) -> list[str]:
     failures: list[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for task_batch in task_batches:
-            future_to_task = submit_task_batch(
-                executor,
-                benchmarks_root=benchmarks_root,
-                case=case,
-                task_batch=task_batch,
-                output_root=output_root,
-                codex_sandbox=codex_sandbox,
-            )
+            future_to_task = submit_task_batch(executor, run, task_batch)
             failures.extend(completed_task_failures(future_to_task))
     return failures
 
@@ -431,63 +381,40 @@ def raise_for_failures(failures: list[str]) -> None:
         raise RuntimeError(f"benchmark run completed with failed subprocesses:\n{joined}")
 
 
-def run_case(
-    benchmarks_root: Path,
-    case: BenchmarkCase,
-    *,
-    prompt_id: str | None,
-    variant_id: str | None,
-    repetitions: int | None,
-    jobs: int | None,
-    dry_run: bool,
-    skip_prepare: bool,
-    skill_exposure_mode: str,
-    force_clone: bool,
-    provider_timeout: int,
-    codex_sandbox: str = CODEX_BENCHMARK_SANDBOX,
-    allowed_provider_ids: tuple[str, ...] | None = None,
-) -> Path:
+def run_case(request: BenchmarkRunRequest, case: BenchmarkCase) -> Path:
+    preparation = request.preparation
+    benchmarks_root = preparation.benchmarks_root
+    dry_run = preparation.dry_run
     maybe_prepare_case(
-        benchmarks_root,
+        preparation,
         case,
-        prompt_id=prompt_id,
-        variant_id=variant_id,
-        dry_run=dry_run,
-        skip_prepare=skip_prepare,
-        skill_exposure_mode=skill_exposure_mode,
-        force_clone=force_clone,
-        provider_timeout=provider_timeout,
-        allowed_provider_ids=allowed_provider_ids,
+        prompt_id=request.prompt,
+        variant_id=request.variant,
+        skip_prepare=request.skip_prepare,
     )
     output_root = create_output_root(benchmarks_root, case, dry_run)
     task_batches, default_jobs = benchmark_task_batches(
         case,
-        prompt_id=prompt_id,
-        variant_id=variant_id,
-        repetitions=repetitions,
+        prompt_id=request.prompt,
+        variant_id=request.variant,
+        repetitions=request.repetitions,
+    )
+    run = BenchmarkRun(
+        benchmarks_root=benchmarks_root,
+        case=case,
+        output_root=output_root,
+        dry_run=dry_run,
+        codex_sandbox=request.codex_sandbox,
     )
     if dry_run:
-        run_dry_batches(
-            benchmarks_root=benchmarks_root,
-            case=case,
-            task_batches=task_batches,
-            output_root=output_root,
-            codex_sandbox=codex_sandbox,
-        )
+        run_dry_batches(run, task_batches)
         return output_root
 
-    max_workers = jobs or default_jobs
+    max_workers = request.jobs or default_jobs
     if max_workers < 1:
         raise RuntimeError("--jobs must be greater than zero")
 
-    failures = run_task_batches(
-        benchmarks_root=benchmarks_root,
-        case=case,
-        task_batches=task_batches,
-        output_root=output_root,
-        max_workers=max_workers,
-        codex_sandbox=codex_sandbox,
-    )
+    failures = run_task_batches(run, task_batches, max_workers=max_workers)
     write_summary(output_root, analyze_run_root(output_root))
     raise_for_failures(failures)
     return output_root

@@ -1,0 +1,173 @@
+{
+  "snapshot": {
+    "cliVersion": "0.144.3",
+    "protocol": "codex-app-server/0.144.3",
+    "generatedBy": "npx --yes @openai/codex@0.144.3 app-server generate-json-schema",
+    "experimental": false,
+    "schemaSha256": {
+      "codex_app_server_protocol.v2.schemas.json": "f3e367406685c979a9893ae0ec07cd6214cf8ff92a80f272fbf4a7045f50ce7c",
+      "ClientRequest.json": "60f3627e3a17107bd116f9b99cbb8a02133a5cef8876768401c339d7ddb66720",
+      "ServerRequest.json": "7c8a2c6fe03d6afdf8a83f91fa5eb55e7ae630fe2e43a167691ab917dccc9556",
+      "ServerNotification.json": "67669e13a8af9449da30acdbd83a6108fd54ed92b79849dee381aece1521937f"
+    },
+    "stableMethods": [
+      "initialize",
+      "initialized",
+      "model/list",
+      "thread/start",
+      "thread/resume",
+      "thread/read",
+      "turn/start",
+      "turn/steer",
+      "thread/status/changed",
+      "turn/started",
+      "turn/completed",
+      "item/completed",
+      "item/commandExecution/requestApproval",
+      "item/fileChange/requestApproval",
+      "item/permissions/requestApproval",
+      "mcpServer/elicitation/request",
+      "serverRequest/resolved"
+    ]
+  },
+  "initializeResult": {
+    "userAgent": "agents_remember/0.144.3 (Linux; x86_64) tmux-256color (agents_remember; 3.0.0)",
+    "codexHome": "/home/test/.codex",
+    "platformFamily": "unix",
+    "platformOs": "linux"
+  },
+  "modelListResult": {
+    "data": [
+      {
+        "id": "model-gpt-5.6-sol",
+        "model": "gpt-5.6-sol",
+        "displayName": "GPT-5.6 Sol",
+        "description": "Fixture model",
+        "hidden": false,
+        "isDefault": true,
+        "defaultReasoningEffort": "low",
+        "supportedReasoningEfforts": [
+          {"reasoningEffort": "low", "description": "Low"},
+          {"reasoningEffort": "medium", "description": "Medium"},
+          {"reasoningEffort": "high", "description": "High"},
+          {"reasoningEffort": "xhigh", "description": "Extra high"},
+          {"reasoningEffort": "max", "description": "Maximum"},
+          {"reasoningEffort": "ultra", "description": "Ultra"}
+        ]
+      }
+    ],
+    "nextCursor": null
+  },
+  "threadStartResult": {
+    "model": "gpt-5.6-sol",
+    "modelProvider": "openai",
+    "cwd": "/workspace",
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user",
+    "sandbox": {"type": "workspaceWrite", "writableRoots": ["/workspace"], "networkAccess": false},
+    "reasoningEffort": "xhigh",
+    "thread": {
+      "id": "thread-1",
+      "sessionId": "session-1",
+      "cliVersion": "0.144.3",
+      "createdAt": 1784023200,
+      "updatedAt": 1784023200,
+      "cwd": "/workspace",
+      "ephemeral": true,
+      "modelProvider": "openai",
+      "preview": "",
+      "source": "appServer",
+      "status": {"type": "idle"},
+      "turns": []
+    }
+  },
+  "threadResumeResult": {
+    "model": "gpt-5.6-sol",
+    "modelProvider": "openai",
+    "cwd": "/workspace",
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user",
+    "sandbox": {"type": "workspaceWrite", "writableRoots": ["/workspace"], "networkAccess": false},
+    "reasoningEffort": "xhigh",
+    "thread": {
+      "id": "thread-1",
+      "sessionId": "session-1",
+      "cliVersion": "0.144.3",
+      "createdAt": 1784023200,
+      "updatedAt": 1784023260,
+      "cwd": "/workspace",
+      "ephemeral": true,
+      "modelProvider": "openai",
+      "preview": "hello",
+      "source": "appServer",
+      "status": {"type": "idle"},
+      "turns": []
+    }
+  },
+  "turnStartResult": {
+    "turn": {"id": "turn-1", "status": "inProgress", "items": []}
+  },
+  "notifications": {
+    "running": {
+      "method": "thread/status/changed",
+      "params": {"threadId": "thread-1", "status": {"type": "active", "activeFlags": []}}
+    },
+    "blocked": {
+      "method": "thread/status/changed",
+      "params": {"threadId": "thread-1", "status": {"type": "active", "activeFlags": ["waitingOnApproval"]}}
+    },
+    "completed": {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "thread-1",
+        "turn": {"id": "turn-1", "status": "completed", "items": [], "completedAt": 1784023260}
+      }
+    },
+    "interrupted": {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "thread-1",
+        "turn": {"id": "turn-1", "status": "interrupted", "items": [], "completedAt": 1784023260}
+      }
+    },
+    "failed": {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "thread-1",
+        "turn": {
+          "id": "turn-1",
+          "status": "failed",
+          "items": [],
+          "completedAt": 1784023260,
+          "error": {"message": "fixture failure"}
+        }
+      }
+    }
+  },
+  "serverRequests": {
+    "commandApproval": {
+      "id": "approval-1",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-1",
+        "startedAtMs": 1784023200000,
+        "command": "git status",
+        "reason": "Inspect repository state"
+      }
+    },
+    "elicitation": {
+      "id": "input-1",
+      "method": "mcpServer/elicitation/request",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "serverName": "fixture",
+        "mode": "form",
+        "message": "Choose a value",
+        "requestedSchema": {"type": "object", "properties": {"value": {"type": "string"}}}
+      }
+    }
+  }
+}

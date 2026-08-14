@@ -1,0 +1,1128 @@
+"""Application operations for terminal-session lifecycle tools."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast, get_args
+from uuid import uuid4
+
+from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxSubject,
+    OperatorInboxEntry,
+)
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.errors import HarnessControlError
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettings,
+    RoleKnobs,
+    load_agentic_settings,
+)
+from agents_remember.kernel.harnesses import Harness
+from agents_remember.kernel.primitives.observer_paths import observer_root
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.terminal import (
+    SessionRenameStatus,
+    SessionRetireStatus,
+    SpawnAgentSessionStatus,
+)
+from agents_remember.models.terminal_catalog import (
+    TerminalCatalogEntry,
+)
+from agents_remember.observer.ambient import ambient
+from agents_remember.observer.events import now_iso
+from agents_remember.serving.dispatch_brief import HostedDelivery
+from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
+from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
+from agents_remember.serving.harnesses import (
+    Which,
+    effort_session_commands,
+    find_harness,
+    invalid_effort_detail,
+    invalid_model_detail,
+    is_detected,
+    unknown_harness_detail,
+)
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.operator_inbox_posts import (
+    OperatorInboxPostContext,
+    post_operator_inbox_entry,
+)
+from agents_remember.serving.retire import SeatClosure, retire_entry
+from agents_remember.serving.retire_policy import (
+    RetirePolicyError,
+    SeatRef,
+    check_retire_authority,
+)
+from agents_remember.serving.seat_events import log_rename_event, log_retire_event
+from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    terminal_catalog_path,
+)
+from agents_remember.serving.terminal_opener import (
+    ControlRunnerRequest,
+    SpawnKnobs,
+    SpawnProvenance,
+    TerminalLaunchRequest,
+    open_terminal_session,
+)
+from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.serving.terminal_task_assignment import (
+    TaskAssignmentHost,
+    TaskAssignmentRuntime,
+    assign_terminal_session_to_task,
+)
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+
+from .terminal_spawn_results import open_terminal_refusal, spawn_refusal
+
+if TYPE_CHECKING:
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
+
+
+def _result(_tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the raw use-case result for the MCP adapter to finalize."""
+    return payload
+
+
+def _task_ref_refusal_result(
+    operation: str,
+    task_document_ref: TaskDocumentRef,
+    error: TaskDocumentRefError,
+    *,
+    kind: str | None = None,
+) -> dict[str, Any]:
+    status = (
+        error.status
+        if error.status
+        in {
+            "task-document-not-found",
+            "task-document-invalid",
+            "task-document-repo-mismatch",
+        }
+        else "task-binding-invalid"
+    )
+    payload: dict[str, Any] = {
+        "ok": False,
+        "operation": operation,
+        "status": status,
+        "session": "",
+        "taskDocumentRef": task_document_ref.model_dump(),
+        "detail": str(error),
+    }
+    if operation == "spawn_agent_session":
+        payload["kind"] = kind if kind in ("harness", "terminal") else None
+    return payload
+
+
+_DEFAULT_SHELL = "/bin/bash"
+
+# The dispatch levels (260703-L16, ruling 2026-07-07T08:15) -- the same vocabulary as
+# orchestration.loops.perLevel / orchestration.rolesPerLevel so the per-level families stay
+# congruent. The dispatcher knows its level: a manager dispatching leaf seats = leaf, the seam
+# reviewer = master, portfolio/end-to-end seats = portfolio. Omitted = leaf.
+_SPAWN_LEVELS = ("leaf", "master", "portfolio")
+_AGENT_ROLE_VALUES = frozenset(get_args(AgentRole))
+_REMOVED_CALLER_SPEND_FIELDS = (
+    "harness",
+    "model",
+    "effort",
+    "launch_args",
+    "prompt_keywords",
+    "session_commands",
+)
+# The retained caller env field reaches the spawned harness process through tmux -e. Block
+# harness-native model, effort, endpoint, and credential env vars so env cannot bypass the
+# developer-owned settings surface.
+_HARNESS_NATIVE_SPEND_ENV_KEYS = (
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "MAX_THINKING_TOKENS",
+    "DISABLE_PROMPT_CACHING",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_VERTEX_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENAI_MODEL",
+    "OPENAI_DEFAULT_MODEL",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "OPENAI_API_KEY",
+    "OPENAI_ORGANIZATION",
+    "OPENAI_ORG_ID",
+    "OPENAI_PROJECT",
+)
+_SPEND_ENV_KEYS = ("AR_SPAWN_MODEL", "AR_SPAWN_EFFORT", *_HARNESS_NATIVE_SPEND_ENV_KEYS)
+
+
+def attach_terminal_session_to_task_tool(
+    config: McpRuntimeConfig,
+    *,
+    session_id: str,
+    task_document_ref: TaskDocumentRef,
+    role: str | None = None,
+    host: TaskAssignmentHost | None = None,
+) -> dict[str, Any]:
+    """Trusted administration: move a hosted session to a document-owned role seat."""
+
+    topology = TaskDocumentTopology(config.coordination_root)
+    try:
+        topology.resolve(task_document_ref)
+    except TaskDocumentRefError as exc:
+        return _task_ref_refusal_result("attach_terminal_session_to_task", task_document_ref, exc)
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    assignment_host = host if host is not None else TerminalHost()
+    result = assign_terminal_session_to_task(
+        TaskAssignmentRuntime(catalog, assignment_host, topology),
+        session_id=session_id,
+        task_document_ref=task_document_ref,
+        role=role,
+    )
+    return _result(
+        "attach_terminal_session_to_task",
+        {
+            "ok": result.status == "attached",
+            "operation": "attach_terminal_session_to_task",
+            "status": result.status,
+            "session": result.session_id,
+            "taskDocumentRef": result.task_document_ref.model_dump(),
+            "previousTaskDocumentRef": (
+                result.previous_task_document_ref.model_dump()
+                if result.previous_task_document_ref is not None
+                else None
+            ),
+            "ownerSession": result.owner_session_id,
+            "role": result.role,
+            "seatRole": result.seat_role,
+            "previousSeatRole": result.previous_seat_role,
+            "detail": (
+                "role does not match the referenced task document's structural altitude"
+                if result.status == "task-binding-invalid"
+                else result.detail
+            ),
+            "sourceLineage": result.source_lineage,
+        },
+    )
+
+
+def _spawn_env(
+    model: str | None,
+    effort: str | None,
+    env: dict[str, str] | None,
+) -> dict[str, str]:
+    """Fold the role knobs into the spawn env the terminal host seeds at ``tmux new-session``.
+
+    Model/effort ride as namespaced env vars (``AR_SPAWN_MODEL`` / ``AR_SPAWN_EFFORT``) alongside any
+    caller-supplied ``env``. Caller-supplied spend env keys are rejected before this helper runs; settings
+    are the only authority for model/effort selection.
+    """
+    resolved = dict(env or {})
+    if model:
+        resolved["AR_SPAWN_MODEL"] = model
+    if effort:
+        resolved["AR_SPAWN_EFFORT"] = effort
+    return resolved
+
+
+def _ambient_lifecycle_id() -> str | None:
+    """The active (spawning) lifecycle id, for default spawned-by provenance. Best-effort, never raises."""
+    amb = ambient()
+    if amb is not None and amb.current is not None:
+        return amb.current.id
+    return None
+
+
+def _spawn_repo_root(
+    config: McpRuntimeConfig, task_document_ref: TaskDocumentRef | None
+) -> Path | None:
+    """The code-repo root whose repo-local agentic settings apply to this spawn.
+
+    Derived from the canonical task-document reference: a task-bound spawn works on that repo, so
+    its ``<repo>/system/settings.json`` layer participates. Unbound spawns (and
+    unconfigured repo segments) resolve against the global layer only.
+    """
+    if task_document_ref is None:
+        return None
+    scope = config.repositories.get(task_document_ref.repository)
+    return scope.path if scope is not None else None
+
+
+def _resolve_spawn_harness(
+    settings: AgenticSettings,
+    harness: str | None,
+    which: Which | None,
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """Resolve the harness for a spawn (260703-L13 seam; effective registry 260703-L16).
+
+    Precedence: role/level settings > spawn settings > detection-gated default
+    (the first EFFECTIVE-registry harness detected on PATH). Every id resolves
+    against ``settings.harnesses`` -- the builtin registry merged with the
+    ``orchestration.harnesses`` family, so users can teach the system a new TUI
+    or pre-customize a builtin's launch. An id known nowhere refuses loudly
+    pointing at the manual (never a crash); ``settings`` comes from the per-use
+    loader (a malformed file raises -- never a silent fallback). Returns
+    ``(harness, refusal_payload)`` with exactly one side set.
+    """
+    if harness is not None:
+        return _requested_harness(harness, settings.harnesses, which)
+    preferred = settings.spawn_harness
+    if preferred is not None:
+        return _preferred_harness(preferred, settings, which)
+    return _first_detected_harness(settings.harnesses, which)
+
+
+def _requested_harness(
+    harness: str, registry: tuple[Harness, ...], which: Which | None
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """The caller named a harness: it must be a known id AND installed."""
+    found = find_harness(harness, registry=registry)
+    if found is None:
+        return None, spawn_refusal(
+            "harness-unknown",
+            harness,
+            "harness",
+            detail=unknown_harness_detail(harness, registry=registry),
+        )
+    if not is_detected(found, which=which):
+        return None, spawn_refusal(
+            "harness-not-detected",
+            harness,
+            "harness",
+            detail=f"harness not installed: {harness!r}",
+        )
+    return found, None
+
+
+def _preferred_harness(
+    preferred: str, settings: AgenticSettings, which: Which | None
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """Settings named a spawn harness: a configured-but-missing one names its source file."""
+    found = find_harness(preferred, registry=settings.harnesses)
+    assert found is not None  # the loader validates against the effective ids
+    if not is_detected(found, which=which):
+        source = ", ".join(str(path) for path in settings.sources)
+        return None, spawn_refusal(
+            "harness-not-detected",
+            preferred,
+            "harness",
+            detail=(
+                f"configured spawn harness not installed: {preferred!r} "
+                f"(orchestration.spawn.harness in {source})"
+            ),
+        )
+    return found, None
+
+
+def _first_detected_harness(
+    registry: tuple[Harness, ...], which: Which | None
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """Nothing asked for and nothing configured: the first registry harness on PATH."""
+    for candidate in registry:
+        if is_detected(candidate, which=which):
+            return candidate, None
+    ids = ", ".join(candidate.id for candidate in registry)
+    return None, spawn_refusal(
+        "harness-not-detected",
+        None,
+        "harness",
+        detail=(
+            "no harness given, none preferred in settings, and none detected on "
+            f"PATH; install one of: {ids} or configure orchestration.roles / orchestration.spawn"
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class _HarnessDispatch:
+    """The pre-spawn knob bundle for one harness-kind dispatch (260703-L16).
+
+    Everything the settings rungs resolved for this seat: the harness id (effective-registry
+    validated), the effective registry itself, the resolved model/effort, the settings-owned free-form
+    escape hatch, the resolved free-form session-command list, and the level provenance.
+    """
+
+    harness_id: str
+    registry: tuple[Harness, ...]
+    resolved_launch: ResolvedLaunch | None
+    flag_model: str | None
+    flag_effort: str | None
+    launch_args: list[str] | None
+    prompt_keywords: list[str] | None
+    session_commands: list[str]
+    spawn_level: str
+    spawn_level_source: str
+
+
+def _resolve_harness_dispatch(
+    config: McpRuntimeConfig,
+    *,
+    task_document_ref: TaskDocumentRef | None,
+    level: str | None,
+    env: dict[str, str] | None,
+    which: Which | None,
+) -> tuple[_HarnessDispatch | None, dict[str, Any] | None]:
+    """Resolve + validate every knob BEFORE anything spawns (260703-L16).
+
+    Realizes the settings-only dispatch chain repo-local level override > global level override >
+    repo-local role default > global role default > spawn preference > detection-gated default: the
+    settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the
+    repo-local layer selected by the canonical task document), the harness resolves against the
+    EFFECTIVE registry, and
+    model/effort must both be present. Their vendor validity is checked token-free against L1's
+    dynamic catalog inside the hosted runner before the real harness process starts. Returns
+    ``(dispatch, refusal)`` with exactly one side set.
+    """
+    spawn_level = level or "leaf"
+    spawn_level_source = "explicit" if level is not None else "default"
+    if spawn_level not in _SPAWN_LEVELS:
+        valid = ", ".join(_SPAWN_LEVELS)
+        return None, spawn_refusal(
+            "level-invalid",
+            None,
+            "harness",
+            detail=f"unknown dispatch level {spawn_level!r}; valid levels: [{valid}]",
+        )
+    settings = load_agentic_settings(
+        config.coordination_root, repo_root=_spawn_repo_root(config, task_document_ref)
+    )
+    # The settings rungs, keyed by the AR_SPAWN_ROLE riding the caller's env (no role = no settings
+    # rung, today's behavior); role/level settings are the sole spend source for ordinary spawns.
+    role = (env or {}).get("AR_SPAWN_ROLE")
+    knobs = settings.resolved_role_knobs(role, spawn_level) if role else RoleKnobs()
+    model = knobs.model
+    effort = knobs.effort
+    launch_args = list(knobs.launch_args) if knobs.launch_args else None
+    prompt_keywords = list(knobs.prompt_keywords) if knobs.prompt_keywords else None
+    resolved_session_commands = list(knobs.session_commands)
+    # Harness rung order: role knobs (level-merged) > spawn preference > detection-gated default
+    # (the last two inside _resolve_spawn_harness).
+    found, refusal = _resolve_spawn_harness(settings, knobs.harness, which)
+    if refusal is not None:
+        return None, refusal
+    assert found is not None  # no refusal => a resolved effective-registry harness
+    # Caller-provided AR_SPAWN_MODEL/AR_SPAWN_EFFORT keys are rejected before this function runs,
+    # so settings remain the only authority. Native adapters require one complete structured
+    # selection; unknown/model-gated values fail against dynamic advertise in the runner before the
+    # configured vendor process starts. Settings-defined non-native harnesses keep their explicit
+    # registry mapping contract because they have no normalized native adapter.
+    resolved_launch = None
+    flag_model = None
+    flag_effort = None
+    if role is not None and found.id in BUILTIN_PROTOCOL_HARNESSES:
+        try:
+            resolved_launch = resolve_settings_launch(
+                harness_id=found.id,
+                model=model,
+                effort=effort,
+                workspace=config.workspace_root,
+            )
+        except HarnessControlError as exc:
+            return None, spawn_refusal(
+                "launch-selection-invalid",
+                found.id,
+                "harness",
+                detail=str(exc),
+            )
+    elif found.id not in BUILTIN_PROTOCOL_HARNESSES:
+        refusal = _knob_refusal(found, model, effort)
+        if refusal is not None:
+            return None, refusal
+        resolved_session_commands = (
+            effort_session_commands(found, effort) + resolved_session_commands
+        )
+        flag_model = model
+        flag_effort = effort
+    return (
+        _HarnessDispatch(
+            harness_id=found.id,
+            registry=settings.harnesses,
+            resolved_launch=resolved_launch,
+            flag_model=flag_model,
+            flag_effort=flag_effort,
+            launch_args=launch_args,
+            prompt_keywords=prompt_keywords,
+            session_commands=resolved_session_commands,
+            spawn_level=spawn_level,
+            spawn_level_source=spawn_level_source,
+        ),
+        None,
+    )
+
+
+def _knob_refusal(
+    found: Harness, effective_model: str | None, effective_effort: str | None
+) -> dict[str, Any] | None:
+    """Preserve explicit static validation for settings-defined non-native harnesses."""
+
+    checks: tuple[tuple[SpawnAgentSessionStatus, str | None], ...] = (
+        (
+            "model-invalid",
+            invalid_model_detail(found, effective_model) if effective_model else None,
+        ),
+        (
+            "effort-invalid",
+            invalid_effort_detail(found, effective_effort) if effective_effort else None,
+        ),
+    )
+    for status, detail in checks:
+        if detail is not None:
+            return spawn_refusal(status, found.id, "harness", detail=detail)
+    return None
+
+
+@dataclass(frozen=True)
+class SpawnSeat:
+    """The seat a spawn creates: which task document it binds to (or replaces), at what level,
+    under what display label, as a harness or a plain terminal, and the environment that
+    declares its role (``env.AR_SPAWN_ROLE``) to the settings-owned knob resolution."""
+
+    kind: str = "harness"
+    task_document_ref: TaskDocumentRef | None = None
+    replacement_for_task_document_ref: TaskDocumentRef | None = None
+    level: str | None = None
+    label: str | None = None
+    env: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class RetiredSpawnInputs:
+    """Spawn inputs this tool no longer honours, accepted only so they can be refused loudly
+    before any settings, catalog, or terminal side effect.
+
+    ``context`` / ``submit`` are the retired one-call brief contract (brief delivery is now a
+    separate readiness-gated inbox post); the rest are caller-selected spend knobs that
+    agentic settings now own. A non-``None`` value in any of them is a refusal, never a
+    setting -- which is why they travel as one bundle the refusal walks.
+    """
+
+    context: str | None = None
+    submit: bool = False
+    harness: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    launch_args: list[str] | None = None
+    prompt_keywords: list[str] | None = None
+    session_commands: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class SpawnedBy:
+    """The spawner's own provenance: the catalog session and lifecycle that requested the
+    spawn, recorded on the new row so the dashboard can draw the orchestration tree."""
+
+    session_id: str | None = None
+    lifecycle_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SpawnOverrides:
+    """Real collaborators a caller may substitute. The seam is the whole content of this
+    bundle, and naming it plainly is the point.
+
+    It was called ``SpawnPorts``, which implied a hexagonal boundary the spawn talks to the
+    domain through. It is not one: ``session_id`` is a value rather than a collaborator, and
+    ``paster`` / ``session_log`` are collaborators this path deliberately never talks to.
+    ``None`` everywhere means "use the real thing" -- a freshly minted session id, a real
+    :class:`TerminalHost`, the real executable lookup that decides which harnesses are
+    detected -- so production always passes :data:`NO_SPAWN_OVERRIDES` and only a test passes
+    anything else.
+
+    ``paster`` and ``session_log`` are accepted precisely because the spawn path never reads
+    them. A spawn delivers no brief and writes no session log (the readiness-gated inbox post
+    does the first, the bridge runner the second), and a test hands in a fake to assert it was
+    never called. Dropping them would delete that assertion's subject, not an unused field.
+    """
+
+    session_id: str | None = None
+    host: TerminalHost | None = None
+    paster: TerminalPaster | None = None
+    session_log: object | None = None
+    which: Which | None = None
+
+
+DEFAULT_SPAWN_SEAT = SpawnSeat()
+"""An unbound harness seat: no task document, no label, settings-resolved knobs."""
+
+NO_RETIRED_INPUTS = RetiredSpawnInputs()
+"""The supported call shape -- none of the retired inputs supplied."""
+
+UNATTRIBUTED_SPAWN = SpawnedBy()
+"""No declared spawner; the ambient lifecycle is used when one is active."""
+
+NO_SPAWN_OVERRIDES = SpawnOverrides()
+"""Nothing substituted: the real terminal host and executable lookup, a fresh session id."""
+
+
+def _caller_spend_override_refusal(
+    seat: SpawnSeat,
+    retired: RetiredSpawnInputs,
+) -> dict[str, Any] | None:
+    """Reject legacy caller-controlled spend knobs before any spawn-side effect."""
+
+    removed = []
+    values = {
+        "harness": retired.harness,
+        "model": retired.model,
+        "effort": retired.effort,
+        "launch_args": retired.launch_args,
+        "prompt_keywords": retired.prompt_keywords,
+        "session_commands": retired.session_commands,
+    }
+    for field in _REMOVED_CALLER_SPEND_FIELDS:
+        if values[field] is not None:
+            removed.append(field)
+    for key in _SPEND_ENV_KEYS:
+        if seat.env is not None and key in seat.env:
+            removed.append(f"env.{key}")
+    if not removed:
+        return None
+    fields = ", ".join(removed)
+    detail = (
+        "spawn_agent_session no longer accepts caller-selected spend fields "
+        f"({fields}) for ordinary agent-driven spawns. Configure harness/model/effort and "
+        "launch/session spend controls in agentic settings under orchestration.roles, "
+        "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses; call "
+        "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, task_document_ref, label, env, and "
+        "provenance only, with context omitted and submit=false."
+    )
+    return spawn_refusal(
+        "spend-override-unsupported",
+        retired.harness,
+        seat.kind,
+        detail=detail,
+    )
+
+
+def _brief_delivery_separate_refusal(
+    context: str | None, submit: bool, *, kind: str
+) -> dict[str, Any] | None:
+    """Refuse the retired one-call brief contract before any settings, catalog, or spawn work."""
+
+    if context is None and not submit:
+        return None
+    detail = (
+        "brief delivery is separate: call spawn_agent_session without context and with submit=false; "
+        "then call hosted_session_readiness(session_id=<returned session>, wait_seconds=<bound>); "
+        "only after status='ready', post one operator_inbox entry with the exact agent_id, "
+        "message_kind='dispatch-brief', and deliver_to_hosted=true; treat the seat as briefed only "
+        "when deliveryState='delivered' and adapterDeliveryState is accepted or queued."
+    )
+    return spawn_refusal("brief-delivery-separate", None, kind, detail=detail)
+
+
+@dataclass(frozen=True)
+class _SpawnDelivery:
+    """Launch-phase session-command outcome; task instructions are never represented here."""
+
+    session_commands_delivered: bool | None = None
+    failure_capture: str | None = None
+
+
+def _spawn_request_refusal(
+    seat: SpawnSeat,
+    retired: RetiredSpawnInputs,
+) -> dict[str, Any] | None:
+    """Refuse a request this tool no longer honours, before any settings, catalog, or spawn work."""
+    brief_refusal = _brief_delivery_separate_refusal(
+        retired.context, retired.submit, kind=seat.kind
+    )
+    if brief_refusal is not None:
+        return brief_refusal
+    return _caller_spend_override_refusal(seat, retired)
+
+
+def _resolve_spawn_document(
+    config: McpRuntimeConfig, task_ref: TaskDocumentRef | None, *, kind: str
+) -> tuple[TaskDocumentRef | None, dict[str, Any] | None]:
+    """Validate one optional canonical task-document reference before any spawn side effect."""
+    if task_ref is None:
+        return None, None
+    try:
+        return TaskDocumentTopology(config.coordination_root).resolve(task_ref).ref, None
+    except TaskDocumentRefError as exc:
+        return None, _task_ref_refusal_result("spawn_agent_session", task_ref, exc, kind=kind)
+
+
+def _resolve_spawn_documents(
+    config: McpRuntimeConfig,
+    task_document_ref: TaskDocumentRef | None,
+    replacement_for_task_document_ref: TaskDocumentRef | None,
+    *,
+    kind: str,
+) -> tuple[TaskDocumentRef | None, TaskDocumentRef | None, dict[str, Any] | None]:
+    """Resolve both spawn document references; the first invalid one refuses the spawn."""
+    resolved_document, refusal = _resolve_spawn_document(config, task_document_ref, kind=kind)
+    if refusal is not None:
+        return None, None, refusal
+    resolved_replacement, refusal = _resolve_spawn_document(
+        config, replacement_for_task_document_ref, kind=kind
+    )
+    return resolved_document, resolved_replacement, refusal
+
+
+@dataclass(frozen=True)
+class _SpawnLaunchPlan:
+    """What one spawn will actually launch, after the settings rungs have been read.
+
+    For a non-harness seat this is the caller's inputs unchanged -- there is no registry to
+    resolve against and no level to record. For a harness seat every field comes from
+    ``_resolve_harness_dispatch``, which is the only place allowed to choose them.
+    """
+
+    harness: str | None
+    model: str | None
+    effort: str | None
+    launch_args: list[str] | None
+    prompt_keywords: list[str] | None
+    session_commands: list[str]
+    spawn_level: str | None = None
+    spawn_level_source: str | None = None
+    resolved_launch: ResolvedLaunch | None = None
+    harnesses: tuple[Harness, ...] | None = None
+
+
+def _spawn_launch_plan(
+    config: McpRuntimeConfig,
+    seat: SpawnSeat,
+    retired: RetiredSpawnInputs,
+    overrides: SpawnOverrides,
+    task_document_ref: TaskDocumentRef | None,
+) -> tuple[_SpawnLaunchPlan | None, dict[str, Any] | None]:
+    """The launch plan for one spawn, or the refusal that stops it before any side effect.
+
+    Returns ``(plan, refusal)`` with exactly one side set, matching
+    ``_resolve_harness_dispatch`` -- which this delegates to for a harness seat and does not
+    call at all for any other kind.
+    """
+    caller_inputs = _SpawnLaunchPlan(
+        harness=retired.harness,
+        model=retired.model,
+        effort=retired.effort,
+        launch_args=retired.launch_args,
+        prompt_keywords=retired.prompt_keywords,
+        session_commands=list(retired.session_commands or []),
+    )
+    if seat.kind != "harness":
+        return caller_inputs, None
+    dispatch, refusal = _resolve_harness_dispatch(
+        config,
+        task_document_ref=task_document_ref,
+        level=seat.level,
+        env=seat.env,
+        which=overrides.which,
+    )
+    if refusal is not None:
+        return None, refusal
+    assert dispatch is not None  # no refusal => a resolved dispatch bundle
+    launch = dispatch.resolved_launch
+    return (
+        _SpawnLaunchPlan(
+            harness=dispatch.harness_id,
+            model=launch.model_key if launch is not None else dispatch.flag_model,
+            effort=launch.effort if launch is not None else dispatch.flag_effort,
+            launch_args=dispatch.launch_args,
+            prompt_keywords=dispatch.prompt_keywords,
+            session_commands=dispatch.session_commands,
+            spawn_level=dispatch.spawn_level,
+            spawn_level_source=dispatch.spawn_level_source,
+            resolved_launch=launch,
+            harnesses=dispatch.registry,
+        ),
+        None,
+    )
+
+
+def _spawn_launch_request(
+    config: McpRuntimeConfig,
+    seat: SpawnSeat,
+    overrides: SpawnOverrides,
+    plan: _SpawnLaunchPlan,
+) -> TerminalLaunchRequest:
+    """The launch request the terminal opener receives, assembled from the plan.
+
+    ``flag_model`` and ``flag_effort`` are populated only when there is no resolved
+    launch: with one, the adapter applies model and effort through its native channel and a
+    second copy on the request would be a second authority.
+    """
+    return TerminalLaunchRequest(
+        kind=seat.kind,
+        workspace_root=config.workspace_root,
+        shell=os.environ.get("SHELL") or _DEFAULT_SHELL,
+        harness=plan.harness,
+        which=overrides.which,
+        harnesses=plan.harnesses,
+        env=_spawn_env(plan.model, plan.effort, seat.env),
+        knobs=SpawnKnobs(
+            launch_args=plan.launch_args,
+            prompt_keywords=plan.prompt_keywords,
+            session_commands=plan.session_commands or None,
+        ),
+        control=ControlRunnerRequest(
+            resolved_launch=plan.resolved_launch,
+            endpoint_root=config.coordination_root / "runtime" / "harness-control",
+        ),
+        flag_model=plan.model if plan.resolved_launch is None else None,
+        flag_effort=plan.effort if plan.resolved_launch is None else None,
+    )
+
+
+def spawn_agent_session_tool(
+    config: McpRuntimeConfig,
+    *,
+    seat: SpawnSeat = DEFAULT_SPAWN_SEAT,
+    retired: RetiredSpawnInputs = NO_RETIRED_INPUTS,
+    spawned_by: SpawnedBy = UNATTRIBUTED_SPAWN,
+    overrides: SpawnOverrides = NO_SPAWN_OVERRIDES,
+) -> dict[str, Any]:
+    """Spawn one role-configured, leaf-attached hosted session without a leaf brief.
+
+    Success is ``spawned-unbriefed``. The exact returned session must separately pass
+    ``hosted_session_readiness`` before one durable ``dispatch-brief`` inbox row is created. Legacy
+    ``context`` or ``submit=True`` refuses before settings resolution, leaf lookup, catalog access,
+    or terminal creation. Settings-owned session commands remain post-launch configuration; prompt
+    keywords remain catalog provenance until durable brief delivery.
+
+    Per-level knob resolution (ruling 2026-07-07T08:15): the settings rungs come from
+    ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` -- the ``orchestration.rolesPerLevel[level]``
+    override deep-merged over the flat ``orchestration.roles`` default -- realizing the settings-only
+    chain repo-local level override > global level override > repo-local role default > global role
+    default > detection-gated default. ``level`` is the dispatcher's declaration (leaf|master|portfolio,
+    default leaf); the RESOLVED level + its source (explicit/default) are recorded in spawn provenance.
+
+    Settings-resolved model/effort ride the spawn env and one typed runner payload. The adapter
+    validates and applies them through its native launch channel; no model/effort session command
+    is synthesized. Free-form settings values remain recorded verbatim and caller-controlled spend
+    inputs still refuse before spawning.
+    """
+    # overrides.paster / overrides.session_log are read by nothing here on purpose; the bridge
+    # runner owns launch commands, so the spawn path never pastes and never writes a log.
+    caller_refusal = _spawn_request_refusal(seat, retired)
+    if caller_refusal is not None:
+        return caller_refusal
+    task_document_ref, replacement_for_task_document_ref, refusal = _resolve_spawn_documents(
+        config,
+        seat.task_document_ref,
+        seat.replacement_for_task_document_ref,
+        kind=seat.kind,
+    )
+    if refusal is not None:
+        return refusal
+    plan, refusal = _spawn_launch_plan(
+        config,
+        seat,
+        retired,
+        overrides,
+        task_document_ref or replacement_for_task_document_ref,
+    )
+    if refusal is not None:
+        return refusal
+    assert plan is not None  # no refusal => a resolved plan
+
+    sid = overrides.session_id or uuid4().hex
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    spawn_host = overrides.host if overrides.host is not None else TerminalHost()
+    result = open_terminal_session(
+        runtime=HostedSessionRuntime(catalog=catalog, host=spawn_host),
+        session_id=sid,
+        launch=_spawn_launch_request(config, seat, overrides, plan),
+        provenance=SpawnProvenance(
+            label=seat.label,
+            task_document_ref=task_document_ref,
+            replacement_for_task_document_ref=replacement_for_task_document_ref,
+            spawn_level=plan.spawn_level,
+            spawn_level_source=plan.spawn_level_source,
+            spawned_by_session=spawned_by.session_id,
+            spawned_by_lifecycle=spawned_by.lifecycle_id or _ambient_lifecycle_id(),
+        ),
+    )
+
+    open_refusal = open_terminal_refusal(
+        result,
+        harness=plan.harness,
+        kind=seat.kind,
+        session_id=sid,
+        task_document_ref=task_document_ref,
+    )
+    if open_refusal is not None:
+        return open_refusal
+
+    entry = result.entry
+    assert entry is not None  # opened => an upserted row
+    delivery = _SpawnDelivery()
+
+    return _result("spawn_agent_session", _spawned_payload(entry, delivery))
+
+
+def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> dict[str, Any]:
+    """The spawned-unbriefed row plus settings-owned launch-command outcome."""
+    return {
+        "ok": True,
+        "operation": "spawn_agent_session",
+        "status": "spawned-unbriefed",
+        "session": entry.id,
+        "harness": entry.harness,
+        "kind": entry.kind,
+        "taskDocumentRef": (
+            entry.task_document_ref.model_dump() if entry.task_document_ref is not None else None
+        ),
+        "seatRole": entry.binding_role,
+        "replacementForTaskDocumentRef": (
+            entry.replacement_for_task_document_ref.model_dump()
+            if entry.replacement_for_task_document_ref is not None
+            else None
+        ),
+        "label": entry.label,
+        "cwd": str(entry.cwd),
+        "tmuxName": entry.tmux_name,
+        "spawnedBySession": entry.spawned_by_session,
+        "spawnedByLifecycle": entry.spawned_by_lifecycle,
+        "spawnRole": entry.spawn_role,
+        # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
+        "spawnLevel": entry.spawn_level,
+        "spawnLevelSource": entry.spawn_level_source,
+        "resolvedModel": entry.resolved_model,
+        "resolvedEffort": entry.resolved_effort,
+        # Free-form spawn provenance (260703-L16), echoed as recorded on the catalog row.
+        "launchArgs": list(entry.launch_args) if entry.launch_args else None,
+        "promptKeywords": list(entry.prompt_keywords) if entry.prompt_keywords else None,
+        "sessionCommands": list(entry.session_commands) if entry.session_commands else None,
+        "sessionCommandsDelivered": delivery.session_commands_delivered,
+        "deliveryCapture": delivery.failure_capture,
+        "controlState": entry.control_state,
+        "controlEndpoint": str(entry.control_endpoint) if entry.control_endpoint else None,
+        "controlProtocol": entry.control_protocol,
+    }
+
+
+# ``SessionRetireResponse.ok`` by its own documented rule, in one place: the two idempotent
+# success statuses are true and every refusal is false. A refusal status added later cannot
+# arrive as ``ok=True`` by being written at a fifth call site that forgot the rule.
+_RETIRE_OK_STATUSES: frozenset[SessionRetireStatus] = frozenset({"retired", "already-retired"})
+
+
+def _retire_payload(
+    status: SessionRetireStatus,
+    session_id: str,
+    *,
+    detail: str | None = None,
+    closure: TerminalCatalogEntry | None = None,
+    stranded: tuple[tuple[str, ...], str | None] | None = None,
+) -> dict[str, Any]:
+    """One ``session_retire`` result: the status, plus whichever half of the shape it carries.
+
+    A success reports the row's retirement provenance; a refusal reports the policy clause that
+    fired. Nothing carries both, which is why the two are separate keyword arguments rather than
+    one bundle. ``status`` is the wire alias, so a status invented here is a type error at the
+    producer instead of a ValidationError inside the MCP handler.
+    """
+    payload: dict[str, Any] = {
+        "ok": status in _RETIRE_OK_STATUSES,
+        "operation": "session_retire",
+        "status": status,
+        "session": session_id,
+    }
+    if closure is not None:
+        payload["retiredAt"] = closure.retired_at
+        payload["retiredBySession"] = closure.retired_by_session
+        payload["retiredReason"] = closure.retired_reason
+        payload["retiredEdge"] = closure.retired_edge
+    if detail is not None:
+        payload["detail"] = detail
+    if stranded is not None:
+        stranded_row_ids, surfaced_row_id = stranded
+        if stranded_row_ids:
+            payload["strandedRowIds"] = list(stranded_row_ids)
+            payload["strandedRowCount"] = len(stranded_row_ids)
+        if surfaced_row_id is not None:
+            payload["surfacedRowId"] = surfaced_row_id
+    return _result("session_retire", payload)
+
+
+def session_retire_tool(
+    config: McpRuntimeConfig,
+    *,
+    actor_session_id: str,
+    session_id: str,
+    reason: str = "manual retire",
+    host: TerminalHost | None = None,
+) -> dict[str, Any]:
+    """Retire ``session_id`` (issue #12): terminal mark + provenance, authority enforced server-side.
+
+    ``actor_session_id`` is the RETIRING seat's own catalog session id (self-declared, mirroring the
+    ``spawned_by_session`` provenance pattern -- there is no ambient "who am I" session-id
+    resolution). Authority: owner-never-self-retires; a manager retires only worker/reviewer seats
+    of its own master; the orchestrator retires anything. Idempotent against an already-retired
+    target -- a second retire call reports ``already-retired``, never re-stamps provenance.
+    """
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    target_entry = catalog.get(session_id)
+    if target_entry is None:
+        return _retire_payload(
+            "unknown-session",
+            session_id,
+            detail=f"no catalog entry for session {session_id!r}",
+        )
+    actor_entry = catalog.get(actor_session_id)
+    if actor_entry is None:
+        return _retire_payload(
+            "unknown-actor",
+            session_id,
+            detail=f"no catalog entry for actor session {actor_session_id!r}",
+        )
+    if target_entry.status == "terminated":
+        return _retire_payload("already-retired", session_id, closure=target_entry)
+    try:
+        check_retire_authority(
+            SeatRef(
+                session_id=actor_entry.id,
+                task_document_ref=actor_entry.binding_task_document_ref,
+                seat_role=actor_entry.binding_role,
+            ),
+            SeatRef(
+                session_id=target_entry.id,
+                task_document_ref=target_entry.binding_task_document_ref,
+                seat_role=target_entry.binding_role,
+            ),
+            TaskDocumentTopology(config.coordination_root),
+        )
+    except RetirePolicyError as exc:
+        return _retire_payload("retire-refused", session_id, detail=str(exc))
+    retire_host = host if host is not None else TerminalHost()
+    updated = retire_entry(
+        catalog,
+        retire_host,
+        target_entry,
+        SeatClosure(at=now_iso(), by_session=actor_session_id, reason=reason, edge="manual"),
+    )
+    assert updated is not None  # the entry existed above; nothing between here removes rows
+    log_retire_event(config, updated)
+    stranded, surfaced = _surface_stranded_rows(
+        config,
+        catalog=catalog,
+        host=retire_host,
+        target=updated,
+        actor=actor_entry,
+    )
+    return _retire_payload(
+        "retired",
+        session_id,
+        closure=updated,
+        stranded=(tuple(row.id for row in stranded), surfaced),
+    )
+
+
+def _surface_stranded_rows(
+    config: McpRuntimeConfig,
+    *,
+    catalog: TerminalCatalog,
+    host: TerminalHost,
+    target: TerminalCatalogEntry,
+    actor: TerminalCatalogEntry,
+) -> tuple[list[OperatorInboxEntry], str | None]:
+    """N2 surfacing: pending rows stranded by a retirement go to the retiring authority.
+
+    ``session_retire`` never refuses because rows are pending; instead it posts one durable
+    row to the actor's mailbox listing the stranded ids so the owner can rebrief/rebind.
+    Returns ``(stranded_rows, surfaced_row_id)``.
+    """
+    store = OperatorInboxStore(observer_root(config))
+    stranded = [
+        row
+        for row in store.current().values()
+        if row.state == "pending"
+        and (row.agentId == target.id or row.lifecycleId == target.lifecycle_id)
+    ]
+    if not stranded:
+        return [], None
+    actor_role = actor.binding_role if actor.binding_role in _AGENT_ROLE_VALUES else None
+    response = post_operator_inbox_entry(
+        OperatorInboxPostContext(
+            config=config,
+            store=store,
+            delivery=HostedDelivery(
+                enabled=True,
+                catalog=catalog,
+                host=host,
+            ),
+        ),
+        address=InboxAddress(
+            lifecycle_id=actor.lifecycle_id,
+            agent_id=actor.id,
+            recipient_role=cast(AgentRole | None, actor_role),
+        ),
+        message=InboxMessage(
+            ask=(
+                f"Stranded inbox rows after retiring {target.id} "
+                f"({target.binding_role or target.spawn_role or target.kind}): "
+                f"{len(stranded)} pending row(s)"
+            ),
+            response=", ".join(row.id for row in stranded),
+            message_kind="message",
+            subject=InboxSubject(
+                task_document_ref=target.binding_task_document_ref,
+                seat_role=target.binding_role,
+                agent_id=target.id,
+            ),
+        ),
+        poster=InboxPoster(
+            created_by="session-retire",
+            created_via="cli",
+            sender_role="system",
+        ),
+    )
+    return stranded, str(response["entryId"])
+
+
+def _rename_payload(
+    status: SessionRenameStatus,
+    session_id: str,
+    *,
+    label: str,
+    renamed: TerminalCatalogEntry | None = None,
+) -> dict[str, Any]:
+    """One ``session_rename`` result: the REQUESTED label on a refusal, the stored pair on success.
+
+    ``spawnedLabel`` exists only once a row was actually renamed -- it is the frozen spawn-time
+    label, and there is no row to have frozen one when the session is unknown.
+    """
+    payload: dict[str, Any] = {
+        "ok": status == "renamed",
+        "operation": "session_rename",
+        "status": status,
+        "session": session_id,
+        "label": renamed.label if renamed is not None else label,
+    }
+    if renamed is not None:
+        payload["spawnedLabel"] = renamed.spawned_label
+    return _result("session_rename", payload)
+
+
+def session_rename_tool(
+    config: McpRuntimeConfig,
+    *,
+    session_id: str,
+    label: str,
+) -> dict[str, Any]:
+    """Rename ``session_id``'s display label post-spawn (issue #4). Identity text only -- never role."""
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    entry = catalog.get(session_id)
+    if entry is None or entry.status == "terminated":
+        return _rename_payload("unknown-session", session_id, label=label)
+    updated = catalog.set_label(session_id, label)
+    assert updated is not None
+    log_rename_event(config, updated)
+    return _rename_payload("renamed", session_id, label=label, renamed=updated)

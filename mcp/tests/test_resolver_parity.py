@@ -18,6 +18,9 @@ from agents_remember.worktrees.task_resolver import (
     resolve_active_task_root,
 )
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     default_contract,
     default_series_contract,
     write_contract,
@@ -97,20 +100,26 @@ class ResolverCliTests(unittest.TestCase):
             coordination = fixture["coordination"]
             memory = fixture["memory"]
             contract = default_contract(
-                task_name="Resolver Parity",
-                repo_name="agents-remember",
-                workflow_kind="light",
-                memory_mode="external",
-                coordination_root=coordination,
-                code_repo_path=repo,
-                code_source_branch=current_branch(repo),
-                code_work_branch="ar/resolver-parity",
-                code_base_commit=current_head(repo),
-                worktree_name="resolver-parity",
-                memory_repo_path=memory,
-                memory_source_branch="main",
-                memory_work_branch="ar/resolver-parity-memory",
-                memory_base_commit=current_head(repo),
+                ContractTask(
+                    name="Resolver Parity",
+                    repo_name="agents-remember",
+                    coordination_root=coordination,
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="resolver-parity"),
+                code=RepoBranchPlan(
+                    repo_path=repo,
+                    source_branch=current_branch(repo),
+                    work_branch="ar/resolver-parity",
+                    base_commit=current_head(repo),
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=memory,
+                    source_branch="main",
+                    work_branch="ar/resolver-parity-memory",
+                    base_commit=current_head(repo),
+                ),
             )
             write_contract(contract.contract_path, contract)
 
@@ -159,18 +168,22 @@ class ResolverCliTests(unittest.TestCase):
                 write_contract(
                     task_root / "series-contract.md",
                     default_series_contract(
-                        task_name="child",
-                        repo_name="agents-remember",
-                        workflow_kind="master-series",
-                        memory_mode="disabled",
-                        coordination_root=coordination,
-                        code_repo_path=repo,
-                        protected_branch=current_branch(repo),
-                        integration_branch=branch,
-                        code_base_commit=head,
+                        ContractTask(
+                            name="child",
+                            repo_name="agents-remember",
+                            coordination_root=coordination,
+                            workflow_kind="light-task",
+                            memory_mode="disabled",
+                        ),
+                        code=RepoBranchPlan(
+                            repo_path=repo,
+                            source_branch=current_branch(repo),
+                            work_branch=branch,
+                            base_commit=head,
+                        ),
                         task_root=task_root,
                     ),
-            )
+                )
 
             with self.assertRaisesRegex(TaskResolutionError, "multiple active tasks"):
                 resolve_active_task_root(
@@ -209,15 +222,19 @@ class ResolverCliTests(unittest.TestCase):
                 write_contract(
                     task_root / "series-contract.md",
                     default_series_contract(
-                        task_name=task_name,
-                        repo_name="agents-remember",
-                        workflow_kind="master-series",
-                        memory_mode="disabled",
-                        coordination_root=coordination,
-                        code_repo_path=repo,
-                        protected_branch=current_branch(repo),
-                        integration_branch=f"ar/{task_name}",
-                        code_base_commit=current_head(repo),
+                        ContractTask(
+                            name=task_name,
+                            repo_name="agents-remember",
+                            coordination_root=coordination,
+                            workflow_kind="light-task",
+                            memory_mode="disabled",
+                        ),
+                        code=RepoBranchPlan(
+                            repo_path=repo,
+                            source_branch=current_branch(repo),
+                            work_branch=f"ar/{task_name}",
+                            base_commit=current_head(repo),
+                        ),
                         task_root=task_root,
                     ),
                 )
@@ -315,7 +332,7 @@ def run_package_resolver(*args: str) -> dict[str, object]:
         [
             sys.executable,
             "-m",
-            "agents_remember.kernel.coordination_context_resolver",
+            "agents_remember.cli.coordination_resolver",
             *args,
             "--format",
             "json",

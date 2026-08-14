@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.primitives.identity import stable_provider_id  # noqa: F401
 
 # Re-exported for ``from agents_remember.providers.context import stable_provider_id``
 # (and the ``import *`` facade in ``context/__init__.py``); canonical source is identity.
-from agents_remember.providers.identity import stable_provider_id  # noqa: F401
 
 
 class ContextProviderError(AgentsRememberError):

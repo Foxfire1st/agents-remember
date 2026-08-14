@@ -49,7 +49,9 @@ def _fake_redis_module() -> mock.MagicMock:
 
 def load_guard() -> types.ModuleType:
     fake_redis = _fake_redis_module()
-    with mock.patch.dict(sys.modules, {"redis": fake_redis, "redis.exceptions": fake_redis.exceptions}):
+    with mock.patch.dict(
+        sys.modules, {"redis": fake_redis, "redis.exceptions": fake_redis.exceptions}
+    ):
         spec = importlib.util.spec_from_file_location("cgc_watch_guard", GUARD_PATH)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

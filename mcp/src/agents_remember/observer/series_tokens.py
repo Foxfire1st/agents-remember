@@ -31,7 +31,9 @@ def attach_series_token_totals(
     return updated
 
 
-def _task_docs_by_series_file(task_documents: list[TaskDocNode]) -> dict[tuple[str, str], TaskDocNode]:
+def _task_docs_by_series_file(
+    task_documents: list[TaskDocNode],
+) -> dict[tuple[str, str], TaskDocNode]:
     indexed: dict[tuple[str, str], TaskDocNode] = {}
     for doc in task_documents:
         if doc.kind == "master":

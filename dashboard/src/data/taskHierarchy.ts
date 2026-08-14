@@ -1,9 +1,11 @@
-import type { SeriesNode, TaskDocNode, TaskSubTaskRefNode } from "../types/projection";
+import type { SeriesNode, SeriesSubTaskNode, TaskDocNode } from "../types/projection";
 import { seriesSelectionKey, taskDocSelectionKey } from "./taskIdentity";
 
 export interface ParentTaskMatch {
   series: SeriesNode;
-  ref: TaskSubTaskRefNode;
+  // Always a SERIES row (it is read off `series.subTasks`), so it carries `createdAt` and never a
+  // cross-series `linkedLifecycleId` — the collapsed interface used to claim both.
+  ref: SeriesSubTaskNode;
   number: string;
 }
 
@@ -12,19 +14,40 @@ export interface ParentTaskLink {
   targetKey: string;
 }
 
+// One index per seriesList identity (a boot-profile hotspot): the per-call scan re-sorted every
+// series' refs and re-normalized every ref path for every doc row — O(docs × series × refs)
+// per render pass. The index costs one pass over the refs and makes every lookup O(1); the
+// first series in list order / first ref in creation order still wins, exactly as the scan
+// resolved it.
+const parentMatchIndexCache = new WeakMap<SeriesNode[], Map<string, ParentTaskMatch>>();
+
+function docPathKey(path: string): string {
+  return stripExt(normalizePath(path));
+}
+
+function parentMatchIndex(seriesList: SeriesNode[]): Map<string, ParentTaskMatch> {
+  const cached = parentMatchIndexCache.get(seriesList);
+  if (cached) return cached;
+  const index = new Map<string, ParentTaskMatch>();
+  for (const series of seriesList) {
+    for (const ref of orderedByCreation(series.subTasks)) {
+      if (!ref.file) continue;
+      const key = docPathKey(`${pathDir(series.docPath)}/${ref.file}`);
+      if (!index.has(key)) index.set(key, { series, ref, number: ref.number });
+    }
+  }
+  parentMatchIndexCache.set(seriesList, index);
+  return index;
+}
+
 export function findParentTaskMatch(
   doc: Pick<TaskDocNode, "kind" | "docPath"> & Partial<Pick<TaskDocNode, "id">>,
   seriesList: SeriesNode[],
 ): ParentTaskMatch | undefined {
   if (doc.kind === "master") return undefined;
-  for (const series of seriesList) {
-    const orderedRefs = orderedByCreation(series.subTasks);
-    const index = orderedRefs.findIndex((ref) => refMatchesDoc(series.docPath, ref, doc.docPath));
-    if (index >= 0) {
-      return { series, ref: orderedRefs[index], number: doc.id || orderedRefs[index].number };
-    }
-  }
-  return undefined;
+  const match = parentMatchIndex(seriesList).get(docPathKey(doc.docPath));
+  if (!match) return undefined;
+  return doc.id ? { ...match, number: doc.id } : match;
 }
 
 export function taskDocHierarchyLabel(doc: TaskDocNode, seriesList: SeriesNode[]): string {
@@ -58,17 +81,17 @@ export function parentTaskLinkForDoc(
   };
 }
 
-// --- the orchestration-command relation (L14) --------------------------------------------------
+// --- the orchestration-command relation --------------------------------------------------
 // An ORCHESTRATION TASK is a `kind:"master"` doc carrying a non-empty top-level `orchestrates`
-// list — the master task NAMES it commands (owner data-model ruling; no new task kind). A master
+// list — the master task NAMES it commands (no new task kind). A master
 // is "commanded" when any orchestration doc's list contains one of the names it answers to: its
 // task folder (the durable series key), its doc id, or its title — forgiving but exact-string.
-// Masters named nowhere stay top-level exactly as today (D3: flat runs stay flat).
+// Masters named nowhere stay top-level exactly as today (flat runs stay flat).
 
 export function isOrchestrationDoc(
   doc: Pick<TaskDocNode, "kind" | "orchestrates">,
 ): boolean {
-  return doc.kind === "master" && (doc.orchestrates?.length ?? 0) > 0;
+  return doc.kind === "master" && doc.orchestrates.length > 0;
 }
 
 /** The names a master answers to when matched against an `orchestrates` list. */
@@ -93,7 +116,7 @@ export function orchestratorParentKey(
     (doc) =>
       isOrchestrationDoc(doc) &&
       doc.docPath !== selfDocPath &&
-      (doc.orchestrates ?? []).some((name) => nameSet.has(name)),
+      doc.orchestrates.some((name) => nameSet.has(name)),
   );
   return commander ? taskDocSelectionKey(commander.docPath) : undefined;
 }
@@ -110,16 +133,20 @@ export function stripExt(name: string): string {
   return name.replace(/\.(md|json)$/i, "");
 }
 
-function orderedByCreation<T extends { createdAt?: string }>(items: T[]): T[] {
+/** Creation-order sort, all-or-nothing: rows are only reordered when EVERY row carries a
+ * `createdAt`, so a partially-stamped list keeps its authored order rather than sorting the
+ * stamped ones to the front. Shared with `DetailPanel` (it held a byte-identical second copy).
+ *
+ * Rows whose type carries no `createdAt` at all — a master's `TaskSubTaskRefNode`, which the
+ * server never stamps — therefore pass through untouched by construction. Only
+ * `SeriesSubTaskNode` is actually sortable here, and `snapshots.py::_series_subtask_nodes` has
+ * already applied the same rule server-side, so this is an order-preserving safety net rather
+ * than the thing that establishes the order. */
+export function orderedByCreation<T extends { createdAt?: string }>(items: T[]): T[] {
   if (!items.every((item) => item.createdAt)) return items;
   return [...items].sort((left, right) =>
     (left.createdAt as string).localeCompare(right.createdAt as string),
   );
-}
-
-function refMatchesDoc(seriesDocPath: string, ref: TaskSubTaskRefNode, docPath: string): boolean {
-  if (!ref.file) return false;
-  return stripExt(normalizePath(`${pathDir(seriesDocPath)}/${ref.file}`)) === stripExt(normalizePath(docPath));
 }
 
 function parentSelectionKey(series: SeriesNode, masterDocPaths: Set<string>): string {

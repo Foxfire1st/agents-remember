@@ -12,7 +12,7 @@ lifecycle, and no role reads another role's file.
 
 ## Which Lifecycle Am I? (the router — exactly three conditions, in order)
 
-1. **`AR_SPAWN_ROLE` is set** (spawn env, injected by `spawn_agent_session`) → run
+1. **`AR_SPAWN_ROLE` is set** (injected by the hosted-seat control plane) → run
    `roles/<value>.md`. Nothing else in this file's "developer session" material applies to you.
    (`designer` here means the same design hat in a separate chair — see `roles/designer.md`.)
 2. **Else: the first user message is a role brief in a fresh session** — a `templates/*-brief.md`-shaped dispatch or
@@ -22,12 +22,14 @@ lifecycle, and no role reads another role's file.
 3. **Else** (a developer opened this session) → you are the developer-facing **free chat** — a
    launcher, not a role seat (ruled 2026-07-09). Research-only questions are answered inline with
    no role taken. The moment the ask is role-shaped (a sprint, a task, any durable change), do NOT
-   assume the architect role in this chat: **spawn the architect into its own chat**
-   (`spawn_agent_session` with `AR_SPAWN_ROLE=architect`; the profile — harness/model/effort —
-   comes from `orchestration.roles.architect` in settings, never from this session's guess) and
-   point the developer at that chat. A clean startup with the settings-owned profile removes all
-   profile ambiguity. The spawned architect runs `roles/architect.md` and owns the developer
-   conversation from there.
+   assume the architect role in this chat: resolve the target sprint, then open that sprint in
+   Operations and use its role control to **create or switch to the architect chat bound to the
+   sprint document**. The dashboard and control plane choose the runtime occupant and inject the
+   role; this launcher never handles a session id. The architect profile — harness/model/effort —
+   comes from `orchestration.roles.architect` in settings. The resulting architect runs
+   `roles/architect.md` and owns that sprint's developer conversation.
+   For a first sprint, free chat uses the ordinary durable task workflow to create the master and
+   first leaf before this launch; that bounded bootstrap creates scope data, not a global role seat.
 
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
 value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
@@ -35,7 +37,8 @@ session **whose brief never arrives** announces itself on the inbox and waits �
 improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
 backend takeover chair — the developer still talks to the **architect**, not the orchestrator.
 The spool-up chain is fixed and self-driving (ruled 2026-07-09): free chat spawns the
-**architect**; the architect spawns the **orchestrator** for portfolio execution; the
+**architect for the resolved sprint**; the architect spawns the **orchestrator** for that sprint's
+portfolio execution; the
 orchestrator spawns **managers** per the approved plan and the concurrency settings; managers
 spawn their **workers**. No seat waits to be told "spawn this, spawn that" — each level spawns
 its next level from the plan. Only two spool-up decisions ever go back to the developer, both as
@@ -50,24 +53,21 @@ or build hats (the hat-collapse rule). A spawned role seat never wears another r
 ## Developer-Declared Task-Seat Takeover
 
 When the developer says *"you are the orchestrator/manager/worker for task X"* (or equivalent),
-that is a **task-seat takeover**, not a loose role hint. The named task leaf is the seat. Before
-analysis, profile checks, spawning, or implementation, open the named task doc and attach the
-current dashboard chat to that leaf.
+that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks,
+dispatch, or implementation, open the named task document in Operations and switch to or create
+the role at its canonical altitude: sprint for architect/orchestrator/optional sprint roles,
+master for manager, leaf for worker/reviewer/curator.
 
 Operational checklist:
 
-1. Resolve the named task to the **qualified** leaf key `<repository>/<master>/<docId>` and the
-   lifecycle role this seat is claiming.
-2. Use the dashboard terminal catalog session id for this chat — not `CLAUDE_CODE_SESSION_ID`, not
-   `CODEX_THREAD_ID`.
-3. Call `attach_terminal_session_to_leaf` with that qualified leaf key and the claimed role.
-4. Rename the session to the seat label the developer expects.
-5. Verify the terminal catalog and dashboard row show that exact `(qualified leaf key, seat role)`
-   binding before continuing.
+1. Resolve the canonical JSON-primary task document and the role being claimed.
+2. Use the Operations role switch/create control; do not call a terminal attach primitive and do
+   not read, request, paste, or retain a session/lifecycle/agent id.
+3. If desired, call `rename_self(label=...)` after the hosted role chat is active.
+4. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
 
-If no dashboard terminal catalog session id can be found, record the blocker and ask for the
-missing attachment path. Do not claim the seat is attached until the catalog/dashboard row proves
-it. After the attachment is verified, continue with the lifecycle selected above.
+If the role control cannot establish that document+role binding, record the structural blocker and
+ask for the missing document or role authority. Do not improvise an exact-id attachment.
 
 ## Developer Clarification Triage
 
@@ -96,11 +96,11 @@ fit is unclear.
 
 | Role | Seat | Lifecycle file |
 | --- | --- | --- |
-| **architect** | the developer-facing owner seat; design conversation, decision-item relay, and drawing board | `roles/architect.md` |
-| **orchestrator** | spawned backend portfolio/orchestration seat; never developer-facing | `roles/orchestrator.md` |
+| **architect** | sprint-local developer-facing owner seat; design conversation, decision-item relay, and drawing board | `roles/architect.md` |
+| **orchestrator** | sprint-local spawned backend portfolio/orchestration seat; never developer-facing | `roles/orchestrator.md` |
 | **designer** | a HAT the architect pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
 | **strategist** | the sprint planner, SPAWN-FIRST when the developer approves the architect's propose-first question; its deliverable is the orchestration task draft (sprint plan + scope); spawn value `strategist` | `roles/strategist.md` |
-| **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
+| **manager** | sprint-local coordination seat per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
 | **curator** | fresh per leaf after builder/reviewer; writes onboarding only from task docs, notes, and code diff | `roles/curator.md` |
 | **system-specialist** | backend provider-degradation investigator; report first, fixes only after explicit orchestrator order; spawn value `system-specialist` | `roles/system-specialist.md` |
@@ -142,8 +142,8 @@ dashboard reform is introduced here.
 Every session in a managed repo may be a **lifecycle**: six signals — `lifecycle_start` ·
 `lifecycle_phase` · `lifecycle_turn_end_notification` · `worktree_attach` · `switch_lifecycle` ·
 `lifecycle_end` (plus the automatic `worktree_start` promotion) — record where it
-is and what it waits on, so work is observable and resumable across chat deaths. The model **never
-handles a lifecycle id** — identity is server-side, anchored in the worktree contract.
+is and what it waits on, so work is observable and resumable across chat deaths. Lifecycle
+correlation is server-side and anchored in the worktree contract; it is not model state.
 
 | When | Signal | Effect |
 | --- | --- | --- |
@@ -159,18 +159,20 @@ Rules: a tool call outside any lifecycle is **dropped, never misattributed**; `p
 system-owned. **A spawned role that never touches mutating AR tools simply never instantiates a
 lifecycle — that is correct, not a violation.** A spawned role runs its **own** lifecycle when it
 runs one; it never adopts its spawner's. The session↔task-seat association is the catalog binding
-made at spawn — the pair of **qualified** leaf key `<repository>/<master>/<docId>` and seat role —
-not lifecycle adoption. Different roles may coexist on one leaf; only a second live owner of the
-same `(qualified leaf key, seat role)` pair collides.
+made at dispatch: canonical task document plus role, not lifecycle adoption. Sprint roles bind to
+the sprint document, managers to master documents, and workers/reviewers/curators to leaf
+documents. Different roles may coexist on one document; only a second live occupant of the same
+`(task document, role)` seat collides.
 
 **Notify-and-stop is safe by design (HFX2-L1..L4, landed):** ending a turn on
 `lifecycle_turn_end_notification` — or simply stopping once your artifact is written and nothing is
-pending — is never a liveness gap. Silence is supervised: the HFX2-L2 supervisor sweep evaluates
-every expected artifact/signal on its own mechanical tick and the HFX2-L4 escalation ladder
-(renudge → skip-level → architect custody/architect attention, then respawn) handles inactivity. **No role watches,
-polls, or nudges on its own initiative — that is a banned seat-local watcher (uniform-mechanism
-ruling 2026-07-07).** Every role's own liveness duty inverts to *passive*: you will be woken with
-your pending signals; process and ack every item before ending your turn again.
+pending — is never a liveness gap. Silence is supervised: the HFX2-L2 agent-notifier sweep evaluates
+seat-state facts on its own mechanical tick and relays them to owners (turn-ended/completed
+state-signals, compound-idle, non-reaction residue); owners interpret and act. The timed
+escalation ladder is retired — there is no renudge/skip-level/respawn machinery in the relay.
+**No role watches, polls, or nudges on its own initiative — that is a banned seat-local watcher
+(uniform-mechanism ruling 2026-07-07).** Every role's own liveness duty inverts to *passive*: you
+will be woken with your pending signals; process and ack every item before ending your turn again.
 
 ## Shared Invariants (every role can count on these)
 
@@ -200,18 +202,39 @@ section; they do not restate it.
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
 | Portfolio | the backend orchestrator (developer-facing decisions relayed through the architect) | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
 
+**Independent route review is mandatory after every code-change session.** Once implementation
+and its focused acceptance are stable, the owning seat partitions the changed surface by
+material major route (architecture/control-plane ownership boundary, informed by governing route
+overviews and the import/call graph). The reviewer chair fans out one independent reviewer per
+affected major route. Each route reviewer reads the diff and its surroundings, tests likely side
+effects, and reports source-backed findings; the chair records a route-coverage table and one
+verdict. One reviewer may not silently collapse several routes into a generic diff skim. No code
+change proceeds to curator, closeout, integration, or handover without this verdict. A fix returns
+to the same builder and the same route reviewer delta-verifies it; touching a new major route adds
+that route to the review partition. This mandatory post-code gate also applies to direct/solo work:
+independence requires another agent, never builder self-review.
+
+The chair persists the passing or blocking result through
+`task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})` after the
+durable verdict and every route evidence file exist. The control plane, not the chair or manager,
+stamps the exact current Git candidate tree and review time into the leaf document. Curator dispatch
+and closeout recompute that tree and refuse an absent, blocking, stale, or missing-artifact record.
+This is the executable post-code gate; prose, a chat claim, or an unbound evidence reference does
+not satisfy it.
+
 **Complexity-scored tiers (per leaf, at dispatch).** The owning seat scores three axes — blast
 radius (doctrine/enforcement/public surface vs leaf-local) · novelty (new subsystem vs
-pattern-following) · size (files × steps) — into three tiers: **direct** (no loop
-machinery — the level's ordinary build channel implements: hands-on at session scale, the leaf's
-worker under a manager; self-check + checks ladder only), **builder-verified** (builder
-implements; owner verifies report-vs-artifact; no reviewer), **full loop** (builder + independent
-reviewer rounds). The
+pattern-following) · size (files × steps) — into three tiers: **direct** (ordinary build channel
+plus the mandatory independent route review; no additional loop machinery),
+**builder-verified** (builder implements; owner additionally verifies report-vs-artifact; the
+mandatory route review still runs), **full loop** (builder + independent reviewer rounds, with the
+mandatory route partition as the review scope floor). The
 strategist's blast-radius register is the scoring input when an orchestration task exists. A
 leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
-agent set) is recorded on the leaf doc with a decision-log entry. **A master whose leaves all
-score `direct` is a workflow-free manager** — no loop machinery; the knobs make every loop
-optional per level, never mandatory ceremony.
+agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
+`direct` avoids iterative full-loop machinery, but its code leaves still receive independent
+route review. The knobs tune review depth and round machinery; they never disable the post-code
+independence gate.
 
 **Rounds and the HARD cap.** A round = implement → review. **Hard cap: 3 rounds per loop — and
 ONLY full end-to-end rounds count against it.** Residuals of a passing round are landed and
@@ -274,31 +297,39 @@ Resolution: **role-file defaults < settings.json orchestration block.** There ar
 sub-agent fan-out and the like — are covered inside the portable files as capability-conditional
 doctrine any coding agent can apply, and harness PREFERENCE is deployment configuration
 (settings), not doctrine. Hard-coding a vendor would fork the doctrine per harness. For spawning
-seats, `spawn_agent_session` is itself the harness-independent fan-out: a harness with no
-sub-agent facility still dispatches seats through the framework (a chat, no leaf attachment
-required) — the DBMS principle: one behavior, any engine.
+seats, `dispatch_agent` is itself the harness-independent fan-out: a harness with no sub-agent
+facility still dispatches a canonical document+role seat through the framework — the DBMS
+principle: one behavior, any engine.
 For ordinary spawned seats, settings are the sole developer-controlled spend surface:
-`spawn_agent_session` callers declare role and level, never harness/model/effort or direct
-launch/session spend controls.
+`dispatch_agent` callers declare the canonical task document, role, brief, and optional label;
+they never declare harness/model/effort or direct launch/session spend controls.
 
-### Hosted role dispatch is three explicit states
+### Hosted role dispatch is one structural transaction
 
-Every role that dispatches another hosted role uses one exact session id through all three states:
+Every role that dispatches another hosted role calls `dispatch_agent` once with the child's real
+task document, role, and complete brief. The control plane performs the internal transaction:
 
-1. Call `spawn_agent_session` with `context` omitted and `submit=false`. Success is
-   `spawned-unbriefed`; it creates and binds the seat but assigns no work.
-2. Call `hosted_session_readiness(session_id=<returned-id>, wait_seconds=<finite-bound>)`.
-   Only `status=ready` advances that exact seat to harness-ready. Spawned-only and not-ready seats
-   are **not active work** and receive no task instructions.
-3. Post exactly one durable `operator_inbox_post` row addressed by that same `agent_id`, with
-   `message_kind="dispatch-brief"` and `deliver_to_hosted=true`. Treat the seat as briefed only when
-   that row reports both `deliveryState=delivered` and
-   `deliveryDetail=harness-log-confirmed`.
+1. authorize the direct-child relationship from the caller's ambient document+role seat;
+2. resolve source lineage from that canonical task document before process creation: a manager
+   requires the master to contain its super; a worker/reviewer/curator requires both super → master
+   and master → leaf, for code and external memory when enabled;
+3. create and bind the child using settings-owned launch knobs only when every applicable edge is
+   current;
+4. prove readiness privately;
+5. persist exactly one internally exact-pinned initial dispatch brief before delivery;
+6. return only structural status (`dispatched` or `dispatch-queued`) and delivery state.
 
-If step 3 fails, the original durable row stays pending on the original spawned session for the
-standard injector/supervisor retry path. Never duplicate the row, append another visible draft,
-or respawn merely because delivery is pending. Settings-owned `sessionCommands` remain launch
-configuration; settings-owned `promptKeywords` ride the post-readiness dispatch brief exactly once.
+A `source-lineage-stale` or `source-lineage-unavailable` result means no child process was created.
+Use its ordered, contract-addressed `worktree_sync` recovery, then dispatch the same document+role
+again. Never ask for branch commit ids or occupant ids: task identity is the input and the control
+plane owns the Git proof. This early refusal prevents a fresh seat from reading stale code or stale
+onboarding before anyone notices the master or leaf fell behind its parent.
+
+The model never receives the spawned occupant's runtime id and never calls readiness, exact inbox,
+attach, or raw retire operations. A queued brief is already durable and follows the ordinary
+notifier retry path; never duplicate or respawn it. If persistence fails before the brief exists,
+the control plane retires the unbriefed child. Settings-owned `sessionCommands` remain launch
+configuration; settings-owned `promptKeywords` ride the initial brief exactly once.
 
 ## settings.json Orchestration Block
 
@@ -311,18 +342,20 @@ defaults < global settings < repo-local settings.
 ```jsonc
 {
   "orchestration": {
+    // Illustrative installed catalog values: choose exact model keys and model-local efforts from
+    // each native adapter's dynamic advertise result on the target install/account.
     "roles": {  // role → knob override; validated: harness/model/effort · free-form: launchArgs/promptKeywords/sessionCommands
-      "architect":    { "harness": "claude", "effort": "high" },
-      "orchestrator": { "harness": "claude", "effort": "high" },
-      "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
-      "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
-      "system-specialist": { "harness": "claude", "model": "fable", "effort": "high" },
-      "curator":      { "harness": "codex",  "effort": "medium" },
-      "worker":       { "harness": "codex",  "effort": "medium" }
+      "architect":    { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
+      "orchestrator": { "harness": "codex", "model": "gpt-5.6-sol", "effort": "high" },
+      "strategist":   { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
+      "reviewer":     { "harness": "claude", "model": "claude-fable-5", "effort": "xhigh" },
+      "system-specialist": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
+      "curator":      { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" },
+      "worker":       { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" }
     },
     "rolesPerLevel": {  // per-LEVEL agent sets (leaf|master|portfolio), deep-merged over roles
-      "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
-      "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
+      "master":    { "reviewer": { "model": "claude-fable-5", "effort": "xhigh" } },
+      "portfolio": { "reviewer": { "model": "claude-fable-5", "effort": "max" } }
     },
     "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
     "spawn": { "harness": "claude" },  // fallback when no role/level knob supplies one
@@ -345,20 +378,24 @@ needs a restart (an authority-file value is a one-cycle legacy fallback with a b
 `requireReviewerVerdictAtSeams` **binds delegated seam decisions** (`master-handover-approval`) to
 attached reviewer-verdict evidence; the named policy `manager-decides-leaf-gates` routes leaf gates
 to the manager and the master-exit handover to the **orchestrator** (human review concentrates at
-the super gate). `spawn_agent_session` resolves its spend knobs (260703-L16 + HFX2-L10) as
+the super gate). The plane-owned structural dispatcher resolves spend knobs (260703-L16 +
+HFX2-L10) as
 repo-local level override > global level override > repo-local role default > global role default
 > detection-gated default — the dispatcher declares its `level` (leaf|master|portfolio, default
 leaf) and the resolved level rides spawn provenance. Legacy caller-supplied `harness`/`model`/
 `effort`, direct launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native
 spend/endpoint env keys refuse before spawning with `spend-override-unsupported`. Resolved knobs are
-**applied** at the harness boundary: model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` env AND map onto the launch argv
-per-harness via the effective registry (claude `--model`/`--effort`; a mapping-less harness stays
-env-only; a session-vocabulary effort like claude's `ultracode` is delivered as a post-launch
-`/effort` paste). Unknown effort values REFUSE at dispatch naming the harness's vocabulary — the
-CLI would warn-and-silently-degrade. The free-form escape hatch (`launchArgs` verbatim argv,
+**applied** through one typed native launch selection. `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` remain
+spawn provenance, not a second authority. Before the configured vendor session starts, the native
+adapter advertises its token-free, per-install/account catalog and validates the exact model plus
+that model's launch-settable effort. Claude uses native `--model`/`--effort`, Pi uses the exact
+provider-qualified key through `--model` plus `--thinking`, and Codex sends model plus
+`model_reasoning_effort` in `thread/start` configuration. Missing, stale, unsupported, or conflicting
+native selections fail through the hosted control state; there is no static builtin vocabulary,
+vendor-default substitution, or normalized model/effort composer paste. The free-form escape hatch (`launchArgs` verbatim argv,
 `promptKeywords` riding the post-readiness brief exactly once, `sessionCommands` applied during
-fresh-session launch) is never
-validated, only recorded in spawn provenance; `orchestration.harnesses` teaches the framework new
+fresh-session launch) remains explicitly user-authored, is never validated, and is never synthesized
+from normalized model/effort. It is recorded in spawn provenance; `orchestration.harnesses` teaches the framework new
 TUIs or pre-customizes builtin launches (manual: `docs/reference/harnesses.md`).
 `orchestration.loops` (the three-party-loop knobs: per-level loop sets, round cap, reviewer
 reuse, complexity thresholds) lives in the same block — meaning in

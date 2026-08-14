@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from agents_remember.providers.context import (
 )
 from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.compose_runtime import (
+    BackendStartReconciliation,
     compose_plan,
     remove_unmanaged_compose_container,
     remove_unmanaged_compose_network,
@@ -48,19 +50,72 @@ from agents_remember.providers.lifecycle.state_files import (
 )
 
 
-def cgc_primary_backend_context(
-    args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout], CgcRuntimeLayout, dict[str, Any]]:
+@dataclass(frozen=True)
+class CgcBackendContext:
+    """The CGC backend resolved from one lifecycle invocation's settings.
+
+    Which settings file the invocation read, the provider entry it found, every
+    configured repo layout (the FalkorDB backend is shared across them, and the
+    first is the primary the backend commands act through), and the resolved
+    backend settings. Every backend command needs all of it.
+    """
+
+    settings_path: Path
+    provider_settings: dict[str, Any]
+    layouts: list[CgcRuntimeLayout]
+    backend: dict[str, Any]
+
+    @property
+    def layout(self) -> CgcRuntimeLayout:
+        return self.layouts[0]
+
+
+@dataclass(frozen=True)
+class CgcBackendPort:
+    """One published CGC backend port, named by the keys that carry it.
+
+    A published port is spread across three dictionaries — the recorded backend
+    state, the resolved backend settings, and the container inspect data — under
+    a different key in each. The key set is the port's identity.
+    """
+
+    state_key: str
+    host_key: str
+    host_port_key: str
+    container_port_key: str
+
+
+FALKORDB_PORT = CgcBackendPort(
+    state_key="falkordb",
+    host_key="falkordbHost",
+    host_port_key="falkordbHostPort",
+    container_port_key="falkordbContainerPort",
+)
+BROWSER_PORT = CgcBackendPort(
+    state_key="browser",
+    host_key="browserHost",
+    host_port_key="browserHostPort",
+    container_port_key="browserContainerPort",
+)
+
+
+@dataclass(frozen=True)
+class CgcHostPorts:
+    """The host ports one CGC backend container publishes."""
+
+    falkordb: int
+    browser: int
+
+
+def cgc_primary_backend_context(args: argparse.Namespace) -> CgcBackendContext:
     settings_path, provider_settings, layouts = cgc_all_layouts_from_settings(args)
     if not layouts:
         raise ContextProviderError("codegraphcontext-code.roots must define at least one root")
-    layout = layouts[0]
-    return (
-        settings_path,
-        provider_settings,
-        layouts,
-        layout,
-        cgc_backend_settings(provider_settings, layout),
+    return CgcBackendContext(
+        settings_path=settings_path,
+        provider_settings=provider_settings,
+        layouts=layouts,
+        backend=cgc_backend_settings(provider_settings, layouts[0]),
     )
 
 
@@ -95,24 +150,8 @@ def cgc_backend_runtime_details(
         "dataMountMatches": cgc_backend_data_mount_matches(
             inspect_data, actual_data_mount, layout.backend_data_root
         ),
-        "falkordbEndpoint": cgc_backend_endpoint(
-            state,
-            backend,
-            inspect_data,
-            port_key="falkordb",
-            host_default_key="falkordbHost",
-            host_port_default_key="falkordbHostPort",
-            container_port_key="falkordbContainerPort",
-        ),
-        "browserEndpoint": cgc_backend_endpoint(
-            state,
-            backend,
-            inspect_data,
-            port_key="browser",
-            host_default_key="browserHost",
-            host_port_default_key="browserHostPort",
-            container_port_key="browserContainerPort",
-        ),
+        "falkordbEndpoint": cgc_backend_endpoint(state, backend, inspect_data, FALKORDB_PORT),
+        "browserEndpoint": cgc_backend_endpoint(state, backend, inspect_data, BROWSER_PORT),
     }
 
 
@@ -126,15 +165,11 @@ def cgc_backend_endpoint(
     state: dict[str, Any],
     backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
-    *,
-    port_key: str,
-    host_default_key: str,
-    host_port_default_key: str,
-    container_port_key: str,
+    port: CgcBackendPort,
 ) -> tuple[Any, Any]:
-    inspected = cgc_container_endpoint(inspect_data, backend[container_port_key])
+    inspected = cgc_container_endpoint(inspect_data, backend[port.container_port_key])
     return inspected or cgc_state_endpoint(
-        state, port_key, backend[host_default_key], backend[host_port_default_key]
+        state, port.state_key, backend[port.host_key], backend[port.host_port_key]
     )
 
 
@@ -157,7 +192,8 @@ def cgc_state_endpoint(
 
 
 def cgc_backend_status(args: argparse.Namespace) -> dict[str, Any]:
-    settings_path, _, _, layout, backend = cgc_primary_backend_context(args)
+    context = cgc_primary_backend_context(args)
+    settings_path, layout, backend = context.settings_path, context.layout, context.backend
     state = read_json(layout.backend_state_file)
     inspect_data = cgc_backend_inspect(args, layout, backend)
     running = docker_container_running(inspect_data)
@@ -242,14 +278,12 @@ def cgc_browser_url(host: str, port: int | str) -> str | None:
     return None if str(port) == "auto" else f"http://{host}:{port}"
 
 
-def cgc_backend_start_context(
-    args: argparse.Namespace,
-) -> tuple[Path, dict[str, Any], list[CgcRuntimeLayout], CgcRuntimeLayout, dict[str, Any]]:
-    settings_path, provider_settings, layouts, layout, backend = cgc_primary_backend_context(args)
-    ensure_cgc_runtime_layout(layout)
-    if backend["type"] != "falkordb-remote" or backend["mode"] != "docker":
+def cgc_backend_start_context(args: argparse.Namespace) -> CgcBackendContext:
+    context = cgc_primary_backend_context(args)
+    ensure_cgc_runtime_layout(context.layout)
+    if context.backend["type"] != "falkordb-remote" or context.backend["mode"] != "docker":
         raise ContextProviderError("managed CGC backend must be falkordb-remote docker")
-    return settings_path, provider_settings, layouts, layout, backend
+    return context
 
 
 def cgc_backend_remove_mismatched_container(
@@ -298,121 +332,111 @@ def cgc_existing_backend_host_ports(
 
 def cgc_backend_host_ports(
     args: argparse.Namespace, backend: dict[str, Any], inspect_data: dict[str, Any] | None
-) -> tuple[int, int]:
+) -> CgcHostPorts:
     existing = cgc_existing_backend_host_ports(backend, inspect_data)
     if existing:
-        return existing
+        return CgcHostPorts(falkordb=existing[0], browser=existing[1])
     if args.dry_run:
         falkordb = backend["falkordbHostPort"]
         browser = backend["browserHostPort"]
-        return (
-            6379 if str(falkordb) == "auto" else int(falkordb),
-            3000 if str(browser) == "auto" else int(browser),
+        return CgcHostPorts(
+            falkordb=6379 if str(falkordb) == "auto" else int(falkordb),
+            browser=3000 if str(browser) == "auto" else int(browser),
         )
-    return (
-        allocate_host_port(backend["falkordbHost"], backend["falkordbHostPort"], 6379),
-        allocate_host_port(backend["browserHost"], backend["browserHostPort"], 3000),
+    return CgcHostPorts(
+        falkordb=allocate_host_port(backend["falkordbHost"], backend["falkordbHostPort"], 6379),
+        browser=allocate_host_port(backend["browserHost"], backend["browserHostPort"], 3000),
     )
 
 
 def cgc_backend_dry_run_result(
+    context: CgcBackendContext,
+    reconciliation: BackendStartReconciliation,
     *,
-    settings_path: Path,
-    layout: CgcRuntimeLayout,
-    backend: dict[str, Any],
     commands: list[dict[str, Any]],
-    falkordb_port: int,
-    browser_port: int,
-    network: dict[str, Any],
+    ports: CgcHostPorts,
     compose: dict[str, Any] | None = None,
-    migration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    layout = context.layout
+    backend = context.backend
     return {
         "provider": "codegraphcontext",
         "action": "backend-start",
         "ok": True,
         "dryRun": True,
-        "settingsFile": settings_path.as_posix(),
+        "settingsFile": context.settings_path.as_posix(),
         "commands": commands,
         "backendRuntimeRoot": layout.backend_root.as_posix(),
         "backendDataRoot": layout.backend_data_root.as_posix(),
-        "network": network,
+        "network": reconciliation.network,
         "compose": compose,
-        "migration": migration,
+        "migration": reconciliation.migration,
         "ports": {
             "falkordb": {
                 "bindHost": backend["falkordbHost"],
-                "hostPort": falkordb_port,
+                "hostPort": ports.falkordb,
                 "containerPort": backend["falkordbContainerPort"],
             },
             "browser": {
                 "bindHost": backend["browserHost"],
-                "hostPort": browser_port,
+                "hostPort": ports.browser,
                 "containerPort": backend["browserContainerPort"],
             },
         },
-        "browserUrl": f"http://{backend['browserHost']}:{browser_port}",
+        "browserUrl": f"http://{backend['browserHost']}:{ports.browser}",
     }
 
 
 def cgc_backend_start(args: argparse.Namespace) -> dict[str, Any]:
-    settings_path, provider_settings, layouts, layout, backend = cgc_backend_start_context(args)
-    network_result = {"ok": True, "name": backend["networkName"], "managedBy": "docker-compose"}
-    migration = cgc_project_migration(args, provider_settings, layouts, backend)
-    inspect_data = cgc_backend_inspect(args, layout, backend)
+    context = cgc_backend_start_context(args)
+    backend = context.backend
+    migration = cgc_project_migration(args, context.provider_settings, context.layouts, backend)
+    inspect_data = cgc_backend_inspect(args, context.layout, backend)
     inspect_data, forced_remove_result, error = cgc_backend_remove_mismatched_container(
-        args, layout, backend, inspect_data
+        args, context.layout, backend, inspect_data
     )
     if error:
         return error
     return cgc_backend_create_start_result(
         args,
-        settings_path=settings_path,
-        provider_settings=provider_settings,
-        layouts=layouts,
-        layout=layout,
-        backend=backend,
+        context,
+        BackendStartReconciliation(
+            network={"ok": True, "name": backend["networkName"], "managedBy": "docker-compose"},
+            migration=migration,
+            forced_remove=forced_remove_result,
+        ),
         inspect_data=inspect_data,
-        forced_remove_result=forced_remove_result,
-        network_result=network_result,
-        migration=migration,
     )
 
 
 def cgc_backend_create_start_result(
     args: argparse.Namespace,
+    context: CgcBackendContext,
+    reconciliation: BackendStartReconciliation,
     *,
-    settings_path: Path,
-    provider_settings: dict[str, Any],
-    layouts: list[CgcRuntimeLayout],
-    layout: CgcRuntimeLayout,
-    backend: dict[str, Any],
     inspect_data: dict[str, Any] | None,
-    forced_remove_result: dict[str, Any] | None,
-    network_result: dict[str, Any],
-    migration: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    falkordb_port, browser_port = cgc_backend_host_ports(args, backend, inspect_data)
+    layout = context.layout
+    backend = context.backend
+    ports = cgc_backend_host_ports(args, backend, inspect_data)
     render = cgc_compose_render(
-        provider_settings,
-        layouts,
-        falkordb_port=falkordb_port,
-        browser_port=browser_port,
+        context.provider_settings,
+        context.layouts,
+        falkordb_port=ports.falkordb,
+        browser_port=ports.browser,
     )
     command_args = ["up", "-d", "falkordb"]
     if args.dry_run:
         return cgc_backend_dry_run_result(
-            settings_path=settings_path,
-            layout=layout,
-            backend=backend,
+            context,
+            reconciliation,
             commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
-            falkordb_port=falkordb_port,
-            browser_port=browser_port,
-            network=network_result,
+            ports=ports,
             compose=cgc_compose_summary(render),
-            migration=migration,
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     if up_result["returncode"] != 0:
         return {
             "provider": "codegraphcontext",
@@ -420,7 +444,7 @@ def cgc_backend_create_start_result(
             "ok": False,
             "command": up_result,
             "compose": cgc_compose_summary(render),
-            "migration": migration,
+            "migration": reconciliation.migration,
         }
     ping = docker_wait_for_ping(
         backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
@@ -429,14 +453,9 @@ def cgc_backend_create_start_result(
         backend["containerName"], cwd=layout.coordination_root, timeout=args.timeout
     )
     backend_state = cgc_backend_state(
-        layout,
-        backend,
-        settings_path=settings_path,
+        context,
         status="running",
-        falkordb_host=backend["falkordbHost"],
-        falkordb_port=falkordb_port,
-        browser_host=backend["browserHost"],
-        browser_port=browser_port,
+        ports=ports,
         image_digest=docker_repo_digest(
             backend["image"], cwd=layout.coordination_root, timeout=args.timeout
         ),
@@ -452,11 +471,11 @@ def cgc_backend_create_start_result(
         "ports": backend_state["backend"]["ports"],
         "browserUrl": backend_state["backend"]["browserUrl"],
         "commands": {
-            "forcedRemove": forced_remove_result,
-            "migration": migration,
+            "forcedRemove": reconciliation.forced_remove,
+            "migration": reconciliation.migration,
             "up": up_result,
         },
-        "network": network_result,
+        "network": reconciliation.network,
         "compose": cgc_compose_summary(render),
         "ping": ping,
     }
@@ -500,18 +519,17 @@ def cgc_project_migration(
 
 
 def cgc_backend_state(
-    layout: CgcRuntimeLayout,
-    backend: dict[str, Any],
+    context: CgcBackendContext,
     *,
-    settings_path: Path,
     status: str,
-    falkordb_host: str,
-    falkordb_port: int,
-    browser_host: str,
-    browser_port: int,
+    ports: CgcHostPorts,
     image_digest: str | None,
     container_id: str | None,
 ) -> dict[str, Any]:
+    layout = context.layout
+    backend = context.backend
+    falkordb_host = backend["falkordbHost"]
+    browser_host = backend["browserHost"]
     return {
         "provider": "codegraphcontext",
         "backend": {
@@ -529,17 +547,17 @@ def cgc_backend_state(
             "ports": {
                 "falkordb": {
                     "bindHost": falkordb_host,
-                    "hostPort": falkordb_port,
+                    "hostPort": ports.falkordb,
                     "containerPort": backend["falkordbContainerPort"],
                 },
                 "browser": {
                     "bindHost": browser_host,
-                    "hostPort": browser_port,
+                    "hostPort": ports.browser,
                     "containerPort": backend["browserContainerPort"],
                 },
             },
-            "browserUrl": f"http://{browser_host}:{browser_port}",
+            "browserUrl": f"http://{browser_host}:{ports.browser}",
         },
-        "settingsFile": settings_path.as_posix(),
+        "settingsFile": context.settings_path.as_posix(),
         "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

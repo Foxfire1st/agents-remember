@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskTreeNode } from "../data/taskIdentity";
 import { LeafAttachPicker } from "./LeafAttachPicker";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 // A nested tree: Operations Integration (master) → { L5 leaf, Engine Room (NESTED master) → E1 leaf }.
 // Proves the picker drills arbitrary nesting — "a master that is the leaf of another master".
@@ -100,5 +103,32 @@ describe("LeafAttachPicker drill-down", () => {
     fireEvent.click(getByTestId(`${TID}-back`)); // back to top
     expect(queryByTestId(`${TID}-back`)).toBeNull();
     expect(getByTestId(`${TID}-master`).getAttribute("data-master")).toBe("ops");
+  });
+
+  it("uses the available viewport instead of an arbitrary half-screen height cap", () => {
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(900);
+    const { getByTestId } = render(
+      <LeafAttachPicker tree={TREE} onPick={() => {}} align="right" />,
+    );
+    const trigger = getByTestId(TID);
+    trigger.getBoundingClientRect = () =>
+      ({
+        top: 60,
+        bottom: 82,
+        left: 700,
+        right: 820,
+        width: 120,
+        height: 22,
+        x: 700,
+        y: 60,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    fireEvent.click(trigger);
+
+    const menu = getByTestId(`${TID}-menu`);
+    expect(menu.style.top).toBe("86px");
+    expect(menu.style.maxHeight).toBe("806px");
+    expect(menu.style.right).not.toBe("");
   });
 });

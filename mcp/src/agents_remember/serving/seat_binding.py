@@ -1,8 +1,19 @@
-"""Leaf-seat binding roles shared by catalog, spawn, and attach surfaces."""
+"""Leaf-seat binding roles shared by catalog, spawn, and attach surfaces.
+
+The chat/terminal role constants and the legacy role resolver live in
+``models/terminal_catalog.py``; this module owns the binding decisions on top
+of them.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+
+from agents_remember.models.terminal_catalog import (
+    LEGACY_CHAT_SEAT_ROLE,
+    TERMINAL_SEAT_ROLE,
+    _clean,
+)
 
 PIPELINE_SEAT_ROLES = (
     "architect",
@@ -16,25 +27,6 @@ PIPELINE_SEAT_ROLES = (
     "system-specialist",
     "agent",
 )
-LEGACY_CHAT_SEAT_ROLE = "chat"
-TERMINAL_SEAT_ROLE = "terminal"
-
-
-def _clean(role: str | None) -> str | None:
-    if role is None:
-        return None
-    cleaned = role.strip()
-    return cleaned or None
-
-
-def migrated_seat_role(
-    *, persisted: str | None, spawn_role: str | None, kind: str
-) -> str:
-    """Resolve a catalog row's binding role, including the one-time legacy fallback."""
-
-    if kind == "terminal":
-        return TERMINAL_SEAT_ROLE
-    return _clean(persisted) or _clean(spawn_role) or LEGACY_CHAT_SEAT_ROLE
 
 
 def attach_seat_role(

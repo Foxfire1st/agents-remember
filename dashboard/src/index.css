@@ -2,8 +2,11 @@
    postcss plugin injects the generated `tokens` / `recipes` / `utilities` layers, while `reset` /
    `base` / `effects` are ours. Effects stay global + isolated (note 09), never per-component.
    Imported first in main.tsx. Token *values* still live in styles/tokens.css `:root` during the
-   migration (referenced here as var(--…)); they move into Panda tokens as panels are ported. */
-@layer reset, base, effects, tokens, recipes, utilities;
+   migration (referenced here as var(--…)); they move into Panda tokens as panels are ported.
+   `webtui` (260715-FEUI-L1 S1) hosts the scoped WebTUI skin for the sessions cockpit — slotted
+   between `effects` and `tokens` so Panda tokens/recipes/utilities always win a conflict, and the
+   unlayered html[data-effects="off"] freeze below stays above it all. */
+@layer reset, base, effects, webtui, tokens, recipes, utilities;
 
 @layer reset {
   * {
@@ -58,7 +61,10 @@
     inset: 0;
     z-index: 9999;
     pointer-events: none;
-    mix-blend-mode: multiply;
+    /* 260721 C1: NO mix-blend-mode. A full-page multiply blend forced a whole-screen re-raster on
+       every invalidated frame (each GSAP write / video frame / scroll). Plain alpha compositing
+       keeps the scanlines + vignette — they are translucent black over a dark theme, so the look
+       is ~unchanged — and lets the overlay sit on its own static compositor layer. */
     background:
       repeating-linear-gradient(0deg, oklch(0 0 0 / 0.18) 0 1px, transparent 1px 3px),
       radial-gradient(120% 120% at 50% 50%, transparent 70%, oklch(0 0 0 / 0.22) 100%);
@@ -85,6 +91,15 @@
   }
 }
 
+/* The cockpit state pulse (260715-FEUI-L2, stateGrammar.ts — developer ruling 2026-07-16):
+   SLOW ease-in-out opacity pulse, NEVER steps()/on-off blinking. Driven at 2.4s by the grammar's
+   PULSE_ANIMATION; frozen by effects=off below and by _motionReduce at the consumer. */
+@keyframes pulseSlow {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* Engine Room pod-stage CANVAS motion is GSAP (useEngineTimeline) + Motion (EnclosureCanvas), never CSS
    (05f §8) — the former canvas @keyframes (chargeSweep, conduitDraw, pktRun, attnBreath, stopFlash,
    closeoutSweep, warpSurgeUp/Down, landingIn) are removed. The indexing→nominal engine "powerup" is a
@@ -98,6 +113,24 @@
 
 
 
+
+/* RV-1 — @webtui/css base sets `body,html { word-break: break-all }` (it lands in the `webtui`
+   layer). `word-break: break-all` permits a break between ANY two characters regardless of
+   `overflow-wrap`, so every component-level overflow-wrap patch was inert in render (Inspector
+   headers/values, the rail footer, the keyboard-overlay footer, and prose all still broke mid-word:
+   `CAPABILI/TIES`, `thi/s`, `termi/nal`, `Be bri/ef`). Neutralize it once at the app root — this
+   unlayered rule wins over webtui's layered one — with break-word as the intended overflow policy.
+   Raw-id / hash spans that WANT character breaking carry their own explicit `word-break: break-all`
+   (a direct rule on the span overrides this inherited default, so they are unaffected).
+   `[data-view="sessions"]` is included because postcss-prefix-selector rewrites webtui's `body,html`
+   rule onto the cockpit scope root at build time, so the sessions view carries its OWN break-all that
+   an html/body override alone does not reach; descendants inherit `normal` from here. */
+html,
+body,
+[data-view="sessions"] {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
 
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +

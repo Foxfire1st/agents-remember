@@ -1,10 +1,12 @@
 import { css, cva } from "../../styled-system/css";
 import { sessionSeatRole, type OpenSession } from "../data/sessions";
+import { sameTaskDocumentRef } from "../data/taskIdentity";
+import type { TaskDocumentRef } from "../types/terminalCatalog";
 
 export type ChatActivityState = "needs-input" | "working" | "unknown" | "idle";
 
 export interface ChatActivityIdentity {
-  leafKey?: string;
+  taskDocumentRef?: TaskDocumentRef;
   lifecycleId?: string;
 }
 
@@ -71,10 +73,17 @@ function isLiveHarness(session: OpenSession): boolean {
   return session.kind === "harness" && session.status === "running";
 }
 
-function activityState(turnState: string | undefined): ChatActivityState {
+function activityState(
+  turnState: string | undefined,
+  controlState: OpenSession["controlState"],
+): ChatActivityState {
   if (turnState === "awaiting-input") return "needs-input";
   if (turnState === "working") return "working";
   if (turnState === "turn-ended") return "idle";
+  // A fresh ready-idle chat carries NO seat turn claim (the sweep
+  // stamps none until its first turn) — its calm idle reads from the control lifecycle,
+  // never from a fabricated stale/turn-ended.
+  if (turnState === undefined && controlState === "ready") return "idle";
   return "unknown";
 }
 
@@ -87,13 +96,15 @@ function boundSessions(
   identity: ChatActivityIdentity,
 ): OpenSession[] {
   const liveHarnesses = sessions.filter(isLiveHarness);
-  const exactLeaf = identity.leafKey
-    ? liveHarnesses.filter((session) => session.leafKey === identity.leafKey)
+  const exactTask = identity.taskDocumentRef
+    ? liveHarnesses.filter((session) =>
+        sameTaskDocumentRef(session.taskDocumentRef, identity.taskDocumentRef),
+      )
     : [];
-  if (exactLeaf.length > 0) return exactLeaf;
+  if (exactTask.length > 0) return exactTask;
   if (!identity.lifecycleId) return [];
   return liveHarnesses.filter(
-    (session) => !session.leafKey && session.lifecycleId === identity.lifecycleId,
+    (session) => !session.taskDocumentRef && session.lifecycleId === identity.lifecycleId,
   );
 }
 
@@ -105,7 +116,7 @@ export function summarizeChatActivity(
     .map((session) => ({
       id: session.id,
       role: sessionSeatRole(session),
-      state: activityState(session.turnState),
+      state: activityState(session.turnState, session.controlState),
     }))
     .sort((left, right) => left.role.localeCompare(right.role) || left.id.localeCompare(right.id));
   if (seats.length === 0) return undefined;

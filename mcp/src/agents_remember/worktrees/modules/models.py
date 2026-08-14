@@ -17,13 +17,29 @@ class WorktreeCommandResult:
 
 
 @dataclass(frozen=True)
+class VerifiedChange:
+    """The landed code change that onboarding metadata is stamped against.
+
+    Every refresher needs the same four facts together -- the commit, its date, the paths it
+    touched, and the working-tree subset of those paths that gates closeout (``None`` when
+    the caller has no separate working set). Splitting them let a caller stamp one commit's
+    hash beside another's path list.
+    """
+
+    commit: str
+    commit_date: str
+    changed_paths: list[str]
+    working_paths: list[str] | None = None
+
+
+@dataclass(frozen=True)
 class WorktreeProviderSetupConfig:
     coordination_root: Path
     settings_path: Path
     seed_source_coordination_root: Path | None = None
     # True when settings_path is a temporary file whose lifetime must extend
-    # into the background setup thread; the launcher then owns the unlink and
-    # the controller must skip its own cleanup for a "starting" result.
+    # into the background setup thread; the launcher then owns the unlink and the
+    # application entry point must skip its own cleanup for a "starting" result.
     unlink_settings_after_setup: bool = False
 
 
@@ -43,7 +59,7 @@ class OnboardingRefreshPlan(TypedDict):
 
 
 class RouteOverviewRefreshPlan(TypedDict):
-    """Route-overview verification-metadata refresh plan."""
+    """Route-overview refresh plan for source-matched and task-edited routes."""
 
     required: list[dict[str, str]]
     missing_metadata: list[str]

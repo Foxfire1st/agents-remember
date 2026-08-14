@@ -1,6 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FilesApiError, fetchRepos, listDir, readFile, resolveForward, resolveReverse } from "./files";
+import {
+  FilesApiError,
+  FILES_REPOS_REQUEST_TIMEOUT_MS,
+  fetchRepos,
+  listDir,
+  readFile,
+  resolveForward,
+  resolveReverse,
+} from "./files";
+
+// A half-dead socket (the hung-transport class): never settles on its own; rejects only when
+// the request's abort signal fires — what a REAL fetch does when the fetchWithTimeout bound
+// aborts it.
+const hungSocketImplementation = (_url: string, init?: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("The operation was aborted.", "AbortError")),
+    );
+  });
 
 function stubFetch(payload: unknown, ok = true, status = 200) {
   const fn = vi.fn(
@@ -31,5 +49,67 @@ describe("data/files client", () => {
   it("throws FilesApiError carrying the server status code on a non-ok response", async () => {
     stubFetch({ status: "bad-path" }, false, 400);
     await expect(listDir("r", "mainline", "..")).rejects.toBeInstanceOf(FilesApiError);
+  });
+});
+
+describe("fetchRepos single-flight (data/inflight)", () => {
+  it("shares one in-flight request between concurrent callers; both resolve", async () => {
+    const catalog = { repos: [{ repo: "agents-remember" }] };
+    const fn = stubFetch(catalog);
+    const one = fetchRepos();
+    const two = fetchRepos();
+    expect(fn).toHaveBeenCalledTimes(1);
+    await expect(one).resolves.toEqual(catalog);
+    await expect(two).resolves.toEqual(catalog);
+  });
+
+  it("delivers the same rejection to every caller, then clears so a retry re-fires", async () => {
+    const fn = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    vi.stubGlobal("fetch", fn);
+    const one = fetchRepos();
+    const two = fetchRepos();
+    await expect(one).rejects.toThrow("offline");
+    await expect(two).rejects.toThrow("offline");
+    expect(fn).toHaveBeenCalledTimes(1);
+    // The rejected read released the slot: a later call re-fires the request.
+    await expect(fetchRepos()).rejects.toThrow("offline");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-fires after a successful read settles (single-flight, not a cache)", async () => {
+    const fn = stubFetch({ repos: [] });
+    await fetchRepos();
+    await fetchRepos();
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("a hung catalog socket rejects within the bound, clearing the slot for a fresh retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const catalog = { repos: [] };
+      const fn = vi
+        .fn()
+        .mockImplementationOnce(hungSocketImplementation)
+        .mockImplementationOnce(
+          async () =>
+            ({ ok: true, status: 200, statusText: "", json: async () => catalog }) as unknown as Response,
+        );
+      vi.stubGlobal("fetch", fn);
+
+      const hung = fetchRepos();
+      // Attach the rejection expectation BEFORE advancing time so the abort rejection never
+      // surfaces as an unhandled rejection.
+      const expired = expect(hung).rejects.toThrow(/abort/i);
+      await vi.advanceTimersByTimeAsync(FILES_REPOS_REQUEST_TIMEOUT_MS);
+      await expired; // the bound turned the wedge into a rejection
+
+      // The rejection released the slot: the retry fires a fresh request and succeeds.
+      await expect(fetchRepos()).resolves.toEqual(catalog);
+      expect(fn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

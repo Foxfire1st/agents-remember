@@ -19,7 +19,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.tool_reports import (
+from agents_remember.kernel.primitives.tool_reports import (
     prune_tool_reports,
     redact_secrets,
     write_tool_report,

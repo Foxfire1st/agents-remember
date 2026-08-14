@@ -1,0 +1,740 @@
+// The LaunchFlow jsdom matrix (260715-FEUI-L3 S2/S3/S6): dynamic-only pickers, miss/refresh
+// cost-naming parity, complete-pair gating with default re-gating, advertised-order rendering,
+// all four open-response paths, and the F9 unknown-outcome catalog reconciliation.
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { capabilityCatalogStore, capabilityCostNote } from "../../data/capabilityCatalog";
+import { resetCatalogPollForDev } from "../../data/catalogPoll";
+import type { HarnessInfo } from "../../data/harnessCatalog";
+import { sessionCockpitStore } from "../../data/sessionCockpitStore";
+import { fromTerminalSessionInfo, sessionStore, type OpenSession } from "../../data/sessions";
+import { dashboardStore } from "../../data/store";
+import { capabilityEnvelope } from "../../test/fixtures/capabilityEnvelopes";
+import { catalogRow } from "../../test/fixtures/catalogRows";
+import {
+  INVALID_PARTIAL_PAIR,
+  LAUNCH_CONFLICT,
+  SEAT_TAKEN,
+  OPENED_STARTING,
+} from "../../test/fixtures/openResponses";
+import { LaunchFlow } from "./LaunchFlow";
+
+// Annotated rather than bare: `HarnessInfo` is declared in `data/harnessCatalog.ts`, which carries
+// no mirror marker and so is invisible to `wireFixtureGuard.ts`. These three rows each carried a
+// `control` the server's `DetectedHarness` (`extra="forbid"`) does not declare and no dashboard
+// code reads; the annotation is what makes a second such field fail `tsc -b` here.
+const HARNESSES: { harnesses: HarnessInfo[] } = {
+  harnesses: [
+    { id: "claude", name: "Claude Code", detected: true },
+    { id: "codex", name: "Codex", detected: true },
+    { id: "pi", name: "Pi.dev", detected: false },
+  ],
+};
+
+type Router = (url: string, init?: RequestInit) => Promise<{ status: number; body: unknown }>;
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
+function stubFetch(router: Router) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const { status, body } = await router(url, init);
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function stubBroadcastMessages(): unknown[] {
+  const messages: unknown[] = [];
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      onmessage = null;
+      postMessage(message: unknown) {
+        messages.push(message);
+      }
+      close() {}
+    },
+  );
+  return messages;
+}
+
+/** Default happy router: harness list, claude/codex envelopes, empty catalog, opened POST. */
+function defaultRouter(openResponse: { status: number; body: unknown }): Router {
+  return async (url) => {
+    if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+    if (url.startsWith("/api/harnesses/claude/capabilities")) {
+      return { status: 200, body: capabilityEnvelope("claude", "hit") };
+    }
+    if (url.startsWith("/api/harnesses/codex/capabilities")) {
+      return { status: 200, body: capabilityEnvelope("codex", "miss") };
+    }
+    if (url === "/api/terminal/sessions") return { status: 200, body: { sessions: [] } };
+    if (url.startsWith("/api/terminal/")) return openResponse;
+    throw new Error(`unrouted ${url}`);
+  };
+}
+
+function renderFlow(overrides: Partial<Parameters<typeof LaunchFlow>[0]> = {}) {
+  const onClose = vi.fn();
+  const onFocusSession = vi.fn();
+  const view = render(
+    <LaunchFlow
+      open
+      sessions={[]}
+      onClose={onClose}
+      onFocusSession={onFocusSession}
+      mintSessionId={() => "launch-1"}
+      {...overrides}
+    />,
+  );
+  return { ...view, onClose, onFocusSession };
+}
+
+beforeEach(() => {
+  resetCatalogPollForDev();
+  capabilityCatalogStore.setState({ perHarness: {} });
+  sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  sessionCockpitStore.setState({
+    focusedSessionId: null,
+    perSession: {},
+    pollHealth: { lastBeatAt: null, missedBeats: 0, healthy: true },
+  });
+  dashboardStore.getState().reset();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("the catalog body this file serves is one the daemon could send", () => {
+  it("advertises exactly the three fields `DetectedHarness` declares", () => {
+    // The annotation above catches a field added to a FRESH row. This catches the rest: a row
+    // spread in from somewhere else, or a key written onto the array after the fact. Both are
+    // invisible to `tsc` and to `wireFixtureGuard.ts`, because `harnessCatalog.ts` is not a
+    // marker-carrying mirror module and `HarnessInfo` is therefore not wire vocabulary.
+    for (const row of HARNESSES.harnesses) {
+      expect(Object.keys(row).sort()).toEqual(["detected", "id", "name"]);
+    }
+  });
+});
+
+describe("LaunchFlow — dynamic-only pickers (R1/R4)", () => {
+  it("renders NO model/effort options before the daemon answers; populates from the envelope only", async () => {
+    let releaseCapabilities: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseCapabilities = resolve;
+    });
+    stubFetch(async (url) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        await gate;
+        return { status: 200, body: capabilityEnvelope("claude", "hit") };
+      }
+      throw new Error(`unrouted ${url}`);
+    });
+    const { findByTestId, queryByTestId, getByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-claude"));
+    // pending: cost-named loading, ZERO options — nothing is invented client-side
+    await findByTestId("launch-cap-loading");
+    expect(queryByTestId("launch-model-list")).toBeNull();
+    expect(getByTestId("launch-cap-loading").textContent).toContain(capabilityCostNote("claude"));
+    releaseCapabilities?.();
+    const list = await findByTestId("launch-model-list");
+    const keys = [...list.querySelectorAll("[data-testid^='launch-model-']")].map((node) =>
+      node.getAttribute("data-testid"),
+    );
+    expect(keys).toEqual([
+      "launch-model-default",
+      "launch-model-opus[1m]",
+      "launch-model-claude-fable-5[1m]",
+      "launch-model-sonnet",
+      "launch-model-haiku",
+    ]);
+  });
+
+  it("an undetected harness is disabled; no not-yet-created adapter process is projected", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId } = renderFlow();
+    const pi = await findByTestId("launch-harness-pi");
+    expect(pi.hasAttribute("disabled")).toBe(true);
+    // Even a stale older response carrying the retired field cannot make the chooser claim a
+    // process exists. Real opened catalog rows keep their separate starting -> ready/failed state.
+    expect(pi.textContent).not.toContain("adapter starting");
+    expect((await findByTestId("launch-harness-claude")).textContent).not.toContain(
+      "adapter starting",
+    );
+  });
+
+  it("a hidden model row never renders; the rest keep advertised order", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId, queryByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-codex"));
+    await findByTestId("launch-model-list");
+    expect(queryByTestId("launch-model-codex-auto-review")).toBeNull();
+    expect(queryByTestId("launch-model-gpt-5.6-sol")).not.toBeNull();
+  });
+
+  it("capability-route errors render the VERBATIM status+detail with a retry (never an empty menu)", async () => {
+    let failures = 0;
+    stubFetch(async (url) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        failures += 1;
+        if (failures === 1) {
+          return {
+            status: 503,
+            body: { status: "control-unavailable", detail: "discovery quarantined after a failed refresh" },
+          };
+        }
+        return { status: 200, body: capabilityEnvelope("claude", "miss") };
+      }
+      throw new Error(`unrouted ${url}`);
+    });
+    const { findByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-claude"));
+    const error = await findByTestId("launch-cap-error");
+    expect(error.textContent).toBe(
+      "control-unavailable: discovery quarantined after a failed refresh",
+    );
+    fireEvent.click(await findByTestId("launch-cap-retry"));
+    await findByTestId("launch-model-list");
+  });
+});
+
+describe("LaunchFlow — owned harness-catalog recovery (L9R R3/R4)", () => {
+  it("first-read failure retries in place and renders all choices without closing", async () => {
+    let reads = 0;
+    stubFetch(async (url) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      reads += 1;
+      if (reads === 1) throw new Error("daemon restarting");
+      return { status: 200, body: HARNESSES };
+    });
+    const view = renderFlow();
+    expect((await view.findByTestId("launch-harness-error")).textContent).toContain(
+      "network error",
+    );
+    fireEvent.click(view.getByTestId("launch-harness-retry"));
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+    expect(view.getByTestId("launch-harness-codex")).toBeTruthy();
+    expect(view.getByTestId("launch-harness-pi")).toBeTruthy();
+    expect(view.onClose).not.toHaveBeenCalled();
+  });
+
+  it("a held read becomes a distinct timeout and then retries successfully", async () => {
+    const held = deferred<{ status: number; body: unknown }>();
+    let reads = 0;
+    let firstSignal: AbortSignal | undefined;
+    stubFetch(async (url, init) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      reads += 1;
+      if (reads === 1) firstSignal = init?.signal ?? undefined;
+      return reads === 1 ? held.promise : { status: 200, body: HARNESSES };
+    });
+    const view = renderFlow({ harnessReadTimeoutMs: 10 });
+    expect((await view.findByTestId("launch-harness-timeout")).textContent).toContain(
+      "timed out",
+    );
+    expect(firstSignal?.aborted).toBe(true);
+    fireEvent.click(view.getByTestId("launch-harness-retry"));
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+    expect(reads).toBe(2);
+  });
+
+  it.each([
+    { body: {} },
+    { body: { harnesses: "not-an-array" } },
+    { body: { harnesses: [{ id: "claude", name: "Claude Code" }] } },
+  ])(
+    "a malformed HTTP 200 is a protocol error, never a blank row ($body)",
+    async ({ body }) => {
+      stubFetch(async () => ({ status: 200, body }));
+      const view = renderFlow();
+      expect((await view.findByTestId("launch-harness-error")).textContent).toContain(
+        "protocol error",
+      );
+      expect(view.queryByTestId("launch-harness-list")).toBeNull();
+      expect(view.getByTestId("launch-harness-retry")).toBeTruthy();
+    },
+  );
+
+  it("an honest empty catalog has explicit zero-state copy and Retry", async () => {
+    stubFetch(async () => ({ status: 200, body: { harnesses: [] } }));
+    const view = renderFlow();
+    expect((await view.findByTestId("launch-harness-empty")).textContent).toContain(
+      "no harnesses advertised",
+    );
+    expect(view.getByTestId("launch-harness-retry")).toBeTruthy();
+    expect(view.queryByTestId("launch-harness-list")).toBeNull();
+  });
+
+  it("one new serving boot identity causes exactly one replacement read", async () => {
+    dashboardStore.setState({
+      servingBuild: { version: "1", bootedAt: "2026-07-18T08:00:00Z" },
+    });
+    const fetchMock = stubFetch(async () => ({ status: 200, body: HARNESSES }));
+    const view = renderFlow();
+    await view.findByTestId("launch-harness-claude");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+      dashboardStore.getState().setConn("signal-lost");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("the first serving identity observed after an SSE-less open causes one reread", async () => {
+    const fetchMock = stubFetch(async () => ({ status: 200, body: HARNESSES }));
+    const view = renderFlow();
+    await view.findByTestId("launch-harness-claude");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => dashboardStore.getState().setConn("signal-lost"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a boot replacement aborts the old read and ignores its late completion", async () => {
+    dashboardStore.setState({
+      servingBuild: { version: "1", bootedAt: "2026-07-18T08:00:00Z" },
+    });
+    const first = deferred<{ status: number; body: unknown }>();
+    let reads = 0;
+    let firstSignal: AbortSignal | undefined;
+    stubFetch(async (url, init) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      reads += 1;
+      if (reads === 1) {
+        firstSignal = init?.signal ?? undefined;
+        return first.promise;
+      }
+      return { status: 200, body: HARNESSES };
+    });
+    const view = renderFlow();
+    await waitFor(() => expect(reads).toBe(1));
+
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+    });
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+    expect(firstSignal?.aborted).toBe(true);
+    expect(reads).toBe(2);
+
+    // Deliberately resolve the aborted mock: request identity, not mock abort compliance, owns state.
+    first.resolve({ status: 200, body: { harnesses: [] } });
+    await act(async () => Promise.resolve());
+    expect(view.getByTestId("launch-harness-claude")).toBeTruthy();
+    expect(view.queryByTestId("launch-harness-empty")).toBeNull();
+  });
+
+  it("closing the chooser aborts its in-flight catalog read", async () => {
+    const held = deferred<{ status: number; body: unknown }>();
+    let signal: AbortSignal | undefined;
+    stubFetch(async (url, init) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      signal = init?.signal ?? undefined;
+      return held.promise;
+    });
+    const props = {
+      sessions: [] as OpenSession[],
+      onClose: vi.fn(),
+      onFocusSession: vi.fn(),
+      mintSessionId: () => "launch-1",
+    };
+    const view = render(<LaunchFlow open {...props} />);
+    await waitFor(() => expect(signal).toBeDefined());
+    view.rerender(<LaunchFlow open={false} {...props} />);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("SSE loss is independent from harness discovery", async () => {
+    dashboardStore.getState().setConn("signal-lost");
+    stubFetch(async () => ({ status: 200, body: HARNESSES }));
+    const view = renderFlow();
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+  });
+});
+
+describe("LaunchFlow — cost honesty (R2)", () => {
+  it("miss-loading and explicit refresh show the SAME cost naming", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-claude"));
+    await findByTestId("launch-model-list");
+    const refreshButton = await findByTestId("launch-cap-refresh");
+    // the refresh affordance carries the same generic cost note the loading state used
+    expect(refreshButton.getAttribute("title")).toBe(capabilityCostNote("claude"));
+    fireEvent.click(refreshButton);
+    const loading = await findByTestId("launch-cap-loading");
+    expect(loading.textContent).toContain(capabilityCostNote("claude"));
+    await findByTestId("launch-model-list");
+  });
+
+  it("the loaded state names the cache truth (hit vs miss-cost parity wording)", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-codex"));
+    const note = await findByTestId("launch-cache-status");
+    expect(note.textContent).toContain("cache miss");
+    expect(note.textContent).toContain("same short-lived native discovery as a refresh");
+  });
+});
+
+describe("LaunchFlow — complete-pair rules (R4)", () => {
+  it("selecting a model re-gates effort to ITS advertised default; switching re-gates again", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-codex"));
+    fireEvent.click(await findByTestId("launch-model-gpt-5.6-sol"));
+    expect((await findByTestId("launch-effort-low")).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(await findByTestId("launch-model-gpt-5.3-codex-spark"));
+    expect((await findByTestId("launch-effort-high")).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("a model with no advertised launch default demands an explicit effort choice", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId, getByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-claude"));
+    fireEvent.click(await findByTestId("launch-model-sonnet"));
+    await findByTestId("launch-effort-choose");
+    expect(getByTestId("launch-submit").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(getByTestId("launch-effort-high"));
+    expect(getByTestId("launch-submit").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("efforts render in advertised native order with no reordering", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-codex"));
+    fireEvent.click(await findByTestId("launch-model-gpt-5.6-sol"));
+    const list = await findByTestId("launch-effort-list");
+    const keys = [...list.querySelectorAll("[data-testid^='launch-effort-']")].map((node) =>
+      node.textContent,
+    );
+    expect(keys).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+  });
+
+  it("the effortless Haiku row cannot form a pair — the flow says so and stays disabled", async () => {
+    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId, getByTestId } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-claude"));
+    fireEvent.click(await findByTestId("launch-model-haiku"));
+    const note = await findByTestId("launch-effort-none");
+    expect(note.textContent).toContain("no launch-settable efforts");
+    expect(getByTestId("launch-submit").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("vendor defaults sends NEITHER knob on the wire", async () => {
+    const fetchMock = stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const { findByTestId, getByTestId, onFocusSession } = renderFlow();
+    fireEvent.click(await findByTestId("launch-harness-claude"));
+    fireEvent.click(await findByTestId("launch-vendor-defaults"));
+    fireEvent.click(getByTestId("launch-submit"));
+    await waitFor(() => expect(onFocusSession).toHaveBeenCalled());
+    const openCall = fetchMock.mock.calls.find(
+      ([url, init]) => (url as string).startsWith("/api/terminal/launch-1") && init,
+    );
+    const body = JSON.parse((openCall?.[1] as RequestInit).body as string) as Record<string, unknown>;
+    expect("model" in body).toBe(false);
+    expect("effort" in body).toBe(false);
+  });
+});
+
+describe("LaunchFlow — response paths (R5)", () => {
+  async function launchClaudePair(view: ReturnType<typeof renderFlow>) {
+    fireEvent.click(await view.findByTestId("launch-harness-claude"));
+    fireEvent.click(await view.findByTestId("launch-model-claude-fable-5[1m]"));
+    fireEvent.click(await view.findByTestId("launch-effort-max"));
+    fireEvent.click(view.getByTestId("launch-submit"));
+  }
+
+  it("200 → inherits lifecycle, broadcasts create, records pending evidence, focuses, and closes", async () => {
+    const messages: unknown[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage = null;
+        postMessage(message: unknown) {
+          messages.push(message);
+        }
+        close() {}
+      },
+    );
+    const fetchMock = stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const view = renderFlow({ lifecycleId: "LC-S5" });
+    await launchClaudePair(view);
+    await waitFor(() => expect(view.onFocusSession).toHaveBeenCalledWith("launch-1"));
+    expect(view.onClose).toHaveBeenCalled();
+    expect(sessionCockpitStore.getState().perSession["launch-1"].launchEvidence).toEqual({
+      retainedModel: "claude-fable-5[1m]",
+      retainedEffort: "max",
+      tier: "pending",
+    });
+    const openCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/terminal/launch-1" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(openCall?.[1]?.body))).toEqual({
+      kind: "harness",
+      harness: "claude",
+      model: "claude-fable-5[1m]",
+      effort: "max",
+      lifecycleId: "LC-S5",
+    });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "terminal-catalog-changed",
+        reason: "create",
+        sessionId: "launch-1",
+      }),
+    );
+  });
+
+  it("revokes an open POST that settles after the dev scenario authority changes", async () => {
+    const messages = stubBroadcastMessages();
+    const pendingOpen = deferred<{ status: number; body: unknown }>();
+    const fetchMock = stubFetch(async (url, init) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        return { status: 200, body: capabilityEnvelope("claude", "hit") };
+      }
+      if (url === "/api/terminal/launch-1" && init?.method === "POST") {
+        return pendingOpen.promise;
+      }
+      if (url === "/api/terminal/sessions") return { status: 200, body: { sessions: [] } };
+      throw new Error(`unrouted ${url}`);
+    });
+    const view = renderFlow();
+    await launchClaudePair(view);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => url === "/api/terminal/launch-1" && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+
+    view.unmount();
+    resetCatalogPollForDev();
+    sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+    sessionStore
+      .getState()
+      .hydrate([fromTerminalSessionInfo(catalogRow({ id: "architect" }))], "architect");
+    const successorPollHealth = { lastBeatAt: 123, missedBeats: 2, healthy: true };
+    sessionCockpitStore.setState({
+      focusedSessionId: "architect",
+      perSession: {},
+      pollHealth: successorPollHealth,
+    });
+
+    pendingOpen.resolve({ status: 200, body: OPENED_STARTING });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["architect"]);
+    expect(sessionCockpitStore.getState().perSession["launch-1"]).toBeUndefined();
+    expect(sessionCockpitStore.getState().focusedSessionId).toBe("architect");
+    expect(sessionCockpitStore.getState().pollHealth).toEqual(successorPollHealth);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === "/api/terminal/sessions"),
+    ).toHaveLength(0);
+    const openCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/terminal/launch-1" && init?.method === "POST",
+    );
+    expect(openCalls).toHaveLength(1);
+    expect(JSON.parse(String(openCalls[0]?.[1]?.body))).toEqual({
+      kind: "harness",
+      harness: "claude",
+      model: "claude-fable-5[1m]",
+      effort: "max",
+    });
+    expect(view.onFocusSession).not.toHaveBeenCalled();
+    expect(view.onClose).not.toHaveBeenCalled();
+    expect(messages).toEqual([]);
+  });
+
+  it("400 launch-selection-invalid → the verbatim detail, nothing retried", async () => {
+    stubFetch(defaultRouter({ status: 400, body: INVALID_PARTIAL_PAIR }));
+    const view = renderFlow();
+    await launchClaudePair(view);
+    const outcome = await view.findByTestId("launch-outcome-invalid");
+    expect(outcome.textContent).toContain("model and effort must be provided together");
+    expect(view.onClose).not.toHaveBeenCalled();
+  });
+
+  it("409 seat-taken → names the owning session and offers focus", async () => {
+    stubFetch(defaultRouter({ status: 409, body: SEAT_TAKEN }));
+    const view = renderFlow();
+    await launchClaudePair(view);
+    const outcome = await view.findByTestId("launch-outcome-seat-taken");
+    expect(outcome.textContent).toContain("worker-l3-live");
+    fireEvent.click(view.getByTestId("launch-focus-owner"));
+    expect(view.onFocusSession).toHaveBeenCalledWith("worker-l3-live");
+  });
+
+  it("409 conflict → live retained pair vs attempted pair + 'focus existing session'; no evidence rewritten", async () => {
+    stubFetch(defaultRouter({ status: 409, body: LAUNCH_CONFLICT }));
+    const view = renderFlow();
+    fireEvent.click(await view.findByTestId("launch-harness-claude"));
+    fireEvent.click(await view.findByTestId("launch-model-sonnet"));
+    fireEvent.click(await view.findByTestId("launch-effort-high"));
+    fireEvent.click(view.getByTestId("launch-submit"));
+    const pairs = await view.findByTestId("launch-conflict-pairs");
+    expect(pairs.textContent).toContain("live retained pair: claude-fable-5[1m] · max");
+    expect(pairs.textContent).toContain("attempted: sonnet · high");
+    // provenance untouched: the flow wrote NO launch evidence for the live session
+    expect(sessionCockpitStore.getState().perSession["launch-1"]).toBeUndefined();
+    fireEvent.click(view.getByTestId("launch-focus-existing"));
+    expect(view.onFocusSession).toHaveBeenCalledWith("launch-1");
+  });
+
+  it("transport loss → 'open outcome unknown — checking the catalog', resolved by row appearance (F9)", async () => {
+    const messages = stubBroadcastMessages();
+    stubFetch(async (url) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        return { status: 200, body: capabilityEnvelope("claude", "hit") };
+      }
+      if (url.startsWith("/api/terminal/launch-1")) throw new Error("socket hang up");
+      throw new Error(`unrouted ${url}`);
+    });
+    const view = renderFlow();
+    await launchClaudePair(view);
+    const unknown = await view.findByTestId("launch-outcome-unknown");
+    expect(unknown.textContent).toContain("open outcome unknown — checking the catalog");
+    expect(view.onClose).not.toHaveBeenCalled();
+    // the caller-minted id appears on the next catalog beat → the flow resolves WITHOUT re-POST
+    const appeared: OpenSession[] = [
+      fromTerminalSessionInfo(catalogRow({ id: "launch-1", controlState: "starting" })),
+    ];
+    view.rerender(
+      <LaunchFlow
+        open
+        sessions={appeared}
+        onClose={view.onClose}
+        onFocusSession={view.onFocusSession}
+        mintSessionId={() => "launch-1"}
+      />,
+    );
+    await waitFor(() => expect(view.onFocusSession).toHaveBeenCalledWith("launch-1"));
+    expect(view.onClose).toHaveBeenCalled();
+    expect(messages).toContainEqual(
+      expect.objectContaining({ reason: "create", sessionId: "launch-1" }),
+    );
+  });
+
+  it("an explicit dismiss ENDS the unknown-outcome watch — a late row never steals focus (review finding 1)", async () => {
+    stubFetch(async (url) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        return { status: 200, body: capabilityEnvelope("claude", "hit") };
+      }
+      if (url.startsWith("/api/terminal/launch-1")) throw new Error("socket hang up");
+      throw new Error(`unrouted ${url}`);
+    });
+    const view = renderFlow();
+    await launchClaudePair(view);
+    await view.findByTestId("launch-outcome-unknown");
+    // the operator dismisses; the parent closes the dialog (it stays mounted, open=false)
+    fireEvent.click(view.getByTestId("launch-cancel"));
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <LaunchFlow
+        open={false}
+        sessions={[]}
+        onClose={view.onClose}
+        onFocusSession={view.onFocusSession}
+        mintSessionId={() => "launch-1"}
+      />,
+    );
+    // minutes later the daemon-processed row surfaces on a catalog beat…
+    const late: OpenSession[] = [
+      fromTerminalSessionInfo(catalogRow({ id: "launch-1", controlState: "starting" })),
+    ];
+    view.rerender(
+      <LaunchFlow
+        open={false}
+        sessions={late}
+        onClose={view.onClose}
+        onFocusSession={view.onFocusSession}
+        mintSessionId={() => "launch-1"}
+      />,
+    );
+    // …and NOTHING fires: no focus steal, no extra close. The rail's poll shows the row.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.onFocusSession).not.toHaveBeenCalled();
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("REOPEN after a dismissed unknown outcome starts clean — the stale id never fires (delta-verify residual)", async () => {
+    stubFetch(async (url) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        return { status: 200, body: capabilityEnvelope("claude", "hit") };
+      }
+      if (url.startsWith("/api/terminal/launch-1")) throw new Error("socket hang up");
+      throw new Error(`unrouted ${url}`);
+    });
+    const view = renderFlow();
+    await launchClaudePair(view);
+    await view.findByTestId("launch-outcome-unknown");
+    fireEvent.click(view.getByTestId("launch-cancel")); // dismiss clears the watch state itself
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+    // the daemon-processed row lands WHILE the dialog is closed…
+    const late: OpenSession[] = [
+      fromTerminalSessionInfo(catalogRow({ id: "launch-1", controlState: "starting" })),
+    ];
+    view.rerender(
+      <LaunchFlow
+        open={false}
+        sessions={late}
+        onClose={view.onClose}
+        onFocusSession={view.onFocusSession}
+        mintSessionId={() => "launch-1"}
+      />,
+    );
+    // …then the operator REOPENS the flow: the first effect pass must NOT fire the stale id
+    // (before this fix, the watcher ran once with the surviving unknownId before the reset).
+    view.rerender(
+      <LaunchFlow
+        open
+        sessions={late}
+        onClose={view.onClose}
+        onFocusSession={view.onFocusSession}
+        mintSessionId={() => "launch-1"}
+      />,
+    );
+    await view.findByTestId("launch-flow"); // fully reopened
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.onFocusSession).not.toHaveBeenCalled();
+    expect(view.onClose).toHaveBeenCalledTimes(1); // no phantom close either
+  });
+});

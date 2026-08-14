@@ -1,53 +1,18 @@
 name: Quality checks
 
 on:
-  push:
-    branches: ["main"]
+  # The pull request owns GitHub-side validation. Ordinary branch pushes do not launch
+  # a duplicate workflow. Acceptance remains lifecycle-owned: targeted at leaf closeout
+  # and full at master integration, never by GitHub CI.
   pull_request:
-    branches: ["main"]
 
 concurrency:
   group: quality-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Quality wrapper (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install package with dev extras
-        run: python -m pip install -e "mcp[dev]"
-
-      # The pytest fixtures create real git repos and commit, so a git identity
-      # must exist or they fail with "unable to auto-detect email address".
-      - name: Configure git identity for hermetic test fixtures
-        run: |
-          git config --global user.email "ci@agents-remember.invalid"
-          git config --global user.name "Agents Remember CI"
-
-      # Enforces ALL of: ruff (lint), Pyright (types), the full pytest suite, and
-      # CRAP (complexity x coverage). The wrapper exits non-zero if ANY of them
-      # fail; --fail-on-crap-threshold adds CRAP as the fourth hard gate.
-      - name: Run quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)
-        run: python -m agents_remember.code_quality.check --fail-on-crap-threshold
-
-  dashboard:
-    name: Dashboard frontend rail
+  clean-linux:
+    name: Deterministic repository checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -61,27 +26,17 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Install dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python development dependencies
+        run: python -m pip install -e "mcp[dev]"
+
+      - name: Install dashboard dependencies
         working-directory: dashboard
         run: npm ci
 
-      - name: Lint
-        working-directory: dashboard
-        run: npm run lint
-
-      - name: Typecheck
-        working-directory: dashboard
-        run: npm run typecheck
-
-      - name: Unit tests
-        working-directory: dashboard
-        run: npm run test
-
-      - name: Build
-        working-directory: dashboard
-        run: npm run build
-
-      # Catches a stale shipped bundle: the committed package_data/dashboard must match a
-      # fresh build (the same check the pre-commit/pre-push githooks run locally).
-      - name: Verify shipped bundle matches a fresh build
-        run: python3 scripts/sync-dashboard.py --check
+      - name: Run deterministic non-test checks
+        run: ./.githooks/_gate.sh targeted

@@ -25,6 +25,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from agents_remember.kernel.git_command import git_environment, run_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _PROBE_TIMEOUT_SECONDS = 8
@@ -52,22 +53,8 @@ def _remote_branch(repo: Path, branch: str) -> tuple[str, str | None]:
     if not branch or not repo.exists():
         return ("missing", None)
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "-c",
-                f"safe.directory={repo.as_posix()}",
-                "ls-remote",
-                "--heads",
-                "origin",
-                branch,
-            ],
-            cwd=repo,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            check=False,
+        result = run_git(
+            repo, ["ls-remote", "--heads", "origin", branch], timeout=_PROBE_TIMEOUT_SECONDS
         )
     except (OSError, subprocess.SubprocessError):
         return ("missing", None)
@@ -89,22 +76,8 @@ def _default_branch(repo: Path) -> str:
     if not repo.exists():
         return "main"
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "-c",
-                f"safe.directory={repo.as_posix()}",
-                "ls-remote",
-                "--symref",
-                "origin",
-                "HEAD",
-            ],
-            cwd=repo,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            check=False,
+        result = run_git(
+            repo, ["ls-remote", "--symref", "origin", "HEAD"], timeout=_PROBE_TIMEOUT_SECONDS
         )
     except (OSError, subprocess.SubprocessError):
         return "main"
@@ -143,6 +116,12 @@ def _pr_for(repo: Path, head: str) -> dict[str, str] | None:
                 "1",
             ],
             cwd=repo,
+            # `gh` is not git, but it resolves the repository *through* git, so an inherited
+            # GIT_DIR would have it list another repository's pull requests under this
+            # worktree's branch name. `cwd=repo` does not outrank the selectors for gh any
+            # more than it does for git, and this is the package's only non-git spawn that
+            # reads a repository, so it takes the same scrubbed environment.
+            env=git_environment(),
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

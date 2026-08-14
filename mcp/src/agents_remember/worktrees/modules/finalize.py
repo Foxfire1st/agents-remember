@@ -5,7 +5,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import (
+    CompletionBlocker,
+    SubTaskRef,
+    TaskDocument,
+    completion_blockers,
+    read_task_doc,
+    write_task_docs,
+)
+from agents_remember.tasks.leaf_doc import (
+    TerminalLeafResolutionError,
+    resolve_terminal_leaf_doc,
+)
+from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.git import is_ancestor
@@ -25,6 +37,21 @@ class FinalizeArgs:
     teardown_providers: bool = True
 
 
+class FinalizeTaskDocumentError(ValueError):
+    """The finalizer could not prove its exact task-document completion targets."""
+
+
+@dataclass(frozen=True)
+class FinalizeTaskTargets:
+    leaf_path: Path | None = None
+    leaf: TaskDocument | None = None
+    completed_leaf: TaskDocument | None = None
+    parent_path: Path | None = None
+    parent: TaskDocument | None = None
+    parent_row: SubTaskRef | None = None
+    completed_parent: TaskDocument | None = None
+
+
 def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
     contract = load_contract(args.contract_path)
     readiness = _readiness(contract)
@@ -40,6 +67,26 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
                 "blockers": readiness,
                 "summary": "Task lifecycle is not finalizable yet.",
             },
+        )
+
+    try:
+        targets = _resolve_task_targets(contract, args)
+    except (FinalizeTaskDocumentError, TerminalLeafResolutionError) as exc:
+        return _task_refusal(
+            contract,
+            args,
+            state="task-document-resolution-blocked",
+            blockers=[f"task-document-resolution: {exc}"],
+            summary=f"Task document identity could not be proven: {exc}",
+        )
+    step_blockers = completion_blockers(targets.leaf) if targets.leaf is not None else []
+    if step_blockers:
+        return _task_refusal(
+            contract,
+            args,
+            state="task-steps-blocked",
+            blockers=step_blockers,
+            summary="Task lifecycle cannot be finalized while declared work units are unresolved.",
         )
 
     cleanup = _run_or_verify_cleanup(contract, args)
@@ -58,7 +105,7 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
         )
 
     updated_contract = load_contract(contract.contract_path) if not args.dry_run else contract
-    updates = _reconcile_task_documents(args)
+    updates = _reconcile_task_documents(targets, dry_run=args.dry_run)
     if updated_contract.kind == "series":
         archive = archive_completed_root_task(
             updated_contract.coordination_root,
@@ -90,6 +137,31 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
                 if not args.dry_run
                 else "Task lifecycle would be finalized."
             ),
+        },
+    )
+
+
+def _task_refusal(
+    contract: WorktreeContract,
+    args: FinalizeArgs,
+    *,
+    state: str,
+    blockers: list[str] | list[CompletionBlocker],
+    summary: str,
+) -> WorktreeCommandResult:
+    return WorktreeCommandResult(
+        2,
+        {
+            **_identity_payload(contract),
+            "state": state,
+            "dryRun": args.dry_run,
+            "contractPath": contract.contract_path.as_posix(),
+            "enclosurePath": contract.contract_path.as_posix(),
+            "blockers": [
+                blocker.model_dump() if isinstance(blocker, CompletionBlocker) else blocker
+                for blocker in blockers
+            ],
+            "summary": summary,
         },
     )
 
@@ -151,87 +223,208 @@ def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> Wo
         )
 
 
-def _reconcile_task_documents(args: FinalizeArgs) -> dict[str, Any]:
-    updates: dict[str, Any] = {}
-    if args.task_doc_path is None:
-        updates["leaf"] = {"state": "skipped", "reason": "task_doc_path not supplied"}
-    else:
-        updates["leaf"] = _complete_leaf(args.task_doc_path, dry_run=args.dry_run)
+def _resolve_task_targets(
+    contract: WorktreeContract,
+    args: FinalizeArgs,
+) -> FinalizeTaskTargets:
+    if contract.kind != "leaf":
+        if args.task_doc_path is not None:
+            raise FinalizeTaskDocumentError(
+                "a series contract cannot assert a leaf task-document completion target"
+            )
+        return _resolve_parent_target(contract, args, None, None)
+    resolved = resolve_terminal_leaf_doc(
+        contract.task_root,
+        contract.leaf_id,
+        asserted_path=args.task_doc_path,
+    )
+    if resolved is None:
+        return _resolve_parent_target(contract, args, None, None)
+    leaf_path, leaf = resolved
+    return _resolve_parent_target(contract, args, leaf_path, leaf)
 
-    if args.master_doc_path is None:
-        updates["parent"] = {"state": "skipped", "reason": "master_doc_path not supplied"}
-    elif not args.subtask_number:
-        updates["parent"] = {"state": "skipped", "reason": "subtask_number not supplied"}
-    else:
-        updates["parent"] = _complete_parent_row(
-            args.master_doc_path,
-            args.subtask_number,
-            dry_run=args.dry_run,
+
+def _resolve_parent_target(
+    contract: WorktreeContract,
+    args: FinalizeArgs,
+    leaf_path: Path | None,
+    leaf: TaskDocument | None,
+) -> FinalizeTaskTargets:
+    if leaf is None or leaf_path is None:
+        if args.master_doc_path is None and not args.subtask_number:
+            return FinalizeTaskTargets()
+        raise FinalizeTaskDocumentError(
+            "cannot complete an immediate parent row without a contract-bound leaf document"
         )
+    if not leaf.master:
+        if args.master_doc_path is not None or args.subtask_number:
+            raise FinalizeTaskDocumentError(
+                "standalone leaf has no immediate parent reference to assert"
+            )
+        return FinalizeTaskTargets(
+            leaf_path=leaf_path,
+            leaf=leaf,
+            completed_leaf=_leaf_completion_candidate(leaf),
+        )
+    expected_parent = _expected_parent_path(contract.task_root, leaf)
+    _assert_parent_arguments(args, expected_parent, leaf.id)
+    parent = _read_parent(expected_parent)
+    row = _exact_parent_row(parent, leaf.id)
+    _check_parent_row_path(expected_parent, row, leaf_path)
+    completed_parent = _parent_completion_candidate(parent, row.number)
+    return FinalizeTaskTargets(
+        leaf_path=leaf_path,
+        leaf=leaf,
+        completed_leaf=_leaf_completion_candidate(leaf),
+        parent_path=expected_parent,
+        parent=parent,
+        parent_row=row,
+        completed_parent=completed_parent,
+    )
+
+
+def _assert_parent_arguments(
+    args: FinalizeArgs,
+    expected_parent: Path,
+    leaf_id: str,
+) -> None:
+    if (
+        args.master_doc_path is not None
+        and args.master_doc_path.resolve(strict=False) != expected_parent
+    ):
+        raise FinalizeTaskDocumentError(
+            f"master_doc_path {args.master_doc_path.resolve(strict=False)} is not the leaf's "
+            f"immediate parent {expected_parent}"
+        )
+    if args.subtask_number and args.subtask_number != leaf_id:
+        raise FinalizeTaskDocumentError(
+            f"subtask_number {args.subtask_number!r} does not identify leaf {leaf_id!r}"
+        )
+
+
+def _read_parent(parent_path: Path) -> TaskDocument:
+    try:
+        parent = read_task_doc(parent_path)
+    except (OSError, ValueError) as exc:
+        raise FinalizeTaskDocumentError(
+            f"cannot read immediate parent task document {parent_path}: {exc}"
+        ) from exc
+    if parent.kind != "master":
+        raise FinalizeTaskDocumentError(
+            f"immediate parent path is not a master task document: {parent_path}"
+        )
+    return parent
+
+
+def _exact_parent_row(parent: TaskDocument, subtask_number: str) -> SubTaskRef:
+    rows = [row for row in parent.subTasks if row.number == subtask_number]
+    if len(rows) != 1:
+        raise FinalizeTaskDocumentError(
+            f"immediate parent must contain exactly one row {subtask_number!r}; found {len(rows)}"
+        )
+    return rows[0]
+
+
+def _check_parent_row_path(parent_path: Path, row: SubTaskRef, leaf_path: Path) -> None:
+    if not row.file:
+        return
+    row_leaf_path = (parent_path.parent / Path(row.file).with_suffix(".json")).resolve(strict=False)
+    if row_leaf_path != leaf_path.resolve(strict=False):
+        raise FinalizeTaskDocumentError(
+            f"parent row {row.number!r} points at {row_leaf_path}, not leaf {leaf_path}"
+        )
+
+
+def _expected_parent_path(task_root: Path, leaf: TaskDocument) -> Path:
+    ref = Path(leaf.master) if leaf.master else Path("task.md")
+    root = task_root.resolve(strict=False)
+    candidate = (root / ref.with_suffix(".json")).resolve(strict=False)
+    if candidate.parent != root:
+        raise FinalizeTaskDocumentError(
+            f"leaf master reference must resolve to a direct child of {root}: {leaf.master!r}"
+        )
+    return candidate
+
+
+def _reconcile_task_documents(
+    targets: FinalizeTaskTargets,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    documents: list[TaskDocument] = []
+    if targets.leaf_path is None or targets.leaf is None:
+        updates["leaf"] = {
+            "state": "skipped",
+            "reason": "no contract-bound leaf task document authored",
+        }
+    else:
+        if targets.completed_leaf is None:
+            raise FinalizeTaskDocumentError("preflighted leaf completion candidate is missing")
+        documents.append(targets.completed_leaf)
+        updates["leaf"] = _task_update_payload(
+            targets.leaf_path,
+            targets.completed_leaf,
+            dry_run=dry_run,
+        )
+
+    if targets.parent_path is None or targets.parent is None or targets.parent_row is None:
+        updates["parent"] = {"state": "skipped", "reason": "leaf has no immediate parent"}
+    else:
+        if targets.completed_parent is None:
+            raise FinalizeTaskDocumentError("preflighted parent completion candidate is missing")
+        documents.append(targets.completed_parent)
+        updates["parent"] = _task_update_payload(
+            targets.parent_path,
+            targets.completed_parent,
+            dry_run=dry_run,
+        )
+        updates["parent"]["subtaskNumber"] = targets.parent_row.number
+    if not dry_run and documents:
+        if targets.leaf_path is None:
+            raise FinalizeTaskDocumentError("completion candidates have no task-document root")
+        write_task_docs(targets.leaf_path.parent, documents)
     return updates
 
 
-def _complete_leaf(path: Path, *, dry_run: bool) -> dict[str, Any]:
-    if not path.exists():
-        return {"state": "skipped", "reason": "task document not found", "path": path.as_posix()}
-    doc = read_task_doc(path)
-    if doc.kind == "master":
-        return {
-            "state": "skipped",
-            "reason": "leaf path points at a master",
-            "path": path.as_posix(),
-        }
+def _leaf_completion_candidate(doc: TaskDocument) -> TaskDocument:
     data = doc.model_dump(by_alias=True)
     data["status"] = "Completed"
     data["decisions"] = _finalized_decisions(data)
-    updated = TaskDocument.model_validate(data)
-    return _write_or_preview(path.parent, updated, dry_run=dry_run)
+    return TaskDocument.model_validate(data)
 
 
-def _complete_parent_row(path: Path, subtask_number: str, *, dry_run: bool) -> dict[str, Any]:
-    if not path.exists():
-        return {"state": "skipped", "reason": "master document not found", "path": path.as_posix()}
-    doc = read_task_doc(path)
-    if doc.kind != "master":
-        return {
-            "state": "skipped",
-            "reason": "master path is not a master",
-            "path": path.as_posix(),
-        }
+def _parent_completion_candidate(
+    doc: TaskDocument,
+    subtask_number: str,
+) -> TaskDocument:
     data = doc.model_dump(by_alias=True)
     refs = data["subTasks"]
     index = next((idx for idx, ref in enumerate(refs) if ref["number"] == subtask_number), None)
     if index is None:
-        return {
-            "state": "skipped",
-            "reason": "subtask row not found",
-            "path": path.as_posix(),
-            "subtaskNumber": subtask_number,
-        }
+        raise FinalizeTaskDocumentError(
+            f"preflighted parent row disappeared before reconciliation: {subtask_number!r}"
+        )
     refs[index]["status"] = "Completed"
     data["decisions"] = _finalized_decisions(data)
     updated = TaskDocument.model_validate(data)
-    result = _write_or_preview(path.parent, updated, dry_run=dry_run)
-    result["subtaskNumber"] = subtask_number
-    return result
+    return demote_completed_master_if_unresolved(updated)
 
 
-def _write_or_preview(task_root: Path, doc: TaskDocument, *, dry_run: bool) -> dict[str, Any]:
-    if dry_run:
-        return {
-            "state": "would-update",
-            "docPath": (
-                task_root / f"{doc.slug if doc.kind == 'subTask' else 'task'}.json"
-            ).as_posix(),
-            "status": doc.status,
-        }
-    json_path, markdown_path = write_task_doc(task_root, doc)
-    return {
-        "state": "updated",
-        "docPath": json_path.as_posix(),
-        "renderedPath": markdown_path.as_posix(),
+def _task_update_payload(
+    path: Path,
+    doc: TaskDocument,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "state": "would-update" if dry_run else "updated",
+        "docPath": path.as_posix(),
         "status": doc.status,
     }
+    if not dry_run:
+        payload["renderedPath"] = path.with_suffix(".md").as_posix()
+    return payload
 
 
 def _finalized_decisions(data: dict[str, Any]) -> list[dict[str, str]]:

@@ -1,0 +1,156 @@
+"""Source-aware operation queue projection (260718-CHATS-L3, R2).
+
+The complete retained live queue over the L2E operation-timeline: every
+retained prompt operation across all three sources with exact
+source/kind/phase/order truth, and never a body — terminal and durable rows
+expose identity fields only. Only queued cockpit rows carry the caller-bound
+withdrawalRef, the redacted identification preview, and the content digest
+(the privacy rule is enforced by the SC1 contract validator itself).
+Previews/digests come from this authority's own submit journal; rows the
+journal does not hold (submitted outside the typed L3 submit) honestly report
+empty held content — identification copy, never fabricated content. Set-model
+and set-effort control operations are authority-minted with no submission
+source (the substrate reports ``source=None``) and are not queue rows: the
+contract's privacy validator cannot represent them without inventing a source,
+so the projection covers the complete prompt queue they interleave with.
+"""
+
+from __future__ import annotations
+
+from typing import Literal, cast
+
+from agents_remember.models.conversations.control_wire import (
+    OperationTimelineItem,
+)
+from agents_remember.models.conversations.identity import (
+    AuthorizationBinding,
+)
+from agents_remember.models.conversations.submissions import (
+    CockpitQueueIdentity,
+    OperationQueueItem,
+    OperationQueueProjection,
+)
+from agents_remember.serving.conversation.control.previews import payload_digest, redacted_preview
+from agents_remember.serving.conversation.control.refs import (
+    OperationIdentity,
+    RefBinding,
+    RefTarget,
+    mint_ref,
+)
+from agents_remember.serving.conversation.control.service import (
+    MAX_QUEUE_ROWS_PER_CHANNEL,
+    ControlChannel,
+    ControlScope,
+    ConversationControlService,
+)
+
+_LIVE_ROW_STATES = {"queued", "dispatching", "unknown"}
+_EMPTY_DIGEST = payload_digest("")
+
+
+async def operation_queue(
+    service: ConversationControlService,
+    authorization: AuthorizationBinding,
+    ar_session_id: str,
+    *,
+    expected_bridge_epoch: str,
+) -> OperationQueueProjection:
+    """The complete retained live queue; never a body from another source."""
+
+    entry = await service.resolve_entry(ar_session_id)
+    epoch = await service.verify_epoch(entry, expected_bridge_epoch)
+    channel = service.channel(ar_session_id, epoch)
+    items = await service.read_full_timeline(entry, expected_bridge_epoch=epoch)
+    rows: list[OperationQueueItem] = []
+    key_parts: list[str] = []
+    for item in items:
+        if item.kind != "prompt" or item.state not in _LIVE_ROW_STATES:
+            continue
+        row = _queue_row(ControlScope(service, authorization, ar_session_id, epoch), channel, item)
+        rows.append(row)
+        key_parts.append(
+            f"{row.operation_ref}|{row.revision}|{row.phase}|{row.withdrawable}|{row.sequence}"
+        )
+    items_key = ";".join(key_parts)
+    if items_key != channel.queue_items_key:
+        channel.queue_items_key = items_key
+        channel.queue_revision += 1
+    return OperationQueueProjection(
+        bridge_epoch=epoch,
+        revision=max(1, channel.queue_revision),
+        items=tuple(rows),
+    )
+
+
+def _queue_row(
+    scope: ControlScope,
+    channel: ControlChannel,
+    item: OperationTimelineItem,
+) -> OperationQueueItem:
+    service, authorization = scope.service, scope.authorization
+    ar_session_id, epoch = scope.ar_session_id, scope.epoch
+    identity = OperationIdentity(
+        kind=item.kind, operation_id=item.operation_id, sequence=item.sequence
+    )
+    phase = cast(Literal["queued", "dispatching", "unknown"], item.state)
+    source = item.source
+    assert source is not None  # prompt rows always carry a submission source
+    authorized = source == "cockpit" and phase == "queued"
+    content_key = f"{phase}|{source}|{authorized}"
+    prior = channel.queue_rows.get((identity.kind, identity.operation_id, identity.sequence))
+    if prior is None:
+        revision = 1
+    elif prior[1] != content_key:
+        revision = prior[0] + 1
+    else:
+        revision = prior[0]
+    row_key = (identity.kind, identity.operation_id, identity.sequence)
+    channel.queue_rows[row_key] = (revision, content_key)
+    # 260718-CHATS-L5F R5: bound the revision-bookkeeping map with oldest-key eviction (D2). An
+    # evicted key simply restarts at revision 1 if its operation ever reappears — settled operations
+    # do not, so the bound is invisible to live rows and closes the open unbounded-growth Todo.
+    channel.queue_rows.move_to_end(row_key)
+    while len(channel.queue_rows) > MAX_QUEUE_ROWS_PER_CHANNEL:
+        channel.queue_rows.popitem(last=False)
+    operation_ref = mint_ref(
+        service.secret,
+        "operation-ref",
+        RefBinding(authorization, ar_session_id, epoch),
+        RefTarget(identity=identity),
+    )
+    cockpit: CockpitQueueIdentity | None = None
+    if authorized:
+        journal = channel.journal.get(item.operation_id)
+        if journal is not None:
+            preview, truncated = redacted_preview(journal.text)
+            digest = journal.content_digest
+        else:
+            # The daemon holds no content for this row (it was not submitted
+            # through the typed L3 submit): the held-content preview/digest are
+            # honestly empty — identification copy, never fabricated content.
+            preview, truncated, digest = "", False, _EMPTY_DIGEST
+        cockpit = CockpitQueueIdentity(
+            withdrawal_ref=mint_ref(
+                service.secret,
+                "withdrawal-ref",
+                RefBinding(authorization, ar_session_id, epoch),
+                RefTarget(identity=identity),
+            ),
+            redacted_preview=preview,
+            preview_truncated=truncated,
+            content_digest=digest,
+        )
+    return OperationQueueItem(
+        operation_ref=operation_ref,
+        revision=revision,
+        sequence=item.sequence,
+        kind=item.kind,
+        source=source,
+        phase=phase,
+        withdrawable=authorized,
+        safe_label=f"{item.kind} · {source}",
+        cockpit=cockpit,
+    )
+
+
+__all__ = ["operation_queue"]

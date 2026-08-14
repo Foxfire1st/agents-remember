@@ -30,6 +30,22 @@ class ComposeRender:
         return hashlib.sha256(self.override_yaml.encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class BackendStartReconciliation:
+    """What a backend start already did to the host before bringing a container up.
+
+    Every managed provider start reconciles the host first: it adopts the
+    compose-owned network, migrates containers and networks left behind by an
+    unmanaged project, and force-removes a container whose data mount no longer
+    matches the layout. All three land together in the start result's
+    ``network``/``commands`` payload, so they travel together.
+    """
+
+    network: dict[str, Any]
+    migration: dict[str, Any] | None = None
+    forced_remove: dict[str, Any] | None = None
+
+
 def provider_asset_path(*parts: str) -> Path:
     resource = files("agents_remember").joinpath("package_data", "runtime", "providers", *parts)
     return Path(str(resource))
@@ -39,9 +55,11 @@ def provider_asset_text(*parts: str) -> str:
     return provider_asset_path(*parts).read_text(encoding="utf-8")
 
 
-def compose_command(render: ComposeRender, args: list[str]) -> list[str]:
+def compose_command(
+    render: ComposeRender, args: list[str], *, executable: str | None = None
+) -> list[str]:
     return [
-        docker_command(),
+        executable or docker_command(),
         "compose",
         "--project-name",
         render.project_name,
@@ -69,8 +87,9 @@ def run_compose(
 
 
 def compose_plan(render: ComposeRender, args: list[str], *, cwd: Path) -> dict[str, Any]:
+    """Describe the Docker command without requiring Docker on the planning host."""
     return {
-        "command": compose_command(render, args),
+        "command": compose_command(render, args, executable="docker"),
         "cwd": cwd.as_posix(),
         "baseFile": render.base_file.as_posix(),
         "overrideSha256": render.override_sha256,
@@ -102,9 +121,7 @@ def yaml_port_mapping(host: Any, host_port: Any, container_port: Any) -> str:
 
 def yaml_environment(env: dict[str, Any], *, indent: int = 6) -> str:
     prefix = " " * indent
-    return "\n".join(
-        f"{prefix}{key}: {yaml_scalar(value)}" for key, value in sorted(env.items())
-    )
+    return "\n".join(f"{prefix}{key}: {yaml_scalar(value)}" for key, value in sorted(env.items()))
 
 
 def yaml_labels(labels: dict[str, Any], *, indent: int = 6) -> str:
@@ -114,7 +131,9 @@ def yaml_labels(labels: dict[str, Any], *, indent: int = 6) -> str:
     )
 
 
-def required_ownership_labels(provider_settings: dict[str, Any], provider_id: str) -> dict[str, str]:
+def required_ownership_labels(
+    provider_settings: dict[str, Any], provider_id: str
+) -> dict[str, str]:
     instance = provider_settings.get("instance")
     if not isinstance(instance, dict):
         raise ContextProviderError(f"{provider_id} settings must include instance.labels")
@@ -154,9 +173,7 @@ def container_compose_project(inspect_data: dict[str, Any] | None) -> str | None
     return str(project) if project else None
 
 
-def container_managed_by_project(
-    inspect_data: dict[str, Any] | None, project_name: str
-) -> bool:
+def container_managed_by_project(inspect_data: dict[str, Any] | None, project_name: str) -> bool:
     return inspect_data is not None and container_compose_project(inspect_data) == project_name
 
 

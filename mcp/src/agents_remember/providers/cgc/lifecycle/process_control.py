@@ -86,7 +86,9 @@ def cgc_start_compose_render(args: argparse.Namespace, backend_result: dict[str,
     )
 
 
-def cgc_start_watch_process(args: argparse.Namespace, layout: CgcRuntimeLayout, render: Any) -> dict[str, Any]:
+def cgc_start_watch_process(
+    args: argparse.Namespace, layout: CgcRuntimeLayout, render: Any
+) -> dict[str, Any]:
     watch_log = layout.watch_log_file
     watch_log.parent.mkdir(parents=True, exist_ok=True)
     return run_compose(

@@ -37,8 +37,8 @@ each wait on the other — or a seat waits on a channel nobody is told to serve 
 finding.
 
 - Catching evidence: 260703-L8 review 2 — the seam deadlock: the manager's blocking raise and the
-  orchestrator's decide path could not meet as written; the ruled `wait=false` +
-  packet-carried-gateId channel resolved it (L8 rounds 2/4b history).
+  orchestrator's decide path could not meet as written. The ruled `wait=false` handover plus the
+  structural master-document decision channel resolves it without exposing transport identity.
 
 ## Exploratory Mandate
 

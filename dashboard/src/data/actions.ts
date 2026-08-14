@@ -37,6 +37,67 @@ export async function postGateDecision(
   }
 }
 
+// 260715-FEUI-L6 (R4): the same gate-decision POST, keeping the server's words. The
+// InteractionBar must render POST failures VERBATIM (design §7.3 F7), so this variant captures
+// the response body instead of collapsing everything past 202/409 into "error".
+export interface GateDecisionDetailedResult {
+  status: GateDecisionStatus;
+  /** The server's own words (response body / HTTP status line / network error message). */
+  detail?: string;
+}
+
+function gateDecisionBody(options: GateDecisionOptions): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (options.gateId) body.gateId = options.gateId;
+  if (options.note) body.note = options.note;
+  return body;
+}
+
+function classifyGateConflict(raw: string): {
+  status: "stale-gate" | "no-open-gate";
+  detail: string;
+} {
+  let payload: { status?: string } | null = null;
+  try {
+    payload = JSON.parse(raw) as { status?: string };
+  } catch {
+    payload = null;
+  }
+  return {
+    status: payload?.status === "stale-gate" ? "stale-gate" : "no-open-gate",
+    detail: raw,
+  };
+}
+
+export async function postGateDecisionDetailed(
+  lifecycleId: string | null | undefined,
+  verb: string,
+  options: GateDecisionOptions = {},
+): Promise<GateDecisionDetailedResult> {
+  try {
+    const body: Record<string, string> = {};
+    if (lifecycleId) body.target = lifecycleId;
+    Object.assign(body, gateDecisionBody(options));
+    const res = await fetch(`/api/actions/${verb}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 202) return { status: "recorded" };
+    const raw = await res.text().catch(() => "");
+    if (res.status === 409) {
+      const conflict = classifyGateConflict(raw);
+      return {
+        status: conflict.status,
+        detail: conflict.detail || `HTTP ${res.status}`,
+      };
+    }
+    return { status: "error", detail: raw || `HTTP ${res.status}` };
+  } catch (error) {
+    return { status: "error", detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 // Leaf-28 S5.2: dismiss ONE lifecycle-bound attention-queue item. POSTs to the same
 // `/api/actions/{verb}` return channel with verb `dismiss`; the server records a compact
 // lifecycle acknowledgement, or cancels/deletes the gate for a `gate-open` item. Fire-and-report

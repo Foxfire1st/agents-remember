@@ -34,7 +34,14 @@ from agents_remember.observer.projection import WorkspaceProjection
 #: the stable forms the diff compares. Mirrored client-side in
 #: ``dashboard/src/data/servedAges.ts`` (VOLATILE_AGE_FIELDS) -- keep the two sets in lockstep.
 VOLATILE_AGE_FIELDS = frozenset(
-    {"staleSeconds", "snapshotStaleSeconds", "ageSeconds", "waitSeconds", "heartbeatAgeSeconds"}
+    {
+        "staleSeconds",
+        "snapshotStaleSeconds",
+        "ageSeconds",
+        "waitSeconds",
+        "heartbeatAgeSeconds",
+        "elapsedSeconds",
+    }
 )
 
 
@@ -134,7 +141,9 @@ def diff_projection(
         # A bare list isn't a node with a key, so it rides as a whole-value replacement
         # (like metrics/analytics) wrapped in a marker dict the client unwraps.
         deltas.append(
-            DeltaEvent("activeWorktreeGroups", {"activeWorktreeGroups": current.activeWorktreeGroups})
+            DeltaEvent(
+                "activeWorktreeGroups", {"activeWorktreeGroups": current.activeWorktreeGroups}
+            )
         )
     if prev.metrics != cur.metrics:
         deltas.append(DeltaEvent("metrics", current.metrics))

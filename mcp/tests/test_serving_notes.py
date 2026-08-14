@@ -21,9 +21,13 @@ from fastapi.testclient import TestClient
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+)
 from agents_remember.serving.app import create_app
 from agents_remember.serving.notes import _MAX_FILE_BYTES
+from agents_remember.serving.projector import ProjectionCadence
 
 _MASTER = "260703_agent-orchestration"
 
@@ -49,7 +53,7 @@ class NotesRouteTests(unittest.TestCase):
             transcript_root=self.tmp / "logs",
             repositories={"R": RepositoryScope(repo_id="R", path=self.code_root)},
         )
-        return TestClient(create_app(config, interval=100))
+        return TestClient(create_app(config, cadence=ProjectionCadence(interval=100)))
 
     def _seed_notes(self) -> None:
         (self.notes / "reports").mkdir(parents=True)
@@ -81,8 +85,9 @@ class NotesRouteTests(unittest.TestCase):
         )
         by_path = {entry["path"]: entry for entry in body["notes"]}
         self.assertEqual(by_path["friction-ledger.md"]["language"], "markdown")
-        self.assertEqual(by_path["reports/260703-L1-worker-report.md"]["name"],
-                         "260703-L1-worker-report.md")
+        self.assertEqual(
+            by_path["reports/260703-L1-worker-report.md"]["name"], "260703-L1-worker-report.md"
+        )
         self.assertFalse(body["truncated"])
 
     def test_list_depth_cap_prunes_and_reports_truncated(self) -> None:

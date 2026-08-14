@@ -1,10 +1,24 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
+import { AttentionQueue } from "../panels/AttentionQueue";
+import { DetailPanel } from "../panels/detail-panel/DetailPanel";
+import { EngineRoom } from "../panels/EngineRoom";
+import { EventRiver } from "../panels/EventRiver";
+import { FileViewer } from "../panels/file-viewer/FileViewer";
+import { HighlightComposer } from "../panels/HighlightComposer";
+import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
+import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
+import { RailChat } from "../panels/RailChat";
+import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
+import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
+import { metricsFor } from "../types/projection";
 import type {
+  Analytics,
   EnclosureNode,
   LifecycleProjection,
   TaskDocNode,
@@ -24,7 +38,7 @@ vi.mock("../panels/Terminal", () => ({
 }));
 
 function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPath" | "id">): TaskDocNode {
-  return {
+  return wireTaskDoc({
     lifecycleId: "ROOT",
     repository: "repo-a",
     title: "doc",
@@ -42,10 +56,10 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     subTasks: [],
     sections: [],
     ...over,
-  } as TaskDocNode;
+  });
 }
 
-// A lifecycle-bound master with one authored, drillable leaf — the drilled-leaf fixture for fix 1.
+// A lifecycle-bound master with one authored, drillable leaf — the drilled-leaf fixture.
 function seedDrillableMaster() {
   const lc: LifecycleProjection = {
     id: "ROOT",
@@ -56,6 +70,7 @@ function seedDrillableMaster() {
     tokens: 0,
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
+    stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
     actions: [],
     tokenSeries: [],
@@ -73,7 +88,6 @@ function seedDrillableMaster() {
         file: "01_leaf.md",
         status: "inProgress",
         scope: "",
-        createdAt: "2026-06-20T09:00:00+00:00",
       },
     ],
   });
@@ -91,14 +105,7 @@ function seedDrillableMaster() {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: 1,
-      runningCount: 1,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lc]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -111,6 +118,8 @@ function seedDrillableMaster() {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -168,6 +177,7 @@ function taskReaderProjection(): WorkspaceProjection {
     tokens: 0,
     startedAt: "2026-07-12T10:00:00+00:00",
     lastEventTs: "2026-07-12T10:00:30+00:00",
+    stateEnteredAt: "2026-07-12T10:00:00+00:00",
     inferred: false,
     actions: [],
     tokenSeries: [],
@@ -225,14 +235,7 @@ function taskReaderProjection(): WorkspaceProjection {
     ],
     providers: [],
     activeWorktreeGroups: ["direct-leaf", "runtime-only"],
-    metrics: {
-      lifecycleCount: 2,
-      runningCount: 2,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lifecycle("LC-DIRECT", "direct-leaf"), lifecycle("LC-BOUND", "runtime-only")]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -256,10 +259,13 @@ function taskReaderProjection(): WorkspaceProjection {
           sections: [],
           decisions: [],
           docPath: master.docPath,
+          createdAt: master.createdAt,
         },
       ],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   };
 }
@@ -434,6 +440,41 @@ describe("Operations click-to-detail body hydration", () => {
   });
 });
 
+describe("workspace rollup — the handoff reaches the header", () => {
+  // The served rollup grew an `awaitingDeveloperCount` bucket, but the header read only
+  // running/blocked/tokens. A lifecycle that had stopped and handed the turn back was inside
+  // `lifecycleCount` and `totalTokens` and inside none of the numbers on the bar — the workflow's
+  // own handoff surface was countable on the wire and invisible in the UI.
+  const withStates = (...states: LifecycleProjection["state"][]): WorkspaceProjection => {
+    const fixture = GALLERY.find((entry) => entry.name === "calm");
+    if (!fixture) throw new Error("fixture not found: calm");
+    const lifecycles = states.map((state, index) => ({
+      ...fixture.projection.lifecycles[0],
+      id: `LC-${index}`,
+      state,
+    }));
+    return { ...fixture.projection, lifecycles, metrics: metricsFor(lifecycles) };
+  };
+
+  it("counts handed-back lifecycles on the bar", () => {
+    dashboardStore
+      .getState()
+      .applySnapshot(withStates("awaiting-developer", "awaiting-developer", "running"));
+    const { getByTestId } = render(<CockpitShell />);
+    expect(getByTestId("task-metrics").textContent).toContain("2 awaiting you");
+  });
+
+  it("says nothing when nothing is handed back (no reassurance zero)", () => {
+    dashboardStore.getState().applySnapshot(withStates("running", "blocked"));
+    const { getByTestId } = render(<CockpitShell />);
+    const text = getByTestId("task-metrics").textContent ?? "";
+    expect(text).not.toContain("awaiting");
+    // the standing rhythm is unchanged — the segment is appended, it does not displace anything
+    expect(text).toContain("1 running");
+    expect(text).toContain("1 blocked");
+  });
+});
+
 describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)", () => {
   it("renders the muted stamp from the snapshot's servingBuild (commit-first)", () => {
     const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
@@ -445,6 +486,25 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
     const { getByTestId } = render(<CockpitShell />);
     expect(getByTestId("serving-build").textContent).toContain("abc1234");
     expect(getByTestId("serving-build").textContent).toContain("up ");
+  });
+
+  it("marks a serving checkout with uncommitted code as hash* (additive wire flag)", () => {
+    const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
+    if (!fixture) throw new Error("fixture not found: engine-fleet");
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: {
+        version: "9.9.9",
+        commit: "38c3fd8",
+        bootedAt: "2026-07-07T05:00:00Z",
+        dirty: true,
+      },
+    });
+    const { getByTestId } = render(<CockpitShell />);
+    expect(getByTestId("serving-build").textContent).toContain("38c3fd8*");
+    expect(getByTestId("serving-build").textContent).not.toContain("dirty");
+    expect(getByTestId("serving-build").title).toContain("@ 38c3fd8*");
+    expect(getByTestId("serving-build").title).toContain("dirty — serving uncommitted code");
   });
 
   it("falls back to the package version off-checkout; renders nothing without a stamp", () => {
@@ -459,9 +519,60 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
     first.unmount();
 
     dashboardStore.getState().reset();
-    seed("engine-fleet"); // no servingBuild on the wire (a pre-L15 server)
+    seed("engine-fleet"); // no servingBuild on the wire (a legacy server)
     const second = render(<CockpitShell />);
     expect(second.queryByTestId("serving-build")).toBeNull(); // absent stamp: nothing, never faked
+  });
+
+  it("surfaces a stale client bundle in the tooltip (no redundant reload action)", () => {
+    const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
+    if (!fixture) throw new Error("fixture not found: engine-fleet");
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: {
+        version: "9.9.9",
+        bootedAt: "2026-07-07T05:00:00Z",
+        dashboardBuild: "different-dashboard-build", // ≠ test CLIENT_DASHBOARD_BUILD ("test-dashboard-build")
+      },
+    });
+    const stale = render(<CockpitShell />);
+    expect(stale.getByTestId("serving-build").dataset.clientBuildCurrent).toBe("false");
+    // A proven client/serving mismatch must be visible to the operator, not silently swallowed
+    // into the invisible data attribute — the hoverable stamp tooltip carries the reload cue.
+    expect(stale.getByTestId("serving-build").title).toContain(
+      "client bundle differs from the serving build — reload",
+    );
+    expect(stale.queryByTestId("reload-dashboard-client")).toBeNull();
+    stale.unmount();
+
+    dashboardStore.getState().reset();
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: {
+        version: "9.9.9",
+        bootedAt: "2026-07-07T05:01:00Z",
+        dashboardBuild: "test-dashboard-build",
+      },
+    });
+    const current = render(<CockpitShell />);
+    expect(current.getByTestId("serving-build").dataset.clientBuildCurrent).toBe("true");
+    // A real match renders no mismatch cue — never fabricate a discrepancy that is not there.
+    expect(current.getByTestId("serving-build").title).not.toContain("client bundle differs");
+    expect(current.queryByTestId("reload-dashboard-client")).toBeNull();
+  });
+
+  it("adds no client-mismatch cue when a legacy server advertises no comparable bundle identity", () => {
+    // `dashboardBuild` absent → clientMatchesServingBuild returns null (unknown). Honesty doctrine:
+    // an unknown state must not assert a mismatch any more than it may fabricate a match.
+    const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
+    if (!fixture) throw new Error("fixture not found: engine-fleet");
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: { version: "9.9.9", bootedAt: "2026-07-07T05:00:00Z" },
+    });
+    const { getByTestId } = render(<CockpitShell />);
+    expect(getByTestId("serving-build").dataset.clientBuildCurrent).toBe("unknown");
+    expect(getByTestId("serving-build").title).not.toContain("client bundle differs");
   });
 });
 
@@ -478,11 +589,18 @@ describe("CockpitShell full-bleed machine-map views (5f S1)", () => {
     // Switch to the Engine Room machine-map view via the mode bar.
     fireEvent.click(getByRole("radio", { name:"Engine Room" }));
 
-    // Full-bleed: both rails gone, single full-width column, and the room's own 3-zone layout
-    // (header + boot/diagnostics zone) is present.
+    // Full-bleed: both rails stay mounted but hidden (display:none + aria-hidden), the grid drops
+    // to a single full-width column, and the room's own 3-zone layout (header + boot/diagnostics
+    // zone) is present. Keep-alive: re-entry no longer remounts the rails.
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
-    expect(container.querySelector(".rail--left")).toBeNull();
-    expect(container.querySelector(".rail--right")).toBeNull();
+    const railLeft = container.querySelector(".rail--left") as HTMLElement;
+    const railRight = container.querySelector(".rail--right") as HTMLElement;
+    expect(railLeft).not.toBeNull();
+    expect(railRight).not.toBeNull();
+    expect(railLeft.style.display).toBe("none");
+    expect(railRight.style.display).toBe("none");
+    expect(railLeft.getAttribute("aria-hidden")).toBe("true");
+    expect(railRight.getAttribute("aria-hidden")).toBe("true");
     expect(container.querySelector('[data-testid="engine-room-header"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="engine-room-diagnostics"]')).not.toBeNull();
   });
@@ -495,6 +613,44 @@ describe("CockpitShell full-bleed machine-map views (5f S1)", () => {
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");
     expect(container.querySelector(".rail--left")).not.toBeNull();
     expect(container.querySelector(".rail--right")).not.toBeNull();
+  });
+});
+
+describe("rail keep-alive across view switches (260721 F1)", () => {
+  it("keeps both rail asides mounted (hidden, never unmounted) on a full-bleed view", () => {
+    seed("engine-fleet");
+    const { container, getByRole } = render(<CockpitShell />);
+
+    // Railed Operations view: the two aside nodes (and the river inside the right one) that we
+    // watch across the switch.
+    const railLeft = container.querySelector(".rail--left") as HTMLElement;
+    const railRight = container.querySelector(".rail--right") as HTMLElement;
+    const river = railRight.querySelector('[data-testid="event-river"]');
+    expect(railLeft.style.display).toBe("flex");
+    expect(railLeft.getAttribute("aria-hidden")).toBe("false");
+    expect(river).not.toBeNull();
+
+    // Switch to the full-bleed Engine Room: the asides are hidden, NOT unmounted (same nodes, so
+    // rail scroll/collapsed state survives); the grid still drops to the single full-width column.
+    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
+    expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
+    expect(container.querySelector(".rail--left")).toBe(railLeft);
+    expect(container.querySelector(".rail--right")).toBe(railRight);
+    expect(railLeft.style.display).toBe("none");
+    expect(railRight.style.display).toBe("none");
+    expect(railLeft.getAttribute("aria-hidden")).toBe("true");
+    expect(railRight.getAttribute("aria-hidden")).toBe("true");
+    expect(railRight.querySelector('[data-testid="event-river"]')).toBe(river);
+
+    // Back to Operations: the exact same asides re-show — no remount, so no fresh
+    // AttentionQueue/LifecycleList/EventRiver mount cost on entry.
+    fireEvent.click(getByRole("radio", { name: "Operations" }));
+    expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("false");
+    expect(container.querySelector(".rail--left")).toBe(railLeft);
+    expect(container.querySelector(".rail--right")).toBe(railRight);
+    expect(railLeft.style.display).toBe("flex");
+    expect(railLeft.getAttribute("aria-hidden")).toBe("false");
+    expect(railRight.querySelector('[data-testid="event-river"]')).toBe(river);
   });
 });
 
@@ -607,25 +763,200 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
   });
 });
 
-describe("Chats persistence across view switches (6e hardening)", () => {
-  it("keeps <Chats> mounted (hidden) on other views and shows the same node on Chats", () => {
+describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
+  it("defaults to Operations, exposes no Sessions route, and keeps one Chats cockpit mounted", () => {
+    seed("engine-fleet");
+    const { container, getByRole, queryByRole } = render(<CockpitShell />);
+
+    expect(getByRole("radio", { name: "Operations" }).getAttribute("aria-checked")).toBe("true");
+    expect(queryByRole("radio", { name: "Sessions" })).toBeNull();
+
+    // The internal sessions-* markers remain the WebTUI/keyboard implementation scope, but there is
+    // only one product route and one mounted PTY owner.
+    const chats = container.querySelector('[data-testid="sessions-view"]');
+    expect(chats).not.toBeNull();
+    const layer = chats?.parentElement as HTMLElement;
+    expect(layer.style.display).toBe("none");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+
+    fireEvent.click(getByRole("radio", { name: "Chats" }));
+    expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
+    // The left rail stays mounted, hidden (keep-alive), while Chats goes full-bleed.
+    expect((container.querySelector(".rail--left") as HTMLElement).style.display).toBe("none");
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
+    expect(layer.style.display).toBe("flex");
+    expect(layer.getAttribute("aria-hidden")).toBe("false");
+
+    fireEvent.click(getByRole("radio", { name: "Operations" }));
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
+    expect(layer.style.display).toBe("none");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+  });
+});
+
+describe("Engine Room keep-alive cockpit layer (260721 C2)", () => {
+  it("keeps the Engine Room mounted (hidden, never unmounted) across a tab switch", () => {
     seed("engine-fleet");
     const { container, getByRole } = render(<CockpitShell />);
 
-    // Default Operations view: Chats is already mounted but hidden — the live terminal it owns is
-    // never torn down, so a view switch can't throw the session's visuals away.
-    const chats = container.querySelector('[data-testid="chats"]');
-    expect(chats).not.toBeNull();
-    expect((chats?.parentElement as HTMLElement).style.display).toBe("none");
+    // Mounted at boot like the other persistent layers, but hidden while Operations is up.
+    const room = container.querySelector('[data-testid="engine-room"]') as HTMLElement;
+    expect(room).not.toBeNull();
+    const layer = room.parentElement as HTMLElement;
+    expect(layer.style.display).toBe("none");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
 
-    // Switching to Chats reveals the *same* element (it was never remounted).
+    // Switch to the Engine Room: the same DOM node shows — no remount, exactly one room in the tree.
+    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
+    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
+    expect(container.querySelectorAll('[data-testid="engine-room"]').length).toBe(1);
+    expect(layer.style.display).toBe("flex");
+    expect(layer.getAttribute("aria-hidden")).toBe("false");
+
+    // Away to Chats and back: still the same node — the room's SVG + GSAP substrate was never rebuilt.
     fireEvent.click(getByRole("radio", { name: "Chats" }));
-    expect(container.querySelector('[data-testid="chats"]')).toBe(chats);
-    expect((chats?.parentElement as HTMLElement).style.display).toBe("flex");
+    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
+    expect(layer.style.display).toBe("none");
+    fireEvent.click(getByRole("radio", { name: "Engine Room" }));
+    expect(container.querySelector('[data-testid="engine-room"]')).toBe(room);
+    expect(layer.style.display).toBe("flex");
+  });
+});
 
-    // Leaving Chats hides it again without unmounting (still the same node).
-    fireEvent.click(getByRole("radio", { name: "Operations" }));
-    expect(container.querySelector('[data-testid="chats"]')).toBe(chats);
-    expect((chats?.parentElement as HTMLElement).style.display).toBe("none");
+describe("persistent layers are exported memoized (260721 tab-switch CPU)", () => {
+  // The memo gate is the fix's contract: a shell re-render (every setView) must not reconcile a
+  // layer whose props are unchanged. Guard the export SHAPE here so a future refactor can't
+  // silently drop the memo; the render-count behavior lives in Cockpit.memo.test.tsx.
+  it("exports every persistent layer as a React.memo component", () => {
+    const layers: Array<[string, unknown]> = [
+      ["DetailPanel", DetailPanel],
+      ["SessionsView", SessionsView],
+      ["EngineRoom", EngineRoom],
+      ["FileViewer", FileViewer],
+      ["AttentionQueue", AttentionQueue],
+      ["LifecycleList", LifecycleList],
+      ["EventRiver", EventRiver],
+      ["RailChat", RailChat],
+      ["HighlightComposer", HighlightComposer],
+      ["NotesReaderViewer", NotesReaderViewer],
+    ];
+    for (const [name, component] of layers) {
+      expect((component as { $$typeof: symbol }).$$typeof, name).toBe(Symbol.for("react.memo"));
+    }
+  });
+});
+
+describe("the left rail shows lifecycle states and attention severities at the same time", () => {
+  // Dot.tsx used to justify `warn` and `awaiting-developer` sharing amber on the grounds that
+  // "AttentionQueue renders only severities and LifecycleList renders only states, so no list can
+  // show both". True per LIST and false per VIEW: the two panels are siblings inside the same
+  // always-visible left rail, so a developer reads both grammars in one glance — and they are
+  // different facts about different objects (the reducer builds no attention row for an
+  // `awaiting-developer` lifecycle, so an amber dot in one panel says nothing about the other).
+  //
+  // This renders the whole shell rather than the two panels, because the panels being siblings in
+  // one view is exactly the claim under test.
+  function railProjection(attentionQueue: Analytics["attentionQueue"]): WorkspaceProjection {
+    const handoff: LifecycleProjection = {
+      id: "LC-HANDOFF",
+      state: "awaiting-developer",
+      phase: "build",
+      fleeting: false,
+      repoId: "repo-a",
+      tokens: 0,
+      startedAt: "2026-06-20T09:00:00+00:00",
+      lastEventTs: "2026-06-20T09:00:30+00:00",
+      stateEnteredAt: "2026-06-20T09:00:00+00:00",
+      inferred: false,
+      actions: [],
+      tokenSeries: [],
+    };
+    return {
+      version: 2,
+      generatedAt: "2026-06-20T09:01:00+00:00",
+      lifecycles: [handoff],
+      // The rail renders a leaf only while a worktree exists, so the row needs its enclosure.
+      enclosures: [liveEnclosure("01", "LC-HANDOFF")],
+      providers: [],
+      activeWorktreeGroups: [],
+      metrics: metricsFor([handoff]),
+      analytics: {
+        driftSnapshots: [],
+        stalestSidecars: [],
+        setupSummaries: [],
+        setupProgress: [],
+        routeCoverage: [],
+        toolReports: [],
+        ledgers: [],
+        taskDocuments: [
+          taskDoc({
+            id: "01",
+            kind: "subTask",
+            lifecycleId: "LC-HANDOFF",
+            title: "Handoff Leaf",
+            docPath: "/tasks/repo-a/ops/01_handoff.json",
+          }),
+        ],
+        series: [],
+        attentionQueue,
+        engineProcesses: [],
+        agentPickups: [],
+        expectationRows: [],
+      },
+    };
+  }
+
+  const WARN_ROW: Analytics["attentionQueue"] = [
+    {
+      id: "actionable-drift:repo-a",
+      kind: "actionable-drift",
+      severity: "warn",
+      lane: "repo",
+      title: "6 actionable drift",
+      waitSeconds: 900,
+      repoId: "repo-a",
+    },
+  ];
+
+  it("keeps a handoff state and a queue warning apart in the one rail that shows both", () => {
+    dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
+    const { getByTestId } = render(<CockpitShell />);
+
+    const stateDot = getByTestId("task-state").firstElementChild;
+    const severityDot = getByTestId("attn-severity").firstElementChild;
+    expect(stateDot, "no lifecycle state dot in the rail").toBeTruthy();
+    expect(severityDot, "no attention severity dot in the rail").toBeTruthy();
+    // Both are amber — the palette groups rather than identifies — so this is the glyph's job.
+    expect(stateDot?.outerHTML).not.toBe(severityDot?.outerHTML);
+  });
+
+  it("speaks the severity of an attention row into the accessibility tree", () => {
+    // The Dot is `aria-hidden`, so the severity lives entirely on its wrapper — and the wrapper
+    // used to be a bare `<span aria-label>`. ARIA prohibits naming a `generic`, so that label was
+    // in the DOM and in no accessibility tree: `getAttribute("aria-label")` passed while a screen
+    // reader user got nothing. Queried BY ROLE AND NAME here, which is the computed tree, and
+    // backed by axe, which fails the prohibited attribute outright.
+    dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
+    const { getByRole, container } = render(<CockpitShell />);
+    expect(getByRole("img", { name: "Severity: warn" })).toBe(
+      container.querySelector('[data-testid="attn-severity"]'),
+    );
+    // The state dot's label reaches the tree a different way: React Aria gives the row
+    // `role="option"`, whose name comes from its content, so the span's label is absorbed into it.
+    expect(
+      getByRole("option", { name: /Task progress: awaiting-developer; phase: build/ }),
+    ).toBeTruthy();
+  });
+
+  it("passes axe on the panel the severity label lives in", async () => {
+    // The panel rather than the whole shell: axe walks every node it is given, and this is the
+    // subtree the label is on. `aria-prohibited-attr` is `serious` and would fail here.
+    dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
+    const { container } = render(<AttentionQueue onSelect={vi.fn()} />);
+    const results = await axe.run(container, {
+      // jsdom has no layout engine, so skip the rules that need rendered geometry.
+      rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
+    });
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
   });
 });

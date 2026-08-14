@@ -239,11 +239,12 @@ The ledger makes this safe rather than chaotic:
   off an older commit gets the memory that was true then, instead of whatever
   happens to be on memory main. (A freshly squash-merged branch is the common
   blocker: the merge creates a new commit the ledger has not mapped yet.)
-- **Closeout commits in a fixed order.** Code first, then onboarding metadata
-  stamped to that exact code commit, then a *blocking* memory-quality gate, then
-  the memory content, then the ledger row. If onboarding is unclean, the gate
-  raises mid-closeout and the memory commit is simply never created — stale prose
-  cannot be stamped as verified.
+- **Closeout commits in a fixed order.** For an Agents Remember source commit,
+  strict project-owned code quality runs first. Then code commits, onboarding
+  metadata is stamped to that exact code commit, the *blocking* memory-quality
+  gate runs, and memory content and the ledger row commit. A failed source-quality
+  gate leaves code, memory, and ledger uncommitted; unclean onboarding blocks the
+  later memory commit.
 - **Integration is transactional across both repos.** Landing advances code main
   and memory main as a single all-or-nothing step. A failure on the memory side
   rolls the already-advanced code repo back too, so main never holds code without
@@ -295,8 +296,9 @@ worktree and thrown away with it.
 Memory is only as good as the discipline that keeps it honest, and that
 discipline is the second half of the product. Sessions route by role through
 one skill (`l-01-agent-lifecycles`): a spawned agent follows the role brief
-that spawned it, and a developer-facing session is the **architect**, whose
-lifecycle runs
+that spawned it, and a developer-facing session is **free chat**. It answers
+research inline, creates or resolves the first durable sprint and leaf when needed,
+then launches that sprint-bound architect lifecycle:
 
 ```text
 request → trust-checkpoint → reframe-research → decide → build → close
@@ -427,9 +429,12 @@ becoming fragile:
 - **Benchmark tools** prepare paired source-only and memory-enabled Codex runs,
   capture JSONL results, and summarize metrics so claims about the memory layer
   can be checked instead of waved through.
-- **Source quality tooling** wraps repository-owned checks such as Ruff, Radon,
-  pytest coverage, and CRAP-score risk reporting so implementation work can use
-  the same command surface the memory layer records.
+- **Source quality tooling** wraps repository-owned checks — Ruff lint
+  (complexity rules included) and format, Pyright, pytest coverage, and mandatory
+  CRAP threshold enforcement — so commit, closeout, push, and CI gates use one
+  command surface. No rail carries a baseline, allowlist or exemption file. Radon
+  is carried alongside them as a labelled report, not as enforcement: `radon cc`
+  and `radon mi` exit 0 whatever they find.
 
 ## How the pieces fit
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from agents_remember.mcp.config import (
+from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
     McpRuntimeConfig,
     ProviderScope,
@@ -63,25 +63,28 @@ def provider_status_packet(
         detail_limit=detail_limit,
         target_repo_id=target_repo_id,
     )
-    packet = ProviderStatusResponse(ok=True, providers=summary).model_dump(
-        mode="json",
-        exclude_none=True,
-    )
     # Containment R4 (260707-HFX-L1): the daemon-sampled containment metrics ride
     # the status packet even when providers are disabled — leftover stacks from a
     # dead session are exactly what must stay observable. Read-only; None until
     # the serving daemon's first sample lands.
-    store = ProviderMetricsStore(config.coordination_root)
-    metrics = store.read_current()
-    if metrics is not None:
-        packet["metrics"] = metrics
     # 260707-HFX-L2: index staleness is a reportable STATE — the newest
     # index-lifecycle rows (seed catch-up, staleIndex, watcher readiness)
     # surface here so an operator sees behind-ness without reading logs.
+    # Both are set on the MODEL and serialized by the single dump below. They used to be
+    # stamped onto the dumped dict, which `ProviderStatusResponse` (extra="forbid") then
+    # rejected at the `mcp/tools/base.py::_tool_payload` re-validation — so a sampled
+    # metrics row or a non-empty index-state list turned `provider_status` into a
+    # ValidationError instead of a response. `exclude_none=True` keeps the empty case
+    # byte-identical to before: an unsampled metric and an empty row list emit no key.
+    store = ProviderMetricsStore(config.coordination_root)
     index_states = store.read_recent_index_states(limit=10)
-    if index_states:
-        packet["indexState"] = index_states
-    return packet
+    response = ProviderStatusResponse(
+        ok=True,
+        providers=summary,
+        metrics=store.read_current(),
+        indexState=index_states or None,
+    )
+    return response.model_dump(mode="json", exclude_none=True)
 
 
 def provider_summary_packet(
@@ -195,7 +198,11 @@ def _provider_status_projection(
     # ok also reflects graph/workspace content, so both must hold for a green
     # global summary.
     raw_ok = status.get("ok")
-    ok = bool(aggregated.get("ok")) if raw_ok is None else bool(raw_ok) and bool(aggregated.get("ok"))
+    ok = (
+        bool(aggregated.get("ok"))
+        if raw_ok is None
+        else bool(raw_ok) and bool(aggregated.get("ok"))
+    )
     providers_map = aggregated.get("providers", {})
     partial = status.get("partial", False) or (
         not ok
@@ -291,9 +298,7 @@ def _cgc_watchers_map(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(watchers, dict):
         return {}
     return {
-        str(repo_id): watcher
-        for repo_id, watcher in watchers.items()
-        if isinstance(watcher, dict)
+        str(repo_id): watcher for repo_id, watcher in watchers.items() if isinstance(watcher, dict)
     }
 
 

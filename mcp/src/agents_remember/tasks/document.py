@@ -18,19 +18,14 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from agents_remember.models.task_document import DocStatus, StepStatus
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
-# Step/substep status carries the dashboard's granularity; the markdown render
-# only has a binary checkbox, so the richer state lives in the JSON.
-StepStatus = Literal["pending", "inProgress", "blocked", "done"]
-# Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
-# the rendered ``**Status:**`` line is always a valid template value.
-DocStatus = Literal["planning", "inProgress", "Completed"]
-# "light" is retained only so any legacy light document still loads; the task_doc
-# create/replace path refuses to author new ones — every task is master/leaf.
 DocKind = Literal["light", "subTask", "master"]
+RouteReviewVerdict = Literal["pass", "pass-with-notes", "block"]
 
 
 class _Doc(BaseModel):
@@ -39,11 +34,36 @@ class _Doc(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+class StepDisposition(_Doc):
+    """Durable evidence that one exact work unit was intentionally skipped."""
+
+    kind: Literal["intentionalSkip"] = "intentionalSkip"
+    reason: str
+    recordedAt: str
+    recordedVia: Literal["task_doc.skip_step"] = "task_doc.skip_step"
+    lifecycleId: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _trim_nonblank_reason(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("intentional skip reason must not be blank")
+        return trimmed
+
+
 class SubStep(_Doc):
     id: str
     title: str
     status: StepStatus = "pending"
     note: str | None = None
+    disposition: StepDisposition | None = None
+
+    @model_validator(mode="after")
+    def _check_disposition_is_terminal(self) -> Self:
+        if self.disposition is not None and self.status != "done":
+            raise ValueError("a substep with intentional-skip disposition must have status done")
+        return self
 
 
 class Step(_Doc):
@@ -54,12 +74,65 @@ class Step(_Doc):
     outcome: str | None = None
     status: StepStatus = "pending"
     substeps: list[SubStep] = Field(default_factory=list)
+    disposition: StepDisposition | None = None
+
+    @model_validator(mode="after")
+    def _check_disposition_is_terminal(self) -> Self:
+        if self.disposition is not None and self.status != "done":
+            raise ValueError("a step with intentional-skip disposition must have status done")
+        return self
 
 
 class Decision(_Doc):
     at: str
     decision: str
     rationale: str
+
+
+class RouteReviewUnit(_Doc):
+    """One independently reviewed major route in the candidate code tree."""
+
+    route: str
+    verdict: RouteReviewVerdict
+    evidenceRef: str
+
+    @field_validator("route", "evidenceRef")
+    @classmethod
+    def _trim_nonblank_route_review_value(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("route-review route and evidenceRef must not be blank")
+        return trimmed
+
+
+class RouteReviewRecord(_Doc):
+    """Plane-stamped review evidence bound to one exact Git candidate tree."""
+
+    candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    verdict: RouteReviewVerdict
+    verdictRef: str
+    reviewedAt: str
+    routes: list[RouteReviewUnit] = Field(min_length=1)
+
+    @field_validator("verdictRef", "reviewedAt")
+    @classmethod
+    def _trim_nonblank_route_review_metadata(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("route-review verdictRef and reviewedAt must not be blank")
+        return trimmed
+
+    @model_validator(mode="after")
+    def _check_route_review_coherence(self) -> Self:
+        names = [route.route for route in self.routes]
+        if len(names) != len(set(names)):
+            raise ValueError("route-review routes must be unique")
+        blocked = any(route.verdict == "block" for route in self.routes)
+        if self.verdict == "block" and not blocked:
+            raise ValueError("a blocking route-review verdict requires at least one blocked route")
+        if self.verdict != "block" and blocked:
+            raise ValueError("a passing route-review verdict cannot contain a blocked route")
+        return self
 
 
 class CodeExample(_Doc):
@@ -123,6 +196,9 @@ class TaskDocument(_Doc):
     # Extra "**Key:** value" header lines beyond the standard block (e.g. Verified/Source); R4.
     headerNotes: list[HeaderNote] = Field(default_factory=list)
     seriesContractPath: str | None = None
+    # Sprint-owned branch identity.  A manager's master integration edge is based on this
+    # declaration, never on whichever branch the repository checkout happens to have active.
+    integrationBranch: str | None = None
     enclosures: list[TaskEnclosureRef] = Field(default_factory=list)
     lifecycleId: str | None = None
     objective: str = ""
@@ -134,6 +210,7 @@ class TaskDocument(_Doc):
     # planning slice that defers its examples from a task that genuinely needs none (R3).
     codeExamplesNote: str | None = None
     decisions: list[Decision] = Field(default_factory=list)
+    routeReview: RouteReviewRecord | None = None
     openQuestions: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     # subTasks is the master series index (master-only). sections is the master's ordered
@@ -154,9 +231,11 @@ class TaskDocument(_Doc):
                 or self.codeExamples
                 or self.codeExamplesNote is not None
                 or self.lifecycleId is not None
+                or self.routeReview is not None
             ):
                 raise ValueError(
-                    "a master document has no steps, codeExamples, codeExamplesNote, or lifecycleId"
+                    "a master document has no steps, codeExamples, codeExamplesNote, lifecycleId, "
+                    "or routeReview"
                 )
         else:
             if self.subTasks:
@@ -170,26 +249,39 @@ class TaskDocument(_Doc):
                     "codeExamplesNote explains why code examples are absent; "
                     "it cannot be set alongside codeExamples"
                 )
+        self._normalize_integration_branch()
         return self
 
+    def _normalize_integration_branch(self) -> None:
+        if self.integrationBranch is None:
+            return
+        branch = self.integrationBranch.strip()
+        if self.kind != "master":
+            raise ValueError("integrationBranch is master-only")
+        if not self.orchestrates:
+            raise ValueError(
+                "integrationBranch belongs only to an orchestration sprint with orchestrates"
+            )
+        if not branch:
+            raise ValueError("integrationBranch must not be blank")
+        self.integrationBranch = branch
 
-def _leaf_statuses(doc: TaskDocument) -> list[StepStatus]:
-    """The progress-bearing units: a step's substeps if it has any, else the step."""
+
+def _declared_statuses(doc: TaskDocument) -> list[StepStatus]:
+    """Every declared step and substep, matching terminal-readiness semantics."""
     statuses: list[StepStatus] = []
     for step in doc.steps:
-        if step.substeps:
-            statuses.extend(sub.status for sub in step.substeps)
-        else:
-            statuses.append(step.status)
+        statuses.append(step.status)
+        statuses.extend(sub.status for sub in step.substeps)
     return statuses
 
 
 def step_total(doc: TaskDocument) -> int:
-    return len(_leaf_statuses(doc))
+    return len(_declared_statuses(doc))
 
 
 def step_done(doc: TaskDocument) -> int:
-    return sum(1 for status in _leaf_statuses(doc) if status == "done")
+    return sum(1 for status in _declared_statuses(doc) if status == "done")
 
 
 def current_step(doc: TaskDocument) -> str | None:
@@ -197,9 +289,15 @@ def current_step(doc: TaskDocument) -> str | None:
     for step in doc.steps:
         if step.status in ("inProgress", "blocked"):
             return f"{step.id} — {step.title}"
+        for sub in step.substeps:
+            if sub.status in ("inProgress", "blocked"):
+                return f"{step.id}/{sub.id} — {sub.title}"
     for step in doc.steps:
         if step.status != "done":
             return f"{step.id} — {step.title}"
+        for sub in step.substeps:
+            if sub.status != "done":
+                return f"{step.id}/{sub.id} — {sub.title}"
     return None
 
 

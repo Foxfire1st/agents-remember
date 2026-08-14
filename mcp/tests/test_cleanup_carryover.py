@@ -6,31 +6,58 @@ branches. Parent/source branches belong to the next edge up the task tree and mu
 child-edge cleanup. The "carryover done" signal is the official ledger itself (no contract stamp).
 """
 
-from __future__ import annotations
-
 import json
+import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import (
+    MagicMock,
+    patch,
+)
 
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     ledger_to_text,
     prepend_mapping,
 )
-from agents_remember.observer.drift_snapshots import drift_snapshot_path
-from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA
+from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
+from agents_remember.memory_quality.style.citations import (
+    source_index,
+    source_index_cache,
+)
+from agents_remember.memory_quality.style.citations.resolution import Trees
+from agents_remember.serving.projections.paths import DRIFT_SNAPSHOT_SCHEMA
+from agents_remember.tasks import (
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
+from agents_remember.worktrees.modules import terminal_validation
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
+    LocalBranchPresence,
     cleanup_result,
+    delete_branch_if_merged,
     delete_branch_if_merged_into,
     delete_remote_branch_if_present,
 )
-from agents_remember.worktrees.modules.guidance import carryover_done, lifecycle_guidance
-from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
-from test_worktree_support import git, init_repo
+from agents_remember.worktrees.modules.guidance import (
+    carryover_done,
+    lifecycle_guidance,
+)
+from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    write_contract,
+)
+from test_worktree_support import (
+    git,
+    init_repo,
+)
 
 
 def _contract(tmp: Path, **over: object) -> WorktreeContract:
@@ -61,6 +88,7 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
         "integrated_code_commit": "LANDED1234",
         "code_commit": "CLOSE1234",
         "cleanup": "pending",
+        "lifecycle_id": "LC-T",
     }
     base.update(over)
     return WorktreeContract(**base)  # type: ignore[arg-type]
@@ -146,15 +174,15 @@ class GuidanceCarryoverRoutingTests(unittest.TestCase):
         cd.return_value = (False, "")
         guidance = lifecycle_guidance(_contract(self.tmp))
         self.assertEqual(guidance["phase"], "carryover-pending")
-        self.assertEqual(guidance["nextTool"], "memory_carryover_apply")
+        self.assertEqual(guidance.get("nextTool"), "memory_carryover_apply")
 
     @patch("agents_remember.worktrees.modules.guidance.carryover_done")
     def test_routes_cleanup_pending_with_done_at_when_carried(self, cd: MagicMock) -> None:
         cd.return_value = (True, "2026-06-21T09:00:00+02:00")
         guidance = lifecycle_guidance(_contract(self.tmp))
         self.assertEqual(guidance["phase"], "cleanup-pending")
-        self.assertEqual(guidance["nextTool"], "worktree_cleanup")
-        self.assertEqual(guidance["carryoverDoneAt"], "2026-06-21T09:00:00+02:00")
+        self.assertEqual(guidance.get("nextTool"), "worktree_cleanup")
+        self.assertEqual(guidance.get("carryoverDoneAt"), "2026-06-21T09:00:00+02:00")
 
 
 class CleanupCarryoverGuardTests(unittest.TestCase):
@@ -274,6 +302,107 @@ class CleanupChildEdgeTests(unittest.TestCase):
             memory_worktree=memory_worktree,
             ledger_path=memory_worktree / "memory.md",
         )
+        reports = contract.worktree_group / "reports"
+        reports.mkdir()
+        (reports / "curator-memory-quality.md").write_text("temporary\n", encoding="utf-8")
+        write_contract(contract.contract_path, contract)
+        task_doc_path, _task_markdown = write_task_doc(
+            contract.task_root,
+            TaskDocument.model_validate(
+                {
+                    "id": "demo",
+                    "slug": "task",
+                    "title": "Pending cleanup step",
+                    "kind": "light",
+                    "status": "inProgress",
+                    "repo": "repo-a",
+                    "createdAt": "2026-08-03T12:00:00+00:00",
+                    "steps": [
+                        {
+                            "id": "S-final",
+                            "title": "Clean up the worktree",
+                            "status": "pending",
+                        }
+                    ],
+                }
+            ),
+        )
+        task_before = task_doc_path.read_bytes()
+
+        with (
+            patch.object(
+                terminal_validation,
+                "_remote_branch_preflight",
+                return_value={"remote_deleted": False, "reason": "already-absent"},
+            ),
+            patch(
+                "agents_remember.worktrees.modules.cleanup.delete_remote_branch_if_present",
+                return_value={"remote_deleted": False, "reason": "already-absent"},
+            ),
+        ):
+            result = cleanup_result(
+                WorktreeArgs(
+                    contract_path=contract.contract_path,
+                    approved=True,
+                    dry_run=False,
+                    teardown_providers=False,
+                )
+            )
+        branches = result.payload["branches"]  # type: ignore[index]
+        directories = result.payload["directories"]  # type: ignore[index]
+
+        self.assertEqual(result.returncode, 0)
+        assert isinstance(directories, dict)
+        assert isinstance(directories["reports"], dict)
+        self.assertTrue(directories["reports"]["removed"])
+        self.assertFalse(reports.exists())
+        assert isinstance(branches, dict)
+        self.assertEqual(sorted(branches.keys()), ["code", "memory", "memory_integration"])
+        self.assertEqual(branches["memory_integration"]["reason"], "already-absent")
+        self.assertEqual(git(code_repo, "branch", "--list", "ar/task").strip(), "")
+        self.assertEqual(git(memory_repo, "branch", "--list", "ar/task").strip(), "")
+        self.assertIn("feat/dashboard", git(code_repo, "branch", "--list", "feat/dashboard"))
+        self.assertIn("feat/dashboard", git(memory_repo, "branch", "--list", "feat/dashboard"))
+        self.assertEqual(task_doc_path.read_bytes(), task_before)
+        self.assertEqual(read_task_doc(task_doc_path).steps[0].status, "pending")
+        self.assertEqual(read_task_doc(task_doc_path).status, "inProgress")
+
+    @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
+    def test_cleanup_deletes_remote_branch_when_local_branch_is_already_absent(
+        self, carryover: MagicMock
+    ) -> None:
+        carryover.return_value = (True, "2026-08-03T09:00:00+02:00")
+        code_repo, code_worktree = self._repo_with_landed_task("remote-code")
+        memory_repo, memory_worktree = self._repo_with_landed_task("remote-memory")
+        origin = self.tmp / "origin.git"
+        origin.mkdir()
+        subprocess.run(
+            ["git", "init", "--bare"],
+            cwd=origin,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        git(code_repo, "remote", "add", "origin", origin.as_posix())
+        git(code_repo, "push", "origin", "ar/task")
+        git(code_repo, "worktree", "remove", code_worktree.as_posix())
+        git(code_repo, "branch", "-D", "ar/task")
+        self.assertEqual(git(code_repo, "branch", "--list", "ar/task"), "")
+        self.assertIn("refs/heads/ar/task", git(code_repo, "ls-remote", "origin", "ar/task"))
+
+        contract = _contract(
+            self.tmp,
+            code_repo_path=code_repo,
+            memory_repo_path=memory_repo,
+            code_source_branch="feat/dashboard",
+            code_work_branch="ar/task",
+            memory_source_branch="feat/dashboard",
+            memory_work_branch="ar/task",
+            worktree_group=self.tmp / "grp",
+            code_worktree=code_worktree,
+            memory_worktree=memory_worktree,
+            ledger_path=memory_worktree / "memory.md",
+        )
         write_contract(contract.contract_path, contract)
 
         result = cleanup_result(
@@ -288,11 +417,10 @@ class CleanupChildEdgeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         assert isinstance(branches, dict)
-        self.assertEqual(sorted(branches.keys()), ["code", "memory"])
-        self.assertEqual(git(code_repo, "branch", "--list", "ar/task").strip(), "")
-        self.assertEqual(git(memory_repo, "branch", "--list", "ar/task").strip(), "")
-        self.assertIn("feat/dashboard", git(code_repo, "branch", "--list", "feat/dashboard"))
-        self.assertIn("feat/dashboard", git(memory_repo, "branch", "--list", "feat/dashboard"))
+        self.assertEqual(branches["code"]["reason"], "already-absent")
+        self.assertTrue(branches["code"]["remote"]["remote_deleted"])
+        self.assertEqual(git(code_repo, "ls-remote", "origin", "ar/task"), "")
+        self.assertEqual(load_contract(contract.contract_path).cleanup, "completed")
 
 
 class CleanupDryRunDirectoryTests(unittest.TestCase):
@@ -305,7 +433,7 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._td.cleanup()
 
-    @patch("agents_remember.worktrees.modules.cleanup.teardown_worktree_providers")
+    @patch("agents_remember.application.provider_runtime.teardown_worktree_providers")
     @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
     def test_worktree_group_would_remove_when_only_scheduled_paths_remain(
         self, carryover: MagicMock, teardown: MagicMock
@@ -319,9 +447,12 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         code_worktree = worktree_group / "code"
         memory_worktree = worktree_group / "memory"
         provider_runtime = worktree_group / "provider-runtime"
+        reports = worktree_group / "reports"
         code_worktree.mkdir(parents=True)
         memory_worktree.mkdir()
         provider_runtime.mkdir()
+        reports.mkdir()
+        (reports / "curator-memory-quality.md").write_text("temporary\n", encoding="utf-8")
         teardown.return_value = {
             "state": "would-teardown",
             "providerRuntime": {
@@ -347,6 +478,7 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.payload["state"], "would-cleanup")  # type: ignore[index]
         self.assertIn("Cleanup would reclaim", result.payload["summary"])  # type: ignore[index]
+        self.assertTrue(directories["reports"]["would_remove"])  # type: ignore[index]
         self.assertTrue(directories["worktree_group"]["would_remove"])  # type: ignore[index]
 
 
@@ -367,6 +499,8 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
         memory_repo = self.tmp / "mem"
         init_repo(code_repo, "main")
         init_repo(memory_repo, "main")
+        git(code_repo, "branch", "feat/x")
+        git(memory_repo, "branch", "feat/x")
         contract = _contract(self.tmp, code_repo_path=code_repo, memory_repo_path=memory_repo)
         write_contract(contract.contract_path, contract)
         snapshot = _write_drift_snapshot(
@@ -389,6 +523,8 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
         memory_repo = self.tmp / "mem"
         init_repo(code_repo, "main")
         init_repo(memory_repo, "main")
+        git(code_repo, "branch", "feat/x")
+        git(memory_repo, "branch", "feat/x")
         contract = _contract(self.tmp, code_repo_path=code_repo, memory_repo_path=memory_repo)
         write_contract(contract.contract_path, contract)
         snapshot = _write_drift_snapshot(
@@ -429,12 +565,202 @@ class RemoteBranchDeleteTests(unittest.TestCase):
     @patch("agents_remember.worktrees.modules.cleanup.run_git")
     def test_present_remote_is_deleted(self, run_git: MagicMock) -> None:
         run_git.side_effect = [
+            SimpleNamespace(returncode=0, stdout="origin\n", stderr=""),
             SimpleNamespace(returncode=0, stdout="sha1234\trefs/heads/feat/x\n", stderr=""),
             SimpleNamespace(returncode=0, stdout="", stderr=""),
         ]
         out = delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
         self.assertTrue(out["remote_deleted"])
 
+    @patch("agents_remember.worktrees.modules.cleanup.run_git")
+    def test_remote_query_failure_is_not_reported_absent(self, run_git: MagicMock) -> None:
+        run_git.return_value = SimpleNamespace(
+            returncode=128, stdout="", stderr="remote config exploded"
+        )
+        out = delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+        self.assertEqual(out["reason"], "remote config exploded")
 
-if __name__ == "__main__":
+    def test_terminal_remote_preflight_reports_present_and_absent_refs(self) -> None:
+        configured = SimpleNamespace(returncode=0, stdout="origin\n", stderr="")
+        for ref_output, expected in (
+            ("sha\trefs/heads/feat/x\n", {"remote_deleted": False, "would_delete": True}),
+            ("", {"remote_deleted": False, "reason": "already-absent"}),
+        ):
+            with (
+                self.subTest(ref_output=ref_output),
+                patch.object(
+                    terminal_validation,
+                    "run_git",
+                    side_effect=[
+                        configured,
+                        SimpleNamespace(returncode=0, stdout=ref_output, stderr=""),
+                    ],
+                ),
+            ):
+                self.assertEqual(
+                    terminal_validation._remote_branch_preflight(Path("/x"), "feat/x"),
+                    expected,
+                )
+
+    def test_terminal_remote_preflight_reports_query_and_probe_failures(self) -> None:
+        cases = (
+            (
+                [SimpleNamespace(returncode=128, stdout="", stderr="config exploded")],
+                "config exploded",
+            ),
+            (
+                [
+                    SimpleNamespace(returncode=0, stdout="origin\n", stderr=""),
+                    SimpleNamespace(returncode=128, stdout="", stderr="probe exploded"),
+                ],
+                "probe exploded",
+            ),
+            (
+                [
+                    SimpleNamespace(returncode=0, stdout="origin\n", stderr=""),
+                    subprocess.TimeoutExpired(["git", "ls-remote"], 30),
+                ],
+                "remote-unreachable",
+            ),
+        )
+        for side_effect, reason in cases:
+            with (
+                self.subTest(reason=reason),
+                patch.object(terminal_validation, "run_git", side_effect=side_effect),
+            ):
+                result = terminal_validation._remote_branch_preflight(Path("/x"), "feat/x")
+                self.assertEqual(result["reason"], reason)
+
+
+class LocalBranchDeleteTests(unittest.TestCase):
+    def test_presence_error_and_absence_are_truthful_without_deletion(self) -> None:
+        cases = (
+            (LocalBranchPresence("error", "ref query exploded"), "ref query exploded"),
+            (LocalBranchPresence("absent"), "already-absent"),
+        )
+        for presence, reason in cases:
+            with (
+                self.subTest(reason=reason),
+                patch(
+                    "agents_remember.worktrees.modules.cleanup.local_branch_presence",
+                    return_value=presence,
+                ),
+                patch("agents_remember.worktrees.modules.cleanup.run_git") as run_git_mock,
+            ):
+                result = delete_branch_if_merged(Path("/x"), "ar/task", dry_run=False)
+                self.assertFalse(result["deleted"])
+                self.assertEqual(result["reason"], reason)
+                run_git_mock.assert_not_called()
+
+    def test_present_branch_dry_run_success_and_failure_are_distinct(self) -> None:
+        outcomes = (
+            (True, None, {"deleted": False, "would_delete": True}),
+            (False, SimpleNamespace(returncode=0, stdout="", stderr=""), {"deleted": True}),
+            (
+                False,
+                SimpleNamespace(returncode=1, stdout="", stderr="delete refused"),
+                {"deleted": False, "reason": "delete refused"},
+            ),
+        )
+        for dry_run, git_result, expected in outcomes:
+            with (
+                self.subTest(dry_run=dry_run, expected=expected),
+                patch(
+                    "agents_remember.worktrees.modules.cleanup.local_branch_presence",
+                    return_value=LocalBranchPresence("present"),
+                ),
+                patch(
+                    "agents_remember.worktrees.modules.cleanup.run_git",
+                    return_value=git_result,
+                ) as run_git_mock,
+            ):
+                result = delete_branch_if_merged(Path("/x"), "ar/task", dry_run=dry_run)
+                self.assertEqual(
+                    {key: result[key] for key in expected},
+                    expected,
+                )
+                if dry_run:
+                    run_git_mock.assert_not_called()
+                else:
+                    run_git_mock.assert_called_once_with(Path("/x"), ["branch", "-d", "ar/task"])
+
+
+class CitationCacheLifecycleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+
+    def contract(self, name: str) -> WorktreeContract:
+        code = self.tmp / f"{name}-code"
+        memory = self.tmp / f"{name}-memory"
+        code.mkdir()
+        memory.mkdir()
+        contract = _contract(
+            self.tmp,
+            task_name=name,
+            contract_path=self.tmp / "tasks" / name / "series-contract.md",
+            code_worktree=code,
+            memory_worktree=memory,
+            worktree_group=self.tmp / f"{name}-group",
+        )
+        write_contract(contract.contract_path, contract)
+        return contract
+
+    def preflight(self, *blockers: dict[str, object]) -> TerminalPreflight:
+        return TerminalPreflight(
+            worktrees={
+                "code": {"removed": False, "would_remove": True},
+                "memory": {"removed": False, "would_remove": True},
+            },
+            branches={
+                "code": {"deleted": False, "would_delete": True},
+                "memory": {"deleted": False, "would_delete": True},
+                "memory_integration": {"deleted": False, "reason": "already-absent"},
+            },
+            blockers=tuple(blockers),
+        )
+
+    def cache(self, contract: WorktreeContract) -> Path:
+        authority = source_index_cache.contract_cache_authority(contract)
+        assert authority is not None
+        authority.namespace.mkdir(parents=True)
+        authority.control_dir.mkdir(parents=True)
+        authority.control_lock.write_bytes(b"")
+        (authority.namespace / "ready.json").write_text("ready\n", encoding="utf-8")
+        (authority.namespace / "index.sqlite3").write_bytes(b"exact-ready-generation")
+        return authority.namespace
+
+    def cache_bytes(self, cache: Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(cache).as_posix(): path.read_bytes()
+            for path in sorted(cache.rglob("*"))
+            if path.is_file()
+        }
+
+    @staticmethod
+    def trees(contract: WorktreeContract, authority: object) -> Trees:
+        assert contract.memory_worktree is not None
+        assert isinstance(authority, source_index_cache.ManagedCacheAuthority)
+        return Trees(
+            contract.code_worktree,
+            contract.memory_worktree,
+            cache_authority=authority,
+        )
+
+    @staticmethod
+    def fail_publication() -> None:
+        raise RuntimeError("publication exploded")
+
+    @staticmethod
+    def _open_after_signal(trees: Trees, started: threading.Event, outcome: list[str]) -> None:
+        started.set()
+        try:
+            with source_index.open_repository_index(trees):
+                outcome.append("opened")
+        except Exception as error:
+            outcome.append(str(error))
+
+
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

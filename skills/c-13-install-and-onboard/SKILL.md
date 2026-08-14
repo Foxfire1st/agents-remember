@@ -158,12 +158,18 @@ preference):
    a smarter master-seam reviewer). Harness values must be known ids: the
    builtin registry (`claude`, `codex`, `pi`) or an `orchestration.harnesses`
    entry the developer defines (new TUIs, or a pre-customized launch argv for
-   a builtin). `effort` is validated per-harness at dispatch (claude:
-   `low|medium|high|xhigh|max` on the `--effort` flag plus the session-level
-   `ultracode`); mention the FREE-FORM escape hatch for anything outside the
-   vocabularies - `launchArgs` (verbatim argv), `sessionCommands` (pasted
-   before the brief), `promptKeywords` (prepended to the brief) - never
-   validated, recorded in spawn provenance. Ordinary spawning seats cannot
+   a builtin). A configured native role supplies the complete harness/model/effort
+   selection. Do not teach a static builtin model or effort vocabulary: the native
+   adapter advertises the token-free per-install/account model catalog, with effort
+   nested under each model, and validates it before the configured vendor session
+   starts. Use the exact advertised model key (Pi keys are provider-qualified) and
+   one launch-settable effort advertised for that model. The adapter applies the
+   selection through native launch configuration; normalized model/effort is never
+   converted into composer paste or a generated session command. Mention the
+   FREE-FORM escape hatch - `launchArgs` (verbatim argv), `sessionCommands`
+   (explicit user-authored lines applied before the brief), `promptKeywords`
+   (prepended to the brief) - which is never validated or synthesized and is
+   recorded in spawn provenance. Ordinary spawning seats cannot
    pass `harness`/`model`/`effort`, launch/session spend controls, or harness-native
    spend/endpoint env keys directly; settings are the spend surface. Default:
    detection-gated (the first detected harness). The full spawn-surface manual is
@@ -219,8 +225,11 @@ If providers are enabled, make them index the configured code and memory:
    ```
 
    Use `provider_watchers(action="start", dry_run=true)` only when a preview is
-   requested or workflow policy requires one. Use `action="refresh"` to reseed
-   providers after repo or memory changes.
+   requested or workflow policy requires one. `action="refresh"` no longer exists --
+   it force-rebuilt every index while reading like a harmless restart, so it was split
+   in two. Use `action="restart"` to stop and start the watchers without touching their
+   indexes, or `action="invalidate-indexes"` to delete and rebuild every index from
+   scratch (a slow full re-embed and re-graph).
 3. Verify with `provider_status` or
    `context_packet(repo_id=..., include_providers=true)` that providers are
    `ready`, watchers are up, and the target repo is covered.

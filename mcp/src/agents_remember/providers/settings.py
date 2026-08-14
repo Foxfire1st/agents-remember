@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import json
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
+from agents_remember.kernel.primitives.identity import (
+    provider_ownership_labels,
+    scoped_name,
+)
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    ProviderScope,
+    RepositoryScope,
+)
 from agents_remember.providers.cgc.context.constants import CGC_REPO_CGCIGNORE_EXTRAS
 from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.context import (
@@ -18,7 +27,6 @@ from agents_remember.providers.context import (
     GREPAI_PIN,
     GREPAI_RUNNER_IMAGE_REPOSITORY,
 )
-from agents_remember.providers.identity import provider_ownership_labels, scoped_name
 
 
 def lifecycle_settings_from_config(config: McpRuntimeConfig) -> dict[str, Any]:
@@ -50,27 +58,155 @@ def write_lifecycle_settings(config: McpRuntimeConfig) -> Path:
     return path
 
 
-def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str, Any]:
-    roots = [
+@dataclass(frozen=True)
+class _GrepaiNames:
+    """The instance-scoped docker names one GrepAI provider owns.
+
+    Every one of them is ``scoped_name(<base>, instance_id)``, so they are derived once and
+    passed on rather than re-derived in each block that needs them -- two blocks spelling
+    the same container name differently is the failure this shape removes.
+    """
+
+    workspace: str
+    compose_project: str
+    network: str
+    watcher_container: str
+    postgres_container: str
+    ollama_container: str
+
+
+def _grepai_names(provider: ProviderScope) -> _GrepaiNames:
+    return _GrepaiNames(
+        workspace=scoped_name("agents-remember-memory", provider.instance_id),
+        compose_project=scoped_name("agents-remember-grepai", provider.instance_id),
+        network=scoped_name(GREPAI_NETWORK_NAME, provider.instance_id),
+        watcher_container=scoped_name("ar-grepai-watcher", provider.instance_id),
+        postgres_container=scoped_name("ar-grepai-postgres", provider.instance_id),
+        ollama_container=scoped_name("ar-grepai-ollama", provider.instance_id),
+    )
+
+
+def _grepai_roots(config: McpRuntimeConfig) -> list[Any]:
+    """The memory roots GrepAI indexes: one per repository, or the shared root."""
+    roots: list[Any] = [
         {"projectId": repo.repo_id, "path": repo.memory_root.as_posix()}
         for repo in config.repositories.values()
         if repo.memory_root is not None
     ]
     if not roots:
         roots = [config.coordination_root.joinpath("memory-repos").as_posix()]
+    return roots
+
+
+def _grepai_runtime(
+    provider: ProviderScope, config: McpRuntimeConfig, names: _GrepaiNames
+) -> dict[str, Any]:
+    """The watcher container: the process that indexes the roots."""
     version = GREPAI_PIN.split("==", 1)[1]
-    labels = provider_ownership_labels(
-        provider_id=provider.provider_id,
-        instance_id=provider.instance_id,
-        scope=provider.scope,
-        coordination_root=config.coordination_root,
-    )
-    postgres_container = scoped_name("ar-grepai-postgres", provider.instance_id)
-    ollama_container = scoped_name("ar-grepai-ollama", provider.instance_id)
-    watcher_container = scoped_name("ar-grepai-watcher", provider.instance_id)
-    network_name = scoped_name(GREPAI_NETWORK_NAME, provider.instance_id)
-    compose_project = scoped_name("agents-remember-grepai", provider.instance_id)
-    workspace_name = scoped_name("agents-remember-memory", provider.instance_id)
+    return {
+        "mode": "docker",
+        "composeProject": names.compose_project,
+        "network": {"name": names.network},
+        "runner": {
+            "image": f"{GREPAI_RUNNER_IMAGE_REPOSITORY}:{version}",
+            "containerName": names.watcher_container,
+            "imageLockFile": config.coordination_root.joinpath(
+                "providers",
+                "requirements",
+                "grepai-runner-docker.lock",
+            ).as_posix(),
+            "buildRoot": provider.runtime_root.joinpath("image").as_posix(),
+            "runtimeMount": "/grepai/runtime",
+            "logsMount": "/grepai/logs",
+        },
+    }
+
+
+def _grepai_backend(
+    provider: ProviderScope, config: McpRuntimeConfig, names: _GrepaiNames
+) -> dict[str, Any]:
+    """The pgvector store the embeddings land in."""
+    return {
+        "id": "grepai-postgres",
+        "type": "postgres",
+        "mode": "docker",
+        "image": "pgvector/pgvector:pg16",
+        "imageLockFile": config.coordination_root.joinpath(
+            "providers",
+            "requirements",
+            "grepai-postgres-docker.lock",
+        ).as_posix(),
+        "runtimeRoot": config.coordination_root.joinpath(
+            "providers",
+            "data",
+            "grepai",
+            provider.instance_id,
+            "postgres",
+        ).as_posix(),
+        "dataRoot": "<backendRuntimeRoot>/data",
+        "containerName": names.postgres_container,
+        "postgres": {
+            "user": "grepai",
+            "password": "grepai",
+            "database": "grepai",
+        },
+        "ports": {
+            "postgres": {
+                "bindHost": "127.0.0.1",
+                "hostPort": "auto",
+                "containerPort": 5432,
+            }
+        },
+    }
+
+
+def _grepai_embedder(
+    provider: ProviderScope, config: McpRuntimeConfig, names: _GrepaiNames
+) -> dict[str, Any]:
+    """The Ollama container that turns documents into vectors."""
+    container = names.ollama_container
+    return {
+        "provider": "ollama",
+        "model": "nomic-embed-text",
+        "endpoint": f"http://{container}:11434",
+        "dimensions": 768,
+        "backend": {
+            "mode": "docker",
+            "image": GREPAI_OLLAMA_IMAGE,
+            "imageLockFile": config.coordination_root.joinpath(
+                "providers",
+                "requirements",
+                "grepai-ollama-docker.lock",
+            ).as_posix(),
+            "runtimeRoot": config.coordination_root.joinpath(
+                "providers",
+                "data",
+                "grepai",
+                provider.instance_id,
+                "ollama",
+            ).as_posix(),
+            "dataRoot": "<embedderRuntimeRoot>/data",
+            "dataDestination": "/root/.ollama",
+            "containerName": container,
+            "ports": {
+                "http": {
+                    "bindHost": "127.0.0.1",
+                    "hostPort": "auto",
+                    "containerPort": 11434,
+                }
+            },
+        },
+    }
+
+
+def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[str, Any]:
+    """The GrepAI provider document, assembled from the four blocks above.
+
+    Split by block rather than shortened: this is a settings document, so every line is a
+    key the runtime reads, and the only honest way to make 126 lines readable is to name
+    the four things it declares.
+    """
+    names = _grepai_names(provider)
     return {
         "type": "semantic",
         "scope": "memory",
@@ -78,10 +214,15 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
         "instance": {
             "id": provider.instance_id,
             "scope": provider.scope,
-            "labels": labels,
+            "labels": provider_ownership_labels(
+                provider_id=provider.provider_id,
+                instance_id=provider.instance_id,
+                scope=provider.scope,
+                coordination_root=config.coordination_root,
+            ),
         },
-        "workspace": workspace_name,
-        "roots": roots,
+        "workspace": names.workspace,
+        "roots": _grepai_roots(config),
         "runtimeRoot": provider.runtime_root.as_posix(),
         "requirementsFile": config.coordination_root.joinpath(
             "providers",
@@ -89,87 +230,9 @@ def _grepai_settings(provider: ProviderScope, config: McpRuntimeConfig) -> dict[
             "grepai.txt",
         ).as_posix(),
         "stateFile": provider.runtime_root.joinpath("state", "provider-state.json").as_posix(),
-        "runtime": {
-            "mode": "docker",
-            "composeProject": compose_project,
-            "network": {"name": network_name},
-            "runner": {
-                "image": f"{GREPAI_RUNNER_IMAGE_REPOSITORY}:{version}",
-                "containerName": watcher_container,
-                "imageLockFile": config.coordination_root.joinpath(
-                    "providers",
-                    "requirements",
-                    "grepai-runner-docker.lock",
-                ).as_posix(),
-                "buildRoot": provider.runtime_root.joinpath("image").as_posix(),
-                "runtimeMount": "/grepai/runtime",
-                "logsMount": "/grepai/logs",
-            },
-        },
-        "backend": {
-            "id": "grepai-postgres",
-            "type": "postgres",
-            "mode": "docker",
-            "image": "pgvector/pgvector:pg16",
-            "imageLockFile": config.coordination_root.joinpath(
-                "providers",
-                "requirements",
-                "grepai-postgres-docker.lock",
-            ).as_posix(),
-            "runtimeRoot": config.coordination_root.joinpath(
-                "providers",
-                "data",
-                "grepai",
-                provider.instance_id,
-                "postgres",
-            ).as_posix(),
-            "dataRoot": "<backendRuntimeRoot>/data",
-            "containerName": postgres_container,
-            "postgres": {
-                "user": "grepai",
-                "password": "grepai",
-                "database": "grepai",
-            },
-            "ports": {
-                "postgres": {
-                    "bindHost": "127.0.0.1",
-                    "hostPort": "auto",
-                    "containerPort": 5432,
-                }
-            },
-        },
-        "embedder": {
-            "provider": "ollama",
-            "model": "nomic-embed-text",
-            "endpoint": f"http://{ollama_container}:11434",
-            "dimensions": 768,
-            "backend": {
-                "mode": "docker",
-                "image": GREPAI_OLLAMA_IMAGE,
-                "imageLockFile": config.coordination_root.joinpath(
-                    "providers",
-                    "requirements",
-                    "grepai-ollama-docker.lock",
-                ).as_posix(),
-                "runtimeRoot": config.coordination_root.joinpath(
-                    "providers",
-                    "data",
-                    "grepai",
-                    provider.instance_id,
-                    "ollama",
-                ).as_posix(),
-                "dataRoot": "<embedderRuntimeRoot>/data",
-                "dataDestination": "/root/.ollama",
-                "containerName": ollama_container,
-                "ports": {
-                    "http": {
-                        "bindHost": "127.0.0.1",
-                        "hostPort": "auto",
-                        "containerPort": 11434,
-                    }
-                },
-            },
-        },
+        "runtime": _grepai_runtime(provider, config, names),
+        "backend": _grepai_backend(provider, config, names),
+        "embedder": _grepai_embedder(provider, config, names),
         "watch": {
             "mode": "background",
             "cwd": config.coordination_root.joinpath("memory-repos").as_posix(),

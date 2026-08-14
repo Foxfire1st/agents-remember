@@ -13,18 +13,20 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from subprocess import CompletedProcess
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import fetch_remote, upstream_ref
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, parse_ledger_text
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     head_commit,
     is_ancestor,
-    run_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
-    next_guidance,
+    recovery_guidance,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start import load_contract_from_args
@@ -55,22 +57,11 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
         else ""
     )
 
-    if external:
-        pair_block = _consistent_pair_block(contract, code_tip)
-        if pair_block is not None:
-            return WorktreeCommandResult(2, {**pair_block, "fetch": fetch})
-
-    if code_tip == contract.code_base_commit and (
-        not external or memory_tip == contract.memory_base_commit
-    ):
-        return WorktreeCommandResult(
-            0,
-            {
-                "state": "already-current",
-                "summary": "The recorded base pair already matches the official line.",
-                "fetch": fetch,
-            },
-        )
+    stop = _stop_before_sync(
+        contract, code_tip=code_tip, memory_tip=memory_tip, external=external, fetch=fetch
+    )
+    if stop is not None:
+        return stop
 
     code_sync = _sync_code(contract, args.dry_run)
     if code_sync["state"] == "conflicts":
@@ -85,39 +76,12 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
-    memory_sync = _sync_memory(contract, args) if external else {"state": "no-external-memory"}
-    if memory_sync["state"] == "needs-review":
-        return WorktreeCommandResult(
-            2,
-            {
-                "state": "blocked",
-                "summary": "The memory work branch has local commits and the official memory "
-                "moved; choose merge-memory (ledger conflicts abort cleanly) or skip-memory "
-                "(defer to end-of-task carryover).",
-                **next_guidance(
-                    "choose_memory_sync_recovery",
-                    tool="worktree_sync",
-                    args=contract_next_args(contract),
-                    required_args=["memory_sync_choice"],
-                ),
-                "code": code_sync,
-                "memory": memory_sync,
-                "fetch": fetch,
-            },
-        )
-    if memory_sync["state"] == "conflicts":
-        return WorktreeCommandResult(
-            2,
-            {
-                "state": "blocked",
-                "summary": "Merging official memory into the memory work branch conflicts "
-                "(ledger or onboarding overlap); the merge was aborted. Use "
-                "memory_sync_choice='skip-memory' to defer to end-of-task carryover.",
-                "code": code_sync,
-                "memory": memory_sync,
-                "fetch": fetch,
-            },
-        )
+    memory_sync: dict[str, object] = (
+        _sync_memory(contract, args) if external else {"state": "no-external-memory"}
+    )
+    memory_block = _memory_sync_block(contract, code_sync, memory_sync, fetch)
+    if memory_block is not None:
+        return memory_block
 
     memory_synced = memory_sync["state"] in {"fast-forwarded", "merged", "already-current"}
     if not args.dry_run:
@@ -155,6 +119,75 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
     )
 
 
+def _stop_before_sync(
+    contract: WorktreeContract,
+    *,
+    code_tip: str,
+    memory_tip: str,
+    external: bool,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult | None:
+    """The result when no branch should move: an inconsistent official pair, or nothing to do."""
+    if external:
+        pair_block = _consistent_pair_block(contract, code_tip)
+        if pair_block is not None:
+            return WorktreeCommandResult(2, {**pair_block, "fetch": fetch})
+    if code_tip == contract.code_base_commit and (
+        not external or memory_tip == contract.memory_base_commit
+    ):
+        return WorktreeCommandResult(
+            0,
+            {
+                "state": "already-current",
+                "summary": "The recorded base pair already matches the official line.",
+                "fetch": fetch,
+            },
+        )
+    return None
+
+
+def _memory_sync_block(
+    contract: WorktreeContract,
+    code_sync: dict[str, object],
+    memory_sync: dict[str, object],
+    fetch: dict[str, object],
+) -> WorktreeCommandResult | None:
+    """The blocked result when the memory side could not be advanced on its own."""
+    if memory_sync["state"] == "needs-review":
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                "summary": "The memory work branch has local commits and the official memory "
+                "moved; choose merge-memory (ledger conflicts abort cleanly) or skip-memory "
+                "(defer to end-of-task carryover).",
+                **recovery_guidance(
+                    "choose_memory_sync_recovery",
+                    tool="worktree_sync",
+                    args=contract_next_args(contract),
+                    required_args=["memory_sync_choice"],
+                ),
+                "code": code_sync,
+                "memory": memory_sync,
+                "fetch": fetch,
+            },
+        )
+    if memory_sync["state"] == "conflicts":
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                "summary": "Merging official memory into the memory work branch conflicts "
+                "(ledger or onboarding overlap); the merge was aborted. Use "
+                "memory_sync_choice='skip-memory' to defer to end-of-task carryover.",
+                "code": code_sync,
+                "memory": memory_sync,
+                "fetch": fetch,
+            },
+        )
+    return None
+
+
 def _fetch_source_upstreams(contract: WorktreeContract) -> dict[str, object]:
     """Best-effort bounded fetch of each source branch's upstream remote.
 
@@ -171,13 +204,13 @@ def _fetch_source_upstreams(contract: WorktreeContract) -> dict[str, object]:
             results[side] = {"state": "no-upstream"}
             continue
         error = fetch_remote(repo, upstream.partition("/")[0])
-        results[side] = {"state": "fetched"} if error is None else {"state": "failed", "error": error}
+        results[side] = (
+            {"state": "fetched"} if error is None else {"state": "failed", "error": error}
+        )
     return results
 
 
-def _consistent_pair_block(
-    contract: WorktreeContract, code_tip: str
-) -> dict[str, object] | None:
+def _consistent_pair_block(contract: WorktreeContract, code_tip: str) -> dict[str, object] | None:
     """The new code tip must be ledger-mapped at the official memory tip."""
     assert contract.memory_repo_path is not None
     ledger_blob = run_git(
@@ -224,6 +257,11 @@ def _sync_code(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
     result = run_git(worktree, ["merge", "--no-edit", contract.code_source_branch])
     if result.returncode == 0:
         return {"state": "merged", "head": head_commit(worktree)}
+    return _aborted_merge_state(worktree, result)
+
+
+def _aborted_merge_state(worktree: Path, result: CompletedProcess[str]) -> dict[str, object]:
+    """Collect the conflicted paths and abort, so the worktree is never left half-merged."""
     conflicts = run_git(worktree, ["diff", "--name-only", "--diff-filter=U"]).stdout.split()
     run_git(worktree, ["merge", "--abort"])
     return {
@@ -250,14 +288,32 @@ def _sync_memory(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, ob
     worktree_head = head_commit(worktree)
     if worktree_head == tip:
         return {"state": "already-current"}
-    if args.dry_run:
-        if is_ancestor(contract.memory_repo_path, worktree_head, tip):
-            return {"state": "would-fast-forward", "to": tip}
-        if args.memory_sync_choice == "merge-memory":
-            return {"state": "would-merge", "to": tip}
+    move = _memory_branch_move(contract, args, worktree_head=worktree_head, tip=tip)
+    if move == "needs-review":
         return {"state": "needs-review", "worktreeHead": worktree_head, "officialTip": tip}
+    if args.dry_run:
+        return {"state": f"would-{move}", "to": tip}
+    return _move_memory_branch(worktree, contract.memory_source_branch, move=move, tip=tip)
+
+
+def _memory_branch_move(
+    contract: WorktreeContract, args: WorktreeArgs, *, worktree_head: str, tip: str
+) -> str:
+    """Which move the memory work branch needs: ``fast-forward``, ``merge``, or ``needs-review``."""
+    assert contract.memory_repo_path is not None
     if is_ancestor(contract.memory_repo_path, worktree_head, tip):
-        result = run_git(worktree, ["merge", "--ff-only", contract.memory_source_branch])
+        return "fast-forward"
+    if args.memory_sync_choice == "merge-memory":
+        return "merge"
+    return "needs-review"
+
+
+def _move_memory_branch(
+    worktree: Path, source_branch: str, *, move: str, tip: str
+) -> dict[str, object]:
+    """Perform the decided move. A failed ff leaves nothing to abort; a failed merge does."""
+    if move == "fast-forward":
+        result = run_git(worktree, ["merge", "--ff-only", source_branch])
         if result.returncode == 0:
             return {"state": "fast-forwarded", "to": tip}
         return {
@@ -265,15 +321,7 @@ def _sync_memory(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, ob
             "files": [],
             "reason": (result.stderr or result.stdout).strip(),
         }
-    if args.memory_sync_choice != "merge-memory":
-        return {"state": "needs-review", "worktreeHead": worktree_head, "officialTip": tip}
-    result = run_git(worktree, ["merge", "--no-edit", contract.memory_source_branch])
+    result = run_git(worktree, ["merge", "--no-edit", source_branch])
     if result.returncode == 0:
         return {"state": "merged", "head": head_commit(worktree)}
-    conflicts = run_git(worktree, ["diff", "--name-only", "--diff-filter=U"]).stdout.split()
-    run_git(worktree, ["merge", "--abort"])
-    return {
-        "state": "conflicts",
-        "files": conflicts,
-        "reason": (result.stderr or result.stdout).strip(),
-    }
+    return _aborted_merge_state(worktree, result)

@@ -11,31 +11,40 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.tools.core import ping_payload
-from agents_remember.mcp.tools.lifecycle import (
-    lifecycle_start_payload,
-    lifecycle_turn_end_notification_payload,
-)
-from agents_remember.mcp.tools.next_step import (
+from agents_remember.application.next_step import (
     FRONT_HALF_RUNDOWN,
     _from_guidance,
     compute_next_step,
     next_step_for,
 )
+from agents_remember.mcp.tools.core import ping_payload
+from agents_remember.mcp.tools.lifecycle import (
+    lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
+)
+from agents_remember.models.core import PingResponse
+from agents_remember.models.tokens import count_response_tokens
 from agents_remember.observer.ambient import (
     AmbientLifecycle,
+    AmbientTiming,
     install_ambient,
     reset_ambient,
 )
 from agents_remember.observer.lifecycle_state import LifecycleState
-from agents_remember.observer.reducer import build_attention_queue, project_lifecycle
+from agents_remember.observer.reducer import (
+    AnalyticalInputs,
+    build_attention_queue,
+    project_lifecycle,
+)
 from agents_remember.observer.store import EventStore
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
 _GUIDANCE = {
@@ -210,7 +219,9 @@ class EdgeAndChokePointTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.root = Path(self._dir.name)
-        self.amb = AmbientLifecycle(EventStore(self.root), heartbeat_seconds=3600)
+        self.amb = AmbientLifecycle(
+            EventStore(self.root), timing=AmbientTiming(heartbeat_seconds=3600)
+        )
         install_ambient(self.amb)
         self.addCleanup(self._dir.cleanup)
         self.addCleanup(reset_ambient)
@@ -227,14 +238,15 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.block(kind="closeout-approval", prompt="approve?")
         step = next_step_for(self.amb, "lifecycle_gate")
         assert step is not None
-        self.assertEqual(step["nextTool"], "lifecycle_resume")
+        self.assertEqual(step.nextTool, "lifecycle_resume")
 
     def test_next_step_for_front_half(self) -> None:
         self.amb.start()
         step = next_step_for(self.amb, "read_ar_files")
         assert step is not None
-        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
-        self.assertIn("summary", step["nextArgs"])
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
     def test_missing_contract_degrades_to_front_half_hint(self) -> None:
         # A promoted lifecycle whose contract file is not on disk yet (the
@@ -244,8 +256,9 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.promote(enclosure=str(self.root / "missing.md"), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_status")
         assert step is not None
-        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
-        self.assertIn("summary", step["nextArgs"])
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
     def test_dry_run_window_in_decide_shows_turn_end(self) -> None:
         # The live worktree_start --dry-run case: promoted (enclosure set) +
@@ -255,8 +268,9 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.promote(enclosure=str(self.root / "missing.md"), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_start")
         assert step is not None
-        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
-        self.assertIn("summary", step["nextArgs"])
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
     def test_corrupt_contract_degrades_gracefully(self) -> None:
         # A contract file that EXISTS but is unparseable (torn by a racing
@@ -267,8 +281,9 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.promote(enclosure=str(torn), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_status")
         assert step is not None
-        self.assertEqual(step["nextTool"], "lifecycle_turn_end_notification")
-        self.assertIn("summary", step["nextArgs"])
+        self.assertEqual(step.nextTool, "lifecycle_turn_end_notification")
+        assert step.nextArgs is not None
+        self.assertIn("summary", step.nextArgs)
 
     def test_next_step_for_linear_delegates_to_guidance(self) -> None:
         contract_path = self.root / "series-contract.md"
@@ -278,7 +293,7 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.amb.promote(enclosure=str(contract_path), repo_id="r", scope="r")
         step = next_step_for(self.amb, "worktree_status")
         assert step is not None
-        self.assertEqual(step["nextOperation"], "continue_work")
+        self.assertEqual(step.nextOperation, "continue_work")
 
     def test_tool_payload_attaches_next_step_and_lifecycle_start_emits_rundown(self) -> None:
         payload = lifecycle_start_payload()
@@ -286,6 +301,53 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.assertIn("nextStep", payload)
         self.assertEqual(payload["nextStep"]["nextTool"], "lifecycle_turn_end_notification")
         self.assertIn("summary", payload["nextStep"]["nextArgs"])
+
+    def test_advertised_token_count_covers_the_attached_next_step(self) -> None:
+        # The hint is several hundred characters and it is on the wire, so it is in the
+        # count. It was not: ``finalize_payload_tokens`` ran over the dump and ``nextStep``
+        # was written in afterwards, so every in-lifecycle response advertised a total that
+        # excluded the largest thing the choke point adds.
+        payload = lifecycle_start_payload()
+        self.assertIn("nextStep", payload)
+        # The advertised number is a fixed point over the payload AS SERVED: recounting the
+        # emitted dict reproduces it exactly.
+        self.assertEqual(payload["tokens"], count_response_tokens(payload))
+        # ...and the hint is genuinely inside that number, not incidentally equal to it.
+        without_hint = {key: value for key, value in payload.items() if key != "nextStep"}
+        self.assertLess(count_response_tokens(without_hint), payload["tokens"])
+
+    def test_advertised_token_count_covers_the_agent_notifier_banner(self) -> None:
+        # Same invariant for the other choke-point field. An agent-notifier that ticked and then
+        # went quiet past the cutoff puts a banner on EVERY response; it is on the wire, so
+        # it is in the count, and (leaf-4) it is a declared field of the envelope.
+        AgentNotifierHeartbeatStore(self.root).tick(now=datetime.now(UTC) - timedelta(hours=6))
+        self.amb.start()
+        payload = ping_payload()
+        self.assertIn("agent-notifier stale", payload["agentNotifierBanner"])
+        # The legacy alias rides the same value during the rename window.
+        self.assertEqual(payload["supervisorBanner"], payload["agentNotifierBanner"])
+        self.assertEqual(payload["tokens"], count_response_tokens(payload))
+        without_banner = {
+            k: v for k, v in payload.items() if k not in {"agentNotifierBanner", "supervisorBanner"}
+        }
+        self.assertLess(count_response_tokens(without_banner), payload["tokens"])
+        # The whole point of the leaf: the response validates against its own model.
+        PingResponse.model_validate(payload)
+
+    def test_a_raising_staleness_probe_degrades_to_silence(self) -> None:
+        # The banner is opportunistic and defended: it must never take down the tool call it
+        # rides on. A probe that raises yields no banner -- and the response is still a valid
+        # one, not a half-built envelope.
+        self.amb.start()
+        with mock.patch(
+            "agents_remember.application.tool_response.agent_notifier_staleness_banner",
+            side_effect=OSError("heartbeat unreadable"),
+        ):
+            payload = ping_payload()
+        self.assertNotIn("agentNotifierBanner", payload)
+        self.assertNotIn("supervisorBanner", payload)
+        PingResponse.model_validate(payload)
+        self.assertEqual(payload["tokens"], count_response_tokens(payload))
 
     def test_turn_end_notification_does_not_self_dismiss_then_next_call_resumes(self) -> None:
         # Leaf-28 choke-point auto-dismiss. (a) The notification flows through
@@ -305,7 +367,12 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.assertIn("resumes automatically", payload["nextStep"]["summary"])
         parked = project_lifecycle(store.read(lc.id), now=datetime.now(UTC))
         self.assertEqual(
-            [i.kind for i in build_attention_queue([parked], [], [], [])],
+            [
+                i.kind
+                for i in build_attention_queue(
+                    [parked], [], AnalyticalInputs(drift_snapshots=[], setup_progress=[])
+                )
+            ],
             ["awaiting-developer"],
         )
 
@@ -315,7 +382,12 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.assertEqual(self.amb.current.state, "running")
         # ...and the awaiting-developer attention item disappears (state-derived).
         resumed = project_lifecycle(store.read(lc.id), now=datetime.now(UTC))
-        self.assertEqual(build_attention_queue([resumed], [], [], []), [])
+        self.assertEqual(
+            build_attention_queue(
+                [resumed], [], AnalyticalInputs(drift_snapshots=[], setup_progress=[])
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":

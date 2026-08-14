@@ -125,94 +125,186 @@ class CgcRuntimeLayout:
         }
         return env
 
+
+@dataclass(frozen=True)
+class CgcRepo:
+    """The repository one CGC instance indexes, and the root that owns the instance.
+
+    ``cgcignore_patterns`` belongs here because it is about which parts of THIS
+    repository the graph covers, not about how the provider is deployed.
+    """
+
+    coordination_root: Path
+    repo_id: str
+    code_repo_root: Path
+    cgcignore_patterns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CgcInstance:
+    """Where one repo's CGC instance lives on disk and what it is pinned to.
+
+    Every field is an optional override of the conventional placement under
+    ``providers/runners/codegraphcontext/<repoId>``; a settings entry may pin
+    any of them.
+    """
+
+    runtime_root: Path | None = None
+    requirements_file: Path | None = None
+    patches_root: Path | None = None
+    state_file: Path | None = None
+
+
+@dataclass(frozen=True)
+class CgcWatcher:
+    """The CGC watcher: the runner image it runs from and how that process runs.
+
+    The image, the build inputs it is produced from, the container it runs as,
+    its process environment, and the working directory and log file of the
+    ``cgc watch`` it hosts — one process, described once.
+    """
+
+    image: str | None = None
+    build_root: Path | None = None
+    lock_file: Path | None = None
+    container_name: str | None = None
+    process_env_template: dict[str, str] | None = None
+    watch_cwd: Path | None = None
+    watch_log_file: Path | None = None
+
+
+@dataclass(frozen=True)
+class CgcBackend:
+    """The managed FalkorDB backend a CGC instance connects to."""
+
+    root: Path | None = None
+    data_root: Path | None = None
+    state_file: Path | None = None
+    container_name: str | None = None
+    network_name: str | None = None
+
+
+# Conventional placement: every field of these is an override, so the empty
+# instance IS the convention. Module-level singletons because they are frozen.
+DEFAULT_CGC_INSTANCE = CgcInstance()
+DEFAULT_CGC_WATCHER = CgcWatcher()
+DEFAULT_CGC_BACKEND = CgcBackend()
+
+
 def cgc_runtime_layout(
+    repo: CgcRepo,
     *,
-    coordination_root: Path,
-    repo_id: str,
-    code_repo_root: Path,
-    runtime_root: Path | None = None,
-    requirements_file: Path | None = None,
-    patches_root: Path | None = None,
-    image_build_root: Path | None = None,
-    image_lock_file: Path | None = None,
-    runner_image: str | None = None,
-    watcher_container_name: str | None = None,
-    state_file: Path | None = None,
-    backend_root: Path | None = None,
-    backend_data_root: Path | None = None,
-    backend_container_name: str | None = None,
-    network_name: str | None = None,
-    backend_state_file: Path | None = None,
-    process_env_template: dict[str, str] | None = None,
-    cgcignore_patterns: tuple[str, ...] = (),
-    watch_cwd: Path | None = None,
-    watch_log_file: Path | None = None,
+    instance: CgcInstance = DEFAULT_CGC_INSTANCE,
+    watcher: CgcWatcher = DEFAULT_CGC_WATCHER,
+    backend: CgcBackend = DEFAULT_CGC_BACKEND,
 ) -> CgcRuntimeLayout:
     """Build the managed CGC runtime layout for one code repository."""
 
-    coordination_root = coordination_root.resolve()
-    repo_id = stable_provider_id(repo_id)
+    coordination_root = repo.coordination_root.resolve()
+    repo_id = stable_provider_id(repo.repo_id)
     providers_root = coordination_root / "providers"
     provider_data_root = coordination_root / "providers" / "data"
     runtime_root = _resolve_optional_path(
-        runtime_root,
+        instance.runtime_root,
         providers_root / "runners" / CGC_PROVIDER / repo_id,
     )
     cgc_root = runtime_root / ".codegraphcontext"
     backend_root = _resolve_optional_path(
-        backend_root,
+        backend.root,
         provider_data_root / CGC_PROVIDER / "falkordb",
     )
-    backend_data_root = _resolve_optional_path(backend_data_root, backend_root / "data")
+    backend_data_root = _resolve_optional_path(backend.data_root, backend_root / "data")
     return CgcRuntimeLayout(
         coordination_root=coordination_root,
         repo_id=repo_id,
-        code_repo_root=code_repo_root.resolve(),
+        code_repo_root=repo.code_repo_root.resolve(),
         providers_root=providers_root,
         runtime_root=runtime_root,
         cgc_root=cgc_root,
         requirements_file=_resolve_optional_path(
-            requirements_file,
+            instance.requirements_file,
             provider_requirements_file(coordination_root, CGC_PROVIDER),
         ),
         patches_root=_resolve_optional_path(
-            patches_root,
+            instance.patches_root,
             providers_root / "patches" / CGC_PROVIDER,
         ),
         image_build_root=_resolve_optional_path(
-            image_build_root,
+            watcher.build_root,
             providers_root / "runners" / CGC_PROVIDER / "image",
         ),
         image_lock_file=_resolve_optional_path(
-            image_lock_file,
+            watcher.lock_file,
             providers_root / "requirements" / "codegraphcontext-runner-docker.lock",
         ),
-        runner_image=runner_image or cgc_runner_image(),
-        watcher_container_name=watcher_container_name
+        runner_image=watcher.image or cgc_runner_image(),
+        watcher_container_name=watcher.container_name
         or f"{CGC_WATCHER_CONTAINER_PREFIX}-{repo_id}",
-        state_file=_resolve_optional_path(state_file, runtime_root / "provider-state.json"),
+        state_file=_resolve_optional_path(
+            instance.state_file, runtime_root / "provider-state.json"
+        ),
         cgcignore_path=cgc_root / ".cgcignore",
-        cgcignore_patterns=tuple(pattern for pattern in cgcignore_patterns if pattern),
+        cgcignore_patterns=tuple(pattern for pattern in repo.cgcignore_patterns if pattern),
         config_file=cgc_root / "config.yaml",
         env_file=cgc_root / ".env",
         backend_root=backend_root,
         backend_data_root=backend_data_root,
-        backend_container_name=backend_container_name or CGC_FALKORDB_CONTAINER_NAME,
-        network_name=network_name or CGC_NETWORK_NAME,
+        backend_container_name=backend.container_name or CGC_FALKORDB_CONTAINER_NAME,
+        network_name=backend.network_name or CGC_NETWORK_NAME,
         backend_state_file=_resolve_optional_path(
-            backend_state_file,
+            backend.state_file,
             backend_root / "backend-state.json",
         ),
         run_root=cgc_root / "run",
         logs_root=cgc_root / "logs",
-        process_env_template=process_env_template,
-        watch_cwd=_resolve_optional_path(watch_cwd, runtime_root),
-        watch_log_file=_resolve_optional_path(watch_log_file, cgc_root / "logs" / "watch.log"),
+        process_env_template=watcher.process_env_template,
+        watch_cwd=_resolve_optional_path(watcher.watch_cwd, runtime_root),
+        watch_log_file=_resolve_optional_path(
+            watcher.watch_log_file, cgc_root / "logs" / "watch.log"
+        ),
     )
 
 
 def _resolve_optional_path(candidate: Path | None, default: Path) -> Path:
     return (candidate or default).resolve()
+
+
+def _unresolved_template_path(value: Any, variables: dict[str, str]) -> Path:
+    """A templated path left exactly as the template spelled it.
+
+    Deliberately not :func:`_template_path`, which calls ``.resolve()``. These two settings
+    are read back and compared against what the runtime installer wrote, so resolving them
+    here would turn an equal pair into an unequal one on any checkout reached through a
+    symlink.
+    """
+    return Path(expand_template(str(value), variables))
+
+
+def _cgc_instance(
+    provider_settings: dict[str, Any],
+    base_variables: dict[str, str],
+    instance_root: Path,
+    state_file: Path,
+) -> CgcInstance:
+    """The per-repository instance paths, templated from settings with packaged defaults."""
+    return CgcInstance(
+        runtime_root=instance_root,
+        requirements_file=_unresolved_template_path(
+            provider_settings.get(
+                "requirementsFile",
+                "<coordination_root>/providers/requirements/codegraphcontext.txt",
+            ),
+            base_variables,
+        ),
+        patches_root=_unresolved_template_path(
+            provider_settings.get(
+                "patchesRoot",
+                "<coordination_root>/providers/patches/codegraphcontext",
+            ),
+            base_variables,
+        ),
+        state_file=state_file,
+    )
 
 
 def cgc_runtime_layout_from_provider_settings(
@@ -265,49 +357,32 @@ def cgc_runtime_layout_from_provider_settings(
     )
 
     return cgc_runtime_layout(
-        coordination_root=coordination_root,
-        repo_id=repo_id,
-        code_repo_root=code_repo_root,
-        runtime_root=instance_root,
-        requirements_file=Path(
-            expand_template(
-                str(
-                    provider_settings.get(
-                        "requirementsFile",
-                        "<coordination_root>/providers/requirements/codegraphcontext.txt",
-                    )
-                ),
-                base_variables,
-            )
+        CgcRepo(
+            coordination_root=coordination_root,
+            repo_id=repo_id,
+            code_repo_root=code_repo_root,
+            cgcignore_patterns=_cgcignore_patterns_from_settings(provider_settings, root_settings),
         ),
-        patches_root=Path(
-            expand_template(
-                str(
-                    provider_settings.get(
-                        "patchesRoot",
-                        "<coordination_root>/providers/patches/codegraphcontext",
-                    )
-                ),
-                base_variables,
-            )
+        instance=_cgc_instance(provider_settings, base_variables, instance_root, state_file),
+        watcher=CgcWatcher(
+            image=runner_image,
+            build_root=image_build_root,
+            lock_file=image_lock_file,
+            container_name=watcher_container_name,
+            process_env_template=_cgc_process_env_template(
+                provider_settings,
+                backend_bind_host=backend_bind_host,
+                backend_host_port=backend_host_port,
+            ),
+            watch_cwd=watch_cwd,
+            watch_log_file=watch_log_file,
         ),
-        image_build_root=image_build_root,
-        image_lock_file=image_lock_file,
-        runner_image=runner_image,
-        watcher_container_name=watcher_container_name,
-        state_file=state_file,
-        backend_root=backend_runtime_root,
-        backend_data_root=backend_data_root,
-        backend_container_name=backend_container_name,
-        network_name=network_name,
-        process_env_template=_cgc_process_env_template(
-            provider_settings,
-            backend_bind_host=backend_bind_host,
-            backend_host_port=backend_host_port,
+        backend=CgcBackend(
+            root=backend_runtime_root,
+            data_root=backend_data_root,
+            container_name=backend_container_name,
+            network_name=network_name,
         ),
-        cgcignore_patterns=_cgcignore_patterns_from_settings(provider_settings, root_settings),
-        watch_cwd=watch_cwd,
-        watch_log_file=watch_log_file,
     )
 
 

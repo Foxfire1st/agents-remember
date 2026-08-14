@@ -245,7 +245,7 @@ Why this order:
    `no_cache=true` to force a from-scratch image rebuild (it otherwise skips
    images whose tag already exists). If providers report `degraded`, check that
    Docker is running and (for grepai) that the Ollama model pulled, then
-   `provider_watchers(action="refresh")`; `provider_diagnostics()` shows the gap.
+   `provider_watchers(action="restart")`; `provider_diagnostics()` shows the gap.
 
 ## Troubleshooting
 
@@ -261,7 +261,7 @@ providers need Docker running; grepai additionally needs its Ollama container an
 embedding model. Check and recover:
 
 - Docker: `docker ps` — if the daemon is down, start it (`sudo systemctl start
-  docker` on Linux, or Docker Desktop), then `provider_watchers(action="refresh")`.
+  docker` on Linux, or Docker Desktop), then `provider_watchers(action="restart")`.
 - grepai/Ollama: `docker logs ar-grepai-ollama` and
   `docker exec ar-grepai-ollama ollama list` to confirm the model is present. The
   model (`nomic-embed-text`) is pulled automatically on first setup; if that

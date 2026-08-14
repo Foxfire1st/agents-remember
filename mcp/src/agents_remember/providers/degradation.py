@@ -5,25 +5,57 @@ The detector consumes the central provider metrics log produced by
 healthy/degraded/critical state transitions, durable events, inbox alerts, and
 the critical provider-stop failsafe. It deliberately stays outside the serving
 app so the dashboard loop only has to call one focused service after sampling.
+
+DURABILITY: THE EVENT LOG IS ON ``ar-durable-store/1.0`` (260731-EFA-L5)
+
+``degradation-events.jsonl`` had the same shape as the six ``controlplane/`` logs: an unlocked
+``open("a")`` append beside a ``compact_events`` whole-file read-filter-rewrite, and a
+``.compact.tmp`` name with no pid in it. It has ONE writer today, and that is exactly the
+argument this leaf refused for attention-dismissals and agent-notifier-signals — and refused for a
+measured reason, since the draft that left those two unlocked on the strength of single-writer
+measured 31.45% loss. Measured here before this change, appenders against one compactor lost
+events this store had reported written.
+
+NO LOSS RATE IS QUOTED FOR THIS LOG, for the reason ``providers/metrics.py`` gives about its own:
+the percentages move with a pacing nothing records, and
+``mcp/tests/test_provider_store_durability.py`` disclaims the figures this leaf took while
+measuring different ones for the same named shape. The direction is what reproduces — events were
+lost and now none are — and ``ProviderHarnessSensitivityTests`` re-establishes it on every run
+against a ``git archive`` of the base commit. "Only one process writes this file" is a deployment
+fact; the lock is about the file.
+
+:data:`PROVIDER_DEGRADATION_OWNERSHIP` states who writes and who compacts.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
-from agents_remember.controllers.provider_tools import provider_watchers_tool
+from agents_remember.controlplane.durable_store import (
+    SCHEMA_VERSION,
+    StoreOwnership,
+    append_line,
+    exclusive_access,
+    read_log_text,
+    rewrite_lines,
+)
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.mcp.config import ProviderDegradationSettings
+from agents_remember.kernel.primitives.provider_degradation_settings import (
+    ProviderDegradationSettings,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
@@ -32,13 +64,24 @@ from agents_remember.providers.metrics import (
     PROVIDER_METRICS_SCHEMA,
     ProviderMetricsStore,
 )
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
-from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
-from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
-    from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.kernel.primitives.runtime_config import (
+        McpRuntimeConfig,
+    )
+
+
+class DegradationAlertPort(Protocol):
+    """The served alert surface the degradation detector may reach.
+
+    Implemented by the serving layer (dashboard loop); providers declares the
+    port and never imports the implementation.
+    """
+
+    def role_recipients(self, coordination_root: Path, role: AgentRole) -> list[str | None]: ...
+
+    def deliver(self, *, store: OperatorInboxStore, entry: Any) -> None: ...
+
 
 DegradationState = Literal["healthy", "degraded", "critical"]
 _LEVELS: dict[DegradationState, int] = {"healthy": 0, "degraded": 1, "critical": 2}
@@ -49,6 +92,34 @@ DEGRADATION_EVENT_SCHEMA = "ar-provider-degradation-event/v1"
 # 260707-HFX2-L12 F5: cap for the append-only degradation-events audit log. Events fire only on a
 # state change (rare), so this bound is generous; it exists to stop unbounded growth over years.
 DEGRADATION_EVENT_RETAIN_ROWS = 1_000
+
+PROVIDER_DEGRADATION_OWNERSHIP = StoreOwnership(
+    store="provider-degradation",
+    writers=("dashboard",),
+    compaction_owner="dashboard",
+    rationale=(
+        "Single writer TODAY: evaluate_provider_degradation has exactly one production caller, "
+        "the dashboard's _metrics_loop (serving/app.py), and it is the only thing that appends "
+        "an event, compacts the log or writes the state document. Compaction therefore belongs "
+        "to the dashboard, and it is enforced structurally -- compact_events is called from one "
+        "place, immediately after the append it bounds. NOT the operator-inbox exception: that "
+        "store earned compaction_owner=None because both processes must physically remove rows; "
+        "nothing in the MCP process removes a degradation event, or writes one. The single "
+        "writer is why check_declared_writer earns its place here rather than being a formality "
+        "-- with writers=('dashboard',) it is the one store in this pair where the check can "
+        "actually fire, and it fires the moment the MCP process starts evaluating degradation. "
+        "It is NOT why the log is safe: the lock is unconditional for the same reason it is on "
+        "attention-dismissals and agent-notifier-signals, which are also single-writer and whose "
+        "unlocked draft measured 31.45% loss."
+    ),
+)
+"""Who writes and who compacts ``degradation-events.jsonl``.
+
+Declared beside the store rather than in ``controlplane/durable_store.py``'s register, for the
+reason given on ``providers/metrics.PROVIDER_METRICS_OWNERSHIP``: that register is the contract
+for the six control-plane logs, and this leaf had a second worker inside that folder. The
+contract is imported, never re-implemented.
+"""
 
 ORCHESTRATOR_DEGRADATION_INSTRUCTION = (
     "Dispatch AR_SPAWN_ROLE=system-specialist to investigate this provider degradation "
@@ -129,44 +200,95 @@ class ProviderDegradationStore:
         )
 
     def write_state(self, state: ProviderDegradationState) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_path.with_name(f"{self.state_path.name}.tmp")
-        tmp.write_text(json.dumps(state.to_payload(), indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, self.state_path)
+        """Republish the state-machine position: one document, replaced whole.
+
+        Written through the contract's :func:`rewrite_lines` — a pid-scoped temp, fsynced file
+        and directory — because ``degradation-state.json.tmp`` was the second unscoped temp name
+        in this pair and two writers sharing it hand one of them ``FileNotFoundError``.
+
+        BE PRECISE ABOUT WHAT THE LOCK DOES HERE. This document is not a record log: it is
+        recomputed in full every evaluation and replaced, so there is no read-modify-write of
+        stored rows for a lock to make atomic, and the lock is NOT claimed to make
+        ``read_state`` -> ``write_state`` one transaction (it is not; that span belongs to
+        :func:`evaluate_provider_degradation` and to its single caller). What it does is
+        serialize two republications and satisfy ``rewrite_lines``' refusal to rewrite a path
+        whose lock the caller is not holding. It is also why this document carries no
+        ``schemaVersion``: the stamp is a per-RECORD fact, and this file holds no records.
+        """
+        PROVIDER_DEGRADATION_OWNERSHIP.check_declared_writer()
+        path = self.state_path
+        with exclusive_access(path, PROVIDER_DEGRADATION_OWNERSHIP):
+            # One element because it is one document; ``rewrite_lines`` appends the newline the
+            # previous ``write_text`` did, so the bytes on disk are unchanged.
+            rewrite_lines(
+                path,
+                [json.dumps(state.to_payload(), indent=2)],
+                PROVIDER_DEGRADATION_OWNERSHIP,
+            )
 
     def append_event(self, event: dict[str, Any]) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, sort_keys=True) + "\n")
+        """Append one state-change event, under the log's lock and stamped with its schema version.
+
+        The stamp is added HERE, at the only write, because that is the only moment the
+        information exists: this log is an audit trail kept for a thousand events and nothing
+        reads it back today, so a row written without its version can never be told apart from a
+        future one. A reader added later must apply
+        ``durable_store.schema_version_supported`` — unknown major refused, unknown minor
+        accepted, absent means 1.0, which is what lets an existing file load unchanged.
+        """
+        PROVIDER_DEGRADATION_OWNERSHIP.check_declared_writer()
+        path = self.events_path
+        line = json.dumps({**event, "schemaVersion": SCHEMA_VERSION}, sort_keys=True)
+        with exclusive_access(path, PROVIDER_DEGRADATION_OWNERSHIP):
+            append_line(path, line)
 
     def compact_events(self, *, retain_rows: int = DEGRADATION_EVENT_RETAIN_ROWS) -> int:
         """Reclaim degradation-events.jsonl to its newest `retain_rows` events; return rows dropped.
 
         260707-HFX2-L12 F5/CS-6 D3: degradation events are only written on a state change (rare), so a
-        full read-fold on that rare path is cheap; this gives the append-only audit log a bounded cap."""
+        full read-fold on that rare path is cheap; this gives the append-only audit log a bounded cap.
+
+        260731-EFA-L5: the read, the filter and the rewrite happen under ONE hold of the log's
+        lock. Rarity is not serialization — the append that races this rewrite is the one that
+        just caused the state change this compaction is bounding, so the window is not merely
+        open, it is the window the store spends its whole life in.
+
+        The reclaim drops rows BY AGE and never by content: the lines are kept raw, so a row no
+        reader could parse survives here instead of being silently deleted by the rewrite."""
         path = self.events_path
-        if not path.exists():
-            return 0
-        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        if len(lines) <= retain_rows:
-            return 0
-        kept = lines[-retain_rows:]
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".compact.tmp")
-        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
-        return len(lines) - len(kept)
+        with exclusive_access(path, PROVIDER_DEGRADATION_OWNERSHIP):
+            lines = [line for line in read_log_text(path).splitlines() if line.strip()]
+            if len(lines) <= retain_rows:
+                return 0
+            kept = lines[-retain_rows:]
+            rewrite_lines(path, kept, PROVIDER_DEGRADATION_OWNERSHIP)
+            return len(lines) - len(kept)
 
 
 ProviderStopper = Callable[["McpRuntimeConfig"], dict[str, Any]]
+"""The critical failsafe's one action, as a PORT this package declares and never implements.
+
+Stopping the provider stacks is a tool call, and the tool lives at the edge
+(``application.provider_tools.provider_watchers_tool``). This module used to import it for a
+default, which is a rank-10 package importing a rank-15 one (``layers.toml``) so that a
+degradation VERDICT could not be computed without loading the tool surface. The caller that
+owns the tool now supplies the action, which is also the only caller that can say whether a
+failsafe should be able to fire at all.
+"""
 
 
 def evaluate_provider_degradation(
     config: McpRuntimeConfig,
     *,
-    stop_provider_stacks: ProviderStopper | None = None,
+    stop_provider_stacks: ProviderStopper,
+    degradation_alerts: DegradationAlertPort,
 ) -> dict[str, Any]:
-    """Evaluate metrics, emit one event per state change, and run the critical failsafe."""
+    """Evaluate metrics, emit one event per state change, and run the critical failsafe.
+
+    ``stop_provider_stacks`` is required and has no default: there is no implementation of it
+    this package could name without importing the edge, and a failsafe wired to nothing is
+    worse than one the caller had to think about.
+    """
 
     settings = config.provider_degradation
     if not settings.enabled:
@@ -182,26 +304,27 @@ def evaluate_provider_degradation(
 
     if state != previous.state:
         event = _build_event(
-            event_id=new_ulid(),
-            previous=previous.state,
-            state=state,
-            now=now,
-            evidence=evidence,
+            _DegradationTransition(
+                event_id=new_ulid(),
+                previous=previous.state,
+                state=state,
+                at=now,
+            ),
+            evidence,
             rows=rows,
             metric_store=metric_store,
         )
         if state == "critical" and settings.fail_safe_enabled:
-            stopper = stop_provider_stacks or _stop_provider_stacks
             event["criticalFailsafe"] = {
                 "enabled": True,
                 "action": "provider_watchers stop",
-                "result": _run_critical_failsafe(stopper, config),
+                "result": _run_critical_failsafe(stop_provider_stacks, config),
             }
         elif state == "critical":
             event["criticalFailsafe"] = {"enabled": False}
         store.append_event(event)
         store.compact_events()  # F5: bound the append-only degradation audit log
-        _post_degradation_alerts(config, event)
+        _post_degradation_alerts(config, event, degradation_alerts)
 
     updated = ProviderDegradationState(
         state=state,
@@ -473,22 +596,33 @@ def _setup_failure_streak(
     return []
 
 
+@dataclass(frozen=True)
+class _DegradationTransition:
+    """One provider degradation state change: its id, from, to and when.
+
+    The four values are the identity of the event; everything else in the
+    payload is the evidence that justifies it.
+    """
+
+    event_id: str
+    previous: DegradationState
+    state: DegradationState
+    at: str
+
+
 def _build_event(
-    *,
-    event_id: str,
-    previous: DegradationState,
-    state: DegradationState,
-    now: str,
+    transition: _DegradationTransition,
     evidence: list[DegradationEvidence],
+    *,
     rows: list[dict[str, Any]],
     metric_store: ProviderMetricsStore,
 ) -> dict[str, Any]:
     return {
         "schema": DEGRADATION_EVENT_SCHEMA,
-        "id": event_id,
-        "at": now,
-        "from": previous,
-        "to": state,
+        "id": transition.event_id,
+        "at": transition.at,
+        "from": transition.previous,
+        "to": transition.state,
         "affectedStacks": sorted({item.affected for item in evidence}),
         "evidence": [item.to_payload() for item in evidence],
         "metrics": {
@@ -499,50 +633,42 @@ def _build_event(
     }
 
 
-def _post_degradation_alerts(config: McpRuntimeConfig, event: dict[str, Any]) -> None:
+def _post_degradation_alerts(
+    config: McpRuntimeConfig,
+    event: dict[str, Any],
+    alerts: DegradationAlertPort,
+) -> None:
     store = OperatorInboxStore(observer_root(config))
-    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
-    host = TerminalHost()
-    paster = TerminalPaster()
     now = str(event["at"])
     for role, instruction in _ALERT_TARGETS:
-        recipients = _role_recipients(config.coordination_root, role)
+        recipients = alerts.role_recipients(config.coordination_root, role)
         for agent_id in recipients:
             entry = create_operator_inbox_entry(
+                InboxMessage(
+                    ask=f"Provider degradation state changed to {event['to']}",
+                    response=_alert_response(event, instruction),
+                    message_kind="degradation-alert",
+                ),
                 entry_id=new_ulid(),
                 now=now,
-                lifecycle_id=None,
-                agent_id=agent_id,
-                ask=f"Provider degradation state changed to {event['to']}",
-                response=_alert_response(event, instruction),
-                created_by="provider-degradation-detector",
-                created_via="cli",
-                sender_role="system",
-                recipient_role=role,
-                message_kind="degradation-alert",
+                routing=InboxRouting(
+                    address=InboxAddress(lifecycle_id=None, agent_id=agent_id, recipient_role=role)
+                ),
+                poster=InboxPoster(
+                    created_by="provider-degradation-detector",
+                    created_via="cli",
+                    sender_role="system",
+                ),
             )
             store.append(entry)
             store.compact(now=datetime.now(UTC))
-            deliver_inbox_entry(
-                store=store,
-                catalog=catalog,
-                host=host,
-                paster=paster,
-                entry=entry,
-                submit=True,
-            )
+            alerts.deliver(store=store, entry=entry)
 
 
-def _role_recipients(coordination_root: Path, role: AgentRole) -> list[str | None]:
-    catalog = TerminalCatalog(terminal_catalog_path(coordination_root))
-    sessions: list[str | None] = [
-        entry.id
-        for entry in catalog.list()
-        if entry.status == "running" and entry.kind == "harness" and entry.binding_role == role
-    ]
-    if sessions:
-        return sessions
-    return [None]
+def _role_recipients(
+    coordination_root: Path, role: AgentRole, alerts: DegradationAlertPort
+) -> list[str | None]:
+    return alerts.role_recipients(coordination_root, role)
 
 
 def _alert_response(event: dict[str, Any], instruction: str) -> str:
@@ -564,10 +690,6 @@ def _alert_response(event: dict[str, Any], instruction: str) -> str:
     if isinstance(failsafe, dict):
         parts.extend(["", f"critical failsafe: {json.dumps(failsafe, sort_keys=True)}"])
     return "\n".join(parts)
-
-
-def _stop_provider_stacks(config: McpRuntimeConfig) -> dict[str, Any]:
-    return provider_watchers_tool(config, action="stop", dry_run=False)
 
 
 def _run_critical_failsafe(stopper: ProviderStopper, config: McpRuntimeConfig) -> dict[str, Any]:

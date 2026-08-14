@@ -22,39 +22,42 @@ from __future__ import annotations
 import contextlib
 import shutil
 import threading
+import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
+from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.observer.events import Actor, Event, Trust
 from agents_remember.observer.lifecycle_state import (
     INITIAL_PHASE,
+    TERMINAL_STATES,
     GuardedStartError,
     LifecycleError,
     LifecycleState,
     Phase,
-    State,
+    coerce_end_outcome,
 )
 from agents_remember.observer.save_gate import (
     SaveDecision,
     SaveGateRequired,
     compute_scope,
 )
-from agents_remember.observer.served_store import ServedRecord, ServedStore, served_key
+from agents_remember.observer.served_store import ServedLedger, ServedStore
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.timeutil import (
     HEARTBEAT_SECONDS,
     TTL_SECONDS,
     Clock,
-    age_seconds,
 )
 from agents_remember.observer.ulid import new_ulid
 
 IdFactory = Callable[[], str]
+TickerWait = Callable[[threading.Event, float], bool]
 
 # The fixed facts-only allowlist for a ``read.packet`` per-file entry. The
 # read-packet emitter projects every caller entry to exactly these keys, so no
@@ -74,6 +77,38 @@ def _default_clock() -> datetime:
     return datetime.now(UTC)
 
 
+def _default_ticker_wait(stop: threading.Event, interval: float) -> bool:
+    """Wait up to ``interval`` for the stop flag, rechecking on every wake.
+
+    CPython's ``Event.wait``/``Condition.wait`` parks the caller on a waiter
+    lock, and the lock-handoff there can overrun the timeout and leave the
+    thread parked with no recheck or escape. The ticker must never silently
+    stop, so the production wait chunks ``time.sleep`` against a monotonic
+    deadline instead: every sleep returns, the stop flag is re-read, and the
+    interval expires deterministically. Returns True when stop was observed,
+    False when the interval elapsed.
+    """
+    deadline = time.monotonic() + interval
+    while not stop.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(remaining, 0.01))
+    return True
+
+
+@dataclass(frozen=True)
+class AmbientTiming:
+    """The three durations that govern one ambient lifecycle's clock: how often it beats, how
+    long a log lives, and how long inactivity is tolerated before the ticker stops beating.
+    They are read against each other -- a heartbeat longer than the TTL keeps nothing alive --
+    so they are one timing policy rather than three independent knobs."""
+
+    heartbeat_seconds: float = HEARTBEAT_SECONDS
+    ttl_seconds: float = TTL_SECONDS
+    inactivity_cutoff_seconds: float = INACTIVITY_CUTOFF_SECONDS
+
+
 class AmbientLifecycle:
     """Process-scoped current lifecycle: state machine + emission + heartbeat.
 
@@ -86,48 +121,62 @@ class AmbientLifecycle:
         self,
         store: EventStore,
         *,
-        heartbeat_seconds: float = HEARTBEAT_SECONDS,
-        ttl_seconds: float = TTL_SECONDS,
-        inactivity_cutoff_seconds: float = INACTIVITY_CUTOFF_SECONDS,
+        timing: AmbientTiming | None = None,
         clock: Clock = _default_clock,
         id_factory: IdFactory = new_ulid,
         served_store: ServedStore | None = None,
     ) -> None:
+        timing = timing or AmbientTiming()
         self._store = store
-        self._heartbeat_seconds = heartbeat_seconds
-        self._ttl_seconds = ttl_seconds
-        self._inactivity_cutoff_seconds = inactivity_cutoff_seconds
+        self._heartbeat_seconds = timing.heartbeat_seconds
+        self._ttl_seconds = timing.ttl_seconds
+        self._inactivity_cutoff_seconds = timing.inactivity_cutoff_seconds
         # ISO ts of the last real (non-heartbeat) event; gates the heartbeat ticker.
         self._last_activity_iso: str | None = None
         self._clock = clock
         self._mint = id_factory
+        self._ticker_wait = _default_ticker_wait
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ticker: threading.Thread | None = None
         self.current: LifecycleState | None = None
         # The served-onboarding dedup ledger lives beside the event logs (one
-        # served.jsonl per lifecycle dir). The in-memory set is the hot path; it
-        # is hydrated from served.jsonl on first use so it survives a context
-        # compaction (the same lifecycle process keeps running).
-        self._served_store = served_store or ServedStore(store.root)
-        self._served: dict[str, set[str]] = {}
+        # served.jsonl per lifecycle dir). It is a COLLABORATOR rather than four more
+        # methods here: the dedup state is a second substrate with its own file and its
+        # own lock, and it was never part of this state machine -- only co-located with
+        # it. This class keeps exactly one duty over it, forgetting a lifecycle's set
+        # when that lifecycle ends or is left.
+        self._served = ServedLedger(served_store or ServedStore(store.root))
+
+    @property
+    def served(self) -> ServedLedger:
+        """The served-onboarding dedup ledger for the lifecycles in this process."""
+        return self._served
 
     @property
     def root(self) -> Path:
         """The observer store root (``logs/observer``) this ambient lifecycle writes under.
 
         260707-HFX2-L2 R5: the MCP tool choke point (``_tool_payload``) reads this to check the
-        supervisor heartbeat opportunistically, without needing its own ``McpRuntimeConfig``.
+        agent-notifier heartbeat opportunistically, without needing its own ``McpRuntimeConfig``.
         """
         return self._store.root
 
     # --- signals -----------------------------------------------------------
 
-    def start(self, *, fleeting: bool = True, phase: Phase = INITIAL_PHASE) -> LifecycleState:
+    def start(
+        self,
+        *,
+        fleeting: bool = True,
+        phase: Phase = INITIAL_PHASE,
+        ticker_wait: TickerWait | None = None,
+    ) -> LifecycleState:
         """Guarded start: mint a lifecycle and become ``running`` (§1.3)."""
         with self._lock:
             if self.current is not None:
                 raise GuardedStartError(self.current.id)
+            if ticker_wait is not None:
+                self._ticker_wait = ticker_wait
             current = LifecycleState(
                 id=self._mint(),
                 state="running",
@@ -159,7 +208,9 @@ class AmbientLifecycle:
         with self._lock:
             current = self._require_active()
             if current.state != "running":
-                raise LifecycleError(f"cannot block from state {current.state!r}; only running blocks")
+                raise LifecycleError(
+                    f"cannot block from state {current.state!r}; only running blocks"
+                )
             self.current = replace(current, state="blocked")
             ask = build_ask(kind, prompt, options)
             self._emit_locked(
@@ -227,15 +278,29 @@ class AmbientLifecycle:
         current afterward and the end call itself produces no ``tool.completed``
         -- the terminal signal is the record, not a redundant tool event. The
         returned snapshot is the ended lifecycle's terminal state.
+
+        Which outcomes are accepted, and which state each one names, are both read
+        from :mod:`~agents_remember.observer.lifecycle_state` rather than restated
+        here: the terminal half of the vocabulary IS the ``lifecycle.ended`` outcome
+        vocabulary, so the write side has nothing of its own to keep in step. The
+        WRITE side still refuses an unknown outcome rather than defaulting it --
+        :func:`coerce_end_outcome`'s leniency is for the reducer, which reads logs
+        it did not write; a session ending itself must not have a typo silently
+        recorded as an abandonment.
         """
-        if outcome not in ("completed", "abandoned"):
-            raise LifecycleError(f"end outcome must be completed|abandoned, got {outcome!r}")
-        terminal: State = "completed" if outcome == "completed" else "abandoned"
+        if outcome not in TERMINAL_STATES:
+            raise LifecycleError(
+                f"end outcome must be {'|'.join(sorted(TERMINAL_STATES))}, got {outcome!r}"
+            )
+        # Membership is already checked, so this is the identity conversion -- called
+        # anyway, rather than cast, so the outcome -> state rule has exactly one owner
+        # and the write side reads it from the same function the reducer does.
+        terminal = coerce_end_outcome(outcome)
         with self._lock:
             current = self._require_active()
             self._emit_locked("lifecycle.ended", "declared", "model", outcome=outcome)
             self._stop_ticker_locked()
-            self._served.pop(current.id, None)
+            self._served.forget(current.id)
             self.current = None
             return replace(current, state=terminal)
 
@@ -377,66 +442,15 @@ class AmbientLifecycle:
         adopted worktree lifecycle) and is session-traceable by construction.
         """
         projected = [
-            {key: entry[key] for key in _READ_PACKET_FACTS if key in entry}
-            for entry in files
+            {key: entry[key] for key in _READ_PACKET_FACTS if key in entry} for entry in files
         ]
         with self._lock:
             if self.current is None:
                 return
             with contextlib.suppress(ValidationError, OSError):
-                self._emit_locked("read.packet", "observed", "model", repoId=repo_id, files=projected)
-
-    # --- served-onboarding dedup ledger -----------------------------------
-
-    def _served_for_locked(self, lifecycle_id: str) -> set[str]:
-        """The served-key set for a lifecycle, hydrated from disk on first use."""
-        cached = self._served.get(lifecycle_id)
-        if cached is None:
-            cached = self._served_store.served_set(lifecycle_id)
-            self._served[lifecycle_id] = cached
-        return cached
-
-    def served_keys(self, lifecycle_id: str) -> set[str]:
-        """A copy of the served-key set for a lifecycle (hydrated on first use)."""
-        with self._lock:
-            return set(self._served_for_locked(lifecycle_id))
-
-    def is_served(self, lifecycle_id: str, kind: str, path: str, content_hash: str) -> bool:
-        """True when this exact ``(kind, path, hash)`` was already served."""
-        with self._lock:
-            return served_key(kind, path, content_hash) in self._served_for_locked(lifecycle_id)
-
-    def record_served(
-        self, lifecycle_id: str, kind: str, path: str, content_hash: str, *, ts: str
-    ) -> None:
-        """Record a served onboarding piece in memory and on disk (append-only).
-
-        Emission/durability must never break the read, so a disk error is
-        contained -- the in-memory set still advances so the same call does not
-        re-serve within one process.
-        """
-        with self._lock:
-            served = self._served_for_locked(lifecycle_id)
-            served.add(served_key(kind, path, content_hash))
-            with contextlib.suppress(OSError):
-                self._served_store.append(
-                    lifecycle_id,
-                    ServedRecord(kind=kind, path=path, hash=content_hash, ts=ts),
+                self._emit_locked(
+                    "read.packet", "observed", "model", repoId=repo_id, files=projected
                 )
-
-    def reset_served(self, lifecycle_id: str) -> None:
-        """Clear the served-set for a lifecycle (the compaction/refresh reset).
-
-        Drops the in-memory set and deletes the on-disk ``served.jsonl`` so the
-        next read re-serves every onboarding piece from scratch. The single live
-        owner deleting its own ledger keeps the single-writer invariant intact.
-        """
-        with self._lock:
-            self._served.pop(lifecycle_id, None)
-            with contextlib.suppress(OSError):
-                path = self._served_store.log_path(lifecycle_id)
-                if path.exists():
-                    path.unlink()
 
     def shutdown(self) -> None:
         """Stop the heartbeat ticker (process teardown / test isolation)."""
@@ -471,9 +485,14 @@ class AmbientLifecycle:
             self._promote_to_landing_zone_locked()
             self._pause_locked("switched-away")
         else:
+            # Naming ONE outcome, not classifying: discarding unsaved work is a decision
+            # this branch makes, so the literal is the decision. (It is deliberately not
+            # ``DEFAULT_END_OUTCOME``, which is the separate policy for coercing a free-form
+            # outcome at the tool boundary -- discard would follow that constant anywhere it
+            # moved, and there is no reason it should.)
             self._emit_locked("lifecycle.ended", "declared", "model", outcome="abandoned")
             self._stop_ticker_locked()
-            self._served.pop(current.id, None)
+            self._served.forget(current.id)
             self.current = None
 
     def _promote_to_landing_zone_locked(self) -> None:
@@ -495,7 +514,7 @@ class AmbientLifecycle:
         self._emit_locked("lifecycle.paused", "observed", "system", cause=cause)
         self._stop_ticker_locked()
         if self.current is not None:
-            self._served.pop(self.current.id, None)
+            self._served.forget(self.current.id)
         self.current = None
 
     def _emit_locked(self, kind: str, trust: Trust, actor: Actor, **data: Any) -> None:
@@ -542,23 +561,33 @@ class AmbientLifecycle:
         self._stop.set()
 
     def _heartbeat_loop(self, stop: threading.Event, interval: float) -> None:
-        while not stop.wait(interval):
-            with self._lock:
-                current = self.current
-                if current is None or current.is_terminal:
-                    return
-                if self._inactive_seconds_locked() > self._inactivity_cutoff_seconds:
-                    # Idle past the cutoff: stop the heartbeat theater so the log ages out
-                    # and becomes cleanable. The ticker keeps looping and resumes emitting
-                    # the moment a real event resets the activity clock.
-                    continue
-                self._emit_locked(
-                    "lifecycle.heartbeat",
-                    "observed",
-                    "system",
-                    state=current.state,
-                    phase=current.phase,
-                )
+        while not self._ticker_wait(stop, interval):
+            if not self._heartbeat_tick():
+                return
+
+    def _heartbeat_tick(self) -> bool:
+        """Run one beat: emit unless idle past the cutoff or the lifecycle is gone.
+
+        Returns False when the loop should exit (no active lifecycle or a
+        terminal one), True otherwise.
+        """
+        with self._lock:
+            current = self.current
+            if current is None or current.is_terminal:
+                return False
+            if self._inactive_seconds_locked() > self._inactivity_cutoff_seconds:
+                # Idle past the cutoff: stop the heartbeat theater so the log ages out
+                # and becomes cleanable. The ticker keeps looping and resumes emitting
+                # the moment a real event resets the activity clock.
+                return True
+            self._emit_locked(
+                "lifecycle.heartbeat",
+                "observed",
+                "system",
+                state=current.state,
+                phase=current.phase,
+            )
+            return True
 
     def _inactive_seconds_locked(self) -> float:
         """Seconds since the last real (non-heartbeat) event for the current lifecycle."""
@@ -620,6 +649,7 @@ def build_ask(
 
 
 # --- process-global registry ----------------------------------------------
+
 
 class _AmbientRegistry:
     """Holds the one ambient lifecycle for this server process.

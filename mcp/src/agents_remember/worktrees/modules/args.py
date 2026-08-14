@@ -1,25 +1,30 @@
 """Typed cross-layer DTO for worktree domain operations.
 
 `WorktreeArgs` replaces the loosely typed `argparse.Namespace` that previously
-flowed from the MCP controllers and the worktree CLI into the worktree domain
-functions. Every field carries a sensible default so each operation can build
-just the subset it needs.
+flowed from the MCP application layer and the worktree CLI into the worktree
+domain functions. Every field carries a sensible default so each operation can
+build just the subset it needs.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.controlplane.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
+from agents_remember.kernel.primitives.gate_policy import (
+    DEFAULT_GATE_POLICY,
+    GatePolicy,
+)
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 
 @dataclass(frozen=True)
 class WorktreeArgs:
-    """Inputs shared by the worktree controllers, CLI, and domain functions."""
+    """Inputs shared by the worktree application layer, CLI, and domain functions."""
 
     # Coordination / repository resolution
     code_repository_name: str | None = None
@@ -66,6 +71,14 @@ class WorktreeArgs:
     # Gate enforcement policy
     gate_policy: GatePolicy = DEFAULT_GATE_POLICY
 
+    # Plane-owned lifecycle execution. Never populated from an agent/CLI namespace:
+    # the detached worker injects these after resolving the task-bound operation record.
+    operation_key: str = ""
+    candidate_tree: str | None = None
+    approval_claimed: bool = False
+    recovery_commits: LifecycleOperationRecoveryCommits | None = None
+    operation_progress: Callable[[str, Mapping[str, object]], None] | None = None
+
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> WorktreeArgs:
         """Build from an argparse Namespace, falling back to field defaults.
@@ -80,3 +93,9 @@ class WorktreeArgs:
             if hasattr(namespace, field.name)
         }
         return replace(cls(), **overrides)
+
+
+def report_operation_progress(args: WorktreeArgs, phase: str, **evidence: object) -> None:
+    """Advance the plane-owned operation when this call runs under its detached worker."""
+    if args.operation_progress is not None:
+        args.operation_progress(phase, evidence)

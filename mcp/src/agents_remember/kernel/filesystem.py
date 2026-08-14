@@ -41,9 +41,7 @@ def read_text(path: Path, *, encoding: str = "utf-8") -> str:
     return extended_path(path).read_text(encoding=encoding)
 
 
-def read_text_range(
-    path: Path, start_line: int, end_line: int, *, encoding: str = "utf-8"
-) -> str:
+def read_text_range(path: Path, start_line: int, end_line: int, *, encoding: str = "utf-8") -> str:
     """Return lines ``[start_line, end_line]`` (1-based, inclusive) of a file.
 
     Net-new ranged reader (``read_text`` is whole-file). ``end_line`` is clamped

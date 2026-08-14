@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { css } from "../../styled-system/css";
+import { useElementVisible } from "./engine-room/useElementVisible";
 import { useShouldAnimate } from "./engine-room/useShouldAnimate";
 
 // A faint, effects-gated boomerang-video backdrop for empty-state canvases — mirrors the engine-room
-// G6 backdrop (`engineRoomStyles` `backdrop`/`backdropVideo`). The clip is a pre-rendered
+// G6 backdrop (`engine-room/styles` `backdrop`/`backdropVideo`). The clip is a pre-rendered
 // forward+reverse boomerang, so `loop` is seamless (first frame == last). Absent under calm-cockpit /
 // `prefers-reduced-motion` (useShouldAnimate) — the empty text then stands alone. aria-hidden +
 // pointer-events:none: pure atmosphere, never state. Host container must be a flex column so the
@@ -60,12 +61,25 @@ export function EmptyStateBackdrop({
   opacity?: number;
 }) {
   const animate = useShouldAnimate();
+  // Pause the decode while an ancestor cockpit layer is display:none (the DetailPanel empty state is
+  // kept mounted, never unmounted — its battlecruiser loop kept decoding on the Engine Room tab).
+  // autoPlay still covers the first visible mount; this tracks later hide/show flips.
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const visible = useElementVisible(canvasRef);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (visible) void video.play()?.catch(() => {});
+    else video.pause();
+  }, [visible, animate]);
 
   return (
-    <div className={canvas}>
+    <div className={canvas} ref={canvasRef}>
       {animate ? (
         <div className={backdrop} aria-hidden="true" data-testid="empty-backdrop">
           <video
+            ref={videoRef}
             className={backdropVideo}
             style={opacity != null ? { opacity } : undefined}
             src={src}

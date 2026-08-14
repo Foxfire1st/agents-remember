@@ -1,0 +1,25 @@
+# Revisions that changed formatting only, and should be skipped by `git blame`.
+#
+# A commit belongs here when it changed no behaviour: it was produced by a
+# formatter or another mechanical rewrite, it touched many files, and every
+# line it moved still has a meaningful author in the commit before it. Without
+# this list those commits become the blame answer for a large part of the tree
+# and the real authorship becomes one `git blame` hop further away each time.
+#
+# Enable it locally, once per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Forges that read this file (GitHub, GitLab) apply it to their blame views
+# without any configuration. `git blame --ignore-revs-file .git-blame-ignore-revs`
+# works ad hoc if you would rather not set the config.
+#
+# Add entries newest-last, each with the command that produced it. An entry is
+# only honest if a reader can re-run that command and get the same tree.
+
+# 2026-07-31 -- `python -m ruff format .` across the whole tree.
+# 216 of 607 tracked Python files reformatted, 391 already formatted; no hand
+# edits. Formatting had never been gated, so the drift had accumulated
+# unchecked; this is the one-time reformat that lets `ruff format --check`
+# become an enforcing step. (260731-EFA-L2, requirement L2-R4)
+00e83791d4d21bf56fd5b3cc0af194bc5e28112a

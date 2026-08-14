@@ -1,15 +1,16 @@
 """Read and write task documents: the JSON is the source, the markdown a render.
 
 Every write persists the JSON (the source of truth) **and** its rendered
-markdown atomically (temp file + ``os.replace``), the same idiom the observer
-drift snapshot uses. Reading goes through ``model_validate_json`` -- the markdown
-is never parsed back into a document.
+markdown through :mod:`agents_remember.kernel.atomic_write`, the package's one atomic
+publish -- the same call the observer drift snapshot makes. Reading goes through
+``model_validate_json``; the markdown is never parsed back into a document.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
 
 from .document import TaskDocument
 from .render import render_markdown
@@ -37,7 +38,12 @@ def write_task_doc(task_root: Path, doc: TaskDocument) -> tuple[Path, Path]:
 
 
 def write_task_docs(task_root: Path, docs: list[TaskDocument]) -> list[tuple[Path, Path]]:
-    """Write several task docs after every JSON/render payload is prepared."""
+    """Write a prepared document set, restoring every prior file if publication fails.
+
+    Each destination replacement is individually atomic. The snapshot-and-restore around
+    the set supplies failure atomicity for composite leaf/master transitions: a failure on
+    a later destination cannot leave earlier task-document files at the new generation.
+    """
     task_root.mkdir(parents=True, exist_ok=True)
     writes: list[tuple[Path, str]] = []
     paths: list[tuple[Path, Path]] = []
@@ -52,12 +58,25 @@ def write_task_docs(task_root: Path, docs: list[TaskDocument]) -> list[tuple[Pat
         writes.append((json_path, f"{payload}\n"))
         writes.append((markdown_path, render_markdown(doc)))
         paths.append((json_path, markdown_path))
-    for path, text in writes:
-        _atomic_write(path, text)
+    originals = {path: path.read_bytes() if path.exists() else None for path, _text in writes}
+    try:
+        for path, text in writes:
+            atomic_write_text(path, text)
+    except BaseException as publish_error:
+        try:
+            _restore_task_doc_batch(originals)
+        except BaseException as rollback_error:
+            raise RuntimeError(
+                f"task-document batch publication and rollback both failed: {rollback_error}"
+            ) from publish_error
+        raise
     return paths
 
 
-def _atomic_write(path: Path, text: str) -> None:
-    tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+def _restore_task_doc_batch(originals: dict[Path, bytes | None]) -> None:
+    """Restore the exact pre-batch bytes, including absence for newly created files."""
+    for path, payload in originals.items():
+        if payload is None:
+            path.unlink(missing_ok=True)
+        else:
+            atomic_write_bytes(path, payload)

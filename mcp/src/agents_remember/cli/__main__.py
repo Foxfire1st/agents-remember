@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 
-from agents_remember.cli import dashboard
+from agents_remember.cli import dashboard, memory_citations
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +19,12 @@ def build_parser() -> argparse.ArgumentParser:
     dash = sub.add_parser("dashboard", help="Run the local mission-control dashboard.")
     dashboard.add_arguments(dash)
     dash.set_defaults(func=dashboard.run)
+    citations = sub.add_parser(
+        "memory-citations",
+        help="Check a leaf's memory citations; --fix regenerates their ranges from the anchors.",
+    )
+    memory_citations.add_arguments(citations)
+    citations.set_defaults(func=memory_citations.run)
     return parser
 
 

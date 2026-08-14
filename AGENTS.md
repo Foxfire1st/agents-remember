@@ -15,13 +15,11 @@ code repository for resolver, onboarding, workflow, and closeout commands.
 
 ## Start Here — Route By Role
 
-Sessions route by role through the `l-01-agent-lifecycles` skill — the lifecycle
-roof this checkout routes into. A **spawned agent** (the `AR_SPAWN_ROLE` env var
-is set, or the first message is a role brief) follows its brief — the brief is
-its session start, and the rest of this section is not addressed to it. A
-**developer-facing session** is the **architect**: it runs
-`skills/l-01-agent-lifecycles/roles/architect.md`, whose phase axis is
-request → trust-checkpoint → reframe-research → decide → build → close.
+Sessions route by role through the `l-01-agent-lifecycles` skill. A spawned
+agent follows its brief. A developer-facing session is free chat: it answers
+research inline and, for role-shaped work, creates or resolves a durable sprint
+and first leaf before launching that sprint's architect. It is never a global
+architect identity.
 Classify the job (bug / feature / triage / research) as a *lens* during
 reframe-research — a hint, re-pickable, never a gate.
 
@@ -106,6 +104,11 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 - `agents-md-files/`, `benchmarks/`, `providers/`, and `system/` are canonical
   runtime asset source folders. Edit them at the root and run
   `python3 scripts/sync-runtime.py` to refresh MCP package data.
+- `scripts/harness/` is the single source for the eight self-hosted harness
+  starter packages (`.claude/`, `.codex/`, `.cursor/`, `.github-vscode/` with
+  `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/`, `.agents/`). Edit it and run
+  `python3 scripts/sync-harness.py`. Its `README.md` records which differences
+  between harnesses are genuine requirements and which files it does not manage.
 - `mcp/` contains the MCP server, tool surface, and package-owned runtime
   services.
 - `mcp/src/agents_remember/package_data/runtime/agents-md-files/` contains the
@@ -127,6 +130,10 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
   `python3 scripts/sync-skills.py`.
 - Do not edit generated runtime asset copies directly; edit the matching root
   folder and run `python3 scripts/sync-runtime.py`.
+- Do not edit a generated harness starter file directly (each one says so in a
+  header comment); edit `scripts/harness/` and run
+  `python3 scripts/sync-harness.py`. Files a starter package owns alone, such as
+  `.codex/config.toml` or `.cursor/hooks.json`, are edited in place.
 - Keep user-specific behavior, project notes, and repo policy in the resolved
   memory layer, not in package-owned installed `AGENTS.md` templates.
 - Do not create, close out, integrate, push, or clean up worktrees without the
@@ -138,13 +145,63 @@ Use `c-04-retrieval-strategy-router` to understand the full benefit of the strat
 
 ## Code Quality Instructions
 
-After implementing Python code in this source checkout, run Ruff, Pyright, and
-Radon from the `agents-remember/` source repository root. Use the resolved memory
-layer's `system/tools.md` for the exact Ruff, Pyright, Radon, test, build, smoke-check,
-branch, and local command guidance. Use `system/coding-guidelines.md` when
-present for repo-specific coding rules. Use `system/code-quality-report-template.md`
-as a template for reporting code quality results after implementation work
-changes source code.
+After implementing Python code in this source checkout, run acceptance only through the
+pinned Dagger module. Task-addressed worktree closeout builds the exact staged sandbox and
+invokes it automatically; a manual diagnostic invocation uses the same module from the
+candidate checkout:
+
+```text
+dagger call quality --source=. --repository-bundle=<candidate.bundle> --mode=<targeted|full> --diff-base=<commit> reports export --path=<enclosure>/reports
+```
+
+The exported `clean-quality-results.json` is the single authoritative result. Leaf
+closeout enforces targeted acceptance once and master integration enforces full acceptance
+once; leaf integration, push, pull-request, tag, and publish paths do not rerun it.
+GitHub pull requests still run their deterministic non-test checks, but those are not
+acceptance gates. No host-wrapper or second Dagger projection is an acceptance gate.
+The Python, Vitest, and Playwright harnesses also fail closed at startup unless the pinned
+Dagger graph supplies a matching per-run environment nonce and in-container attestation file.
+There is no host-test compatibility path: invoking those suites outside Dagger is an error.
+The graph runs the wrapper inside clean Ubuntu. Four steps enforce — ruff (lint),
+`ruff format --check`, Pyright, and the full pytest suite — followed by mandatory CRAP
+threshold enforcement. Take no path arguments to it: there are none, because its scope is
+`git ls-files '*.py'` and narrowing what a gate certifies is how a gate stops meaning
+anything. Each rail states its current input, resolved config, and unit count before its
+result. On a manual dirty tree, non-ignored untracked files inside the quality scope roots
+are reported as outside the index/diff measurement; reporting never stages or stashes them.
+
+Nothing in this gate is exempt from anything. There is no baseline, ratchet, allowlist or
+grandfather file anywhere in it, and none may be added: a finding is fixed, never
+recorded.
+
+CRAP is `cc**2 * (1 - branch_coverage)**3 + cc`, scored per function against the branch
+data Coverage.py emits under `[tool.coverage.run] branch = true`. The reader refuses a
+statement-only report rather than silently scoring the wrong metric. There is no CRAP
+baseline and no exemption list — the threshold is the whole policy, so a function over it
+is fixed by covering its branches or by splitting it, never by recording it somewhere.
+
+Complexity is enforced by `C901` plus `PLR0911`/`PLR0912`/`PLR0915`, reported by ruff
+like every other rule. Arming them surfaced 67 offenders; those were parked behind a
+shrink-only baseline in `quality/complexity-baseline.txt` for exactly one day before the
+developer overruled it, and all 67 were refactored instead. The file, the module that
+read it and the gate step that ran it are deleted. Clear a finding by extracting a
+cohesive helper — a dispatch table for an if/elif ladder, a guard-clause prologue split
+from the body, a parse step separated from a decide step. Never by `# noqa`, never by a
+per-file ignore, never by widening a limit in `pyproject.toml`.
+
+**Radon does not enforce anything.** `radon cc` and `radon mi` exit 0 whatever they
+find — `radon cc mcp/src/agents_remember -s -n B --order SCORE` reports 141 blocks at
+grade C or worse and still exits 0 — so no Radon invocation can fail a gate. Radon is a
+*report* for refactor scouting, and it is load-bearing in one place that is not a gate:
+`code_quality/crap_calculator.py` imports `radon.complexity.cc_visit` for the complexity
+term of the CRAP score. Run it deliberately when you want the report; do not present a
+green Radon run as evidence that anything passed.
+
+Use the resolved memory layer's `system/tools.md` for the exact commands, and
+`system/coding-guidelines.md` when present for repo-specific coding rules. Use
+`system/code-quality-report-template.md` as a template for reporting code quality
+results after implementation work changes source code; record Radon rows there as
+`reported`, never as `passed`.
 Before adding or editing any store, loop-over-a-store, queue, or append-only log, the
 `system/coding-guidelines.md` "Stability, Bounded Resources, and Reclamation" section is
 MUST-READ doctrine.

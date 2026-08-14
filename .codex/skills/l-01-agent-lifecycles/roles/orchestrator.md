@@ -23,19 +23,21 @@ reports are the most important artifacts in the system: only this seat sees the 
 
 In dashboard-owned sessions, this seat stays an orchestrator for its lifetime. A pasted brief for
 architect, strategist, manager, worker, reviewer, or designer is refused and escalated to the
-architect or owning seat via the inbox. Roles expand horizontally into new chats; sub-agents drill
-vertically inside this seat for bounded analysis. A spawned orchestrator never absorbs another
+architect or owning seat via the inbox. Roles expand horizontally into new chats
+(`dispatch_agent` with the target task document and role) — a role seat is never a native sub-agent of this
+one, and this seat uses no native sub-agents: bounded analysis runs in this seat's own loop or
+dispatches as a proper role seat (system-specialist, strategist), never a shadow channel beside
+the machinery this seat exists to operate. A spawned orchestrator never absorbs another
 role brief and never performs architect/developer-facing hat-collapse.
 
 ## Hosted Role Dispatch
 
-Every manager, strategist, reviewer, or system-specialist dispatch below means the complete shared
-three-state protocol in `../SKILL.md`: spawn with `context` omitted and `submit=false` and retain the
-exact `spawned-unbriefed` session id; require `hosted_session_readiness(...)=status=ready` for that
-same id; then create one exact-agent durable `dispatch-brief`. Spawned-only and not-ready seats are
-not active work. Briefed means both `deliveryState=delivered` and
-`deliveryDetail=harness-log-confirmed`. A delivery failure remains pending on its original row and
-session for standard retry; never duplicate its brief or respawn it merely for pending delivery.
+Every manager or system-specialist dispatch below means the shared structural transaction in
+`../SKILL.md`: call `dispatch_agent` once with the direct child's canonical master/sprint document,
+role, and complete brief. The control plane owns readiness and exact initial brief pinning. A
+`dispatch-queued` result remains durable for standard retry; never request or retain its occupant
+id, poll exact readiness, duplicate its brief, or respawn it merely for pending delivery. Strategist
+and separate designer seats are architect children; reviewers are manager children.
 
 ## The Event Loop
 
@@ -43,10 +45,9 @@ session for standard retry; never duplicate its brief or respawn it merely for p
 exception):
 
 0. **Task-seat takeover:** if the developer declared this chat the orchestrator for a named task,
-   first run `../SKILL.md`'s Developer-Declared Task-Seat Takeover checklist: open that task doc,
-   attach this dashboard terminal catalog session to the qualified leaf key while explicitly
-   claiming the `orchestrator` role, rename the session, and verify that pair in the
-   catalog/dashboard row.
+   first run `../SKILL.md`'s Developer-Declared Task-Seat Takeover checklist: open the sprint task
+   document, select or create its `orchestrator` role chat in Operations, and verify that
+   `(sprint document, orchestrator)` seat in the catalog/dashboard row.
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the architect/developer relay — and **say it back**.
@@ -66,7 +67,7 @@ exception):
 
 **Profile check (takeover).** Before heavy work in any job: if this session's harness/model/
 effort is wrong for the run (resolved: role file < settings), spawn the right chair —
-`spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator`, then deliver a conversation-handover packet
+`dispatch_agent` on the sprint's orchestrator seat, then deliver a conversation-handover packet
 (`../templates/conversation-handover-packet.md`) as the post-readiness `dispatch-brief` — and hand
 over; the architect still talks to the
 developer, and backend orchestrator seats stay behind the relay.
@@ -113,7 +114,7 @@ repeat this checkpoint.
 When a `degradation-alert` lands in your inbox, keep portfolio attention on observation and
 delegation. Do not become the fixer.
 
-1. Dispatch the **system-specialist** with `spawn_agent_session`,
+1. Dispatch the **system-specialist** with `dispatch_agent` on this sprint document,
    `env={"AR_SPAWN_ROLE": "system-specialist"}`, the degradation event id/payload, current metrics
    and provider log paths, and a report path under the active master's `notes/reports/` folder (or
    an orchestrator-designated reports folder when no master owns the incident).
@@ -180,8 +181,9 @@ the design: run the bulwark check against the portfolio and the past before disp
 **Entry:** designed masters exist and coherence/order is the question, or the architect dispatches
 "orchestrate these."
 
-- **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); fan-out
-  sub-agents write durable reports (`../templates/impact-analysis.md`).
+- **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); the scan
+  runs in this seat's own loop or a dispatched system-specialist's, writing durable reports
+  (`../templates/impact-analysis.md`).
 - **Integrity bulwark** — planned-vs-planned AND planned-vs-past, every time.
 - **Reshape** — foundation-master extraction; leaf **moves** for planning-status leaves (real
   moves, never tombstones), each with decision-log entries on both masters. **The sub-task list is
@@ -197,7 +199,7 @@ the design: run the bulwark check against the portfolio and the past before disp
   and none was approved, it raises ONE decision item through the architect relay — it does not
   dispatch on its own authority. When approved: after 1..N masters are designed and BEFORE
   implementation starts on any of them, dispatch the
-  **strategist** — `spawn_agent_session` with `env={"AR_SPAWN_ROLE": "strategist"}`
+  **strategist** — request the architect to dispatch the optional sprint strategist seat
   (`roles/strategist.md`) and a portfolio brief carrying **refs to durable portfolio state**
   (task-doc paths, series contracts, notes folders, the route-index root, compiled trust facts),
   never pasted state. Spawn-first by design: portfolio analysis is token-heavy and must not burn
@@ -236,24 +238,29 @@ sanctioned a strategist skip, this seat authors and adopts the orchestration tas
 developer-ruled plan, recording that source and adoption in the decision log. A skipped Job P
 therefore never blocks Job O.
 
-**First act — the super-branch intent:** create the super integration branch off `main` so
-masters can base off it. **A branch, not a worktree** — this seat has nothing to build at creation
-time. (Interim: until a branch-without-worktree primitive lands, the manual git + contract edge is
-acceptable and recorded in durable notes.)
+**First act — publish the super edge before dispatch:** create the super integration branch off
+`main` so masters can base off it. **A branch, not a worktree** — this seat has nothing to build at
+creation time. Then use `task_doc(operation="set_field")` on the canonical sprint document to set
+`integrationBranch` to that exact branch. Preview the task write first; apply it atomically before
+dispatching or replacing any manager. A resumed or reopened sprint whose super branch already
+exists but whose task document lacks `integrationBranch` must be migrated through that same task
+operation before manager dispatch. The field is durable task identity consumed by structural
+bootstrap and lineage enforcement; it is never a branch name a manager is expected to remember.
+(Interim: until a branch-without-worktree primitive lands, the manual git creation is acceptable,
+but the task-document publication is not optional and is recorded in the decision log.)
 
 **Dispatch loop**, dependency-ordered — the dependency graph, not habit, decides sequencing.
 Dispatch independent ready masters in parallel by default up to
 `orchestration.concurrency.maxParallelMasters`. Sequential execution is the exception and must
 name a gate, a shared-file one-writer dependency, or an explicit ruling. For each ready master
 (dependencies integrated into super), run the three-state hosted-role dispatch for
-`spawn_agent_session(manager)`, compiling its post-readiness `dispatch-brief` from
-`../templates/manager-brief.md` (`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key
-`<repository>/<master>/<docId>`; together the environment role and qualified leaf claim the
-manager's `(leaf, role)` seat; the brief carries the load-bearing base fact: master branches off
-the **current super**, never off main);
-process and ack the pending signals the L2 supervisor sweep wakes you with — turn-report
+`dispatch_agent` on the canonical master document with role `manager`, compiling its complete brief
+from `../templates/manager-brief.md`; the manager occupies `(master document, manager)` and the
+brief carries the load-bearing base fact: master branches off
+the exact super branch published as the sprint document's `integrationBranch`, never off main);
+process and ack the pending signals the L2 agent-notifier sweep wakes you with — turn-report
 artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
-(**watcher ban, uniform-mechanism ruling 2026-07-07:** the supervisor sweep is the one mechanism,
+(**watcher ban, uniform-mechanism ruling 2026-07-07:** the agent-notifier sweep is the one mechanism,
 no seat-local polling/monitoring, own duty inverts to processing what lands, not hunting for it).
 Then apply the **spirit test** — a model-judgment duty, not a watching one — to escalated
 deltas. A manager escalation may carry a **loop's full round history** (3-round cap hit, or a
@@ -266,7 +273,10 @@ architect. This spawned backend seat does not run flat hat-collapse (see The Hat
 subordinate execution without repeated developer formality. Managers may close out and integrate
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
 manager/worker hat, finalize/cleanup subordinate edges, and integrate completed masters into the
-super branch under the accepted-series authority. Run the preview/checks and record the authority
+super branch under the accepted-series authority. Run the preview/checks (a code commit's acceptance
+evidence comes from the implementation resolved through `system/tools.md`, which closeout runs at
+the gate — relay its
+result with the edge) and record the authority
 source in the intent note or decision log; do not stop merely because the next operation creates a
 commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
 Stop for the developer only when the work reaches the final completed super branch / PR-carryover
@@ -279,14 +289,15 @@ decision log preserves the journey. New leaves are only for genuinely **new** ch
 (a fix leaf ≠ a redo leaf). Spawning a sibling per failed attempt hides what went down, breaks
 task order, and splits the change-set.
 
-**Master exit:** consume the manager's handover packet
+**Master exit:** read the manager's handover packet
 (`../templates/master-handover-packet.md`); check the master-exit verdict (evidence, never a
-decision); then **decide the manager's gate by its packet-carried id** — the exact call:
-`gate_decide(gate_id=<handover gateId from the packet>, decision="approve",
-deciding_role="orchestrator")`. The server resolves the gate across lifecycles by id (you never
-handle a LIFECYCLE id; gate ids are the sanctioned hand-off), your ambient identity becomes the
-attributed decider (owner-never-self-approves holds because the raiser was the manager), and the
-policy may require the attached reviewer verdict (`requireReviewerVerdictAtSeams`). Integration
+decision); then decide the one open manager handover gate structurally:
+`gate_decide(task_document_ref=<canonical master document>,
+kind="master-handover-approval", decision="approve")`. The plane resolves the private gate from
+the document, kind, and caller's ambient orchestrator seat; zero or multiple matches fail closed.
+The ambient seat becomes the attributed decider (owner-never-self-approves holds because the
+raiser was the manager), and policy may require the attached reviewer verdict
+(`requireReviewerVerdictAtSeams`). Integration
 enforces it: `worktree_integrate` refuses while a `master-handover-approval` gate addressed to
 this master (its `enclosure`) is undecided or policy-invalid. A blocking verdict decomposes into
 fix leaves dispatched before integration; a
@@ -294,7 +305,8 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 
 **Integration duty (master → super) — the worktree moment.** Per completed master:
 
-1. Consume the handover packet: branch ref, change-set summary, checks, verdict, carry-over
+1. Consume the handover packet: branch ref, change-set summary, checks (the resolved
+   `system/tools.md` evidence), verdict, carry-over
    state, risks, next dependencies.
 2. Check the verdict (pass/accepted proceeds; block → fix leaves first).
 3. Open the orchestrator integration worktree **sourced from the current super branch**;
@@ -304,16 +316,31 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 4. Carry memory + map the ledger (C-11; duplicate memory single-sided; memory quality before the
    memory edge lands).
 5. Record the new super tips in durable notes; mark next masters ready.
-6. **Land the completed master's spent seats** —
-   `lifecycle_finalize_task` auto-lands the master's manager + any master-level reviewer seats into
-   the dashboard's landed/archive group (config-gated, default ON) the moment the master finalizes
-   into super. Their transcripts remain inspectable and non-active; use the landed archive cleanup
-   button when those rows should be closed. You hold the **only** portfolio-wide retire authority
-   for exceptional stuck/abandoned/duplicate seats: unlike a manager (scoped to its own master's
-   worker/reviewer seats), you may retire ANY seat in the portfolio, including a completed manager —
-   `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`.
+6. **Close completed subordinate seats; retain the manager owner** —
+   `lifecycle_finalize_task` retries the default-on completion cleanup for report-bearing
+   worker/reviewer/curator seats of its exact leaf: normal retirement kills tmux while preserving
+   transcripts and durable reports; a missing report leaves the seat live and deferred. Managers
+   and orchestrators are never automatic cleanup targets because they carry ongoing coordination
+   state. After consuming the completed manager's handover and finishing its seam, retire that
+   manager explicitly. You hold the **only** portfolio-wide retire authority for exceptional
+   stuck/abandoned/duplicate seats: unlike a manager (scoped to its own master's
+   worker/reviewer/curator seats), you may retire ANY seat in the portfolio, including a completed manager —
+   `retire_child(task_document_ref=<master document>, role="manager", reason=...)`.
    Owner-never-self-retires still holds (you can never retire your own seat). Use
    this by hand for a stuck/abandoned seat the automation missed; transcripts are never deleted.
+   Setting `retirement.autoCloseCompletedSeats=false` restores landed/archive behavior for the
+   three automatic leaf-altitude roles; it never makes manager/orchestrator automatic targets.
+
+**Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
+acceptance exactly once. Leaf integration lands that certified commit without a rerun. The
+repository-prescribed full check runs exactly once per master at the master integration gate;
+series/master closeout does not spend it. `memory_quality_check` stays a per-leaf closeout gate.
+Do not run a separate full check per leaf or add integration-time reruns.
+
+The concrete executor, permitted environment, command arguments, retry semantics, resource policy,
+and evidence contract belong to the repository's resolved `system/git-workflow.md`,
+`system/coding-guidelines.md`, and `system/tools.md`. Missing or failed required acceptance refuses;
+never replace it with a familiar local runner or compatibility fallback.
 
 **The topology (single home — this section owns it):**
 
@@ -374,31 +401,37 @@ place.
 
 If a run is small enough for one owner seat, the architect may perform these backend duties under
 `roles/architect.md`. If this orchestrator needs another role, it spawns a new role chat
-horizontally. Fan-out sub-agents may read/search and **write durable reports**; **every AR state
-mutation stays in this seat's main loop** (see Sub-Agent Fan-Out below).
+horizontally (`dispatch_agent` with the target task document and role) — this seat uses no native sub-agents
+(see No Native Sub-Agents below); analyses run in its own loop or as dispatched role seats, and
+**every AR state mutation stays in this seat's main loop**.
 
-## Sub-Agent Fan-Out (capability doctrine — any harness that has it)
+## No Native Sub-Agents — role seats only (doctrine, ruled 2026-08-05)
 
-Not a vendor feature: whatever the harness calls its sub-agents, the doctrine is the same — and a
-harness without the ability has two fallbacks: **analyses stay sequential in the main loop**, or
-**spawn a ROLE seat through agents-remember itself** (`spawn_agent_session` with that role's
-`AR_SPAWN_ROLE`, as a chat — no leaf attachment required). The framework spawn is for ROLE seats,
-never for anonymous analyses: an env-less spawned chat has no role and no brief, so the router
-would misroute it as an orchestrator. The framework's own spawn is the harness-independent
-fan-out, which is why spawn-first seats (like the strategist) work from
-ANY harness. Like a database management system, the framework encodes the behavior reliably
-regardless of the engine underneath.
+Orchestration seats (this one, the manager) never use harness-native sub-agents: every agent this
+seat's work needs is either its own main loop or a **role seat spawned through agents-remember
+itself** (`dispatch_agent` with that role on the sprint document
+required). A native sub-agent beside the orchestration machinery is a shadow channel: no brief,
+no leaf, no turn report, no supervision — exactly what the spawned-seat protocol exists to
+provide. Native sub-agent fan-out is the hands-on seats' channel (worker, reviewer, curator, and
+the architect only when it builds solo under the worker discipline): read/search/report for
+seats that produce code or memory artifacts, never for seats that operate orchestration.
 
-- Dispatch each fan-out analysis (route-coherence scan, conflict/regression scan, per-design
-  adversarial pass) as a sub-agent whose task is to **write a templated durable report**
-  (`../templates/impact-analysis.md`, `../templates/onboarding-coherency.md`) and return a compact
-  summary. The report is the artifact of record; a sub-agent that is the sole holder of a finding
-  is a bug.
-- **AR state mutations stay in this seat's main loop** — a sub-agent never calls `task_doc`,
-  gates, `spawn_agent_session`, or closeout.
-- Fan-out is capped by settings.json `orchestration.concurrency.maxSubAgents`.
-- Prefer continuing an existing sub-agent for a follow-up on the same analysis, so its durable
-  report accretes rather than fragmenting across files.
+- Analyses that once were fan-out (route-coherence scan, conflict/regression scan, per-design
+  adversarial pass) run **sequentially in this seat's own loop** or dispatch as
+  system-specialist/strategist seats, each writing the templated durable report
+  (`../templates/impact-analysis.md`, `../templates/onboarding-coherency.md`) and returning a
+  compact summary. The report is the artifact of record; a finding held only in a chat is a bug.
+- An env-less spawned chat has no role and no brief, so the router would misroute it as an
+  orchestrator: every spawn carries the target role's `AR_SPAWN_ROLE`. The framework's own spawn
+  is the harness-independent dispatch, which is why spawn-first seats (like the strategist) work
+  from ANY harness. Like a database management system, the framework encodes the behavior
+  reliably regardless of the engine underneath.
+- **AR state mutations stay in this seat's main loop** — no other agent calls `task_doc`, gates,
+  `dispatch_agent`, or closeout on this seat's behalf.
+- The settings.json `orchestration.concurrency.maxSubAgents` cap bounds the hands-on seats'
+  fan-out, not this seat's dispatches.
+- Prefer continuing an existing analysis seat for a follow-up on the same analysis, so its
+  durable report accretes rather than fragmenting across files.
 
 ## The Spirit Test — This Seat Only
 
@@ -416,9 +449,10 @@ task, fill small blanks, escalate real deltas).
 - **Decision-log entries** for every spirit-test act-alone, every leaf move and renumber map
   (both masters where applicable), every reopen, every conflict-mode choice, every integration
   edge.
-- **Sub-agent durable reports** (`../templates/impact-analysis.md`,
-  `../templates/onboarding-coherency.md`); sub-agents never call `task_doc`, gates,
-  `spawn_agent_session`, or closeout.
+- **Analysis durable reports** (`../templates/impact-analysis.md`,
+  `../templates/onboarding-coherency.md`) — written by this seat's own loop or a dispatched role
+  seat; no anonymous agent ever holds a finding alone, and no other agent calls `task_doc`,
+  gates, `dispatch_agent`, or closeout on this seat's behalf.
 - **The adopted orchestration task** (the strategist drafts when approved; on a sanctioned skip,
   this seat authors it from the developer-ruled plan; either way this seat adopts it with the
   adoption decision-log entry) before any orchestrated run.
@@ -428,12 +462,12 @@ task, fill small blanks, escalate real deltas).
 
 ## Comms Protocol
 
-- **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down, escalation
+- **Structural messages** (`message_parent` / `message_child`) — dispatch follow-ups down and escalate
   intake up; durable + dashboard-visible.
-- **Stdin push** — the L2 supervisor's injector (HFX2-L3, the one standard wake mechanism) delivers
+- **Stdin push** — the L2 agent-notifier's injector (HFX2-L3, the one standard wake mechanism) delivers
   into hosted sessions (echo-confirmed paste) on the sweep's own tick; the inbox is the non-hosted
   equivalent, never a hand-rolled poll of this seat's own.
-- **Idle is safe** — silence is supervised (the L2 sweep + L4 escalation ladder), so
+- **Idle is safe** — silence is supervised (the L2 sweep + the state-signal relay), so
   `lifecycle_turn_end_notification` / ending a turn with nothing pending is the correct move, not a
   risk to be covered by watching. **Watcher ban (uniform-mechanism ruling 2026-07-07):** never
   build a seat-local watcher of any kind.
@@ -458,6 +492,6 @@ task, fill small blanks, escalate real deltas).
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · `session_retire` (any seat, portfolio-wide) · worktree/C-11 |
+| tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `dispatch_agent` · `retire_child` (direct manager/system-specialist seats) · worktree/C-11 |
 
 Settings.json `orchestration.roles.orchestrator` overrides these, and `orchestration.rolesPerLevel.<level>.orchestrator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

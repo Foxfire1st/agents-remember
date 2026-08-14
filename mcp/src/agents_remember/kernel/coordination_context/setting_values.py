@@ -58,9 +58,7 @@ def parse_cross_repo_allow(
     return entries, errors
 
 
-def parse_cross_repo_allow_entry(
-    item: object, item_label: str
-) -> tuple[CrossRepoAllowEntry, str]:
+def parse_cross_repo_allow_entry(item: object, item_label: str) -> tuple[CrossRepoAllowEntry, str]:
     if isinstance(item, str):
         return legacy_cross_repo_allow_entry(item, item_label)
     if not isinstance(item, dict):
@@ -93,9 +91,7 @@ def parsed_cross_repo_allow_entry(
         item.get("expectedBranch"), "expectedBranch is required"
     )
     include_code, include_memory, bool_reason = cross_repo_entry_booleans(item, item_label)
-    reason = "; ".join(
-        reason for reason in [repo_reason, expected_reason, bool_reason] if reason
-    )
+    reason = "; ".join(reason for reason in [repo_reason, expected_reason, bool_reason] if reason)
     entry = CrossRepoAllowEntry(
         repo=repo_value,
         expected_branch=expected_value,
@@ -107,9 +103,7 @@ def parsed_cross_repo_allow_entry(
     return entry, f"{item_label}: {reason}" if reason else ""
 
 
-def cross_repo_entry_booleans(
-    item: dict[str, object], item_label: str
-) -> tuple[bool, bool, str]:
+def cross_repo_entry_booleans(item: dict[str, object], item_label: str) -> tuple[bool, bool, str]:
     try:
         return (
             optional_bool(item.get("includeCode"), f"{item_label}.includeCode", True),

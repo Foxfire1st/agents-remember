@@ -1,0 +1,547 @@
+"""One ordered, protocol-backed control bridge for one exact hosted harness session."""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+from collections.abc import AsyncGenerator, Callable, Mapping
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from uuid import uuid4
+
+from agents_remember.errors import (
+    HarnessAdapterDisconnectedError,
+    HarnessBridgeEpochMismatchError,
+    HarnessControlError,
+)
+from agents_remember.models.conversations.control_wire import (
+    AdapterSnapshot,
+    ControlIdentity,
+    InterruptResult,
+    LaunchSpec,
+    SubmissionSource,
+)
+from agents_remember.models.conversations.evidence import (
+    AR_EVIDENCE_KEY,
+    AR_EVIDENCE_METHOD_KEY,
+    EVIDENCE_PAGE_BYTE_BUDGET,
+    MAX_NATIVE_EVIDENCE_PAGE,
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidencePage,
+    NativePageReader,
+    clip_evidence_payload,
+    evidence_frame_wire_bytes,
+)
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
+from agents_remember.serving.harness_control_adapter import (
+    HarnessProtocolAdapter,
+    InterruptCapableAdapter,
+    reduce_adapter_event,
+)
+from agents_remember.serving.harness_control_models import (
+    CONTROL_PROTOCOL_VERSION,
+    REQUIRED_ADAPTER_CAPABILITIES,
+    AdapterEvent,
+    AdapterHandshake,
+    PromptRequest,
+    ShutdownMode,
+    TranscriptEntry,
+)
+from agents_remember.serving.harness_submission_authority import (
+    BridgeSnapshotPort,
+    HarnessSubmissionAuthority,
+    SubmissionLimits,
+)
+
+Clock = Callable[[], str]
+
+
+@dataclass(frozen=True)
+class BridgeLimits:
+    """Every bound one control bridge holds itself to, chosen as one memory budget.
+
+    A bridge retains a transcript, an evidence window (capped in frames AND in bytes per frame), a
+    command queue, a submission ledger and a per-subscriber fan-out queue. They are one decision --
+    how much a single live session may hold -- and raising any one alone silently moves the
+    process's real ceiling somewhere else.
+    """
+
+    queue: int = 64
+    transcript: int = 1000
+    submission: int = 256
+    subscriber_queue: int = 16
+    evidence: int = 2000
+    evidence_frame_bytes: int = 32 * 1024
+
+
+DEFAULT_BRIDGE_LIMITS = BridgeLimits()
+
+
+class HarnessControlBridge:
+    """Own one adapter and serialize terminal and durable input through one bounded queue."""
+
+    def __init__(
+        self,
+        identity: ControlIdentity,
+        adapter: HarnessProtocolAdapter,
+        *,
+        limits: BridgeLimits = DEFAULT_BRIDGE_LIMITS,
+        clock: Clock = lambda: datetime.now(UTC).isoformat(),
+    ) -> None:
+        queue_limit = limits.queue
+        transcript_limit = limits.transcript
+        submission_limit = limits.submission
+        subscriber_queue_limit = limits.subscriber_queue
+        evidence_limit = limits.evidence
+        evidence_frame_bytes = limits.evidence_frame_bytes
+        for name, value in (
+            ("queue_limit", queue_limit),
+            ("transcript_limit", transcript_limit),
+            ("submission_limit", submission_limit),
+            ("subscriber_queue_limit", subscriber_queue_limit),
+            ("evidence_limit", evidence_limit),
+            ("evidence_frame_bytes", evidence_frame_bytes),
+        ):
+            if value < 1:
+                raise HarnessControlError(f"{name} must be positive")
+        self.identity = identity
+        self._adapter = adapter
+        self._clock = clock
+        self._transcript: deque[TranscriptEntry] = deque(maxlen=transcript_limit)
+        self._evidence: deque[EvidenceFrame] = deque(maxlen=evidence_limit)
+        self._evidence_limit = evidence_limit
+        self._evidence_frame_bytes = evidence_frame_bytes
+        self._evicted_before_sequence = 0
+        self._subscriber_queue_limit = subscriber_queue_limit
+        self._subscribers: set[asyncio.Queue[AdapterSnapshot]] = set()
+        self._snapshot = AdapterSnapshot(
+            identity=identity,
+            control="starting",
+            activity="unknown",
+            acceptance="unknown",
+        )
+        self._started = False
+        self._stopped = False
+        self._event_task: asyncio.Task[None] | None = None
+        self._authority = HarnessSubmissionAuthority(
+            adapter,
+            BridgeSnapshotPort(
+                clock=clock,
+                snapshot=self.snapshot,
+                set_snapshot=self._set_snapshot,
+                publish=self._publish,
+            ),
+            SubmissionLimits(timeline=queue_limit, ledger=submission_limit),
+        )
+        self._authority_started = False
+
+    async def start(self, launch: LaunchSpec) -> AdapterSnapshot:
+        if self._started:
+            raise HarnessControlError("control bridge is already started")
+        if launch.identity != self.identity:
+            raise HarnessControlError("launch identity does not match the control bridge")
+        try:
+            handshake = await self._adapter.start(launch)
+            self._validate_handshake(handshake)
+        except Exception:
+            # Adapter startup can fail after it has acquired a subprocess, before it returns a
+            # handshake. Forced cleanup therefore covers both startup and handshake refusal.
+            await self._adapter.stop("forced")
+            raise
+        self._snapshot = handshake.snapshot
+        self._started = True
+        self._authority_started = True
+        self._authority.start()
+        if self._snapshot.control != "unsupported":
+            self._event_task = asyncio.create_task(self._run_events())
+        self._publish()
+        return self._snapshot
+
+    def snapshot(self) -> AdapterSnapshot:
+        return self._snapshot
+
+    def mark_failed(self, detail: str) -> AdapterSnapshot:
+        """Expose a startup failure through IPC after the adapter cleaned up its partial launch."""
+
+        if self._started:
+            raise HarnessControlError("cannot replace a started control bridge with a failure")
+        self._started = True
+        self._snapshot = replace(
+            self._snapshot,
+            control="failed",
+            activity="unknown",
+            acceptance="rejected",
+            raw={**self._snapshot.raw, "bridgeError": detail},
+        )
+        self._publish()
+        return self._snapshot
+
+    async def subscribe(self) -> AsyncGenerator[AdapterSnapshot]:
+        queue: asyncio.Queue[AdapterSnapshot] = asyncio.Queue(maxsize=self._subscriber_queue_limit)
+        self._subscribers.add(queue)
+        queue.put_nowait(self._snapshot)
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            self._subscribers.discard(queue)
+
+    def transcript(
+        self, *, after_sequence: int = 0, limit: int = 500
+    ) -> tuple[TranscriptEntry, ...]:
+        bounded = min(500, max(1, limit))
+        return tuple(entry for entry in self._transcript if entry.sequence > after_sequence)[
+            :bounded
+        ]
+
+    def evidence(
+        self,
+        *,
+        after_sequence: int = 0,
+        limit: int = 500,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+    ) -> EvidencePage:
+        """Page the bounded evidence buffer (a hot window, never history authority)."""
+
+        if byte_budget < 1:
+            raise HarnessControlError("evidence page byte budget must be positive")
+        bounded = min(500, max(1, limit))
+        frames: list[EvidenceFrame] = []
+        used = 0
+        truncated = False
+        for frame in self._evidence:
+            if frame.sequence <= after_sequence:
+                continue
+            size = evidence_frame_wire_bytes(frame)
+            if len(frames) >= bounded or (frames and used + size > byte_budget):
+                truncated = True
+                break
+            frames.append(frame)
+            used += size
+        return EvidencePage(
+            frames=tuple(frames),
+            latest_sequence=self._evidence[-1].sequence if self._evidence else 0,
+            evicted_before_sequence=self._evicted_before_sequence,
+            truncated=truncated,
+            bridge_epoch=self._authority.bridge_epoch,
+        )
+
+    async def native_page(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+        thread_id: str | None = None,
+    ) -> NativeEvidencePage:
+        """Page harness-native history through the adapter's own read seam; bridge-stamped epoch.
+
+        ``thread_id`` is additive: when set, adapters that multiplex
+        threads (codex) read that thread; it is forwarded only when present so
+        single-thread adapters keep their exact signature.
+        """
+
+        self._require_running()
+        adapter = self._adapter
+        if not isinstance(adapter, NativePageReader):
+            raise HarnessControlError(
+                f"{type(adapter).__name__} does not support native evidence pages; "
+                "only the live stream/replay evidence buffer is available for this session"
+            )
+        read_limit = max(1, min(MAX_NATIVE_EVIDENCE_PAGE, limit))
+        if thread_id is None:
+            page = await adapter.read_native_page(
+                cursor=cursor,
+                limit=read_limit,
+                byte_budget=byte_budget,
+            )
+        else:
+            # Multiplexed adapters (codex) accept the additive thread selector; the
+            # NativePageReader protocol stays the single-thread shape.
+            try:
+                page = await adapter.read_native_page(
+                    cursor=cursor,
+                    limit=read_limit,
+                    byte_budget=byte_budget,
+                    thread_id=thread_id,  # type: ignore[call-arg] - additive codex kwarg
+                )
+            except TypeError as exc:
+                raise HarnessControlError(
+                    f"{type(adapter).__name__} does not support per-thread native pages"
+                ) from exc
+        if page.bridge_epoch:
+            raise HarnessControlError("native evidence adapter must not mint the bridge epoch")
+        return replace(page, bridge_epoch=self._authority.bridge_epoch)
+
+    async def interrupt(
+        self,
+        expected_bridge_epoch: str,
+        *,
+        turn_id: str | None = None,
+        expected_operation_id: str | None = None,
+    ) -> InterruptResult:
+        """One native interrupt write, epoch-guarded and bridge-stamped.
+
+        Settlement is deliberately untouched: the interrupted operation still settles
+        through the landed completion path, never through this acknowledgement.
+        """
+
+        self._require_epoch(expected_bridge_epoch)
+        self._require_running()
+        adapter = self._adapter
+        if not isinstance(adapter, InterruptCapableAdapter):
+            raise HarnessControlError(
+                f"{type(adapter).__name__} does not support native interrupt; "
+                "the interrupt capability is unverified for this harness"
+            )
+        result = await adapter.interrupt(
+            turn_id=turn_id,
+            expected_operation_id=expected_operation_id,
+        )
+        if result.bridge_epoch:
+            raise HarnessControlError("interrupt adapter must not mint the bridge epoch")
+        return replace(result, bridge_epoch=self._authority.bridge_epoch)
+
+    def _require_epoch(self, expected_bridge_epoch: str) -> None:
+        actual = self._authority.bridge_epoch
+        if expected_bridge_epoch != actual:
+            raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual)
+
+    def prompt(
+        self,
+        text: str,
+        *,
+        source: SubmissionSource,
+        request_id: str | None = None,
+        expected_bridge_epoch: str | None = None,
+    ) -> PromptRequest:
+        return PromptRequest(
+            request_id=request_id or uuid4().hex,
+            source=source,
+            text=text,
+            submitted_at=self._clock(),
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+
+    def submissions(self) -> HarnessSubmissionAuthority:
+        """The submission authority and its ``ledger``, refused while this bridge is not running.
+
+        The running check is spent here, at the moment the authority is taken hold of. Call it per
+        operation: a reference cached across an await outlives the check that granted it, and the
+        authority itself does not know the bridge stopped or failed under it.
+        """
+
+        self._require_running()
+        return self._authority
+
+    def advertise(self) -> CapabilitySnapshot:
+        self._require_running()
+        return self._adapter.advertise()
+
+    async def stop(self, mode: ShutdownMode = "graceful") -> None:
+        if self._stopped:
+            return
+        if mode == "forced":
+            self._stopped = True
+            await self._cancel_event_task()
+            await self._stop_authority(forced=True)
+            return
+        self._require_started()
+        self._stopped = True
+        try:
+            await self._stop_authority(forced=False)
+        finally:
+            await self._cancel_event_task()
+
+    async def _stop_authority(self, *, forced: bool) -> None:
+        """Stop the authority at most once and publish the snapshot that stop leaves behind.
+
+        A bridge whose launch failed never started an authority, and its ``failed`` snapshot must
+        survive the forced stop the runner issues on the way out -- so an unstarted authority is a
+        no-op here rather than a transition to ``disconnected``.
+        """
+
+        if not self._authority_started:
+            return
+        self._authority_started = False
+        try:
+            await self._authority.stop(forced=forced)
+        except Exception as exc:
+            error = HarnessControlError(
+                f"unexpected adapter {type(exc).__name__} during control stop: {exc}"
+            )
+            self._snapshot = replace(
+                self._snapshot,
+                control="failed",
+                activity="unknown",
+                acceptance="rejected",
+                raw={**self._snapshot.raw, "bridgeError": str(error)},
+            )
+            self._publish()
+            raise error from exc
+        self._snapshot = replace(
+            self._snapshot,
+            control="disconnected",
+            activity="unknown" if forced else "idle",
+            acceptance="rejected",
+        )
+        self._publish()
+
+    def _validate_handshake(self, handshake: AdapterHandshake) -> None:
+        if handshake.protocol_version != CONTROL_PROTOCOL_VERSION:
+            raise HarnessControlError("adapter handshake protocol version mismatch")
+        if handshake.identity != self.identity or handshake.snapshot.identity != self.identity:
+            raise HarnessControlError("adapter handshake identity does not match the bridge")
+        if handshake.snapshot.control not in {"ready", "unsupported"}:
+            raise HarnessControlError("adapter handshake did not establish explicit readiness")
+        if handshake.snapshot.control == "unsupported":
+            return
+        missing = REQUIRED_ADAPTER_CAPABILITIES - handshake.capabilities
+        if missing:
+            raise HarnessControlError(
+                "adapter capability mismatch: missing " + ", ".join(sorted(missing))
+            )
+
+    def _require_started(self) -> None:
+        if not self._started:
+            raise HarnessControlError("control bridge is not started")
+
+    def _require_running(self) -> None:
+        self._require_started()
+        if self._stopped:
+            raise HarnessControlError("control bridge is stopped")
+        if self._snapshot.control == "failed":
+            raise HarnessControlError(
+                f"control bridge failed: {self._snapshot.raw.get('bridgeError', 'unknown error')}"
+            )
+
+    async def _run_events(self) -> None:
+        try:
+            async for event in self._adapter.subscribe():
+                try:
+                    payload = event.raw.get(AR_EVIDENCE_KEY)
+                    reduced_event = (
+                        self._divert_evidence(event, payload) if payload is not None else event
+                    )
+                    updated = reduce_adapter_event(self._snapshot, reduced_event)
+                    # The authority consumes the direct event before public subscribers see the
+                    # coalesced snapshot. Draining from subscribe() would lose intermediate
+                    # completion identity under subscriber backpressure.
+                    await self._authority.observe_event(reduced_event)
+                    self._append_transcript(reduced_event.transcript)
+                except HarnessControlError as exc:
+                    self._snapshot = replace(
+                        self._snapshot,
+                        control="failed",
+                        activity="unknown",
+                        acceptance="rejected",
+                        raw={**self._snapshot.raw, "bridgeError": str(exc)},
+                    )
+                    self._publish()
+                    return
+                self._snapshot = updated
+                self._authority.notify_snapshot_updated()
+                self._publish()
+            if not self._stopped and self._snapshot.control == "ready":
+                self._snapshot = replace(
+                    self._snapshot,
+                    control="disconnected",
+                    activity="unknown",
+                    acceptance="unknown",
+                )
+                self._publish()
+        except HarnessAdapterDisconnectedError as exc:
+            self._snapshot = replace(
+                self._snapshot,
+                control="disconnected",
+                activity="unknown",
+                acceptance="unknown" if exc.may_have_sent else "rejected",
+                raw={**self._snapshot.raw, "disconnect": str(exc)},
+            )
+            self._publish()
+
+    def _append_transcript(self, entries: tuple[TranscriptEntry, ...]) -> None:
+        previous = self._transcript[-1].sequence if self._transcript else 0
+        for entry in entries:
+            if entry.sequence <= previous:
+                raise HarnessControlError("transcript sequence must increase monotonically")
+            self._transcript.append(entry)
+            previous = entry.sequence
+
+    def _divert_evidence(self, event: AdapterEvent, payload: object) -> AdapterEvent:
+        """Append one reserved-key payload to the bounded buffer; return the redacted event.
+
+        The redacted event is what reduction, the command authority, the transcript, and every
+        subscriber see, so ``snapshot.raw`` and all of its projections stay byte-identical. The
+        optional out-of-band native method (``AR_EVIDENCE_METHOD_KEY``) is preserved on the frame
+        as typed metadata and stripped from the redacted event alongside the payload key.
+        """
+
+        if not isinstance(payload, Mapping):
+            raise HarnessControlError("adapter evidence payload must be an object")
+        native_method = event.raw.get(AR_EVIDENCE_METHOD_KEY)
+        if native_method is not None and (not isinstance(native_method, str) or not native_method):
+            raise HarnessControlError("adapter evidence method must be non-empty text when present")
+        self._append_evidence(
+            event.sequence, event.kind, event.created_at, payload, native_method=native_method
+        )
+        stripped = {AR_EVIDENCE_KEY, AR_EVIDENCE_METHOD_KEY}
+        return replace(
+            event,
+            raw={key: value for key, value in event.raw.items() if key not in stripped},
+        )
+
+    @staticmethod
+    def _evidence_thread_id(payload: Mapping[str, object]) -> str | None:
+        """The demux key for multiplexed harness streams.
+
+        Codex notification params carry ``threadId`` verbatim; it crosses as-is
+        (parent frames carry the parent thread's id). Consumers that know the
+        session thread (the projector's identity) treat ``None`` or the parent
+        id as the parent conversation; anything malformed (non-text) degrades
+        to ``None`` = parent rather than being guessed.
+        """
+
+        thread_id = payload.get("threadId")
+        return thread_id if isinstance(thread_id, str) and thread_id else None
+
+    def _append_evidence(
+        self,
+        sequence: int,
+        kind: str,
+        created_at: str,
+        payload: Mapping[str, object],
+        *,
+        native_method: str | None = None,
+    ) -> None:
+        previous = self._evidence[-1].sequence if self._evidence else 0
+        if sequence <= previous:
+            raise HarnessControlError("evidence sequence must increase monotonically")
+        if len(self._evidence) == self._evidence_limit:
+            self._evicted_before_sequence = self._evidence[0].sequence
+        self._evidence.append(
+            EvidenceFrame(
+                sequence=sequence,
+                kind=kind,
+                created_at=created_at,
+                raw=clip_evidence_payload(payload, max_bytes=self._evidence_frame_bytes),
+                native_method=native_method,
+                thread_id=self._evidence_thread_id(payload),
+            )
+        )
+
+    def _publish(self) -> None:
+        for queue in self._subscribers:
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(self._snapshot)
+
+    def _set_snapshot(self, snapshot: AdapterSnapshot) -> None:
+        self._snapshot = snapshot
+
+    async def _cancel_event_task(self) -> None:
+        if self._event_task is None:
+            return
+        self._event_task.cancel()
+        await asyncio.gather(self._event_task, return_exceptions=True)

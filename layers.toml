@@ -1,0 +1,383 @@
+# The package layer contract for `agents_remember`.
+#
+# One strict order over the top-level packages, and one charter sentence per package
+# saying what it is for. A module in package P may import package Q only when
+# `rank(Q) < rank(P)`. Imports inside a package are unconstrained; this file has
+# nothing to say about them.
+#
+# It is not a record of today's graph. It declares the target, so on the day the check is
+# armed this contract fails against the tree, and the leaf named in each package's
+# `arrives_in` or `deleted_by` is what moves the code to it. Do not edit a rank to make
+# the tree pass.
+#
+# Where a new package goes: doctrine first -- `errors < kernel < models < domain services
+# < application < mcp < cli`. A package's rank is what it is ALLOWED to know about, not
+# what it happens to import today. Inside the domain tier a durable record store ranks
+# below the thing that projects it, which ranks below the thing that supervises seats,
+# which ranks below the process that serves them.
+
+[contract]
+root_package = "agents_remember"
+source_root = "mcp/src/agents_remember"
+declared_by = "260731-EFA-L6"
+declared_on = "2026-08-01"
+enforced_by = "260731-EFA-L9"
+rule = "a module in package P may import package Q only when rank(Q) < rank(P)"
+baseline = "none"
+exceptions = "none"
+
+# The strict order, low to high. Position in this list IS the rank. Six of these packages
+# do not exist yet and carry `present = false` with the leaf that creates them; `serving`
+# exists and carries the leaf that deletes it.
+order = [
+  "errors",
+  "kernel",
+  "models",
+  "controlplane",
+  "harness_adapters",
+  "conversations",
+  "terminals",
+  "observer",
+  "tasks",
+  "worktrees",
+  "memory_quality",
+  "memory",
+  "providers",
+  "harness_control",
+  "hosted_sessions",
+  "supervision",
+  "serving",
+  "dashboard",
+  "install",
+  "benchmarks",
+  "application",
+  "mcp",
+  "cli",
+  "code_quality",
+]
+
+# ---------------------------------------------------------------------------
+# Packages.
+# ---------------------------------------------------------------------------
+
+[package.errors]
+rank = 0
+# Not a directory: this rank is the modules that sit directly in `agents_remember/`.
+# A checker scans `root_modules` here and `path` for every other package.
+path = "."
+root_modules = ["errors.py", "__init__.py"]
+present = true
+charter = """
+The exception hierarchy, and nothing else -- the one name every other package may say. A
+module that sits directly in `agents_remember/` is at this rank and may import nothing
+internal at all.
+"""
+
+[package.kernel]
+rank = 1
+path = "kernel/"
+present = true
+charter = """
+Primitives with no feature in them: filesystem access, path confinement and
+normalization, the coordination-context resolver, settings parsing and the vocabularies
+settings are written in, the git command runner, the atomic file publish, the memory
+ledger. The test for kernel membership is whether the thing would still make sense if
+every feature above it were deleted.
+
+The runtime configuration record belongs here on that test; it lives in `mcp/config.py`
+today and 260731-EFA-L9 moves it.
+"""
+
+[package.models]
+rank = 2
+path = "models/"
+present = true
+charter = """
+The served wire vocabulary: the response models and the literal types their fields are
+drawn from. A status, kind or state that crosses the wire is DEFINED here and imported by
+whoever decides it -- never defined by the decider and imported back down, which is a
+cycle with a type annotation on it. A response model that needs a domain service's type
+is telling you the type is wire vocabulary and belongs in this package.
+"""
+
+[package.controlplane]
+rank = 3
+path = "controlplane/"
+present = true
+charter = """
+Durable interaction records and the policy over them: gates, the operator inbox,
+expectations, escalation and retention rules, and the single-writer durable-store
+contract they share. Lowest of the domain services because it is the substrate the rest
+observe, project and act on, so the primitives its own records are aged and folded by are
+defined here rather than borrowed from a package above.
+"""
+
+[package.harness_adapters]
+rank = 4
+path = "harness_adapters/"
+present = false
+arrives_in = "260731-EFA-L10"
+charter = """
+DECLARED, NOT YET PRESENT. The concrete Claude, Codex and Pi integrations -- process,
+session, state, startup, transport, and native conversation history, normalization and
+projection -- each under its own harness subpackage, with the parent root holding only
+adapter contracts and the registry (260731-EFA-L10 R1, R2). Ranked below `conversations`
+because L10-R4 leaves shared conversation code depending on adapter contracts.
+"""
+
+[package.conversations]
+rank = 5
+path = "conversations/"
+present = false
+arrives_in = "260731-EFA-L11"
+charter = """
+DECLARED, NOT YET PRESENT. Harness-neutral conversation services and the ports they
+declare: the active, control and library services, router, runtime, dependencies and
+authorization (260731-EFA-L11 R3). Ranked below `terminals` and `harness_control` so the
+backwards control and terminal edges L11-R8 forbids are unrepresentable rather than
+merely asserted.
+"""
+
+[package.terminals]
+rank = 6
+path = "terminals/"
+present = false
+arrives_in = "260731-EFA-L11"
+charter = """
+DECLARED, NOT YET PRESENT. The seat catalog: the durable record of every terminal
+session, its binding, its spawn provenance and its liveness, plus the lock that serializes
+writes to it, and the host, catalog, leaf assignment, liveness, opener and paste around it
+(260731-EFA-L11 R4). It is a record store, so it is ranked with the record stores:
+`supervision` imports the catalog rather than owning it, and neither may be a prerequisite
+for the other to compile.
+"""
+
+[package.observer]
+rank = 7
+path = "observer/"
+present = true
+charter = """
+The ambient event substrate and its read model: event append, snapshots, the projection
+reducer, landing state, and retention over the event logs. Above the packages it projects;
+below everything that consumes a projection.
+"""
+
+[package.tasks]
+rank = 8
+path = "tasks/"
+present = true
+charter = """
+The task document itself: its schema, its store, and lookup of a leaf's document. Document
+state only -- an operation that also rewrites an enclosure contract is a worktree
+operation and is ranked accordingly, whatever it is named after.
+"""
+
+[package.worktrees]
+rank = 9
+path = "worktrees/"
+present = true
+charter = """
+The worktree-backed task lifecycle: the enclosure contract, worktree creation, status,
+integration, closeout and cleanup. Owns the contract file and every transition of it.
+"""
+
+[package.memory_quality]
+rank = 10
+path = "memory_quality/"
+present = true
+charter = """
+Memory integrity: drift detection, missing-onboarding checks, entity fingerprints and the
+quality gates over them. Reads code and onboarding; decides nothing about serving.
+"""
+
+[package.memory]
+rank = 11
+path = "memory/"
+present = true
+charter = """
+Memory repository initialization, baseline adoption and carryover. Above memory_quality
+because adopting a baseline asks whether it is current.
+"""
+
+[package.providers]
+rank = 12
+path = "providers/"
+present = true
+charter = """
+External retrieval providers: their container lifecycle, settings, identity, status and
+degradation policy. Declares the PORTS it needs from above -- a stop action, a watcher
+control -- and never reaches up to the application layer for an implementation.
+"""
+
+[package.harness_control]
+rank = 13
+path = "harness_control/"
+present = false
+arrives_in = "260731-EFA-L11"
+charter = """
+DECLARED, NOT YET PRESENT. The shared harness control plane: control API, runner, bridge,
+client, IPC, factories, queue, submission authority, logs, terminal surface, turn state
+and the control-plane-only models (260731-EFA-L11 R1). None of it is a Claude, Codex or Pi
+adapter, which is why it is a peer of `harness_adapters` and not a subpackage of it.
+"""
+
+[package.hosted_sessions]
+rank = 14
+path = "hosted_sessions/"
+present = false
+arrives_in = "260731-EFA-L11"
+charter = """
+DECLARED, NOT YET PRESENT. Hosted readiness, hosted interactions and the hosted control
+projection (260731-EFA-L11 R2). Above `harness_control` because it projects what the
+control plane records.
+"""
+
+[package.supervision]
+rank = 15
+path = "supervision/"
+present = false
+arrives_in = "260731-EFA-L11"
+charter = """
+DECLARED, NOT YET PRESENT. The agent-notifier: sweep and heartbeat, seat liveness judgement,
+signal routing over spawn provenance, the escalation ladder, orphan policy, inbox delivery
+and reclamation, seat binding and events, pane signals and retirement (260731-EFA-L11 R4).
+It decides WHAT should happen and WHO the addressee is; the packages above it perform the
+delivery -- a decision that cannot be imported without importing an HTTP application is a
+decision nobody can test alone.
+"""
+
+[package.serving]
+rank = 16
+path = "serving/"
+present = true
+deleted_by = "260731-EFA-L12"
+charter = """
+The served process as it stands today: the HTTP application, the terminal host, the
+harness control bridge, the conversation runtime and the adapters behind them. Everything
+here is a PERFORMER -- if a module in `serving/` is a pure decision, a predicate, a router
+or a policy, its home is the domain package that owns the substrate it decides about, not
+this one. 260731-EFA-L10 and 260731-EFA-L11 move the adapters and five packages out of it;
+260731-EFA-L12 takes the web surface into `dashboard/` and deletes what is left.
+"""
+
+[package.dashboard]
+rank = 17
+path = "dashboard/"
+present = false
+arrives_in = "260731-EFA-L12"
+charter = """
+DECLARED, NOT YET PRESENT. Web concerns only: the FastAPI composition root, static
+serving, SSE and WebSocket transport, the workspace projection and delta fan-out, thin
+routes, landing, build info and the daemon entry point (260731-EFA-L12 R1). It COMPOSES
+the peer domains and owns none of them -- a module that survives triage as a peer-domain
+concern wearing a web-shaped name goes to its real owner instead (L12-R2).
+"""
+
+[package.install]
+rank = 18
+path = "install/"
+present = true
+charter = """
+Runtime and skills installation into a target repository. Above the packages it installs
+for because it must know what a complete installation contains.
+"""
+
+[package.benchmarks]
+rank = 19
+path = "benchmarks/"
+present = true
+charter = """
+Benchmark case preparation and the harness that runs them. Highest domain package: it
+drives the others and is depended on by nothing except the tools that expose it.
+"""
+
+[package.application]
+rank = 20
+path = "application/"
+present = true
+charter = """
+One function per tool: compose the domain services into the response model the wire
+contract declares. The application layer holds no vocabulary and no durable state -- a
+literal type defined here is wire vocabulary in the wrong package, and belongs in `models`.
+"""
+
+[package.mcp]
+rank = 21
+path = "mcp/"
+present = true
+charter = """
+The MCP server adapter: tool registration, the FastMCP wiring, report shaping. It converts
+an application-layer result into a protocol response and does nothing else.
+
+Nothing below this rank may import it. That it is imported from below today is the single
+largest inversion in the tree and it is almost entirely one module wide: on 2026-08-01,
+39 of the 46 import statements reaching this package from outside it named
+`mcp/config.py` -- the runtime configuration record, which is chartered to `kernel`.
+"""
+
+[package.cli]
+rank = 22
+path = "cli/"
+present = true
+charter = """
+Command-line entry points. An entry point is a caller of the whole tree and a dependency
+of none of it.
+"""
+
+[package.code_quality]
+rank = 23
+path = "code_quality/"
+present = true
+charter = """
+The quality gate itself: the check wrapper, CRAP scoring, the changed-lines coverage floor
+-- and, from 260731-EFA-L9, the reader of this file. Ranked above everything because it
+measures everything; imported by nothing, because a gate a package can import is a gate
+that package can bend.
+"""
+
+# ---------------------------------------------------------------------------
+# Sequencing
+# ---------------------------------------------------------------------------
+#
+# ONE ENTRY, ONE PACKAGE, ONE DELETER. This is not an exemption: it names a directory, the
+# caps it departs from, a date, an owner and the leaf that must delete it. R12 forbids
+# baselines and grandfather entries -- open-ended "known violations" with no deleter -- so
+# if this entry outlives its deleter it HAS BECOME one and must be treated as one.
+#
+# A deviation is scoped to a directory and never names a construct. Naming the constructs
+# it excuses would produce a list of exempt symbols, which is an allow-list whatever file
+# it lives in; scoping to the directory means any module in the package is covered, nothing
+# outside it is, and no construct is named. `test_a_deviation_is_scoped_to_a_directory_and_
+# can_never_name_a_class` holds that shape.
+
+[sequencing.serving_package_size]
+directory = "serving/"
+limits = ["directory_modules"]
+declared_on = "2026-08-01"
+owner = "the developer (ruled knowingly, 260731-EFA-L6)"
+deleted_by = "260731-EFA-L12"
+statement = """
+`serving/` holds 87 flat modules against a cap of 25. This entry covers the module count
+and nothing else. It is the one place this contract knowingly departs from "the target is
+enforced from day one".
+
+The cause is that `serving/` holds packages that are not the served process. 260731-EFA-L10
+and 260731-EFA-L11 move the adapters and the five peer packages out and 260731-EFA-L12
+deletes the remainder, so the count falls out of that work rather than being chased
+separately.
+
+`class_surface` WAS ALSO LISTED HERE AND WAS STRUCK ON 2026-08-02. It excused six classes
+at 16 to 24 public methods, and it had never been ruled on: the developer authorised the
+module-count deviation and the second limit was folded in beside it unasked. All six were
+cleared in 260731-EFA-L6 instead of excused -- `HarnessControlQueue` was a forwarding
+facade over the submission authority and was deleted outright, `launch_knobs` measured
+stateless in all three adapters and left the adapter object, the terminal surface split
+along tmux/pty/host, and the submission rows separated from the submission order. Do not
+re-add it: the cap is met, and it was met by finding real seams rather than by relocating
+methods.
+
+IF THIS ENTRY SURVIVES 260731-EFA-L12 IT IS A GRANDFATHER ENTRY AND R12 FORBIDS IT. The
+remedy then is to delete it and fail the build until `serving/` meets the cap, not to
+re-date it. `stale_deviations` enforces that in the other direction too, and it is what
+forced this narrowing: it failed the build the moment the last of the six cleared.
+"""

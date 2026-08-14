@@ -63,7 +63,9 @@ def cgc_refresh_dry_result(layout: CgcRuntimeLayout, command: dict[str, Any]) ->
     }
 
 
-def cgc_refresh_backend(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
+def cgc_refresh_backend(
+    args: argparse.Namespace, layout: CgcRuntimeLayout
+) -> dict[str, Any] | None:
     backend_result = cgc_backend_start(args) if cgc_uses_settings(args) else None
     if backend_result is not None and not backend_result.get("ok"):
         return {**backend_result, "action": "refresh", "ok": False, "repoId": layout.repo_id}
@@ -190,8 +192,7 @@ def cgc_refresh_all(args: argparse.Namespace) -> dict[str, Any]:
         }
     if args.dry_run:
         results = [
-            cgc_refresh_dry_result(layout, cgc_refresh_command(args, layout))
-            for layout in layouts
+            cgc_refresh_dry_result(layout, cgc_refresh_command(args, layout)) for layout in layouts
         ]
     else:
         results = cgc_parallel_layout_action_results(

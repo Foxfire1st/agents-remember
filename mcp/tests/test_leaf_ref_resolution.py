@@ -11,9 +11,13 @@ from typing import cast
 from unittest import mock
 
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees import leaf_refs
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError, resolve_leaf_ref
 from agents_remember.worktrees.modules.cli import main as worktree_cli_main
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     WorktreeContract,
     contract_to_text,
     default_contract,
@@ -77,17 +81,20 @@ def _persisted_legacy_contract(
 ) -> WorktreeContract:
     """A leaf contract persisted with a legacy stem-shaped leaf id (pre-heal on-disk state)."""
     contract = default_contract(
-        task_name=master,
-        repo_name="repo-a",
-        workflow_kind="light-task",
-        memory_mode="disabled",
-        coordination_root=root,
-        code_repo_path=root / "repo-a",
-        code_source_branch="main",
-        code_work_branch="ar/legacy",
-        code_base_commit="abc123",
-        worktree_name="legacy",
-        leaf_id=leaf_id,
+        ContractTask(
+            name=master,
+            repo_name="repo-a",
+            coordination_root=root,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="legacy", leaf_id=leaf_id),
+        code=RepoBranchPlan(
+            repo_path=root / "repo-a",
+            source_branch="main",
+            work_branch="ar/legacy",
+            base_commit="abc123",
+        ),
     )
     contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
     contract.contract_path.write_text(contract_to_text(contract), encoding="utf-8")
@@ -236,17 +243,20 @@ class LeafRefResolutionTests(unittest.TestCase):
             task_root = root / "tasks" / "repo-a" / "duplicate"
             task_root.mkdir(parents=True)
             contract = default_contract(
-                task_name="duplicate",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="disabled",
-                coordination_root=root,
-                code_repo_path=root / "repo-a",
-                code_source_branch="main",
-                code_work_branch="ar/legacy",
-                code_base_commit="abc123",
-                worktree_name="legacy",
-                leaf_id="legacy-id",
+                ContractTask(
+                    name="duplicate",
+                    repo_name="repo-a",
+                    coordination_root=root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="legacy", leaf_id="legacy-id"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo-a",
+                    source_branch="main",
+                    work_branch="ar/legacy",
+                    base_commit="abc123",
+                ),
             )
             contract = replace(contract, leaf_id="legacy-id")
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,6 +463,21 @@ class LeafRefResolutionTests(unittest.TestCase):
             self.assertEqual(by_doc_id.qualified_id, "repo-a/fix-thing/260707-T1")
             self.assertEqual(by_folder.qualified_id, by_doc_id.qualified_id)
             self.assertEqual(by_enclosure.qualified_id, by_doc_id.qualified_id)
+
+    def test_single_repository_inference_ignores_non_active_task_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertIsNone(leaf_refs._single_repo_name(root))
+
+            tasks = root / "tasks"
+            tasks.mkdir()
+            (tasks / "README.md").write_text("not a repository\n", encoding="utf-8")
+            (tasks / leaf_refs.ARCHIVE_DIR).mkdir()
+            (tasks / "repo-a").mkdir()
+            self.assertEqual(leaf_refs._single_repo_name(root), "repo-a")
+
+            (tasks / "repo-b").mkdir()
+            self.assertIsNone(leaf_refs._single_repo_name(root))
 
 
 if __name__ == "__main__":

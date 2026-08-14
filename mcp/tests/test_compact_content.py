@@ -23,8 +23,10 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.kernel.primitives.runtime_config import (
+    load_config,
+)
 from agents_remember.mcp.compact_content import install_compact_content
-from agents_remember.mcp.config import load_config
 from agents_remember.mcp.server import create_server
 from test_config import settings_payload
 
@@ -73,9 +75,7 @@ class CompactContentShimTests(unittest.TestCase):
 
     @staticmethod
     async def _call_ping(server):
-        async with create_connected_server_and_client_session(
-            server._mcp_server
-        ) as client:
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
             return await client.call_tool("ping", {})
 
 
