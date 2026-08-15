@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SOURCE_SKILL = REPOSITORY_ROOT / "skills/l-01-agent-lifecycles"
 CANONICAL_SKILL = REPOSITORY_ROOT / ".codex/skills/l-01-agent-lifecycles"
 PACKAGED_SKILL = (
     REPOSITORY_ROOT / "mcp/src/agents_remember/package_data/runtime/skills/l-01-agent-lifecycles"
@@ -61,3 +62,177 @@ def test_packaged_agent_doctrine_is_the_canonical_skill_exactly() -> None:
     }
 
     assert packaged == canonical
+
+
+def _doctrine(path: str) -> str:
+    return SOURCE_SKILL.joinpath(path).read_text(encoding="utf-8")
+
+
+def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership() -> None:
+    lifecycle = _doctrine("SKILL.md")
+    architect = _doctrine("roles/architect.md")
+    strategist = _doctrine("roles/strategist.md")
+    orchestrator = _doctrine("roles/orchestrator.md")
+    manager = _doctrine("roles/manager.md")
+    reviewer = _doctrine("roles/reviewer.md")
+    worker = _doctrine("roles/worker.md")
+    orchestration_task = _doctrine("templates/orchestration-task.md")
+    manager_brief = _doctrine("templates/manager-brief.md")
+    handover = _doctrine("templates/master-handover-packet.md")
+    verdict = _doctrine("templates/verdict.md")
+    worker_brief = _doctrine("templates/worker-brief.md")
+    plan_review = _doctrine("criteria/plan-review.md")
+    doctrine_review = _doctrine("criteria/doctrine.md")
+
+    assert all(
+        term in architect
+        for term in (
+            "executionGraph",
+            "executionNature",
+            "recommend **yes**",
+            "Never dispatch the strategist without the developer's yes",
+            "Resolve this before step 1 above",
+            "migrate_execution_topology",
+            "An organizational master has no branch",
+            "recommend skipping only when a ruled plan is complete",
+        )
+    )
+    assert all(
+        term in strategist
+        for term in (
+            "Detection/judgment split",
+            "`organizational`",
+            "`atomic`",
+            "critical / high / normal / low",
+            "A common foundation required by leaves in multiple masters",
+            "Large size alone is not a reason",
+            "first, between waves, or last",
+            "throwaway experiment",
+            "facts compiled by the architect for an initial pass",
+            "supplied by the orchestrator through the architect for a runtime reshape",
+        )
+    )
+    assert all(
+        term in orchestrator
+        for term in (
+            "Execution loop — recompute after every material event",
+            "graph's stable node order as a deterministic",
+            "Organizational:",
+            "Atomic:",
+            "integration branches are not workbenches",
+            "bounded reprioritization are this seat's job",
+            "multi-master reshape is substantial",
+            "full acceptance once **before** moving super",
+            "the orchestration task's Judgment Register",
+            "rationale, evidence, author, confidence, and supersession",
+            "Initial planning is already resolved before this seat is spawned",
+            "The architect owns and rules the plan-review loop",
+            "builder only when the developer sanctioned a strategist skip",
+            "plan-review reviewer seats are architect children",
+        )
+    )
+    assert all(
+        term in manager
+        for term in (
+            "Declare closeout readiness; do not rank the portfolio",
+            "An `organizational` leaf lands directly",
+            "an `atomic` leaf lands only",
+            "routes and seams touched, local blockers",
+            "only after the orchestrator released",
+        )
+    )
+    assert "organizational leaf requires super → leaf" in lifecycle
+    assert "atomic path requires super → master → leaf" in lifecycle
+    assert "| Portfolio plan | the architect |" in lifecycle
+    assert all(
+        term in reviewer
+        for term in (
+            "exact proposed final super candidate containing prior landed leaf contributions",
+            "owning or reopened leaf",
+            "integration branches are not repair workbenches",
+        )
+    )
+    assert "proposed final organizational super candidate before it lands" in worker
+    assert all(
+        term in orchestration_task
+        for term in (
+            "Mechanical Fact Inventory",
+            "Judgment Register (canonical judgment authority)",
+            "Evidence/fact refs",
+            "Judgment id (required when selected into executionGraph)",
+            "no relation selected into `executionGraph` may omit its judgment id",
+            "Master Execution Nature (explicit judgment)",
+            "Priority Register (explicit judgment)",
+            "Canonical executionGraph Adoption Payload",
+            "Derived Waves And Barrier Walk",
+            "barrier-placement judgment <id>",
+            "sprint decision log and Judgment Register",
+        )
+    )
+    assert all(
+        term in manager_brief
+        for term in (
+            "Execution nature:",
+            "Closeout-ready report:",
+            "Build concurrency does not grant",
+            "before it lands",
+            "exact proposed final super candidate containing the master's prior landed "
+            "contributions",
+        )
+    )
+    assert "prior landed leaf commits plus the proposed final leaf" in handover
+    assert "exact proposed final super candidate" in handover
+    assert "before final organizational leaf moves super" in handover
+    assert "exact proposed organizational super candidate including final leaf" in verdict
+    assert "owning or reopened leaf, or new scoped fix leaf" in verdict
+    assert "proposed final organizational super candidate or atomic landing" in verdict
+    assert "proposed final organizational super candidate before it lands" in worker_brief
+    assert "PR-6 — Detection/judgment boundary and runtime ownership" in plan_review
+    assert "owner = architect" in plan_review
+    assert "orchestrator on a sanctioned strategist skip" in plan_review
+    assert "D-4 — Topology and authority sweep" in doctrine_review
+    assert "D-5 — Detection is not judgment" in doctrine_review
+    assert "architect for the plan review" in verdict
+
+
+def test_agent_doctrine_contains_no_retired_fixed_master_branch_topology() -> None:
+    doctrine_text = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(SOURCE_SKILL.rglob("*.md"))
+    )
+    retired = (
+        "master branches off the **current super**",
+        "master-A integration branch",
+        "remediate on the super worktree",
+        "before implementation starts on any of them",
+        "if leaf-level cross-deps interleave, reshape master boundaries",
+        "runs once per master at master integration",
+        "leaf→master and master→super",
+        "slug into the sprint doc's `orchestrates`",
+        "super worktree",
+        "super-worktree",
+        "recommend skipping when a ruled plan already exists",
+        "owner = orchestrator, builder = strategist",
+        "owner = this seat · builder = strategist",
+        "Strategist and separate designer seats are architect children; reviewers are manager "
+        "children.",
+    )
+    for phrase in retired:
+        assert phrase.casefold() not in doctrine_text.casefold(), phrase
+
+
+def test_execution_topology_templates_have_rectangular_markdown_tables() -> None:
+    for relative_path in (
+        "templates/orchestration-task.md",
+        "templates/master-handover-packet.md",
+        "templates/verdict.md",
+    ):
+        table: list[str] = []
+        for line in [*_doctrine(relative_path).splitlines(), ""]:
+            if line.startswith("|"):
+                table.append(line)
+                continue
+            if not table:
+                continue
+            widths = {row.count("|") for row in table}
+            assert len(widths) == 1, f"{relative_path}: ragged table {table!r}"
+            table = []

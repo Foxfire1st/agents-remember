@@ -77,8 +77,10 @@ and evidence contract. Do not substitute a familiar runner or invent a fallback.
 
 Under the quality altitude ladder, leaf acceptance is change-set-scoped and runs exactly once at
 leaf closeout. Leaf integration lands that certified commit without rerunning acceptance. The
-full-repository check is not a leaf check: it runs exactly once per master at the master integration
-gate. `memory_quality_check` stays a per-leaf closeout gate. A red check you cannot fix inside the
+full-repository check is not a leaf check: it runs exactly once per master at its completion
+boundary (against the proposed final organizational super candidate before it lands, or during
+atomic landing). `memory_quality_check`
+stays a per-leaf closeout gate. A red check you cannot fix inside the
 leaf's scope is an escalation, not a workaround.
 
 ### 5 — The Turn Report (mandatory, your last act)

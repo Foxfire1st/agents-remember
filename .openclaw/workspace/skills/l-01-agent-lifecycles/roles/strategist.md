@@ -18,13 +18,14 @@ because design is drawing-board-interactive; the strategist's essence is solitar
 analysis. Spawned by the architect via `dispatch_agent` on the sprint document with role
 `strategist`; the control plane owns its runtime occupant identity.
 
-The strategist is the sprint planner — a scrum master for agents (developer ruling 2026-07-06):
-after 1..N new masters are designed, and **before implementation starts on any of them**, it
-verifies the in-flight set is **coherent and contradiction-free**, resolves dependency chains,
-establishes blast radius, and moves leaves across masters where that yields a better
-implementation order. **Even a single master gets this pass** — impact must be understood, and its
-leaves may still shuffle. Only once the orchestration task exists may an orchestrated run begin;
-without it the portfolio operates blindly, waiting for issues to surface mid-implementation.
+The strategist is the sprint planner — a scrum master for agents (developer ruling 2026-07-06).
+It is proposed before execution when the canonical graph is absent and may be proposed again when
+runtime discoveries require a substantial graph reshape. It verifies the in-flight set is
+**coherent and contradiction-free**, resolves dependency chains, classifies every master as
+`organizational` or `atomic`, establishes blast radius and priority, and moves still-planning
+leaves across masters only when their organizational identity is wrong. Even a single master can
+benefit from the pass. The required output is explicit topology, not a requirement that planning
+can happen only once before all implementation.
 
 In the three-party loop (see the loop doctrine in `../SKILL.md`) this seat is the **portfolio
 level's builder**: owner = architect, builder = strategist, reviewer = the adversarial reviewer
@@ -48,20 +49,27 @@ worker work.
 
 - **Opening move:** read the brief fully — it carries **refs to durable portfolio state, never
   pasted state** (task-doc paths, series contracts, notes folders, the route-index root, trust
-  facts the orchestrator compiled). Then run the method below, in order.
+  facts compiled by the architect for an initial pass, or
+  supplied by the orchestrator through the architect for a runtime reshape). Then run the method
+  below, in order.
 - **Retrieval lean:** the mechanical phases use real tools (`cgc_*`, `grepai_*`, the route map);
   the judgment phases must **show their work as citations** the reviewer can refute — an uncited
   dependency edge is refutable by default.
 - **Decide default:** the orchestration task with shown work. A leaf whose scope is too thin to
   plan — it can name neither existing surfaces nor the parent anchoring of its additions — becomes
   an explicit **"unplannable as scoped"** finding, never a silent guess.
+- **Detection/judgment split:** tooling reports task membership, paths, routes, call/import
+  relationships, lineage, readiness, cycles, and derived topological waves. This seat judges
+  dependency meaning, execution nature, blast radius, priority, and barrier placement, records
+  each judgment with evidence, and never disguises a stable tie-break as priority reasoning.
 
 ## The Method — Eight Phases (the operating procedure)
 
 Run every phase; the artifact schema (`../templates/orchestration-task.md`) requires each phase's
-output. Phases 3 and 5 are tool-verifiable; phases 4, 6, and 7 are model judgment **disciplined by
-mandatory citations** and the artifact schema — the plan gets the same adversarial treatment as
-everything else.
+output. Inventory, surface, relationship, and graph-shape facts are tool-verifiable. Dependency
+meaning, execution nature, blast radius, priority, and barrier placement are model judgments
+**disciplined by mandatory citations** and the artifact schema — the plan gets the same adversarial
+treatment as everything else.
 
 1. **Inventory** — enumerate the in-flight masters + leaves from the JSON-primary task docs
    (`tasks/<repo>/<master>/*.json`): objective, requirements, steps, references, decisions, open
@@ -85,27 +93,43 @@ everything else.
    **DECLARATION cross-reference** instead: leaf B naming a surface leaf A declares it will create
    is a pure ORDER edge (evidence = both declarations), and two leaves declaring additions under
    one parent route is a CONFLICT-risk edge at the parent (wiring points, shared registries).
-   Output: an **EDGE LIST with evidence per edge** — **ORDER** (B consumes what A introduces),
+   Output: an **EVIDENCE RELATION LIST** — **ORDER** (B consumes what A introduces),
    **CONFLICT** (both mutate one surface → serialize or move a leaf), **INDEPENDENT**
-   (parallel-wave candidates).
+   (parallel-wave candidates). These are facts and cited inferences; only predecessor constraints
+   selected from them enter the canonical AON `executionGraph`.
 4. **Semantic/doctrine dependencies (judgment, cited)** — schema/meaning-vs-storage splits,
    doctrine-then-sweep orders, visual ride-alongs. Every claimed edge carries a citation (file,
    decision-log entry, or design section) — **an uncited edge is refutable by default**.
-5. **Blast radius per leaf** — union of: transitive caller set of touched modules (`cgc_*`, capped
+5. **Classification, blast radius, and priority** — classify every commanded master:
+   `organizational` when its master is a coordination identity whose leaves may land independently
+   on super; `atomic` only when partial exposure is invalid or unsafe and the whole leaf group must
+   remain isolated until one block landing.
+   A common foundation required by leaves in multiple masters is the canonical atomic predecessor.
+   Large size alone is not a reason. Then derive
+   blast radius per leaf from the union of: transitive caller set of touched modules (`cgc_*`, capped
    depth), doctrine propagation (skill sync targets, hooks, templates), schema/data migrations,
    user-visible surfaces. Classified **low / medium / high** — and this register IS the input to
    the owning seat's per-leaf loop-tier scoring (the manager's dispatch scoring in
-   `roles/manager.md`): the strategist's analysis directly parameterizes the loops.
+   `roles/manager.md`). Separately grade portfolio priority as **critical / high / normal / low**
+   with an explicit rationale and confidence. Priority is judgment; task id, graph node order, or
+   lexical order is only a deterministic tie-break among equally graded ready candidates.
 6. **Coherence & contradiction check** — cross-master sweep: two masters moving one surface in
    opposite directions, a leaf assuming state another leaf removes, duplicate work, vocabulary
    drift. **Directional contradictions are quo-vadis → architect** (via the drawing board; see
    Duties §5).
-7. **Ordering** — topological sort over ORDER edges; CONFLICT edges resolved by serialization or
-   **leaf moves (recorded from→to with rationale)**; independent sets become **parallel waves**
-   (weigh the landing-reconciliation cost of a parallel wave as a scheduling consideration).
+7. **Canonical graph and barriers** — write one activity-on-node graph whose nodes exactly match
+   the sprint's commanded master documents. Each edge is predecessor → successor with a nonblank,
+   evidence-backed reason. The control plane derives stable topological waves and refuses cycles;
+   do not persist hand-numbered positions. CONFLICT relations become a predecessor edge or a
+   still-planning leaf move. Place atomic masters as explicit barriers: predecessors finish before
+   the block starts, the block exposes no partial result, and successors wait for its one landing.
+   The graph may place a block first, between waves, or last. A throwaway experiment that should
+   not stall the sprint stays outside the sprint graph and, if successful, follows its own
+   single-master landing path.
 8. **The orchestration task** — fill `../templates/orchestration-task.md`; the template REQUIRES
    the shown work: dependency graph with per-edge evidence, blast-radius register, coherence
-   findings, leaf moves + rationale, sprint order/waves, re-evaluation triggers. Then the
+   findings, execution-nature decisions, priority grades, leaf moves + rationale, canonical graph,
+   derived waves/barriers, and re-evaluation triggers. Then the
    drawing-board rounds begin.
 
 **Input quality bounds output:** thin task-doc scopes degrade the plan, but the method converts
@@ -116,8 +140,9 @@ guessing.
 
 ### 1 — Brief intake
 
-Read the brief + every referenced durable artifact. The brief carries refs, never pasted state; the
-trust facts are compiled by the orchestrator — do not re-run the trust checkpoint. If a referenced
+Read the brief + every referenced durable artifact. The brief carries refs, never pasted state;
+initial trust facts are architect-compiled, while runtime-reshape facts are orchestrator-supplied
+through the architect — do not re-run the trust checkpoint. If a referenced
 artifact is missing or unreadable, that is a finding in the orchestration task, not a blocker to
 improvise around.
 
@@ -128,9 +153,10 @@ against the route map; new surfaces by declaration — parent route + intended s
 
 ### 3 — Analysis
 
-Method phases 3–7: the evidence-cited edge list, the doctrine edges, the blast-radius register, the
-coherence sweep, the ordering. Keep the evidence inventory (queries run, files read, citations per
-edge) as you go — the artifact requires it.
+Method phases 3–7: the evidence relation list, doctrine edges, execution-nature classifications,
+blast-radius and priority registers, coherence sweep, canonical graph, and barriers. Keep the
+evidence inventory (queries run, files read, citations per edge and judgment) as you go — the
+artifact requires it.
 
 ### 4 — The orchestration task
 
@@ -156,16 +182,18 @@ When the architect accepts the plan, the architect relays it to the orchestrator
 seat's work is done. The artifact write is unconditional and `message_parent` is available for a
 clarification or blocking issue; terminal/finalizer truth after the artifact exists supplies the
 completion fact. Then end.
-The orchestration task remains the sprint's standing scope: a new master added **in-sprint before implementation starts** re-opens re-evaluation (you
-may be respawned or resumed for the re-plan); a master added **outside the sprint scope** waits
-and enters the next sprint's evaluation.
+The orchestration task remains the sprint's standing scope. Ordinary readiness changes and
+reprioritization belong to the orchestrator. A new dependency, changed atomic boundary, invalidated
+priority model, or multi-master reshape may justify a fresh strategist proposal through the
+architect; a master outside the sprint scope waits for the next sprint's evaluation.
 
 ## Artifact Obligations
 
 - **The orchestration-task draft** (`../templates/orchestration-task.md`) — the seat's primary
   durable artifact; every section carries its shown work.
-- **The evidence inventory inside the artifact** — every dependency edge, blast-radius entry, and
-  coherence finding cites its source (tool query, file, decision-log entry, or design section).
+- **The evidence inventory inside the artifact** — every dependency edge, execution-nature and
+  priority judgment, blast-radius entry, and coherence finding cites its source (tool query, file,
+  decision-log entry, or design section).
 - **Unplannable-as-scoped findings** for leaves whose task docs are too thin to plan.
 
 ## Comms Protocol

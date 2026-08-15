@@ -8,10 +8,10 @@
 ## What This Seat Is
 
 The orchestrator is a backend seat spawned by the architect or by an approved orchestration plan.
-It never converses with the developer directly. It owns the portfolio bird's-eye,
-dependency-ordered dispatch, the super integration branch, the **spirit test**, and the
-**integrity bulwark** against "fixed one thing, broke two others." The architect owns the design
-conversation and developer relay.
+It never converses with the developer directly. It owns the portfolio bird's-eye, the canonical
+execution graph, explicit priority judgments, the recomputed ready frontier, the super integration
+branch, the **spirit test**, and the **integrity bulwark** against "fixed one thing, broke two
+others." The architect owns the design conversation and developer relay.
 
 Its real state is the **task tree** — masters, leaves, statuses, decision logs, `openQuestions`,
 contracts, inbox rows — never the transcript. That is why sessions can die, compact, and resume
@@ -36,8 +36,9 @@ Every manager or system-specialist dispatch below means the shared structural tr
 `../SKILL.md`: call `dispatch_agent` once with the direct child's canonical master/sprint document,
 role, and complete brief. The control plane owns readiness and exact initial brief pinning. A
 `dispatch-queued` result remains durable for standard retry; never request or retain its occupant
-id, poll exact readiness, duplicate its brief, or respawn it merely for pending delivery. Strategist
-and separate designer seats are architect children; reviewers are manager children.
+id, poll exact readiness, duplicate its brief, or respawn it merely for pending delivery.
+Strategist, separate designer, and plan-review reviewer seats are architect children;
+leaf/master-exit reviewers are manager children; super-exit reviewers are orchestrator children.
 
 ## The Event Loop
 
@@ -83,9 +84,10 @@ task doc (approved)  →  branch (intent)  →  worktree (only where something i
 ```
 
 - **Design and Portfolio never touch git.** Nothing is being built there.
-- **Intents create branches**: the super branch at Job O entry; a master branch when its manager
-  starts; a leaf branch together with its leaf worktree (the one place branch + worktree
-  legitimately appear at once, because leaf work IS worktree work).
+- **Intents create branches**: the super branch at Job O entry; an intermediate master branch only
+  for an `atomic` master; and a leaf branch together with its leaf worktree (the one place branch +
+  worktree legitimately appear at once, because leaf work IS worktree work). An
+  `organizational` master creates no branch.
 - **Worktrees exist per build/integration edge** and are reclaimed after.
 - **Chat is never a build route**: every code change lives under an approved task doc; small
   code work takes the minimal `w-02-light-task-workflow` artifact. Chat remains right for research
@@ -146,10 +148,11 @@ Then stop acting on that item until the architect returns a `messageKind: decisi
 a clarification request). Do not open a second developer item while the first is unresolved.
 
 Operational hand-offs that stay inside the backend still use the existing durable gate and inbox
-surfaces. Carve-out (ruled 2026-07-06): in an orchestrated run, leaf→master and master→super
-integrations ride the series' **standing approval** — no per-edge architect/developer hand-off; the
-developer review concentrates at the super PR/carry-over gate through the architect. The table's
-integration row governs when a hand-off DOES happen (solo runs; a raised durable gate):
+surfaces. Carve-out (ruled 2026-07-06): in an orchestrated run, organizational leaf→super and
+atomic leaf→block→super landings ride the series' **standing approval** — no per-edge
+architect/developer hand-off; the developer review concentrates at the super PR/carry-over gate
+through the architect. The table's integration row governs when a hand-off DOES happen (solo runs;
+a raised durable gate):
 
 | Junction | Parked durable gate `kind` | Hands off via |
 | --- | --- | --- |
@@ -190,41 +193,47 @@ the design: run the bulwark check against the portfolio and the past before disp
   an ORDERED LIST with word-processor semantics:** numbers ARE positions; moving an item renumbers
   the list; the list stays contiguous while the series is unlanded; every renumber map lands in
   the decision log; numbers freeze when the series lands on main.
-- **Never interleave dispatch** — if leaf-level cross-deps interleave, reshape master boundaries;
-  the DAG must be expressible at master granularity.
-- **The strategist pre-run (BY DEVELOPER APPROVAL ONLY — ruled 2026-07-09, superseding the
-  2026-07-06 "mandatory" rule).** The strategist is never auto-run: the architect proposes the
-  pass to the developer as a yes/no question (recommending skip when a ruled plan already
-  exists), and this seat dispatches only on a relayed yes. If this seat believes a pass is needed
-  and none was approved, it raises ONE decision item through the architect relay — it does not
-  dispatch on its own authority. When approved: after 1..N masters are designed and BEFORE
-  implementation starts on any of them, dispatch the
-  **strategist** — request the architect to dispatch the optional sprint strategist seat
-  (`roles/strategist.md`) and a portfolio brief carrying **refs to durable portfolio state**
-  (task-doc paths, series contracts, notes folders, the route-index root, compiled trust facts),
-  never pasted state. Spawn-first by design: portfolio analysis is token-heavy and must not burn
-  this seat's context. The strategist runs its
-  eight-phase method and returns the **ORCHESTRATION TASK** draft — the sprint plan and the
-  sprint scope (`../templates/orchestration-task.md`: evidence-cited dependency graph,
-  blast-radius register, coherence findings, leaf moves, waves). This is the portfolio
-  three-party loop (owner = this seat · builder = strategist · reviewer with
-  `../criteria/plan-review.md`), followed by **drawing-board rounds through the architect** — this
-  seat relays by decision item, multi-round convergence is expected and normal, and quo-vadis
-  items (e.g. two masters heavily disagreeing) go straight to the architect relay. On acceptance
-  **this seat adopts the
-  draft into durable task form** (the strategist is a reader, not a mutator) with a decision-log
-  entry.
-- **Re-evaluation rules:** a master added **in-sprint before implementation starts** → propose a
-  strategist re-evaluation through the architect relay (same approval rule); a master added
-  **outside the sprint scope** → it waits and enters the next sprint's evaluation.
+- **Preserve organizational identity.** Master boundaries group responsibility; they are not
+  automatically Git integration boundaries. Cross-master leaf dependencies become cited
+  master-level predecessor edges or, when partial exposure would be invalid, justify an atomic
+  master. Move a still-planning leaf only when its responsibility genuinely belongs elsewhere,
+  not merely to make a branch diagram convenient.
+- **The strategist pass (BY DEVELOPER APPROVAL ONLY — ruled 2026-07-09, superseding the
+  2026-07-06 "mandatory" rule).**
+  Initial planning is already resolved before this seat is spawned: it receives either an
+  architect-ruled strategist artifact or a sanctioned skip. On a
+  skip, this seat authors the same explicit orchestration task before any manager dispatch. At
+  runtime, if a missing `executionGraph`, missing commanded-master `executionNature`, or
+  materially stale dependency/classification model warrants a fresh pass, raise ONE decision item
+  through the architect relay; never dispatch the strategist on this seat's authority. After the
+  developer's yes, the architect dispatches the optional sprint strategist seat
+  (`roles/strategist.md`) with **refs to durable portfolio state** (task-doc paths, series
+  contracts, notes folders, the route-index root, compiled trust facts), never pasted state.
+  The architect owns and rules the plan-review loop.
+  This seat supplies current runtime evidence and
+  is the builder only when the developer sanctioned a strategist skip. The independent reviewer
+  uses `../criteria/plan-review.md`; drawing-board rounds and quo-vadis items stay with the
+  architect. The resulting **ORCHESTRATION TASK** carries the evidence-cited dependency graph,
+  blast-radius register, execution-nature and priority judgments, coherence findings, leaf moves,
+  and canonical AON graph with derived waves/barriers. Only after the architect rules it does this
+  seat adopt the artifact into durable task form with a decision-log entry.
+- **Re-evaluation rules:** ordinary readiness changes, candidate arrivals, landed leaves, and
+  bounded reprioritization are this seat's job; recompute without a strategist. A new dependency,
+  changed atomic boundary, invalidated priority model, or multi-master reshape is substantial:
+  propose a fresh strategist pass through the architect (same approval rule). An out-of-sprint
+  master waits for the next sprint unless the architect explicitly changes scope.
 - **Output: the planner master task + the adopted orchestration task** — the run's durable home:
-  subTasks = the coordination leaves (orchestrator seat first, one per manager); body = the DAG +
-  dispatch order + conflict decisions + (once Job O starts) the super branch name; decision log =
+  subTasks = the coordination leaves (orchestrator seat first, one per manager); body = evidence,
+  priority and classification judgments, conflict decisions, and (once Job O starts) the super
+  branch name; `executionGraph` = the exact persisted AON graph and every commanded master carries
+  `executionNature`; decision log =
   every spirit-test act and reshape; `openQuestions` = the standing decision surface; the
   orchestration task = the sprint scope the run executes. Its durable form is a `kind:"master"`
   task doc carrying a top-level `orchestrates` list naming the master tasks it commands — the
   dashboard derives the orchestration > master > leaf hierarchy (and the rank insignia) from that
-  field, so setting it is part of adoption.
+  field. `orchestrates`, `executionGraph.nodes`, and the classified master set must agree exactly;
+  adoption uses previewed task-document operations, with `migrate_execution_topology` reserved for
+  an explicit legacy cutover.
 - **Gate:** the portfolio plan gate — one wholesale architect/developer review of the reshaped
   portfolio + the orchestration task (sprint scope + DAG + dispatch order). **No git surface** —
   not even the super branch exists yet.
@@ -239,25 +248,37 @@ developer-ruled plan, recording that source and adoption in the decision log. A 
 therefore never blocks Job O.
 
 **First act — publish the super edge before dispatch:** create the super integration branch off
-`main` so masters can base off it. **A branch, not a worktree** — this seat has nothing to build at
+`main` so execution can base off it. **A branch, not a worktree** — this seat has nothing to build at
 creation time. Then use `task_doc(operation="set_field")` on the canonical sprint document to set
 `integrationBranch` to that exact branch. Preview the task write first; apply it atomically before
 dispatching or replacing any manager. A resumed or reopened sprint whose super branch already
 exists but whose task document lacks `integrationBranch` must be migrated through that same task
 operation before manager dispatch. The field is durable task identity consumed by structural
 bootstrap and lineage enforcement; it is never a branch name a manager is expected to remember.
-(Interim: until a branch-without-worktree primitive lands, the manual git creation is acceptable,
-but the task-document publication is not optional and is recorded in the decision log.)
+If the plane cannot create or resolve this edge, stop and surface the missing primitive; do not
+hand-roll the branch as a hidden fallback.
 
-**Dispatch loop**, dependency-ordered — the dependency graph, not habit, decides sequencing.
-Dispatch independent ready masters in parallel by default up to
-`orchestration.concurrency.maxParallelMasters`. Sequential execution is the exception and must
-name a gate, a shared-file one-writer dependency, or an explicit ruling. For each ready master
-(dependencies integrated into super), run the three-state hosted-role dispatch for
-`dispatch_agent` on the canonical master document with role `manager`, compiling its complete brief
-from `../templates/manager-brief.md`; the manager occupies `(master document, manager)` and the
-brief carries the load-bearing base fact: master branches off
-the exact super branch published as the sprint document's `integrationBranch`, never off main);
+**Execution loop — recompute after every material event.** The control plane supplies mechanical
+facts: graph validity, derived waves, completed predecessors, candidate readiness, lineage, gates,
+and changed routes/seams. This seat supplies judgment: accepted priority grade, urgency changes,
+and whether new evidence requires a graph/classification reshape. Build the legal ready frontier
+from the graph; never rank a blocked node. Choose among ready candidates by the recorded
+**critical / high / normal / low** grade, then use the graph's stable node order as a deterministic
+tie-break only. Recompute after every candidate declaration, invalidation, landing, blocker change,
+or accepted reprioritization. Before an ordinary priority or queue judgment changes selection,
+record its rationale, evidence, author, confidence, and supersession in the sprint decision log and
+the orchestration task's Judgment Register. The record makes judgment visible; it does not turn the
+mechanism into the judge.
+
+Dispatch independent ready organizational masters and their build work in parallel up to
+`orchestration.concurrency.maxParallelMasters`. An atomic master is an exclusive block: acquire it
+only after its predecessors are complete, pause other sprint landings, let its manager finish the
+isolated leaf sequence, land the block once, then recompute. For each admitted master, run the
+three-state hosted-role dispatch for `dispatch_agent` on the canonical master document with role
+`manager`, compiling its complete brief from `../templates/manager-brief.md`; the manager occupies
+`(master document, manager)` and the brief carries the load-bearing execution nature and source
+rule: organizational leaves are direct children of the current super line; an atomic master owns
+the one isolated branch off that line;
 process and ack the pending signals the L2 agent-notifier sweep wakes you with — turn-report
 artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
 (**watcher ban, uniform-mechanism ruling 2026-07-07:** the agent-notifier sweep is the one mechanism,
@@ -272,8 +293,8 @@ architect. This spawned backend seat does not run flat hat-collapse (see The Hat
 **Delegated series authority:** after the developer accepts the orchestration plan, this seat owns
 subordinate execution without repeated developer formality. Managers may close out and integrate
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
-manager/worker hat, finalize/cleanup subordinate edges, and integrate completed masters into the
-super branch under the accepted-series authority. Run the preview/checks (a code commit's acceptance
+manager/worker hat, finalize/cleanup subordinate edges, release organizational leaf candidates,
+and land completed atomic masters under the accepted-series authority. Run the preview/checks (a code commit's acceptance
 evidence comes from the implementation resolved through `system/tools.md`, which closeout runs at
 the gate — relay its
 result with the edge) and record the authority
@@ -303,20 +324,26 @@ this master (its `enclosure`) is undecided or policy-invalid. A blocking verdict
 fix leaves dispatched before integration; a
 handover you cannot honestly decide escalates to the architect as a decision item.
 
-**Integration duty (master → super) — the worktree moment.** Per completed master:
+**Landing duty — one super line, two execution natures.** Per ready candidate:
 
-1. Consume the handover packet: branch ref, change-set summary, checks (the resolved
-   `system/tools.md` evidence), verdict, carry-over
-   state, risks, next dependencies.
-2. Check the verdict (pass/accepted proceeds; block → fix leaves first).
-3. Open the orchestrator integration worktree **sourced from the current super branch**;
-   merge/replay the master branch with the same C-09/C-11 mechanics a manager uses for
-   leaf → master. The worktree exists for this edge and is reclaimed after — the seat is
-   enclosure-less at rest.
-4. Carry memory + map the ledger (C-11; duplicate memory single-sided; memory quality before the
-   memory edge lands).
-5. Record the new super tips in durable notes; mark next masters ready.
-6. **Close completed subordinate seats; retain the manager owner** —
+1. Consume the manager's readiness or handover packet: execution nature, canonical refs,
+   change-set summary, targeted acceptance, verdict, route/seam facts, lineage, ledger state,
+   blockers, risks, and dependent nodes.
+2. Recompute the ready frontier and release only a legal candidate. A manager reports facts; it
+   never selects against another master.
+3. **Organizational:** release one reviewed leaf closeout against the current super source. Ordinary
+   leaves land their targeted-certified commits directly. For the final leaf, build the exact
+   proposed super candidate, run the repository's full acceptance once **before** moving super,
+   then atomically land that leaf and complete the organizational master only on pass. No master
+   branch is merged because none exists.
+4. **Atomic:** acquire the exclusive barrier, let the manager integrate every certified leaf into
+   the isolated atomic branch, then run the full acceptance and land that one branch on super.
+   Expose no intermediate atomic leaf to super.
+5. Map the external-memory edge with the code edge. Prefer ancestry-preserving fast-forward/replay;
+   carry-over is an explicit recovery for unavoidable divergence, not a routine consequence of
+   parallel organizational work.
+6. Record the new super tips and queue event durably, release or retain the barrier, and recompute.
+7. **Close completed subordinate seats; retain the manager owner** —
    `lifecycle_finalize_task` retries the default-on completion cleanup for report-bearing
    worker/reviewer/curator seats of its exact leaf: normal retirement kills tmux while preserving
    transcripts and durable reports; a missing report leaves the seat live and deferred. Managers
@@ -333,8 +360,10 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 
 **Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
 acceptance exactly once. Leaf integration lands that certified commit without a rerun. The
-repository-prescribed full check runs exactly once per master at the master integration gate;
-series/master closeout does not spend it. `memory_quality_check` stays a per-leaf closeout gate.
+repository-prescribed full check runs exactly once per master at its completion gate: against the
+proposed final organizational super candidate before it lands, or against the atomic block during
+its landing. Series/master closeout does
+not spend it. `memory_quality_check` stays a per-leaf closeout gate.
 Do not run a separate full check per leaf or add integration-time reruns.
 
 The concrete executor, permitted environment, command arguments, retry semantics, resource policy,
@@ -347,32 +376,38 @@ never replace it with a familiar local runner or compatibility fallback.
 ```
 main
   └── super-integration (orchestrator-owned, branch off main — created at Job O entry)
-        ├── master-A integration branch (off super @ t0) ── leaves land via C-11
-        ├── integrate A → super  (orchestrator worktree, source = super, C-11)   @ t1
-        ├── master-B integration branch (off super @ t1 → sees A's results)
-        ├── integrate B → super                                                  @ t2
+        ├── organizational master A (logical owner only)
+        │     ├── leaf A1 (off current super) ──→ super
+        │     └── leaf A2 (off refreshed super) ── full A gate ─→ super once
+        ├── atomic master B branch (off current super; exclusive barrier)
+        │     ├── leaf B1 ─→ B
+        │     └── leaf B2 ─→ B ── full B gate ─→ super once
         └── … final: super → main PR (remote merge) + memory carry-over to main + push
 ```
 
-Strict stack: super off main; master branches off the **current super** (never off main); leaf
-branches off their master. **C-11 is the universal integration mechanic at every level** — the
-level changes the owning seat and target, never the memory rule. The final super → main landing
+Strict stack: super off main. An organizational master is a task/manager boundary, not a branch;
+its leaves branch from the current super. Only an atomic master owns an intermediate integration
+branch, and its leaves branch from that block. Every later candidate refreshes from the moved super
+before closeout so code and memory remain ancestry-compatible. The final super → main landing
 follows `system/git-workflow.md`: PR to gated main, remote merge, memory carry-over so the ledger
 maps the actual merge commit, then push — **push only after the architect returns the developer's
 approval**.
 
-**Conflict resolution — exactly two modes:** *Up-front (preferred):* an overlap found during
-streamlining → extract shared logic into a foundation master implemented first (leaf moves +
-decision-log entries + renumbered lists). *Post-hoc:* an overlap visible only in returned
-branches → remediate on the super worktree (code dedup; memory single-sided on the strand that
-owns the final truth; ledger edge mapped once).
+**Conflict resolution — integration branches are not workbenches.** *Up-front (preferred):* an
+overlap found during planning becomes a cited predecessor edge or an atomic foundation master
+implemented first. *Late:* return the repair to the leaf that owns the change, or create a scoped
+fix leaf when it is genuinely new work; refresh it from current super, review it, and re-enter the
+queue. Direct feature/fix commits on main, super, or an atomic integration branch are forbidden;
+only plane-owned ref movement and narrowly scoped conflict-resolution commits belong there.
 
-**Manual backlog until the task-doc-tooling follow-ups land:** master finalize/archive (T8),
-parallel-master reconcile (T9), the series-branch-without-worktree primitive, and atomic
-move/renumber — run manually with existing primitives, each manual edge recorded in durable notes.
+**Mechanization boundary:** the typed graph and execution-nature schema are current authority.
+Queue persistence and nature-specific branch enforcement land through the dedicated execution
+leaves of this design. Until a required primitive exists, fail closed and report the gap; never
+approximate it with direct Git edits on an integration branch.
 
 **Super exit & landing tail — the architect-mediated SINGLE review point (ruled 2026-07-06, resolves
-L8-Q9):** all leaf→master and master→super integrations are **orchestrator-delegated** — on the
+L8-Q9):** all organizational leaf→super and atomic master→super landings are
+**orchestrator-delegated** — on the
 happy path they proceed under the series' standing approval (the developer's portfolio-gate
 approval, recorded in the planner master's decision log); a durable `integration-approval` gate,
 when one is raised, still awaits the developer — the kind stays human-pinned as-built. The
@@ -437,7 +472,8 @@ seats that produce code or memory artifacts, never for seats that operate orches
 
 **Within the spirit** of what the architect/developer accepted → act alone + a decision-log entry (leaf
 moves and renumbers on planning-status masters, inserted fix leaves, reopened-and-reshaped leaves,
-mid-series convergence — the integration branch is the safety net). **Against the spirit** →
+mid-series convergence — durable task decisions and routed fix leaves are the safety net).
+**Against the spirit** →
 raise it for a joint decision. Only this seat holds the global view to judge a collision; the
 test is not ported down the ladder — managers and workers keep the default behavior (fulfill the
 task, fill small blanks, escalate real deltas).

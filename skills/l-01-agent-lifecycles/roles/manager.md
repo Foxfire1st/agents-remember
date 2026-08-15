@@ -1,8 +1,8 @@
 # Lifecycle — Manager
 
-> One master, one seat, self-contained. The manager lifecycle drives exactly one master series:
-> dispatch a fresh worker per leaf, review turn reports, decide the delegated leaf gates, close out and
-> integrate each leaf, hand the completed master to the orchestrator through the master-exit seam.
+> One master, one seat, self-contained. The manager lifecycle drives exactly one organizational or
+> atomic master: dispatch a fresh worker per leaf, review turn reports, decide delegated leaf
+> gates, report closeout-ready candidates, and execute only the landings the orchestrator releases.
 > Your **brief is your session start**.
 >
 > Drawn as the **MANAGER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
@@ -12,9 +12,10 @@
 **One per master task.** Dispatched by the orchestrator on the canonical master document with the
 master's context packet. It owns that master chat (**no worktree**) and drives exactly one master series: dispatches/replaces a fresh
 worker per leaf, runs the manager -> builder -> reviewer -> curator closeout chain, decides
-**delegated** leaf gates, integrates leaves into the master integration branch via the
-`c-11-memory-carryover-from-branch` skill, and hands the completed master to the orchestrator
-through the master-exit adversarial seam.
+**delegated** leaf gates, and reports exact master-local readiness to the orchestrator. For an
+`organizational` master, its leaves are direct children of super and land there independently in
+the orchestrator's released order. For an `atomic` master, leaves integrate only into the isolated
+atomic branch and the completed block lands on super once. The manager never orders other masters.
 
 The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → builder code →
 reviewer verdict → curator coherence pass → closeout preview/apply (deciding the delegated gates per
@@ -50,10 +51,10 @@ id, poll exact readiness, duplicate its brief, or respawn merely because deliver
 
 - **Opening move:** on a developer-declared takeover, first run `../SKILL.md`'s
   Developer-Declared Task-Seat Takeover checklist; then read the master `task_doc` + its leaf docs;
-  order the leaves from their dependency graph. Dispatch independent ready leaves in parallel by
-  default up to `orchestration.concurrency.maxParallelLeaves`; the C-11 reconcile absorbs a moved
-  base. Sequential execution is the exception and must name a gate, a shared-file one-writer
-  dependency, or an explicit ruling.
+  require its explicit `executionNature`, and order its local work from the accepted graph and
+  leaf dependencies. Dispatch independent build work in parallel up to
+  `orchestration.concurrency.maxParallelLeaves`, but do not turn build concurrency into landing
+  authority. The orchestrator owns the portfolio ready frontier and release order.
 - **Retrieval lean:** intent-confirmation on the master's own routes (paired `read_ar_files`); the
   breadth/blast-radius reasoning belongs to the orchestrator, not here.
 - **Decide default:** dispatch the next ready leaf; the master exits through the master-exit seam.
@@ -79,11 +80,12 @@ dependency-blocked items are future queue; unclear fit escalates one rung instea
 ### 1 — Seat & intake
 
 Take the canonical master document; Operations resolves its current manager chat from that
-document, so the developer can walk in any time. The control plane admitted this seat only after
-proving the master contains the current super integration line for code and external memory. If
-that proof fails, no manager process is created; the orchestrator receives a contract-addressed
-`source-lineage-*` refusal and syncs the master before retrying this same seat. Read the master +
-leaf docs only after that boundary; order the leaves.
+document, so the developer can walk in any time. Require `executionNature` and the sprint graph
+reference carried by the brief. Structural admission proves the applicable parent edge for code
+and external memory: super → leaf for an organizational master, or super → atomic master → leaf
+for an atomic master. If that proof fails, no manager process is created; the orchestrator receives
+a contract-addressed `source-lineage-*` refusal and repairs the exact edge before retrying this
+same seat. Read the master + leaf docs only after that boundary.
 
 ### Provider Degradation Alert
 
@@ -115,10 +117,11 @@ stops belong to the orchestrator via the system-specialist protocol.
 - `dispatch_agent(task_document_ref=<leaf document>, role="worker", brief=...)` — a **fresh
   document-bound worker seat**. Compile the complete brief from `../templates/worker-brief.md`;
   the control plane claims `(leaf document, worker)` and the worker edits inside the leaf
-  worktrees the brief names. Before creating the worker, it re-proves super → master and master →
-  leaf ancestry for code and external memory. A lineage refusal creates no child and mutates no
-  seat; run the ordered `worktree_sync` recovery carried by the result, then retry the same leaf
-  dispatch. Never request or pass branch commit ids.
+  worktrees the brief names. Before creating the worker, it re-proves the nature-appropriate
+  ancestry for code and external memory: super → leaf for organizational, or super → atomic master
+  → leaf. A lineage refusal creates no child and mutates no seat; run the ordered `worktree_sync`
+  recovery carried by the result, then retry the same leaf dispatch. Never request or pass branch
+  commit ids.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
   **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep evaluates each expected
   artifact at every hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays
@@ -149,10 +152,11 @@ stops belong to the orchestrator via the system-specialist protocol.
 - **Curator coherence pass — mandatory, not skippable.** After builder code is ready and the reviewer
   verdict is available, call `worktree_status` for the canonical leaf
   and require its complete task-derived code and external-memory `sourceLineage` to be `current`.
-  This is the last manager-owned action before onboarding begins. If super has advanced beyond the
-  master, or the master has advanced beyond the leaf, run the contract-addressed `worktree_sync`,
-  reconcile the landed code first, and obtain any required delta review before handing work to the
-  curator. Never ask the curator to document a stale branch. The plane repeats this same lineage
+  This is the last manager-owned action before onboarding begins. If the applicable source parent
+  advanced beyond the leaf — super for organizational, atomic master for atomic — run the
+  contract-addressed `worktree_sync`, reconcile the landed code first, and obtain any required
+  delta review before handing work to the curator. Never ask the curator to document a stale
+  branch. The plane repeats this same lineage
   proof before creating the curator seat, so an omitted or raced check fails closed without a
   hosted-process side effect. Once current, compile a brief from
   `../templates/curator-brief.md` carrying the leaf's **landed change set** (code diff over the
@@ -169,6 +173,14 @@ stops belong to the orchestrator via the system-specialist protocol.
   verdict + current source-lineage proof + curator coherence pass**. Closeout and integration still
   re-prove lineage after their long quality work; the pre-curator proof prevents wasted or stale
   onboarding, while the exit proof closes the later time-of-check/time-of-use window.
+- **Declare closeout readiness; do not rank the portfolio.** Once the leaf has builder completion,
+  a current candidate-bound route verdict, curator reconciliation, and current lineage, publish one
+  durable readiness row to the orchestrator. Include the canonical leaf/master refs,
+  `executionNature`, routes and seams touched, local blockers, acceptance state, and any
+  plan-recorded urgency evidence. These are facts. Do not assign or change cross-master priority,
+  release another manager, or close out before the orchestrator grants this candidate from the
+  recomputed ready frontier. A later source move invalidates readiness and returns the same leaf to
+  sync/review; it does not justify carry-over by default.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
@@ -176,23 +188,28 @@ stops belong to the orchestrator via the system-specialist protocol.
   `controlplane/gate_policy.py` — human-pinned kinds stay human, decisions attributed.)
   Under the accepted series authority, leaf closeout preview/apply is this seat's responsibility:
   run the preview/checks, record the accepted planner/series authority in the closeout intent note,
-  and continue when the leaf is in scope and green. Your own hand-off idiom, this seat only:
+  and continue only after the orchestrator released the in-scope green candidate. Your own
+  hand-off idiom, this seat only:
   durable gates + inbox posts — you never call the developer-facing notification; your counterparty
   is the orchestrator.
-- **Integrate leaf → master branch** via the `c-11-memory-carryover-from-branch` skill (ff-only / replay
-  per the `c-09-git-worktree-manager` skill). Know the human-pinned gate kinds by name:
+- **Integrate according to execution nature.** After the orchestrator releases the candidate,
+  close out and land through the task-bound worktree tools. An `organizational` leaf lands directly
+  into the current super line; an `atomic` leaf lands only into its atomic master branch. Prefer
+  current-lineage fast-forward/replay mechanics; `c-11-memory-carryover-from-branch` is a recovery
+  for unavoidable divergence, not the normal scheduling strategy. Know the human-pinned gate kinds by name:
   `integration-approval`, `push-approval`, `cleanup-approval` — none is ever delegable. When a
   durable `integration-approval` gate is raised on this step it awaits the **developer** (via the
   dashboard GateResponder or your attached chat — you do not relay; if the wait blocks the loop,
   escalate to the orchestrator). Absent a durable gate, the **series' standing approval** governs:
   the developer's portfolio-gate approval of this series, recorded in the planner master's
-  decision log, covers dependency-ordered leaf integrations. Loop until the master's leaves are
-  done.
+  decision log, covers orchestrator-released leaf integrations. Loop until the master's leaves are
+  done; an atomic master exposes nothing to super between leaves.
 - **Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
   acceptance exactly once, and leaf integration lands that exact certified commit without
-  rerunning it. The repository-prescribed full check runs exactly once per master at master
-  integration altitude. Resolve the concrete executor, permitted environment, arguments, resource
-  policy, and evidence contract from the repository's `system/git-workflow.md`,
+  rerunning it. The repository-prescribed full check runs exactly once per master at its completion
+  boundary: against the proposed final organizational super candidate before it lands, or while
+  the completed atomic block lands on super. Resolve the concrete executor, permitted environment, arguments, resource policy,
+  and evidence contract from the repository's `system/git-workflow.md`,
   `system/coding-guidelines.md`, and `system/tools.md`; never infer them or add a fallback.
   `memory_quality_check` is NOT part of that move:
   it stays a per-leaf closeout gate, and a leaf closeout that skips its required checks is
@@ -215,9 +232,12 @@ stops belong to the orchestrator via the system-specialist protocol.
 
 ### 3 — Master-exit seam
 
-When all leaves have landed on the master integration branch, spawn the **adversarial reviewer**
+When all leaves are ready for the master completion boundary, spawn the **adversarial reviewer**
 (master-exit) via `dispatch_agent` on the review task document with role `reviewer` and the reviewer
-role file (`roles/reviewer.md`), passing the master branch ref,
+role file (`roles/reviewer.md`). For an organizational master, scope the accumulated contributions
+of its prior leaves already landed on super plus the proposed final leaf as the exact proposed
+final super candidate; for an atomic master, scope the isolated atomic branch. Pass the execution
+nature, exact candidate and scope refs,
 master/leaf task docs, worker turn reports, decision logs, changed paths, resolved
 `system/tools.md` evidence, and carry-over state. The verdict lands at
 `notes/reports/<master-id>-master-exit-verdict.md` and attaches to the handover gate as
@@ -236,8 +256,11 @@ orchestrator cannot answer on its own escalates up the ladder (orchestrator → 
 
 ### 4 — Handover to the orchestrator
 
-Write the **master-handover packet** (`../templates/master-handover-packet.md`) — integration
-branch ref · change-set summary · verdict ref · canonical master document · carry-over state.
+Write the **master-handover packet** (`../templates/master-handover-packet.md`) — execution nature ·
+scope refs · change-set summary · readiness facts · verdict ref · canonical master document ·
+ledger state. An organizational handover requests its one completion-time full gate against the
+proposed final-leaf super candidate before that ref moves; an atomic handover requests the one
+block landing and full gate.
 Terminal/finalizer truth wakes the structurally current orchestrator. The `(master document,
 manager)` seat **stays reachable** until the series retires; `gate_list` shows the structural gate
 state without exposing its private correlation.

@@ -58,7 +58,9 @@ verdict finding, not a style note.
   repository-specific leaf acceptance command, environment, and evidence requirements into this
   brief before dispatch. Do not invent a runner or fallback.
 - Leaf closeout owns one change-set-scoped acceptance run. Leaf integration does not rerun it. The
-  full-repository check is NOT a leaf check: it runs once per master at master integration.
+  full-repository check is NOT a leaf check: it runs once per master at its completion boundary
+  (against the proposed final organizational super candidate before it lands, or during atomic
+  landing).
   `memory_quality_check` stays a per-leaf closeout gate.
 - `git diff --check` in both worktrees.
 

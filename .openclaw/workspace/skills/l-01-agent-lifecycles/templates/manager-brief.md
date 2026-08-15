@@ -21,12 +21,19 @@ master's leaf loop to the master-exit seam, then hand over.
 ## The master
 - Task doc: `<master task.json/md path>` (read it + every leaf doc first).
 - Planner master: <path or n/a (flat run)>
-- Leaves, in order: <L0 …, with status and any dependency notes>.
+- Execution nature: <organizational | atomic> (exact value from the master task document).
+- Sprint graph ref / derived wave: <canonical sprint document> / <wave and predecessor refs>.
+- Plan priority grade: <critical | high | normal | low> · rationale/evidence <refs>.
+- Leaves: <L0 …, with status and local dependency notes>; build order is not portfolio landing
+  authority.
 - Trust facts (compiled by the orchestrator — do not re-run the checkpoint): providers <state /
   stack key or NONE>, drift <count>, freshness <state>.
 
 ## The source edge (plane-owned, load-bearing)
-- Structural admission has created or validated this master edge from the canonical sprint
+- Organizational: each leaf is a direct child of the current super line; this master has no
+  integration branch. Atomic: the master owns one isolated branch off current super and its leaves
+  are children of that block. A missing/unknown nature is not dispatchable.
+- Structural admission has created or validated the applicable edge from the canonical sprint
   document's `integrationBranch`. Branch names and commit ids stay in the task/contract plane;
   they are not inputs this manager retains or reconciles from its prompt.
 - Before dispatching a leaf, use the task-bound `worktree_status` / `worktree_start` route. If the
@@ -39,6 +46,10 @@ master's leaf loop to the master-exit seam, then hand over.
   <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
+- Closeout-ready report: after that chain and a current-lineage proof, send the orchestrator the
+  canonical leaf/master refs, execution nature, routes/seams, blockers, and acceptance facts.
+  Report facts only; do not rank other masters or close out until the orchestrator releases the
+  candidate from the recomputed ready frontier.
 - Every stable code-change session receives an independent route review before curator handoff.
   Partition the changed surface into material major routes from architectural ownership,
   governing route overviews, and the import/call graph. The reviewer chair fans out one
@@ -46,7 +57,9 @@ master's leaf loop to the master-exit seam, then hand over.
   direct/builder-verified tiers may reduce loop machinery, never remove this gate.
 - Quality altitude ladder: leaf closeout runs the repository-prescribed change-set-scoped
   acceptance exactly once; leaf integration lands that certified commit without a rerun. The
-  repository-prescribed full check runs exactly once per master at master integration altitude.
+  repository-prescribed full check runs exactly once per master at its completion boundary:
+  against the proposed final organizational super candidate before it lands, or during the atomic
+  block landing.
   Resolve the concrete executor, environment, arguments, resource policy, retry rules, and evidence
   contract from the repository's `system/git-workflow.md`, `system/coding-guidelines.md`, and
   `system/tools.md`; never guess or substitute a fallback.
@@ -60,7 +73,8 @@ master's leaf loop to the master-exit seam, then hand over.
   notes/. The curator performs the conservative three-way intent reconciliation, routes accepted
   current truth to the right onboarding home (specific sidecar or governing overview;
   L3 Operational-Notes last-resort only), and writes onboarding only.
-- Concurrency: <max parallel leaves or "sequential">.
+- Concurrency: <max parallel leaf build work or "sequential">. Build concurrency does not grant
+  landing order. An atomic block exposes no intermediate leaf to super.
 - Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
   no provider kill authority; provider stops and fixes route through the orchestrator and
@@ -74,9 +88,11 @@ master's leaf loop to the master-exit seam, then hand over.
   addressed by canonical leaf document plus role; server policy refuses any other target.
 
 ## The exit
-- When all leaves have landed on your branch: dispatch the master-exit reviewer on its canonical
-  review document with role `reviewer` and `roles/reviewer.md`, using the scope packet your role file
-  enumerates; then RAISE the gate without blocking —
+- When the master reaches its completion boundary: dispatch the master-exit reviewer on its
+  canonical review document with role `reviewer` and `roles/reviewer.md`. Organizational scope is
+  the exact proposed final super candidate containing the master's prior landed contributions plus
+  the proposed final leaf; atomic scope is the isolated block branch.
+  Use the scope packet your role file enumerates; then RAISE the gate without blocking —
   `lifecycle_gate(kind="master-handover-approval", evidence_refs=[<verdict>], wait=false)`.
   The control plane derives the master document and privately records the gate. Post the
   master-handover packet with the verdict and master document; the ORCHESTRATOR decides the one
@@ -87,6 +103,8 @@ master's leaf loop to the master-exit seam, then hand over.
 
 ## Reports
 - Your handover packet: `../templates/master-handover-packet.md`.
+- The packet states execution nature, exact scope refs, readiness facts, and the one full-gate
+  boundary; carry-over is named only when an actual divergence required it.
 - Leaf-review notes on the relevant leaf document; decision-log entries for every delegated gate
   you decide and every reopen.
 ```

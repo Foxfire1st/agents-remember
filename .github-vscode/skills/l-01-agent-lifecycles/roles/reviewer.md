@@ -11,8 +11,8 @@
 any three-party loop's reviewer seat (below)** (seams: developer decision 2026-07-03; loop reuse:
 ruling 2026-07-06):
 
-1. **Master-exit** — before a **manager** hands its completed master integration branch to the
-   **orchestrator**.
+1. **Master-exit** — before a **manager** hands an organizational completion scope or completed
+   atomic integration branch to the **orchestrator**.
 2. **Super-exit** — before the **orchestrator** hands the accumulated super integration branch to the
    **architect** for the developer review.
 
@@ -50,8 +50,10 @@ worker work.
 
 ## Lens
 
-- **Opening move:** scope the review — the integration branch diff, the relevant task docs
-  (the master's, or the whole portfolio's at super-exit), and the seam's rubric.
+- **Opening move:** scope the review — for organizational masters, the
+  exact proposed final super candidate containing prior landed leaf contributions
+  plus the proposed final leaf; for atomic
+  masters, the isolated branch diff; plus the relevant task docs and the seam's rubric.
 - **Retrieval lean:** refute-or-confirm — findings must survive an attempt to refute them; the reviewer
   argues *against* the change set, not for it.
 - **Decide default:** produce a verdict artifact with an explicit pass/block recommendation — never a
@@ -104,18 +106,24 @@ and make every finding traceable to a durable evidence file.
 
 ### MASTER-EXIT — Manager Before Orchestrator Handover
 
-The manager spawns this reviewer before handing the completed master integration branch to the
-orchestrator. Review the **accumulated master change set**, not a final leaf in isolation.
+The manager spawns this reviewer before the master's completion boundary. Review the
+**accumulated master change set**, not a final leaf in isolation. Organizational scope is the
+exact proposed final super candidate containing the master's prior landed leaf contributions plus
+the proposed final leaf; atomic scope is the isolated branch before its one landing.
 
-- **Scope packet:** master integration branch diff, master `task_doc`, leaf task docs, worker turn
-  reports, decision logs, the draft master-handover packet, resolved `system/tools.md`, changed source
-  paths, changed sidecars, governing route overviews, and the master branch's memory/carry-over state.
+- **Scope packet:** execution nature; exact proposed organizational candidate or atomic branch diff;
+  nature-appropriate commit and leaf refs; master `task_doc`;
+  leaf task docs; worker turn reports; decision logs; the draft master-handover packet; resolved
+  `system/tools.md`; changed source paths and sidecars; governing route overviews; and code/memory
+  ancestry plus ledger state. Carry-over is present only when an actual recovery used it.
 - **Completion vs task docs:** every master requirement, leaf, substep, and accepted blank-fill is
   accounted for; skipped or reshaped work has a decision-log trail; no unfinished leaf work is hidden
   inside the handover packet.
-- **Code quality per tools.md:** the master branch has current quality evidence for the resolved suite
-  (lint, typecheck, tests, complexity where applicable), and the reviewer checks regressions **vs the
-  past** through route indexes, CGC, GrepAI, and changed behavior surfaces.
+- **Code quality per tools.md:** each leaf's targeted acceptance is current. The one full suite is
+  reserved for the lifecycle-owned master completion gate (against the proposed final
+  organizational super candidate before it lands, or during atomic landing); this reviewer does
+  not spend or duplicate it. Independently check
+  regressions **vs the past** through route indexes, CGC, GrepAI, and changed behavior surfaces.
 - **Onboarding-vs-code:** changed source files have same-pass sidecar updates or explicit no-impact
   history, route overviews are current for the master side of the change, `drift_check` and
   `memory_quality_check` evidence is recorded, and any memory/carry-over gap is named.
@@ -143,9 +151,9 @@ integrated on super.
   current, route overviews describe the resulting behavior, C-11 carry-over/ledger mapping is coherent,
   and `drift_check` plus `memory_quality_check` evidence is recorded.
 - **Blocking rule:** a block returns to the **orchestrator** as decomposable fix leaves. The
-  orchestrator may route a fix through an owning manager, a new master, or the super worktree, but the
-  verdict itself must name leaf-shaped work with evidence and done-when. A super-exit block without fix
-  leaves is invalid.
+  orchestrator routes a fix through an owning or reopened leaf, or creates a new scoped fix leaf;
+  integration branches are not repair workbenches. The verdict itself must name leaf-shaped work
+  with evidence and done-when. A super-exit block without fix leaves is invalid.
 
 ## Duties
 

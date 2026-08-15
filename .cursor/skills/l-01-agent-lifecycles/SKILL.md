@@ -200,7 +200,7 @@ section; they do not restate it.
 | --- | --- | --- | --- |
 | Leaf | the leaf's owning seat (manager; architect in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
-| Portfolio | the backend orchestrator (developer-facing decisions relayed through the architect) | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
+| Portfolio plan | the architect | strategist when approved; orchestrator on a sanctioned strategist skip | reviewer with the plan-review catalog |
 
 **Independent route review is mandatory after every code-change session.** Once implementation
 and its focused acceptance are stable, the owning seat partitions the changed surface by
@@ -273,9 +273,10 @@ strategist pre-run, and it occurs only after developer approval; settings cannot
 
 Once the developer accepts an orchestrated series/portfolio plan, that acceptance is standing
 authority for the owning seats to execute the subordinate edges in that series. Managers govern
-their workers and leaf closeouts. The orchestrator governs managers, master handovers, master →
-super integrations, and the same closeout/finalize/cleanup mechanics when it wears a manager or
-worker hat in a flat/direct run. These edges do **not** stop for a new developer approval just
+their workers, leaf readiness, and released leaf closeouts. The orchestrator governs managers,
+the portfolio queue, organizational leaf → super releases, atomic master → super handovers, and
+the same closeout/finalize/cleanup mechanics when it wears a manager or worker hat in a flat/direct
+run. These edges do **not** stop for a new developer approval just
 because a commit, lifecycle finalization, cleanup, or integration command is next; the owner runs
 the preview/check, records the accepted-series authority in the intent note or decision log, and
 continues.
@@ -310,9 +311,10 @@ Every role that dispatches another hosted role calls `dispatch_agent` once with 
 task document, role, and complete brief. The control plane performs the internal transaction:
 
 1. authorize the direct-child relationship from the caller's ambient document+role seat;
-2. resolve source lineage from that canonical task document before process creation: a manager
-   requires the master to contain its super; a worker/reviewer/curator requires both super → master
-   and master → leaf, for code and external memory when enabled;
+2. resolve source lineage from that canonical task document before process creation: an
+   organizational leaf requires super → leaf, while an atomic path requires super → master → leaf,
+   for code and external memory when enabled; a manager's admission proves its nature-appropriate
+   source edge before it can read or dispatch;
 3. create and bind the child using settings-owned launch knobs only when every applicable edge is
    current;
 4. prove readiness privately;
@@ -422,14 +424,15 @@ reuse, complexity thresholds) lives in the same block — meaning in
 ```
 main
   └── super-integration (orchestrator-owned, off main)
-        ├── master-A branch (off super)  ── leaves land via C-11
-        ├── integrate A → super (orchestrator worktree, C-11)
-        ├── master-B branch (off the moved super — sees A)
+        ├── organizational master A (logical owner; leaves land directly on super)
+        ├── atomic master B (isolated branch; all leaves land there, then B lands once)
+        ├── later leaves refresh from moved super before closeout
         └── … final: super → main PR + memory carry-over + push
 ```
 
-The full topology — dependency-ordered dispatch, the integration-duty procedure, the two
-conflict-resolution modes, leaf moves — lives in **`roles/orchestrator.md`** and only there.
+The full topology — canonical graph, execution-nature classification, ready-frontier recomputation,
+landing procedures, conflict routing, and leaf moves — lives in **`roles/orchestrator.md`** and
+only there.
 
 ## Credits
 

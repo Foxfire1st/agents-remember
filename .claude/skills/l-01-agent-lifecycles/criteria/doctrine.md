@@ -40,6 +40,23 @@ finding.
   orchestrator's decide path could not meet as written. The ruled `wait=false` handover plus the
   structural master-document decision channel resolves it without exposing transport identity.
 
+### D-4 — Topology and authority sweep
+
+**Reject doctrine that treats every master as a Git integration branch or an integration branch as
+a repair workbench.** The current topology has two explicit natures: organizational masters are
+logical owners whose leaves land directly on super; atomic masters alone own an intermediate
+branch and expose it once. Sweep roles, briefs, templates, review packets, and diagrams for the
+retired fixed stack. Direct feature/fix commits on main, super, or atomic integration branches are
+a blocking contradiction; narrowly scoped conflict resolution and plane-owned ref movement are
+the only integration-branch writes.
+
+### D-5 — Detection is not judgment
+
+**Mechanistic facts must not smuggle policy decisions.** Code may report membership, graph shape,
+derived waves, readiness, lineage, and route/seam evidence. Execution nature, dependency meaning,
+priority, and material reprioritization require an explicit role judgment with durable rationale.
+Stable tie-breaking must be named as tie-breaking, not described as a priority decision.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): attack

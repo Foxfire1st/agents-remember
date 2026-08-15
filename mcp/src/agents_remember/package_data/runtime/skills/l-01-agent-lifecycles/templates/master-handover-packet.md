@@ -2,15 +2,19 @@
 
 The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after the
 master-exit adversarial seam. The artifact is durable and terminal/finalizer truth wakes the current
-orchestrator. It is what the
-orchestrator integrates a completed master into the super branch from.
+orchestrator. It tells the orchestrator which completion boundary is ready: the final accumulated
+organizational candidate containing prior landed contributions plus the proposed final leaf, or
+one isolated atomic branch ready to land.
 
 ## Rules
 
 1. Post it only **after** the master-exit verdict exists — the verdict reference is a required slot.
-2. Name the integration branch precisely; the orchestrator bases its C-11 integration on it.
-3. The carry-over state must let the orchestrator's `c-11-memory-carryover-from-branch` integration run
-   without re-deriving what landed.
+2. Name `executionNature` and the exact scope. An organizational master names the
+   prior landed leaf commits plus the proposed final leaf
+   and the exact proposed final super candidate; it has no
+   master branch. An atomic master names its isolated branch.
+3. State code/memory ancestry and ledger facts. Carry-over appears only when actual divergence
+   required the recovery; it is not the normal landing plan.
 4. Do not address an orchestrator occupant. `message_parent` is available for clarification or a
    blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth.
 
@@ -23,11 +27,14 @@ orchestrator integrates a completed master into the super branch from.
 | ------------------ | -------------------------------------------- |
 | master             | <master id / task_doc path>                  |
 | manager seat       | <master task_doc path> + manager             |
-| integration branch | <branch ref the leaves landed on>            |
+| execution nature   | <organizational or atomic>                 |
+| completion scope   | <organizational prior landed leaf refs plus proposed final leaf; atomic branch ref> |
+| proposed candidate | <exact organizational super candidate ref/tree; atomic branch ref/tree> |
 | handover evidence  | <review verdict / delegated decision ref>    |
-| base               | <super branch @ commit the master based off> |
+| super source       | <canonical sprint document / plane-owned current edge> |
+| full gate boundary | <before final organizational leaf moves super; atomic block landing> |
 | verdict            | <master-exit verdict artifact ref>           |
-| verdict outcome    | pass | pass-with-notes                        |
+| verdict outcome    | <pass or pass-with-notes>                    |
 | written            | <YYYY-MM-DDTHH:MM>                            |
 
 ## Change-Set Summary
@@ -37,10 +44,11 @@ orchestrator integrates a completed master into the super branch from.
 ## Requirements / Steps Completion
 - All master requirements addressed: yes | with justified deltas (decision-log refs: …)
 
-## Carry-Over State (for the orchestrator's master → super C-11)
-- Memory rows parked / carried: <summary>
+## Code / Memory / Ledger State
+- Ancestry-compatible fast-forward/replay: yes | no:<exact divergence>
+- Memory rows carried as explicit recovery: <summary> | none
 - Ledger maps every leaf commit: yes | <gap>
-- Single-siding notes (if this master overlaps another strand): <which memory to defer / dedup>
+- Single-siding notes after unavoidable overlap: <which memory to defer / dedup> | none
 
 ## Known Follow-Ups
 - <fix leaf the verdict named but scoped as post-integration> | none

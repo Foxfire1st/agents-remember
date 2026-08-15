@@ -32,7 +32,7 @@ and the loop-review adaptation below.
 | --------------- | -------------------------------------------------- |
 | scope           | <leaf code candidate; the plane binds its tree>    |
 | reviewer seat   | <leaf task_doc path> + reviewer                    |
-| recommendation  | PASS \| PASS-WITH-NOTES \| BLOCK                   |
+| recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                   |
 | decider         | owning manager (architect in flat/solo mode)       |
 | artifact path   | notes/reports/<leaf-id>-route-review-verdict.md    |
 | written         | <YYYY-MM-DDTHH:MM>                                 |
@@ -40,7 +40,7 @@ and the loop-review adaptation below.
 ## Major-Route Coverage (every material route accounted for)
 | Major route | Independent reviewer report | Verdict | Changed + surrounding scope reviewed |
 | ----------- | --------------------------- | ------- | ------------------------------------ |
-| <route>     | notes/reports/<route-report>.md | pass \| pass-with-notes \| block | <paths/owners/tests> |
+| <route>     | notes/reports/<route-report>.md | pass, pass-with-notes, or block | <paths/owners/tests> |
 
 ## Criteria Catalog Results
 | Criterion (id · catalog) | Ran | Finding | Evidence |
@@ -70,13 +70,14 @@ delta-verify and the owner to record a fresh packet.
 | Field           | Value                                              |
 | --------------- | -------------------------------------------------- |
 | seam            | master-exit                                        |
-| scope           | <master integration branch ref>                    |
+| execution nature | <organizational or atomic>                        |
+| scope           | <exact proposed organizational super candidate including final leaf; atomic branch ref> |
 | reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <master task_doc + leaf task docs>                 |
-| recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
+| recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                       |
 | decider         | orchestrator (delegated `master-handover-approval`; serious issues escalate → developer) |
 | artifact path   | notes/reports/<master-id>-master-exit-verdict.md   |
-| gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass | pass-with-notes | block> |
+| gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass, pass-with-notes, or block> |
 | written         | <YYYY-MM-DDTHH:MM>                                  |
 
 ## Lens 1 — Completion vs Task Docs
@@ -85,7 +86,8 @@ delta-verify and the owner to record a fresh packet.
 - backing evidence file: <impact-analysis report path>
 
 ## Lens 2 — Code Quality
-- resolved system/tools.md suite: green | failing:<which>
+- targeted leaf acceptance: current | failing:<which>
+- one full master gate: reserved for <proposed final organizational super candidate or atomic landing>; reviewer did not duplicate it
 - regressions vs the past (route indexes · CGC · GrepAI): none | <finding>
 - backing evidence file: <quality/impact report path>
 
@@ -125,10 +127,10 @@ reviewer does not.
 | scope           | <super integration branch ref>                     |
 | reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <portfolio task docs + master task docs>           |
-| recommendation  | PASS | PASS-WITH-NOTES | BLOCK                       |
+| recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                       |
 | decider         | developer (human review concentrates at the super gate) |
 | artifact path   | notes/reports/<series-id>-super-exit-verdict.md    |
-| gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass | pass-with-notes | block> |
+| gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass, pass-with-notes, or block> |
 | written         | <YYYY-MM-DDTHH:MM>                                  |
 
 ## Lens 1 — Completion vs Portfolio Task Docs
@@ -160,7 +162,7 @@ reviewer does not.
 | - | -------- | ------- | ----------------- | -------------------- | --------- |
 
 ## If BLOCK — Orchestrator Fix Leaves
-1. <fix leaf routed by the orchestrator: target manager/master/super-worktree · scope · target files/docs · evidence refs · done-when>
+1. <fix leaf routed by the orchestrator: owning or reopened leaf, or new scoped fix leaf · scope · target files/docs · evidence refs · done-when>
    (A BLOCK with no fix leaves here is invalid — resolve to PASS-WITH-NOTES or name the leaves.)
 
 ## Judge-Evidence Note
@@ -173,7 +175,7 @@ reviewer does not.
 A three-party-loop review (a full-loop leaf round, or the plan review over an orchestration task)
 uses the **master-exit variant's shape minus the gate machinery**: drop the `gate evidence` header
 row and the Judge-Evidence Note (a loop review attaches to no gate), set `decider` to the **loop
-owner** (the leaf's owning seat, or the orchestrator for the plan review), scope to the round's
+owner** (the leaf's owning seat, or the architect for the plan review), scope to the round's
 change set (or the orchestration-task draft), and keep everything else — recommendation, Criteria
 Catalog Results (the loop's bound catalogs, e.g. `plan-review` + `report-verification` for a plan
 review), ranked refute-tested findings, and fix decomposition. The verdict remains **evidence to
