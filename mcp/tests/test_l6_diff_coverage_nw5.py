@@ -277,4 +277,4 @@ class TestFinalize:
             completed_parent=parent,
         )
         with pytest.raises(FinalizeTaskDocumentError, match="no task-document root"):
-            finalize._reconcile_task_documents(targets, dry_run=False)
+            finalize._reconcile_task_documents(_contract(Path("/root")), targets, dry_run=False)

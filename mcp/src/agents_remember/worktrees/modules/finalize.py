@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStoreError
 from agents_remember.tasks import (
     CompletionBlocker,
     SubTaskRef,
@@ -18,6 +19,8 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
+from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.git import is_ancestor
@@ -105,7 +108,20 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
         )
 
     updated_contract = load_contract(contract.contract_path) if not args.dry_run else contract
-    updates = _reconcile_task_documents(targets, dry_run=args.dry_run)
+    try:
+        updates = _reconcile_task_documents(
+            updated_contract,
+            targets,
+            dry_run=args.dry_run,
+        )
+    except (CloseoutQueueError, CloseoutQueueStoreError) as exc:
+        return _task_refusal(
+            updated_contract,
+            args,
+            state="task-queue-blocked",
+            blockers=[str(exc)],
+            summary=f"Task finalization is blocked by the sprint closeout queue: {exc}",
+        )
     if updated_contract.kind == "series":
         archive = archive_completed_root_task(
             updated_contract.coordination_root,
@@ -347,6 +363,7 @@ def _expected_parent_path(task_root: Path, leaf: TaskDocument) -> Path:
 
 
 def _reconcile_task_documents(
+    contract: WorktreeContract,
     targets: FinalizeTaskTargets,
     *,
     dry_run: bool,
@@ -383,7 +400,12 @@ def _reconcile_task_documents(
     if not dry_run and documents:
         if targets.leaf_path is None:
             raise FinalizeTaskDocumentError("completion candidates have no task-document root")
-        write_task_docs(targets.leaf_path.parent, documents)
+        task_root = targets.leaf_path.parent
+        publish_queue_bound_task_facts(
+            contract,
+            lambda: write_task_docs(task_root, documents),
+            topology_stable=True,
+        )
     return updates
 
 

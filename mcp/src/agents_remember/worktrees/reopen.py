@@ -34,6 +34,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStoreError
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
 from agents_remember.tasks.document import TaskDocument
@@ -46,6 +47,8 @@ from agents_remember.tasks.store import (
     write_task_docs,
 )
 
+from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_lifecycle import publish_queue_bound_task_facts
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -216,7 +219,7 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             docs,
             dry_run=dry_run,
         )
-    except OSError as exc:
+    except (OSError, CloseoutQueueError, CloseoutQueueStoreError) as exc:
         return WorktreeCommandResult(
             2,
             {
@@ -387,25 +390,33 @@ def _publish_reopen_transition(
     """Publish contract, task docs, and landing deletion as one rollback-capable unit."""
     if dry_run:
         return _clear_frozen_landing(contract, dry_run=True)
-    final_path = contract.contract_path.parent / LANDING_FINAL_BASENAME
-    paths = {contract.contract_path, final_path}
-    for doc in docs:
-        paths.add(json_path_for(contract.task_root, doc))
-        paths.add(markdown_path_for(contract.task_root, doc))
-    originals = {path: path.read_bytes() if path.exists() else None for path in paths}
-    try:
-        frozen_cleared = _clear_frozen_landing(contract, dry_run=False)
-        write_task_docs(contract.task_root, docs)
-        write_contract(contract.contract_path, updated)
-    except BaseException as publish_error:
+
+    def publication() -> str:
+        final_path = contract.contract_path.parent / LANDING_FINAL_BASENAME
+        paths = {contract.contract_path, final_path}
+        for doc in docs:
+            paths.add(json_path_for(contract.task_root, doc))
+            paths.add(markdown_path_for(contract.task_root, doc))
+        originals = {path: path.read_bytes() if path.exists() else None for path in paths}
         try:
-            _restore_reopen_artifacts(originals)
-        except BaseException as rollback_error:
-            raise RuntimeError(
-                f"reopen publication and rollback both failed: {rollback_error}"
-            ) from publish_error
-        raise
-    return frozen_cleared
+            frozen_cleared = _clear_frozen_landing(contract, dry_run=False)
+            write_task_docs(contract.task_root, docs)
+            write_contract(contract.contract_path, updated)
+        except BaseException as publish_error:
+            try:
+                _restore_reopen_artifacts(originals)
+            except BaseException as rollback_error:
+                raise RuntimeError(
+                    f"reopen publication and rollback both failed: {rollback_error}"
+                ) from publish_error
+            raise
+        return frozen_cleared
+
+    return publish_queue_bound_task_facts(
+        contract,
+        publication,
+        topology_stable=True,
+    )
 
 
 def _restore_reopen_artifacts(originals: dict[Path, bytes | None]) -> None:

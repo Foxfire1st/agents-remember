@@ -210,7 +210,9 @@ class TestAssertAndRead:
 
 class TestReconcileAndCandidates:
     def test_reconcile_skips(self) -> None:
-        updates = finalize._reconcile_task_documents(FinalizeTaskTargets(), dry_run=True)
+        updates = finalize._reconcile_task_documents(
+            _contract(Path("/root")), FinalizeTaskTargets(), dry_run=True
+        )
         assert updates["leaf"]["state"] == "skipped"
         assert updates["parent"]["state"] == "skipped"
 
@@ -218,7 +220,7 @@ class TestReconcileAndCandidates:
         leaf = _doc()
         targets = FinalizeTaskTargets(leaf_path=tmp_path / "leaf.json", leaf=leaf)
         with pytest.raises(FinalizeTaskDocumentError, match="leaf completion candidate is missing"):
-            finalize._reconcile_task_documents(targets, dry_run=False)
+            finalize._reconcile_task_documents(_contract(tmp_path), targets, dry_run=False)
         targets = FinalizeTaskTargets(
             leaf_path=tmp_path / "leaf.json",
             leaf=leaf,
@@ -230,7 +232,7 @@ class TestReconcileAndCandidates:
         with pytest.raises(
             FinalizeTaskDocumentError, match="parent completion candidate is missing"
         ):
-            finalize._reconcile_task_documents(targets, dry_run=False)
+            finalize._reconcile_task_documents(_contract(tmp_path), targets, dry_run=False)
 
     def test_reconcile_writes(self, tmp_path: Path) -> None:
         leaf = _doc()
@@ -243,8 +245,17 @@ class TestReconcileAndCandidates:
             parent_row=_master().subTasks[0],
             completed_parent=_master(),
         )
-        with mock.patch.object(finalize, "write_task_docs", return_value=[]):
-            updates = finalize._reconcile_task_documents(targets, dry_run=False)
+        with (
+            mock.patch.object(
+                finalize,
+                "publish_queue_bound_task_facts",
+                side_effect=lambda _contract, publication, **_kwargs: publication(),
+            ),
+            mock.patch.object(finalize, "write_task_docs", return_value=[]),
+        ):
+            updates = finalize._reconcile_task_documents(
+                _contract(tmp_path), targets, dry_run=False
+            )
         assert updates["leaf"]["state"] == "updated"
         assert updates["parent"]["subtaskNumber"] == "L1"
 

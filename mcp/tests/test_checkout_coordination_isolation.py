@@ -13,6 +13,7 @@ from agents_remember.controlplane.durable_store import (
     OPERATOR_INBOX_OWNERSHIP,
     append_line,
     declare_process_role,
+    declared_process_role,
     exclusive_access,
     rewrite_lines,
 )
@@ -260,4 +261,5 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
 
         self.assertEqual(declared_execution_mode(), "lifecycle-operation")
         self.assertIsNone(declared_daemon_role())
+        self.assertEqual(declared_process_role(), "lifecycle-operation")
         self.assertEqual(config.coordination_root, self.root / "live-ar-coordination")

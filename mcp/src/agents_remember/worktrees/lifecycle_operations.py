@@ -25,6 +25,9 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
+from agents_remember.worktrees.closeout_queue_lifecycle import (
+    release_queue_candidate_after_reversible_operation,
+)
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -184,8 +187,19 @@ def cancel_operation(
         )
 
     current = store.update(request)
-    if worker_pid is not None:
-        _terminate_worker_group(worker_pid)
+    try:
+        if current.status == "cancelled" and not current.irreversibleBoundaryEntered:
+            release_queue_candidate_after_reversible_operation(
+                contract,
+                operation_key=current.operationKey,
+                operation_kind=kind,
+            )
+    finally:
+        # The store has already cleared workerPid. Always signal the captured
+        # process group before surfacing a queue-release failure, or a retry can
+        # launch a second worker while the cancelled one is still running.
+        if worker_pid is not None:
+            _terminate_worker_group(worker_pid)
     return operation_projection(current)
 
 

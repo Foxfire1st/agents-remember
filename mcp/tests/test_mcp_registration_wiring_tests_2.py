@@ -4,6 +4,27 @@ from test_mcp_registration_wiring import RegistrationWiringTests
 
 
 class RegistrationWiringTests2(RegistrationWiringTests):
+    def test_closeout_queue_registration_validates_and_forwards_the_request(self) -> None:
+        recorder = self.invoke(
+            "closeout_queue",
+            "agents_remember.mcp.registration.tasks.closeout_queue_payload",
+            {
+                "request": {
+                    "action": "status",
+                    "sprint_task_document_ref": {
+                        "repository": "agents-remember",
+                        "path": "sprint/task.json",
+                    },
+                }
+            },
+        )
+
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.action, "status")
+        self.assertEqual(request.sprint_task_document_ref.repository, "agents-remember")
+        self.assertEqual(request.sprint_task_document_ref.path, "sprint/task.json")
+
     def test_worktree_operation_cancel_forwards_only_the_task_address(self) -> None:
         recorder = self.invoke(
             "worktree_operation_cancel",

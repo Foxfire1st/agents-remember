@@ -26,6 +26,7 @@ from agents_remember.models.benchmarks import (
     CodexBenchmarkPrepareResponse,
     CodexBenchmarkRunResponse,
 )
+from agents_remember.models.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
@@ -200,6 +201,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "lifecycle_phase": LifecyclePhaseResponse,
     "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
+    "closeout_queue": CloseoutQueueResponse,
     "lifecycle_gate": LifecycleGateResponse,
     "lifecycle_gate_internal": InternalLifecycleGateResponse,
     "gate_create": GateCreateResponse,

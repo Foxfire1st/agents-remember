@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import difflib
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.errors import AgentsRememberError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     MasterExecutionNature,
     SprintExecutionGraph,
     TaskDocument,
+    completion_blockers,
     json_path_for,
     markdown_path_for,
     read_task_doc,
@@ -136,7 +139,21 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
             _migration_preview(ref, root, document) for ref, root, document in documents
         ]
         return result
-    written = write_task_doc_batch([(root, document) for _ref, root, document in documents])
+
+    def publication() -> list[tuple[Path, Path]]:
+        return write_task_doc_batch([(root, document) for _ref, root, document in documents])
+
+    queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
+    written = queue.publish_sprint_update(
+        publication,
+        completed=candidate_sprint.status == "Completed",
+        recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+        validate_completion=lambda: require_commanded_masters_completed(
+            topology,
+            sprint_ref,
+            overrides,
+        ),
+    )
     result["documents"] = [
         {
             "taskDocumentRef": ref.model_dump(mode="json"),
@@ -148,6 +165,29 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
         )
     ]
     return result
+
+
+def require_commanded_masters_completed(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    overrides: dict[TaskDocumentRef, TaskDocument],
+) -> None:
+    """Refuse sprint completion until every exact graph master is terminal."""
+
+    try:
+        masters = topology.validate_execution_topology(sprint_ref, overrides=overrides)
+    except TaskDocumentRefError as exc:
+        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
+    incomplete = sorted(
+        master.ref.key
+        for master in masters
+        if master.document.status != "Completed" or completion_blockers(master.document)
+    )
+    if incomplete:
+        raise ExecutionTopologyError(
+            "orchestration sprint cannot complete while commanded masters remain incomplete: "
+            f"{incomplete!r}"
+        )
 
 
 def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> None:

@@ -401,6 +401,7 @@ class McpToolTests(unittest.TestCase):
             "memory_carryover_apply",
             "codex_benchmark_prepare",
             "codex_benchmark_run",
+            "closeout_queue",
             "lifecycle_gate",
             "gate_decide",
             "gate_list",

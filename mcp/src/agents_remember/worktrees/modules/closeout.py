@@ -18,6 +18,10 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.observer.events import now_iso
+from agents_remember.worktrees.closeout_queue_lifecycle import (
+    certify_queue_candidate_closeout,
+    claim_queue_candidate_for_closeout,
+)
 from agents_remember.worktrees.closeout_recovery import (
     MemoryCloseoutOutcome,
     accepted_code_commit,
@@ -1091,6 +1095,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract(args.contract_path)
     recovered = _recover_closeout_finalization(contract, args)
     if recovered is not None:
+        certify_queue_candidate_closeout(load_contract(args.contract_path), args.operation_key)
         return recovered
     _validate_closeout_source_state(contract)
     _refuse_series_code_commit(contract)
@@ -1127,6 +1132,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         )
     accepted_candidate_tree = cast(str, args.candidate_tree)
     _revalidate_reviewed_candidate(contract, route_review, accepted_candidate_tree)
+    claim_queue_candidate_for_closeout(contract, args.operation_key)
     committed = _closeout_commit_phase(
         contract,
         args,
@@ -1152,6 +1158,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         },
     )
     write_contract(contract.contract_path, updated)
+    certify_queue_candidate_closeout(updated, args.operation_key)
     return WorktreeCommandResult(
         0,
         _closed_result_payload(

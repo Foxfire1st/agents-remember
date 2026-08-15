@@ -35,6 +35,9 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.worktrees.closeout_queue_lifecycle import (
+    release_queue_candidate_after_reversible_operation,
+)
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -268,7 +271,31 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
         )
         result = integrate_result(args)
         payload = integration_completion_payload(config, operation_input, result)
+    if result.returncode != 0:
+        current = runtime.store.read() or record
+        release_failure = _release_reversible_queue_ownership(current)
+        if release_failure is not None:
+            payload["queueReleaseFailure"] = release_failure
+            payload.setdefault(
+                "reason",
+                "operation failed and its queue ownership could not be released; "
+                "repair the reported queue authority before retrying",
+            )
     runtime.finish(payload, ok=result.returncode == 0)
+
+
+def _release_reversible_queue_ownership(record: LifecycleOperationRecord) -> str | None:
+    if record.irreversibleBoundaryEntered:
+        return None
+    try:
+        release_queue_candidate_after_reversible_operation(
+            load_contract(Path(record.contractPath)),
+            operation_key=record.operationKey,
+            operation_kind=record.operationKind,
+        )
+    except Exception as error:  # queue authority must remain visible in the terminal record
+        return str(error)
+    return None
 
 
 def integration_completion_payload(
@@ -314,6 +341,12 @@ def run_worker(contract_path: Path, kind: LifecycleOperationKind) -> int:
         return 0
     except Exception as error:
         print(f"operation failed: {error}", flush=True)
+        latest = store.read() or current
+        release_failure = _release_reversible_queue_ownership(latest)
+        if release_failure is not None:
+            error = RuntimeError(
+                f"{error}; reversible queue ownership release failed: {release_failure}"
+            )
         runtime.fail(error)
         return 1
     finally:

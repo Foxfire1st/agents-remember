@@ -28,6 +28,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -35,6 +36,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.closeout_queue import CloseoutQueueRequest
 from agents_remember.application.gate_tools import GateRaise, GateWait
 from agents_remember.application.lifecycle_operation_worker import run_worker
 from agents_remember.application.memory_tools import CarryoverSelection, CitationOperationScope
@@ -115,11 +117,12 @@ def _run_git(repo: Path, args: list[str]) -> None:
 def _write_leaf_task(
     coordination_root: Path,
     *,
-    repo: str = REPO,
     master: str = "master",
     doc_id: str = "leaf-1",
     slug: str | None = None,
+    execution_graph: bool = True,
 ) -> None:
+    repo = REPO
     slug = slug or doc_id
     task_root = coordination_root / "tasks" / repo / master
     write_task_doc(
@@ -132,6 +135,7 @@ def _write_leaf_task(
                 "kind": "master",
                 "repo": repo,
                 "createdAt": "2026-07-07T10:00",
+                "executionNature": "organizational",
                 "subTasks": [
                     {
                         "number": doc_id,
@@ -149,20 +153,24 @@ def _write_leaf_task(
         for path in (coordination_root / "tasks" / repo).iterdir()
         if path.is_dir() and path.name != sprint_root.name
     )
+    sprint_fields: dict[str, object] = {
+        "id": "SPRINT",
+        "slug": "task",
+        "title": "Sprint",
+        "kind": "master",
+        "repo": repo,
+        "createdAt": "2026-07-07T09:00",
+        "orchestrates": orchestrates,
+        "integrationBranch": "main",
+    }
+    if execution_graph:
+        sprint_fields["executionGraph"] = {
+            "nodes": [{"repository": repo, "path": f"{item}/task.json"} for item in orchestrates],
+            "edges": [],
+        }
     write_task_doc(
         sprint_root,
-        TaskDocument.model_validate(
-            {
-                "id": "SPRINT",
-                "slug": "task",
-                "title": "Sprint",
-                "kind": "master",
-                "repo": repo,
-                "createdAt": "2026-07-07T09:00",
-                "orchestrates": orchestrates,
-                "integrationBranch": "main",
-            }
-        ),
+        TaskDocument.model_validate(sprint_fields),
     )
     write_task_doc(
         task_root,
@@ -180,14 +188,14 @@ def _write_leaf_task(
     )
 
 
-def _base_fixture(root: Path):
+def _base_fixture(root: Path, *, execution_graph: bool = True):
     """Code repo + memory layer + ``.codex/mcp`` settings for the simple tools."""
     repo = root / "workspace" / REPO
     memory = root / "ar-coordination" / "memory-repos" / f"ar-{REPO}"
     (memory / "system").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
-    _write_leaf_task(root / "ar-coordination")
+    _write_leaf_task(root / "ar-coordination", execution_graph=execution_graph)
     repo.mkdir(parents=True, exist_ok=True)
     _run_git(repo, ["init", "-b", "main"])
     _run_git(repo, ["config", "user.email", "agents-remember@example.invalid"])
@@ -215,6 +223,26 @@ def _simple_payloads(config) -> dict[str, dict]:
             operation_scope=CitationOperationScope(),
             dry_run=True,
         )
+    with mock.patch(
+        "agents_remember.application.closeout_queue.resolve_ambient_seat",
+        return_value=SimpleNamespace(
+            binding_role="orchestrator",
+            binding_task_document_ref=TaskDocumentRef(
+                repository=REPO,
+                path="sprint/task.json",
+            ),
+        ),
+    ):
+        closeout_queue = tools.closeout_queue_payload(
+            config,
+            CloseoutQueueRequest(
+                action="status",
+                sprint_task_document_ref=TaskDocumentRef(
+                    repository=REPO,
+                    path="sprint/task.json",
+                ),
+            ),
+        )
     return {
         "ping": tools.ping_payload(),
         "server_info": tools.server_info_payload(config),
@@ -222,6 +250,7 @@ def _simple_payloads(config) -> dict[str, dict]:
         "read_ar_files": tools.read_ar_files_payload(
             config, REPO, [{"path": "README.md", "source": "full"}]
         ),
+        "closeout_queue": closeout_queue,
         "attach_terminal_session_to_task": tools.attach_terminal_session_to_task_payload(
             config,
             session_id="missing-session",
@@ -319,15 +348,25 @@ def _simple_payloads(config) -> dict[str, dict]:
 
 def _worktree_payloads(root: Path) -> dict[str, dict]:
     """Drive a real worktree lifecycle (disabled memory) and capture every step."""
-    config = _base_fixture(root)
+    config = _base_fixture(root, execution_graph=False)
     # worktree_start needs a memory git repo to exist even when memory is disabled.
     tools.memory_init_payload(config, REPO, dry_run=False, initialize_git=True)
     memory_root = root / "ar-coordination" / "memory-repos" / f"ar-{REPO}"
     (memory_root / "memory.md").write_text("# Memory ledger\n", encoding="utf-8")
     _run_git(memory_root, ["add", "-A"])
     _run_git(memory_root, ["commit", "-m", "seed"])
-    _write_leaf_task(config.coordination_root, master="demo-task", doc_id="demo-wt")
-    _write_leaf_task(config.coordination_root, master="abandon-task", doc_id="abandon-wt")
+    _write_leaf_task(
+        config.coordination_root,
+        master="demo-task",
+        doc_id="demo-wt",
+        execution_graph=False,
+    )
+    _write_leaf_task(
+        config.coordination_root,
+        master="abandon-task",
+        doc_id="abandon-wt",
+        execution_graph=False,
+    )
 
     payloads: dict[str, dict] = {}
     abandon_start = tools.worktree_start_payload(

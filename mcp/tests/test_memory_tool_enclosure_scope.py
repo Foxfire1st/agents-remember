@@ -244,7 +244,10 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
         report = expected.read_text(encoding="utf-8")
         self.assertNotEqual(report, "obsolete predecessor\n")
         self.assertIn("# Curator Memory Quality Checklist", report)
-        self.assertEqual([path.name for path in expected.parent.iterdir()], [expected.name])
+        self.assertEqual(
+            {path.name for path in expected.parent.iterdir()},
+            {expected.name, expected.with_suffix(".json").name},
+        )
         self.assertIn(second["checklistStatus"], {"action-required", "ready-for-closeout"})
         self.assertEqual(
             second["curatorActionableCount"],

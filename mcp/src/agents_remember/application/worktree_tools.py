@@ -383,6 +383,14 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    """Start/observe only the exact already-selected task operation.
+
+    Queue role projection assigns this leaf action to the owning manager. This
+    generic task-addressed boundary does not make scheduling decisions: it cannot
+    select or substitute a candidate, and the worker revalidates the selected
+    durable queue record immediately before moving source history.
+    """
+
     confined_contract = require_within_coordination(config, contract_path, "contract_path")
     if not dry_run:
         operation = start_or_observe_operation(

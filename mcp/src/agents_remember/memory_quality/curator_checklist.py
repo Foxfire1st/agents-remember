@@ -8,6 +8,8 @@ lifetime through the enclosure's reserved ``reports`` directory.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +23,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.models impo
 
 REPORT_DIRECTORY_NAME = "reports"
 REPORT_FILE_NAME = "curator-memory-quality.md"
+ATTESTATION_FILE_NAME = "curator-memory-quality.json"
 PROVENANCE_MISSING = "citation_provenance_missing"
 
 
@@ -112,9 +115,38 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         commit_owned=commit_owned,
         report_only=report_only,
     )
-    atomic_write_text(checklist.report_path, _render(checklist, sections))
+    report = _render(checklist, sections)
+    report_path = checklist.report_path.resolve()
+    onboarding_root = checklist.onboarding_root.resolve()
+    atomic_write_text(report_path, report)
+    attestation_path = report_path.with_name(ATTESTATION_FILE_NAME)
+    attestation = {
+        "schema": "ar-curator-memory-quality/v1",
+        "checklistStatus": status,
+        "curatorActionableCount": actionable_count,
+        "memoryRepairCount": len(repair),
+        "missingOnboardingCount": len(missing),
+        "staleRouteIndexCount": len(stale),
+        "sourceChangeCandidateCount": len(source_candidates),
+        "sourceChangeCandidates": [
+            {
+                "sourceFile": str(row.get("source_file", "")),
+                "onboardingFile": str(row.get("onboarding_file", "")),
+                "classification": str(row.get("classification", "")),
+            }
+            for row in source_candidates
+        ],
+        "onboardingRoot": onboarding_root.as_posix(),
+        "reportPath": report_path.as_posix(),
+        "reportSha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
+    }
+    atomic_write_text(
+        attestation_path,
+        json.dumps(attestation, sort_keys=True, separators=(",", ":")) + "\n",
+    )
     return {
-        "reportPath": checklist.report_path.as_posix(),
+        "reportPath": report_path.as_posix(),
+        "attestationPath": attestation_path.as_posix(),
         "checklistStatus": status,
         "curatorActionableCount": actionable_count,
         "memoryRepairCount": len(repair),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,12 +11,21 @@ from unittest import mock
 
 import agents_remember.tasks.document_refs as task_document_refs
 import agents_remember.tasks.store as task_store
+from agents_remember.application import task_doc_queue_scope
+from agents_remember.application.task_doc_queue_scope import QueuePublicationScope
 from agents_remember.application.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
+    _publish_task_doc_set,
+    _TaskDocPublication,
     task_doc_tool,
 )
+from agents_remember.application.task_execution_topology import (
+    ExecutionTopologyError,
+    require_commanded_masters_completed,
+)
+from agents_remember.controlplane.closeout_queue_store import queue_store_paths
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.snapshots_impl._task_documents import read_task_documents
@@ -178,6 +188,117 @@ class ExecutionTopologyTests(unittest.TestCase):
         self.tasks.mkdir(parents=True)
         self.cfg = _config(self.coord)
         self.topology = TaskDocumentTopology(self.coord)
+
+    def test_queue_scope_split_has_direct_topology_test_ownership(self) -> None:
+        self.assertTrue(callable(task_doc_queue_scope.governing_queue_scope))
+
+    def test_queue_scope_refuses_multiple_sprints_and_wrong_leaf_owner(self) -> None:
+        affected = [
+            SimpleNamespace(ref=SPRINT),
+            SimpleNamespace(ref=MASTER_C),
+        ]
+        with self.assertRaisesRegex(task_doc_queue_scope.QueueScopeError, "multiple"):
+            task_doc_queue_scope._single_scope(cast(Any, affected), MASTER_A)
+
+        leaf_ref = TaskDocumentRef(repository=REPOSITORY, path="master-a/leaf/task.json")
+        leaf_path = self.tasks / leaf_ref.path
+        leaf_path.parent.mkdir(parents=True)
+        leaf_path.write_text("{}", encoding="utf-8")
+        (self.tasks / "master-a" / "task.json").write_text("{}", encoding="utf-8")
+        topology = mock.Mock()
+        topology.canonical_ref.side_effect = [leaf_ref, MASTER_A]
+        topology.resolve.return_value = SimpleNamespace(
+            document=SimpleNamespace(kind="subTask", orchestrates=[])
+        )
+        topology.parent.return_value = MASTER_B
+        context = task_doc_queue_scope._ScopeContext(
+            topology=topology,
+            repo_id=REPOSITORY,
+            task_root=leaf_path.parent,
+            repository_root=self.tasks,
+            existing_path=leaf_path,
+        )
+        with (
+            mock.patch.object(
+                task_doc_queue_scope,
+                "_unchanged_master_scope",
+                return_value=QueuePublicationScope(SPRINT, MASTER_A),
+            ),
+            self.assertRaisesRegex(task_doc_queue_scope.QueueScopeError, "exact owning master"),
+        ):
+            task_doc_queue_scope._existing_scope(
+                context,
+                None,
+                _master(identity="LEAF"),
+            )
+
+        broken_root = self.tasks / "broken"
+        broken_root.mkdir()
+        (broken_root / "task.json").write_text("not json\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+            task_doc_queue_scope.QueueScopeError,
+            "cannot resolve governing sprint queue",
+        ):
+            task_doc_queue_scope.governing_queue_scope(
+                self.coord,
+                REPOSITORY,
+                broken_root,
+                None,
+                _master(identity="BROKEN"),
+            )
+
+    def test_light_task_has_no_queue_scope_and_missing_owner_fails_closed(self) -> None:
+        light = _master(identity="LIGHT").model_copy(update={"kind": "light", "orchestrates": []})
+        self.assertIsNone(
+            task_doc_queue_scope.governing_queue_scope(
+                self.coord,
+                REPOSITORY,
+                self.tasks / "light",
+                None,
+                light,
+            )
+        )
+        publication = _TaskDocPublication(
+            config=self.cfg,
+            target=TaskDocTarget(repo_id=REPOSITORY, task_name="master-a"),
+            task_root=self.tasks / "master-a",
+            original=None,
+            candidate=_master(identity="MASTER-A"),
+            documents=[_master(identity="MASTER-A")],
+            publisher=lambda: [],
+        )
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_tools.governing_queue_scope",
+                return_value=QueuePublicationScope(SPRINT, None),
+            ),
+            self.assertRaisesRegex(TaskDocError, "no owning master"),
+        ):
+            _publish_task_doc_set(publication)
+
+        publisher = mock.Mock(return_value=[])
+        publication = replace(publication, publisher=publisher)
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_tools.governing_queue_scope",
+                side_effect=task_doc_queue_scope.QueueScopeError("broken queue scope"),
+            ),
+            self.assertRaisesRegex(TaskDocError, "broken queue scope"),
+        ):
+            _publish_task_doc_set(publication)
+        publisher.assert_not_called()
+
+    def test_completion_topology_errors_are_normalized_at_the_queue_boundary(self) -> None:
+        topology = mock.Mock()
+        topology.validate_execution_topology.side_effect = TaskDocumentRefError(
+            "task-execution-topology-migration-required",
+            "executionGraph is missing",
+        )
+        with self.assertRaisesRegex(
+            ExecutionTopologyError,
+            "task-execution-topology-migration-required",
+        ):
+            require_commanded_masters_completed(topology, SPRINT, {})
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -525,7 +646,11 @@ class ExecutionTopologyTests(unittest.TestCase):
                 edit=TaskDocEdit(fields=incomplete),
             )
 
-        before = {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()}
+        before = {
+            path: path.read_bytes()
+            for path in self.tasks.rglob("*")
+            if path.is_file() and path.suffix in {".json", ".md"}
+        }
         real_write = task_store.atomic_write_text
         calls = 0
 
@@ -543,8 +668,15 @@ class ExecutionTopologyTests(unittest.TestCase):
             self._migrate()
         self.assertEqual(
             before,
-            {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()},
+            {
+                path: path.read_bytes()
+                for path in self.tasks.rglob("*")
+                if path.is_file() and path.suffix in {".json", ".md"}
+            },
         )
+        state_path, pending_path = queue_store_paths(self.coord, SPRINT)
+        self.assertFalse(state_path.exists())
+        self.assertFalse(pending_path.exists())
 
     def test_migration_refuses_invalid_request_shapes_before_reading_or_writing(self) -> None:
         self._write_legacy()

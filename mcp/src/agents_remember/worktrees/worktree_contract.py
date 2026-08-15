@@ -268,6 +268,10 @@ class WorktreeContract:
     leaf_id: str = ""
     parent_task_name: str = ""
     parent_contract_path: Path | None = None
+    # An admitted graph-managed leaf keeps these immutable canonical refs in its enclosure.
+    # Empty means this contract has never crossed the explicit L3 queue boundary.
+    queue_sprint_task_document: str = ""
+    queue_candidate_task_document: str = ""
     # The lifecycle this enclosure anchors (design §1.1): written by worktree_start
     # promotion, read by worktree_attach to resume. Additive on schema v1 -- old
     # contracts parse to "" (the v2 schema flip is the deliberate 3.0 cutover).
@@ -711,6 +715,10 @@ def contract_to_text(contract: WorktreeContract) -> str:
         lines.append(f"  parent_task_name: {contract.parent_task_name}")
     if contract.parent_contract_path is not None:
         lines.append(f"  parent_contract_path: {contract.parent_contract_path.as_posix()}")
+    if contract.queue_sprint_task_document:
+        lines.append(f"  queue_sprint_task_document: {contract.queue_sprint_task_document}")
+    if contract.queue_candidate_task_document:
+        lines.append(f"  queue_candidate_task_document: {contract.queue_candidate_task_document}")
     lines.extend(
         [
             "",
@@ -1039,6 +1047,8 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),
+        queue_sprint_task_document=coordination.get("queue_sprint_task_document", ""),
+        queue_candidate_task_document=coordination.get("queue_candidate_task_document", ""),
         lifecycle_id=lifecycle.get("id", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),
     )

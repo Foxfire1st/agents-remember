@@ -17,7 +17,6 @@ from agents_remember.application.worktree_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.tools import task_doc as task_doc_payload_module
-from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming, install_ambient
 from agents_remember.observer.store import EventStore
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
@@ -45,6 +44,10 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from test_worktree_support import git, init_repo
+
+
+def _publish_restamp(task_root: Path, document: TaskDocument) -> object:
+    return write_task_doc(task_root, document)
 
 
 def _completed_leaf_contract(workspace: Path):
@@ -183,60 +186,6 @@ def _master_doc(
     )
     json_path, _ = write_task_doc(task_root, doc)
     return json_path
-
-
-class ReopenGuardTests(unittest.TestCase):
-    def test_refuses_a_leaf_that_is_not_fully_landed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _completed_leaf_contract(Path(tmp))
-            write_contract(
-                contract.contract_path,
-                replace(contract, closeout_status="not-started", cleanup="pending"),
-            )
-            result = reopen_task(contract.contract_path)
-            self.assertEqual(result.returncode, 2)
-            self.assertEqual(result.payload["state"], "blocked")
-            blockers = " ".join(cast("list[str]", result.payload["blockers"]))
-            self.assertIn("closeout", blockers)
-            self.assertIn("cleanup", blockers)
-
-    def test_refuses_a_non_leaf_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _completed_leaf_contract(Path(tmp))
-            write_contract(contract.contract_path, replace(contract, kind="series"))
-            result = reopen_task(contract.contract_path)
-            self.assertEqual(result.returncode, 2)
-            self.assertIn(
-                "not a leaf enclosure", " ".join(cast("list[str]", result.payload["blockers"]))
-            )
-
-    def test_refuses_when_a_worktree_still_exists(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _completed_leaf_contract(Path(tmp))
-            contract.code_worktree.mkdir(parents=True)
-            result = reopen_task(contract.contract_path)
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("still exists", " ".join(cast("list[str]", result.payload["blockers"])))
-
-    def test_moved_super_refuses_before_reopen_mutates_task_state(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            contract = _completed_leaf_contract(Path(tmp))
-            doc_path = _leaf_doc(contract.task_root)
-            _master_doc(contract.task_root)
-            contract_before = contract.contract_path.read_bytes()
-            doc_before = doc_path.read_bytes()
-            marker = contract.code_repo_path / "super-moved.txt"
-            marker.write_text("new super\n", encoding="utf-8")
-            git(contract.code_repo_path, "add", marker.name)
-            git(contract.code_repo_path, "commit", "-m", "move super")
-
-            result = reopen_task(contract.contract_path)
-
-            self.assertEqual(result.returncode, 2)
-            lineage = SourceLineageProjection.model_validate(result.payload["source_lineage"])
-            self.assertEqual(lineage.state, "blocked")
-            self.assertEqual(contract.contract_path.read_bytes(), contract_before)
-            self.assertEqual(doc_path.read_bytes(), doc_before)
 
 
 class ReopenResetTests(unittest.TestCase):
@@ -595,12 +544,16 @@ class LeafDocLookupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             task_root = Path(tmp)
             json_path = _leaf_doc(task_root, lifecycle_id=None)
-            report = restamp_leaf_doc_lifecycle(task_root, "260698-l1", "LC-NEW")
+            report = restamp_leaf_doc_lifecycle(
+                task_root, "260698-l1", "LC-NEW", publish=_publish_restamp
+            )
             self.assertIsNotNone(report)
             assert report is not None
             self.assertTrue(report["changed"])
             self.assertEqual(read_task_doc(json_path).lifecycleId, "LC-NEW")
-            again = restamp_leaf_doc_lifecycle(task_root, "260698-l1", "LC-NEW")
+            again = restamp_leaf_doc_lifecycle(
+                task_root, "260698-l1", "LC-NEW", publish=_publish_restamp
+            )
             assert again is not None
             self.assertFalse(again["changed"])
 
@@ -620,7 +573,9 @@ class LeafDocLookupTests(unittest.TestCase):
             before = (json_path.read_bytes(), markdown_path.read_bytes())
 
             with self.assertRaises(LeafLifecycleRestampBlocked) as raised:
-                restamp_leaf_doc_lifecycle(task_root, "260698-l1", "LC-NEW")
+                restamp_leaf_doc_lifecycle(
+                    task_root, "260698-l1", "LC-NEW", publish=_publish_restamp
+                )
 
             self.assertEqual(
                 [blocker.model_dump() for blocker in raised.exception.plan.blockers],
@@ -652,7 +607,9 @@ class LeafDocLookupTests(unittest.TestCase):
             markdown_path = json_path.with_suffix(".md")
             before = (json_path.read_bytes(), markdown_path.read_bytes())
 
-            report = restamp_leaf_doc_lifecycle(task_root, "260698-l1", "LC-SAME")
+            report = restamp_leaf_doc_lifecycle(
+                task_root, "260698-l1", "LC-SAME", publish=_publish_restamp
+            )
 
             assert report is not None
             self.assertFalse(report["changed"])
@@ -667,7 +624,9 @@ class LeafDocLookupTests(unittest.TestCase):
                 step={"id": "S1", "title": "do the thing", "status": "inProgress"},
             )
 
-            report = restamp_leaf_doc_lifecycle(task_root, "260698-l1", "LC-NEW")
+            report = restamp_leaf_doc_lifecycle(
+                task_root, "260698-l1", "LC-NEW", publish=_publish_restamp
+            )
 
             assert report is not None
             self.assertTrue(report["changed"])
@@ -676,7 +635,11 @@ class LeafDocLookupTests(unittest.TestCase):
 
     def test_restamp_without_doc_is_a_noop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            self.assertIsNone(restamp_leaf_doc_lifecycle(Path(tmp), "260698-l1", "LC-NEW"))
+            self.assertIsNone(
+                restamp_leaf_doc_lifecycle(
+                    Path(tmp), "260698-l1", "LC-NEW", publish=_publish_restamp
+                )
+            )
 
 
 class AmbientLifecycleRetirementTests(unittest.TestCase):

@@ -46,7 +46,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def integration_contract(root: Path, *, kind: str = "leaf") -> WorktreeContract:
-    task_root = root / "tasks" / "agents-remember" / "master-task"
+    task_root = root / "ar-coordination" / "tasks" / "agents-remember" / "master-task"
     return WorktreeContract(
         task_id="MASTER-L1",
         task_name="master-task",

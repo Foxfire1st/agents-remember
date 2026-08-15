@@ -16,6 +16,8 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.tasks.leaf_doc import restamp_leaf_doc_lifecycle
+from agents_remember.tasks.store import write_task_docs
+from agents_remember.worktrees.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
@@ -599,7 +601,16 @@ def _create_start_enclosure(
         # follow THIS enclosure's fresh lifecycle. First starts are a no-op (the
         # doc is authored afterwards, stamped by task_doc against the contract).
         if contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
-            restamp_leaf_doc_lifecycle(contract.task_root, contract.leaf_id, contract.lifecycle_id)
+            restamp_leaf_doc_lifecycle(
+                contract.task_root,
+                contract.leaf_id,
+                contract.lifecycle_id,
+                publish=lambda task_root, document: publish_queue_bound_task_facts(
+                    contract,
+                    lambda: write_task_docs(task_root, [document]),
+                    topology_stable=True,
+                ),
+            )
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(

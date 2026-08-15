@@ -17,7 +17,7 @@ from agents_remember.models.lifecycles.operation import (
 
 _OWNERSHIP = StoreOwnership(
     store="lifecycle-operation",
-    writers=("mcp",),
+    writers=("mcp", "lifecycle-operation"),
     compaction_owner=None,
     rationale="the MCP starts operations and its detached worker advances the same record",
 )
@@ -140,6 +140,7 @@ class LifecycleOperationStore:
             return validated
 
     def _write(self, record: LifecycleOperationRecord) -> None:
+        _OWNERSHIP.check_declared_writer()
         validated = LifecycleOperationRecord.model_validate(record.model_dump(mode="json"))
         atomic_write_text(
             self.path,

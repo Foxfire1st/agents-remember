@@ -39,6 +39,10 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
             "that this invocation atomically replaced."
         ),
     )
+    attestationPath: str | None = Field(
+        default=None,
+        description="Structured readiness attestation paired to the rendered curator checklist.",
+    )
     checklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
     curatorActionableCount: int | None = Field(default=None, ge=0)
     memoryRepairCount: int | None = Field(default=None, ge=0)

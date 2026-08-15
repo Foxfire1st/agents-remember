@@ -19,6 +19,11 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
+from agents_remember.worktrees.closeout_queue_lifecycle import (
+    claim_queue_candidate_for_integration,
+    complete_queue_candidate_integration,
+    require_queue_candidate_for_integration,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
@@ -800,6 +805,16 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
             {"state": "already-integrated", **status_payload(contract)},
         )
     if completed is not None:
+        finalized = load_contract(args.contract_path)
+        complete_queue_candidate_integration(
+            finalized,
+            operation_key=args.operation_key,
+            code_commit=finalized.integrated_code_commit or finalized.code_commit,
+            memory_content_commit=(
+                finalized.integrated_memory_content_commit or finalized.memory_content_commit
+            ),
+            ledger_commit=finalized.integrated_ledger_commit or finalized.ledger_commit,
+        )
         return completed
     validate_integrate_contract(contract)
     lineage_block = _integration_lineage_block(contract, persist=not args.dry_run)
@@ -909,6 +924,7 @@ def _apply_integration(
         blocked = _integration_source_state_block(contract, sources)
         if blocked is not None:
             return blocked
+        claim_queue_candidate_for_integration(contract, args.operation_key)
         integrated_memory_content_commit, integrated_ledger_commit, blocked = (
             _integrated_memory_commits(
                 contract, args, sources.current_memory_source, integrated_code_commit
@@ -924,6 +940,13 @@ def _apply_integration(
         blocked = _integration_source_state_block(contract, sources)
         if blocked is not None:
             return blocked
+        require_queue_candidate_for_integration(
+            contract,
+            operation_key=args.operation_key,
+            code_commit=commits.code,
+            memory_content_commit=commits.memory_content,
+            ledger_commit=commits.ledger,
+        )
         report_operation_progress(
             args,
             "source-merge",
@@ -937,6 +960,13 @@ def _apply_integration(
         )
         _merge_integrated_commits(contract, commits)
         source_merged = True
+        complete_queue_candidate_integration(
+            contract,
+            operation_key=args.operation_key,
+            code_commit=commits.code,
+            memory_content_commit=commits.memory_content,
+            ledger_commit=commits.ledger,
+        )
         report_operation_progress(
             args, "contract-finalization", current_command="finalize integration contract edge"
         )

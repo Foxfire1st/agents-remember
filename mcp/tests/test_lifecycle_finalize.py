@@ -14,6 +14,7 @@ from agents_remember.mcp.tools.lifecycle_finalize import lifecycle_finalize_task
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.tasks import CompletionBlocker, TaskDocument, read_task_doc, write_task_doc
+from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
@@ -192,6 +193,28 @@ class LifecycleFinalizeTests(unittest.TestCase):
             )
 
         self.assertEqual(_payload(result)["state"], "cleanup-blocked")
+        self.assertEqual(read_task_doc(leaf_json).status, "inProgress")
+        self.assertEqual(read_task_doc(master_json).subTasks[0].status, "inProgress")
+
+    def test_queue_refusal_after_cleanup_does_not_mutate_task_docs(self) -> None:
+        contract = self._contract()
+        leaf_json, master_json = self._docs(contract)
+        with patch(
+            "agents_remember.worktrees.modules.finalize._reconcile_task_documents",
+            side_effect=CloseoutQueueError("closeout-queue-blocked", "lane is owned"),
+        ):
+            result = finalize_result(
+                FinalizeArgs(
+                    contract_path=contract.contract_path,
+                    task_doc_path=leaf_json,
+                    master_doc_path=master_json,
+                    subtask_number="14",
+                )
+            )
+        payload = _payload(result)
+        self.assertEqual(payload["state"], "task-queue-blocked")
+        self.assertIn("closeout-queue-blocked", payload["blockers"][0])
+        self.assertIn("sprint closeout queue", payload["summary"])
         self.assertEqual(read_task_doc(leaf_json).status, "inProgress")
         self.assertEqual(read_task_doc(master_json).subTasks[0].status, "inProgress")
 

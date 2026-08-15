@@ -12,12 +12,13 @@ directory names like ``260628-l11``).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.readiness import CompletionBlocker, completion_blockers
-from agents_remember.tasks.store import read_task_doc, write_task_docs
+from agents_remember.tasks.store import read_task_doc
 
 
 class TerminalLeafResolutionError(ValueError):
@@ -175,7 +176,13 @@ def plan_leaf_doc_lifecycle_restamp(
     return LeafLifecycleRestampPlan(json_path, lifecycle_id, updated, True, blockers)
 
 
-def restamp_leaf_doc_lifecycle(task_root: Path, leaf_id: str, lifecycle_id: str) -> dict | None:
+def restamp_leaf_doc_lifecycle(
+    task_root: Path,
+    leaf_id: str,
+    lifecycle_id: str,
+    *,
+    publish: Callable[[Path, TaskDocument], object],
+) -> dict | None:
     """Point the leaf's doc at ``lifecycle_id`` (the enclosure's current lifecycle).
 
     Overwrites any previous stamp: the enclosure's newest lifecycle IS the doc's
@@ -189,7 +196,7 @@ def restamp_leaf_doc_lifecycle(task_root: Path, leaf_id: str, lifecycle_id: str)
     if plan.doc_path is None:
         return None
     if plan.candidate is not None:
-        write_task_docs(task_root, [plan.candidate])
+        publish(task_root, plan.candidate)
     return {
         "docPath": plan.doc_path.as_posix(),
         "lifecycleId": lifecycle_id,

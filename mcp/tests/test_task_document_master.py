@@ -415,7 +415,7 @@ class MasterApplicationTests(unittest.TestCase):
                     "slug": "01_leaf",
                     "title": "L",
                     "kind": "subTask",
-                    "repo": "r",
+                    "repo": "agents-remember",
                     "createdAt": "2026-01-01T00:00",
                 }
             ),
@@ -485,6 +485,18 @@ class MasterApplicationTests(unittest.TestCase):
         self.assertFalse(leaf_json.exists())
         self.assertFalse(leaf_md.exists())
         self.assertIn(leaf_json.as_posix(), result["deletedFiles"])
+
+    def test_remove_subtask_tolerates_one_already_missing_leaf_artifact(self) -> None:
+        self._create()
+        leaf_json, leaf_md = self._author_leaf()
+        self._complete_row("1")
+        leaf_md.unlink()
+        result = self._op("remove_subtask", subtask={"number": "1"})
+        self.assertFalse(leaf_json.exists())
+        self.assertFalse(leaf_md.exists())
+        self.assertIn(leaf_json.as_posix(), result["deletedFiles"])
+        self.assertNotIn(leaf_md.as_posix(), result["deletedFiles"])
+        self.assertEqual(read_task_doc(Path(str(result["docPath"]))).subTasks, [])
 
     def test_remove_subtask_keep_file_retains_leaf_doc(self) -> None:
         # keep_file drops the index row but leaves the leaf doc on disk.

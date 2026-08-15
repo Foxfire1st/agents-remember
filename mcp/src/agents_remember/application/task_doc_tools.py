@@ -15,10 +15,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
@@ -36,6 +37,7 @@ from agents_remember.tasks import (
     step_total,
     write_task_docs,
 )
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
@@ -60,12 +62,14 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+from .task_doc_queue_scope import QueueScopeError, governing_queue_scope
 from .task_execution_topology import (
     ExecutionTopologyEditRequest,
     ExecutionTopologyError,
     ExecutionTopologyMigrationRequest,
     enforce_execution_topology_edit,
     migrate_execution_topology,
+    require_commanded_masters_completed,
 )
 from .worktree_tools import end_ambient_lifecycle_if_anchored
 
@@ -159,6 +163,17 @@ class _TaskDocSpecialContext:
     dry_run: bool
 
 
+@dataclass(frozen=True)
+class _TaskDocPublication:
+    config: McpRuntimeConfig
+    target: TaskDocTarget
+    task_root: Path
+    original: TaskDocument | None
+    candidate: TaskDocument
+    documents: list[TaskDocument]
+    publisher: Callable[[], list[tuple[Path, Path]]] | None = None
+
+
 def task_doc_tool(
     config: McpRuntimeConfig,
     target: TaskDocTarget,
@@ -234,8 +249,74 @@ def task_doc_tool(
     docs: list[TaskDocument] = [doc]
     if master_sync.changed and master_sync.master is not None:
         docs.append(master_sync.master)
-    json_path, markdown_path = write_task_docs(task_root, docs)[0]
+    written = _publish_task_doc_set(
+        _TaskDocPublication(config, target, task_root, original, doc, docs)
+    )
+    json_path, markdown_path = written[0]
     return _result(operation, doc, json_path, markdown_path, master_sync=master_sync)
+
+
+def _publish_task_doc_set(context: _TaskDocPublication) -> list[tuple[Path, Path]]:
+    def publication() -> list[tuple[Path, Path]]:
+        return (
+            context.publisher()
+            if context.publisher is not None
+            else write_task_docs(context.task_root, context.documents)
+        )
+
+    try:
+        scope = governing_queue_scope(
+            context.config.coordination_root,
+            context.target.repo_id,
+            context.task_root,
+            context.original,
+            context.candidate,
+        )
+    except QueueScopeError as exc:
+        raise TaskDocError(str(exc)) from exc
+    if scope is None:
+        return publication()
+    queue = CloseoutQueueStore(context.config.coordination_root, scope.sprint_ref)
+    if context.candidate.kind != "master" or not context.candidate.orchestrates:
+        if scope.owning_master is None:
+            raise TaskDocError("governed master/leaf edit has no owning master queue scope")
+        return queue.publish_task_facts_update(
+            publication,
+            owning_master=scope.owning_master,
+            topology_stable=_task_topology_stable(context.original, context.candidate),
+        )
+    return cast(
+        list[tuple[Path, Path]],
+        queue.publish_sprint_update(
+            publication,
+            completed=context.candidate.status == "Completed",
+            recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+            validate_completion=lambda: require_commanded_masters_completed(
+                TaskDocumentTopology(context.config.coordination_root),
+                scope.sprint_ref,
+                {scope.sprint_ref: context.candidate},
+            ),
+        ),
+    )
+
+
+def _task_topology_stable(original: TaskDocument | None, candidate: TaskDocument) -> bool:
+    """Whether an in-barrier task update preserves scheduling identity and membership."""
+
+    if original is None or original.kind != candidate.kind:
+        return False
+    stable_fields = ("id", "slug", "title", "repo", "orchestrates", "executionNature")
+    if any(getattr(original, field) != getattr(candidate, field) for field in stable_fields):
+        return False
+    if candidate.kind != "master":
+        return True
+
+    def identity(row: SubTaskRef) -> tuple[str, str, str | None]:
+        return row.number, row.name, row.file
+
+    return [identity(row) for row in original.subTasks] == [
+        identity(row) for row in candidate.subTasks
+    ]
 
 
 def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, Any] | None:
@@ -264,10 +345,8 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
             raise TaskDocError(str(exc)) from exc
     if context.operation == "remove_subtask":
         return _remove_subtask(
-            context.task_root,
-            context.target.slug,
+            context,
             context.edit.subtask,
-            context.dry_run,
         )
     return None
 
@@ -818,10 +897,8 @@ def _upsert_section(data: dict[str, Any], section: dict[str, Any]) -> None:
 
 
 def _remove_subtask(
-    task_root: Path,
-    slug: str | None,
+    context: _TaskDocSpecialContext,
     subtask: dict[str, Any] | None,
-    dry_run: bool,
 ) -> dict[str, Any]:
     """Remove a sub-task row from a master and (by default) delete the leaf doc it points at.
 
@@ -834,7 +911,7 @@ def _remove_subtask(
         raise TaskDocError("remove_subtask requires subtask.number")
     number = str(subtask["number"])
     keep_file = bool(subtask.get("keep_file"))
-    doc = read_task_doc(_existing_json(task_root, slug))
+    doc = read_task_doc(_existing_json(context.task_root, context.target.slug))
     if doc.kind != "master":
         raise TaskDocError("remove_subtask is only valid for a master document")
     data = doc.model_dump(by_alias=True)
@@ -847,27 +924,42 @@ def _remove_subtask(
     _enforce_preserves_unresolved_master_rows("remove_subtask", doc, updated)
     _enforce_terminal_status(updated)
     _enforce_completed_master_rows(
-        task_root,
+        context.task_root,
         "remove_subtask",
         doc,
         updated,
         TaskDocEdit(subtask=subtask),
     )
-    leaf_files = _leaf_doc_files(task_root, match)
-    if dry_run:
-        result = _preview("remove_subtask", updated, task_root)
+    leaf_files = _leaf_doc_files(context.task_root, match)
+    if context.dry_run:
+        result = _preview("remove_subtask", updated, context.task_root)
         result["removedSubtask"] = number
         result["wouldDeleteFiles"] = (
             [] if keep_file else [path.as_posix() for path in leaf_files if path.exists()]
         )
         return result
-    json_path, markdown_path = write_task_docs(task_root, [updated])[0]
     deleted: list[str] = []
-    if not keep_file:
-        for path in leaf_files:
-            if path.exists():
-                path.unlink()
-                deleted.append(path.as_posix())
+
+    def publication() -> list[tuple[Path, Path]]:
+        written = write_task_docs(context.task_root, [updated])
+        if not keep_file:
+            for path in leaf_files:
+                if path.exists():
+                    path.unlink()
+                    deleted.append(path.as_posix())
+        return written
+
+    json_path, markdown_path = _publish_task_doc_set(
+        _TaskDocPublication(
+            context.config,
+            context.target,
+            context.task_root,
+            doc,
+            updated,
+            [updated],
+            publication,
+        )
+    )[0]
     result = _result("remove_subtask", updated, json_path, markdown_path)
     result["removedSubtask"] = number
     result["deletedFiles"] = deleted

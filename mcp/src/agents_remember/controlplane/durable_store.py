@@ -33,7 +33,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -55,8 +55,10 @@ capability that is cheap now and unbuildable later is telling an old record from
 
 SUPPORTED_SCHEMA_MAJOR = 1
 
-ProcessRole = Literal["mcp", "dashboard"]
-"""The two long-lived processes that write these logs concurrently."""
+ProcessRole = Literal["mcp", "dashboard", "lifecycle-operation"]
+"""Every declared execution process that can write a shared durable store."""
+
+CompactionRole = Literal["mcp", "dashboard"]
 
 
 class DurableStoreError(RuntimeError):
@@ -71,23 +73,26 @@ class UnsafeLockFilesystemError(DurableStoreError):
     """``flock`` on the coordination root does not actually exclude, so it cannot be relied on."""
 
 
-# Kernel owns execution mode; this module exposes only the daemon-role view.
+# Kernel owns execution mode; this module exposes the shared-store writer view.
 
 
 def declare_process_role(role: ProcessRole) -> None:
-    """Declare which of the two concurrent writers this process is.
+    """Declare which concurrent shared-store writer this process is.
 
     ``mcp/server.py::main`` and ``cli/dashboard.py::{run,_dev_app}`` call this at their process
-    entry points. Factories used in-process do not declare a role. The reload worker declares in
-    ``_dev_app`` because it starts in a fresh interpreter. Undeclared CLI and test processes skip
-    advisory writer checks; unconditional log locking still protects their writes.
+    entry points. Detached lifecycle workers declare their own mode before touching operation,
+    gate, or queue stores. Factories used in-process do not declare a role. The reload worker
+    declares in ``_dev_app`` because it starts in a fresh interpreter. Undeclared CLI and test
+    processes skip advisory writer checks; unconditional log locking still protects their writes.
     """
     checkout_coordination.declare_execution_mode(role)
 
 
 def declared_process_role() -> ProcessRole | None:
-    """Return the daemon role; CLI and explicit test modes have no store role."""
-    return checkout_coordination.declared_daemon_role()
+    """Return a declared shared-store writer; CLI and explicit test modes have no role."""
+
+    mode = checkout_coordination.declared_execution_mode()
+    return cast(ProcessRole, mode) if mode in {"mcp", "dashboard", "lifecycle-operation"} else None
 
 
 @dataclass(frozen=True)
@@ -102,7 +107,7 @@ class StoreOwnership:
 
     store: str
     writers: tuple[ProcessRole, ...]
-    compaction_owner: ProcessRole | None
+    compaction_owner: CompactionRole | None
     rationale: str
 
     def check_declared_writer(self) -> None:
@@ -138,7 +143,7 @@ class StoreOwnership:
 
 GATE_OWNERSHIP = StoreOwnership(
     store="gate",
-    writers=("mcp", "dashboard"),
+    writers=("mcp", "dashboard", "lifecycle-operation"),
     compaction_owner="mcp",
     rationale=(
         "The MCP process mints, decides, applies and deletes gates (application/gate_tools.py, "
