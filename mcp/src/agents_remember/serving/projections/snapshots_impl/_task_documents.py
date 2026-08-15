@@ -19,6 +19,7 @@ from agents_remember.observer.projection import (
     TaskCodeExampleNode,
     TaskDecisionNode,
     TaskDocNode,
+    TaskExecutionGraphNode,
     TaskSectionNode,
     TaskStepDispositionNode,
     TaskStepNode,
@@ -367,6 +368,15 @@ def _task_doc_node(
         else [],
         masterLifecycleId=parent_lifecycle,
         orchestrates=list(doc.orchestrates),
+        executionNature=doc.executionNature,
+        executionGraph=(
+            TaskExecutionGraphNode.model_validate(doc.executionGraph.model_dump(mode="json"))
+            if doc.executionGraph is not None
+            else None
+        ),
+        executionWaves=(
+            doc.executionGraph.derived_waves() if doc.executionGraph is not None else []
+        ),
     )
 
 
@@ -380,6 +390,10 @@ def _task_doc_body_revision(doc: TaskDocument) -> str:
         "openQuestions": list(doc.openQuestions),
         "references": list(doc.references),
         "sections": [section.model_dump(mode="json") for section in doc.sections],
+        "executionNature": doc.executionNature,
+        "executionGraph": (
+            doc.executionGraph.model_dump(mode="json") if doc.executionGraph is not None else None
+        ),
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

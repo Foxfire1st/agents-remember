@@ -294,44 +294,27 @@ class ApplicationTests1(ApplicationTests):
         doc = read_task_doc(Path(str(updated["docPath"])))
         self.assertEqual(doc.statusNote, "core JSON format landed")
 
-    def test_set_field_orchestrates_on_master(self) -> None:
-        # L14: `orchestrates` is a mutable flat string list on a master (the set_field path
-        # makes an existing master an orchestration task without a replace); the render carries it.
-        self._create_parent_master()
-        updated = task_doc_tool(
-            self.cfg,
-            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
-            operation="set_field",
-            edit=TaskDocEdit(fields={"orchestrates": ["260706_management-repo"]}),
+    def test_set_field_orchestration_fields_require_explicit_topology_migration(self) -> None:
+        # A legacy master cannot silently become an orchestration sprint or acquire sprint-only
+        # integration policy: either edit would leave its graph and commanded-master natures
+        # undefined.
+        created = self._create_parent_master()
+        refusals = (
+            ({"orchestrates": ["260706_management-repo"]}, "migration-required"),
+            ({"integrationBranch": "ar/sprint-super"}, "orchestration sprint"),
         )
-        doc = read_task_doc(Path(str(updated["docPath"])))
-        self.assertEqual(doc.orchestrates, ["260706_management-repo"])
-        rendered = Path(str(updated["renderedPath"])).read_text(encoding="utf-8")
-        self.assertIn("**Orchestrates:** `260706_management-repo`", rendered)
-
-        preview = task_doc_tool(
-            self.cfg,
-            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
-            operation="set_field",
-            edit=TaskDocEdit(fields={"integrationBranch": "ar/sprint-super"}),
-            dry_run=True,
-        )
-        self.assertTrue(preview["dryRun"])
-        self.assertIn("**Integration branch:** `ar/sprint-super`", preview["rendered"])
-        self.assertIsNone(read_task_doc(Path(str(updated["docPath"]))).integrationBranch)
-
-        applied = task_doc_tool(
-            self.cfg,
-            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
-            operation="set_field",
-            edit=TaskDocEdit(fields={"integrationBranch": "ar/sprint-super"}),
-        )
-        sprint = read_task_doc(Path(str(applied["docPath"])))
-        self.assertEqual(sprint.integrationBranch, "ar/sprint-super")
-        self.assertIn(
-            "**Integration branch:** `ar/sprint-super`",
-            Path(str(applied["renderedPath"])).read_text(encoding="utf-8"),
-        )
+        for fields, expected in refusals:
+            with self.subTest(fields=fields), self.assertRaisesRegex(TaskDocError, expected):
+                task_doc_tool(
+                    self.cfg,
+                    TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
+                    operation="set_field",
+                    edit=TaskDocEdit(fields=fields),
+                )
+        doc_path = Path(str(created["docPath"]))
+        unchanged = read_task_doc(doc_path)
+        self.assertEqual(unchanged.orchestrates, [])
+        self.assertIsNone(unchanged.integrationBranch)
 
     def test_set_field_orchestrates_rejected_on_leaf(self) -> None:
         self._create()

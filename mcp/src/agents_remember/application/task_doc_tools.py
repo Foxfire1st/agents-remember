@@ -60,6 +60,13 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+from .task_execution_topology import (
+    ExecutionTopologyEditRequest,
+    ExecutionTopologyError,
+    ExecutionTopologyMigrationRequest,
+    enforce_execution_topology_edit,
+    migrate_execution_topology,
+)
 from .worktree_tools import end_ambient_lifecycle_if_anchored
 
 VALID_OPERATIONS = (
@@ -73,6 +80,7 @@ VALID_OPERATIONS = (
     "set_section",
     "append_decision",
     "record_route_review",
+    "migrate_execution_topology",
     "set_field",
     "get",
 )
@@ -95,6 +103,8 @@ _MUTABLE_FIELDS = frozenset(
         "statusNote",
         "orchestrates",
         "integrationBranch",
+        "executionNature",
+        "executionGraph",
     }
 )
 
@@ -138,6 +148,17 @@ NO_EDIT = TaskDocEdit()
 """The read-only form, for operations (``get``) that change nothing."""
 
 
+@dataclass(frozen=True)
+class _TaskDocSpecialContext:
+    config: McpRuntimeConfig
+    target: TaskDocTarget
+    task_root: Path
+    operation: str
+    edit: TaskDocEdit
+    fields: dict[str, Any]
+    dry_run: bool
+
+
 def task_doc_tool(
     config: McpRuntimeConfig,
     target: TaskDocTarget,
@@ -154,13 +175,19 @@ def task_doc_tool(
     payload_fields = edit.fields or {}
     slug = target.slug
 
-    if operation == "get":
-        json_path = _existing_json(task_root, slug)
-        doc = read_task_doc(json_path)
-        return _result(operation, doc, json_path, markdown_path_for(task_root, doc))
-
-    if operation == "remove_subtask":
-        return _remove_subtask(task_root, slug, edit.subtask, dry_run)
+    special = _special_task_doc_operation(
+        _TaskDocSpecialContext(
+            config=config,
+            target=target,
+            task_root=task_root,
+            operation=operation,
+            edit=edit,
+            fields=payload_fields,
+            dry_run=dry_run,
+        )
+    )
+    if special is not None:
+        return special
 
     original: TaskDocument | None = None
     if operation == "create":
@@ -183,6 +210,20 @@ def task_doc_tool(
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
     _enforce_terminal_status(doc)
     _enforce_completed_master_rows(task_root, operation, original, doc, edit)
+    try:
+        enforce_execution_topology_edit(
+            ExecutionTopologyEditRequest(
+                coordination_root=config.coordination_root,
+                repo_id=target.repo_id,
+                task_root=task_root,
+                operation=operation,
+                original=original,
+                candidate=doc,
+                fields=payload_fields,
+            )
+        )
+    except ExecutionTopologyError as exc:
+        raise TaskDocError(str(exc)) from exc
 
     try:
         master_sync = plan_master_sync(task_root, doc)
@@ -195,6 +236,40 @@ def task_doc_tool(
         docs.append(master_sync.master)
     json_path, markdown_path = write_task_docs(task_root, docs)[0]
     return _result(operation, doc, json_path, markdown_path, master_sync=master_sync)
+
+
+def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, Any] | None:
+    if context.operation == "get":
+        json_path = _existing_json(context.task_root, context.target.slug)
+        doc = read_task_doc(json_path)
+        return _result(
+            context.operation,
+            doc,
+            json_path,
+            markdown_path_for(context.task_root, doc),
+        )
+    if context.operation == "migrate_execution_topology":
+        try:
+            return migrate_execution_topology(
+                ExecutionTopologyMigrationRequest(
+                    coordination_root=context.config.coordination_root,
+                    repo_id=context.target.repo_id,
+                    task_root=context.task_root,
+                    slug=context.target.slug,
+                    fields=context.fields,
+                    dry_run=context.dry_run,
+                )
+            )
+        except ExecutionTopologyError as exc:
+            raise TaskDocError(str(exc)) from exc
+    if context.operation == "remove_subtask":
+        return _remove_subtask(
+            context.task_root,
+            context.target.slug,
+            context.edit.subtask,
+            context.dry_run,
+        )
+    return None
 
 
 def _resolve(

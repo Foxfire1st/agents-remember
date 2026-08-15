@@ -490,6 +490,9 @@ export interface TaskDocNode {
   decisions: TaskDecisionNode[];
   design?: string;
   docPath: string;
+  executionGraph?: TaskExecutionGraphNode;
+  executionNature?: "organizational" | "atomic";
+  executionWaves: TaskDocumentRef[][];
   id: string;
   kind: string;
   lifecycleId?: string;
@@ -512,6 +515,17 @@ export interface TaskDocNode {
 export interface TaskDocumentRef {
   path: string;
   repository: string;
+}
+
+export interface TaskExecutionEdgeNode {
+  predecessor: TaskDocumentRef;
+  reason: string;
+  successor: TaskDocumentRef;
+}
+
+export interface TaskExecutionGraphNode {
+  edges: TaskExecutionEdgeNode[];
+  nodes: TaskDocumentRef[];
 }
 
 export interface TaskSectionNode {

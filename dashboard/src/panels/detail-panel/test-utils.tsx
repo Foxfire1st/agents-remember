@@ -36,6 +36,7 @@ export function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | 
     openQuestions: [],
     references: [],
     orchestrates: [],
+    executionWaves: [],
     subTasks: [],
     sections: [],
     ...over,

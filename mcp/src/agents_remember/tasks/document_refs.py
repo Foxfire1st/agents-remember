@@ -6,12 +6,13 @@ but it never decides who a seat's parent or child is.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks.document import TaskDocument
+from agents_remember.tasks.document import SprintExecutionGraph, TaskDocument
 from agents_remember.tasks.store import read_task_doc
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
@@ -186,8 +187,106 @@ class TaskDocumentTopology:
             return tuple(dict.fromkeys(children))
         return tuple(parent.ref for parent in self._commanded_masters(resolved))
 
+    def validate_execution_topology(
+        self,
+        sprint_ref: TaskDocumentRef,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """Validate one sprint's exact commanded membership and execution contract.
+
+        Legacy documents remain parseable so the explicit migration operation can inspect
+        them. They never acquire inferred meaning: the first topology consumer reports a
+        migration-required status until both the sprint graph and every commanded master's
+        execution nature exist.
+        """
+
+        candidates = overrides or {}
+        sprint = self._resolve_with_overrides(sprint_ref, candidates)
+        if sprint.document.kind != "master" or not sprint.document.orchestrates:
+            raise TaskDocumentRefError(
+                "task-execution-graph-sprint-required",
+                f"execution graph requires an orchestration sprint: {sprint_ref.key}",
+            )
+        graph = sprint.document.executionGraph
+        if graph is None:
+            raise TaskDocumentRefError(
+                "task-execution-topology-migration-required",
+                f"orchestration sprint {sprint_ref.key} has no executionGraph; "
+                "run task_doc.migrate_execution_topology",
+            )
+        commanded = self._commanded_masters_exact(sprint, candidates)
+        commanded_refs = {master.ref for master in commanded}
+        graph_refs = set(graph.nodes)
+        if graph_refs != commanded_refs:
+            missing = sorted(ref.key for ref in commanded_refs - graph_refs)
+            extra = sorted(ref.key for ref in graph_refs - commanded_refs)
+            raise TaskDocumentRefError(
+                "task-execution-graph-membership-invalid",
+                f"executionGraph membership must exactly match orchestrates; "
+                f"missing={missing!r}, extra={extra!r}",
+            )
+        for master in commanded:
+            if master.document.executionNature is None:
+                raise TaskDocumentRefError(
+                    "task-execution-topology-migration-required",
+                    f"commanded master {master.ref.key} has no executionNature; "
+                    "run task_doc.migrate_execution_topology",
+                )
+        return commanded
+
+    def execution_waves(self, sprint_ref: TaskDocumentRef) -> list[list[TaskDocumentRef]]:
+        """Return the graph-derived waves after exact cross-document validation."""
+
+        sprint = self.resolve(sprint_ref)
+        self.validate_execution_topology(sprint_ref, overrides={sprint_ref: sprint.document})
+        graph = cast(SprintExecutionGraph, sprint.document.executionGraph)
+        return graph.derived_waves()
+
+    def execution_sprints_affected_by_master(
+        self,
+        master_ref: TaskDocumentRef,
+        *,
+        original: TaskDocument | None,
+        candidate: TaskDocument,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """Return every sprint whose alias-based command may change under a master edit."""
+
+        aliases = {Path(master_ref.path).parent.name, candidate.id, candidate.title}
+        if original is not None:
+            aliases.update({original.id, original.title})
+        return tuple(
+            sprint
+            for sprint in self._master_documents(master_ref.repository)
+            if sprint.ref != master_ref
+            and sprint.document.orchestrates
+            and aliases.intersection(sprint.document.orchestrates)
+        )
+
     def _repo_root(self, repository: str) -> Path:
         return (self.coordination_root / "tasks" / repository).resolve(strict=False)
+
+    def _resolve_with_overrides(
+        self,
+        ref: TaskDocumentRef,
+        overrides: Mapping[TaskDocumentRef, TaskDocument],
+    ) -> ResolvedTaskDocument:
+        document = overrides.get(ref)
+        if document is None:
+            return self.resolve(ref)
+        root = self._repo_root(ref.repository)
+        path = (root / ref.path).resolve(strict=False)
+        if not path.is_relative_to(root):
+            raise TaskDocumentRefError(
+                "task-document-outside-root",
+                f"task document {ref.path!r} escapes tasks/{ref.repository}",
+            )
+        if document.repo != ref.repository:
+            raise TaskDocumentRefError(
+                "task-document-repo-mismatch",
+                f"task document {ref.key} declares repo {document.repo!r}",
+            )
+        return ResolvedTaskDocument(ref=ref, path=path, document=document)
 
     def _leaf_parent(self, leaf: ResolvedTaskDocument) -> ResolvedTaskDocument:
         parent_path = leaf.path.parent / "task.json"
@@ -250,3 +349,46 @@ class TaskDocumentTopology:
             if commanded.intersection(names):
                 matches.append(candidate)
         return tuple(matches)
+
+    def _commanded_masters_exact(
+        self,
+        sprint: ResolvedTaskDocument,
+        overrides: Mapping[TaskDocumentRef, TaskDocument],
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        available = {
+            candidate.ref: self._resolve_with_overrides(candidate.ref, overrides)
+            for candidate in self._master_documents(sprint.ref.repository)
+            if candidate.ref != sprint.ref
+        }
+        for ref, document in overrides.items():
+            if (
+                ref.repository == sprint.ref.repository
+                and ref != sprint.ref
+                and document.kind == "master"
+            ):
+                available[ref] = self._resolve_with_overrides(ref, overrides)
+        resolved: list[ResolvedTaskDocument] = []
+        for commanded_name in sprint.document.orchestrates:
+            matches = [
+                candidate
+                for candidate in available.values()
+                if commanded_name
+                in {
+                    candidate.path.parent.name,
+                    candidate.document.id,
+                    candidate.document.title,
+                }
+            ]
+            if len(matches) != 1:
+                raise TaskDocumentRefError(
+                    "task-execution-graph-membership-invalid",
+                    f"orchestrates entry {commanded_name!r} resolves to {len(matches)} masters",
+                )
+            resolved.append(matches[0])
+        refs = [master.ref for master in resolved]
+        if len(refs) != len(set(refs)):
+            raise TaskDocumentRefError(
+                "task-execution-graph-membership-invalid",
+                "orchestrates contains multiple aliases for the same commanded master",
+            )
+        return tuple(resolved)

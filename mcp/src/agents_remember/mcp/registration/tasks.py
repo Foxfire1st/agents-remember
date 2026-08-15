@@ -89,7 +89,8 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
-        'set_section' | 'append_decision' | 'record_route_review' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        'set_section' | 'append_decision' | 'record_route_review' | 'migrate_execution_topology' |
+        'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
         title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
@@ -106,6 +107,12 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
         evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
         evidence path must be a real task-relative file. It overwrites the prior candidate's review.
+        'migrate_execution_topology' targets an orchestration sprint and atomically authors its
+        executionGraph plus every commanded master's explicit executionNature from
+        fields={masters:[{taskDocumentRef:{repository,path}, executionNature}],
+        executionGraph:{nodes:[{repository,path}], edges:[{predecessor:{repository,path},
+        successor:{repository,path}, reason}]}}; dry_run previews every affected JSON/Markdown
+        pair, the ordered master classifications, and the derived waves.
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
         scalar/list updates; 'set_status' takes fields.status. Completed refuses while any declared
         step/substep (or master row) remains unresolved. dry_run=true builds + validates and

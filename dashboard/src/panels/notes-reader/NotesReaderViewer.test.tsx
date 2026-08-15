@@ -206,6 +206,7 @@ function masterDoc(): TaskDocNode {
     openQuestions: [],
     references: [],
     orchestrates: [],
+    executionWaves: [],
     subTasks: [],
     sections: [],
   };

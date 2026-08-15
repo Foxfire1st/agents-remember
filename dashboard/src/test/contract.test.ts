@@ -314,6 +314,7 @@ const VOCABULARIES: Record<
   "projection.analytics.taskDocuments[].steps[].substeps[].disposition.recordedVia": [
     "task_doc.skip_step",
   ],
+  "projection.analytics.taskDocuments[].executionNature": ["organizational", "atomic"],
   "projection.enclosures[].lifecycleOperation.kind": ["closeout", "integrate"],
   "projection.enclosures[].lifecycleOperation.status": [
     "queued",

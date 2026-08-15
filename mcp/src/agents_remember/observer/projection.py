@@ -25,6 +25,7 @@ from typing import Any, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+from agents_remember.models.task_document import MasterExecutionNature
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.lifecycle_state import (
@@ -614,6 +615,25 @@ class TaskSectionNode(BaseModel):
     body: str = ""
 
 
+class TaskExecutionEdgeNode(BaseModel):
+    """One reasoned dependency edge in a sprint task document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    predecessor: TaskDocumentRef
+    successor: TaskDocumentRef
+    reason: str
+
+
+class TaskExecutionGraphNode(BaseModel):
+    """Persisted AON graph projected without adding scheduler judgment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[TaskDocumentRef] = Field(default_factory=list)
+    edges: list[TaskExecutionEdgeNode] = Field(default_factory=list)
+
+
 class TaskDocNode(BaseModel):
     """A task document's progress and reader content (slice 3c, surface 7).
 
@@ -661,6 +681,12 @@ class TaskDocNode(BaseModel):
     # orchestration task -- the master task names it commands. The dashboard derives the
     # orchestration > master > leaf hierarchy from it; docs without the field render as before.
     orchestrates: list[str] = Field(default_factory=list)
+    # A commanded master's declared Git execution nature. None is an explicit legacy/migration
+    # signal, never an organizational default.
+    executionNature: MasterExecutionNature | None = None
+    # Sprint-only persisted graph plus mechanically derived topological waves.
+    executionGraph: TaskExecutionGraphNode | None = None
+    executionWaves: list[list[TaskDocumentRef]] = Field(default_factory=list)
 
 
 class SeriesSubTaskNode(BaseModel):

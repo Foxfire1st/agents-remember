@@ -8,9 +8,10 @@ shell program words, and path-qualified executables.
 ``os.replace`` (including imported aliases) and one-argument ``Path.replace`` outside the
 owner.
 
-The reviewed task-document writer set owns calls to ``write_task_doc`` and
-``write_task_docs``. The census follows direct imports, import aliases, module aliases, and
-relative imports so a new production publisher cannot appear outside that set unnoticed.
+The reviewed task-document writer set owns calls to ``write_task_doc``,
+``write_task_docs``, and ``write_task_doc_batch``. The census follows direct imports, import
+aliases, module aliases, and relative imports so a new production publisher cannot appear outside
+that set unnoticed.
 
 Known false-positive boundaries:
 
@@ -39,13 +40,14 @@ TASK_DOCUMENT_STORE_OWNER = "tasks/store.py"
 TASK_DOCUMENT_WRITER_AUTHORITIES = frozenset(
     {
         "application/task_doc_tools.py",
+        "application/task_execution_topology.py",
         "tasks/leaf_doc.py",
         TASK_DOCUMENT_STORE_OWNER,
         "worktrees/modules/finalize.py",
         "worktrees/reopen.py",
     }
 )
-TASK_DOCUMENT_WRITE_APIS = frozenset({"write_task_doc", "write_task_docs"})
+TASK_DOCUMENT_WRITE_APIS = frozenset({"write_task_doc", "write_task_docs", "write_task_doc_batch"})
 TASK_DOCUMENT_WRITE_MODULES = frozenset({"agents_remember.tasks", "agents_remember.tasks.store"})
 
 GIT_REMEDIATION = (

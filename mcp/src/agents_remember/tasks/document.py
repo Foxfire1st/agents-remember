@@ -20,7 +20,8 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agents_remember.models.task_document import DocStatus, StepStatus
+from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
@@ -156,6 +157,84 @@ class TaskEnclosureRef(_Doc):
     enclosurePath: str
 
 
+class SprintExecutionEdge(_Doc):
+    """One reasoned predecessor edge in the sprint's activity-on-node graph."""
+
+    predecessor: TaskDocumentRef
+    successor: TaskDocumentRef
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _trim_nonblank_reason(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("execution-graph edge reason must not be blank")
+        return trimmed
+
+    @model_validator(mode="after")
+    def _check_distinct_endpoints(self) -> Self:
+        if self.predecessor == self.successor:
+            raise ValueError("execution-graph edge cannot point a master to itself")
+        return self
+
+
+class SprintExecutionGraph(_Doc):
+    """The persisted AON graph; positions and waves are always derived from it."""
+
+    nodes: list[TaskDocumentRef] = Field(min_length=1)
+    edges: list[SprintExecutionEdge] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_graph_shape(self) -> Self:
+        node_set = set(self.nodes)
+        if len(node_set) != len(self.nodes):
+            raise ValueError("execution-graph nodes must be unique")
+        edge_keys = [(edge.predecessor, edge.successor) for edge in self.edges]
+        if len(set(edge_keys)) != len(edge_keys):
+            raise ValueError("execution-graph edges must be unique")
+        unknown = {
+            endpoint
+            for edge in self.edges
+            for endpoint in (edge.predecessor, edge.successor)
+            if endpoint not in node_set
+        }
+        if unknown:
+            raise ValueError(
+                "execution-graph edge endpoints must be declared nodes: "
+                f"{sorted(ref.key for ref in unknown)!r}"
+            )
+        self.derived_waves()
+        return self
+
+    def derived_waves(self) -> list[list[TaskDocumentRef]]:
+        """Return deterministic topological waves, refusing a directed cycle."""
+
+        order = {node: index for index, node in enumerate(self.nodes)}
+        indegree = dict.fromkeys(self.nodes, 0)
+        successors: dict[TaskDocumentRef, list[TaskDocumentRef]] = {node: [] for node in self.nodes}
+        for edge in self.edges:
+            indegree[edge.successor] += 1
+            successors[edge.predecessor].append(edge.successor)
+        ready = [node for node in self.nodes if indegree[node] == 0]
+        waves: list[list[TaskDocumentRef]] = []
+        visited = 0
+        while ready:
+            wave = sorted(ready, key=order.__getitem__)
+            waves.append(wave)
+            visited += len(wave)
+            next_ready: list[TaskDocumentRef] = []
+            for node in wave:
+                for successor in successors[node]:
+                    indegree[successor] -= 1
+                    if indegree[successor] == 0:
+                        next_ready.append(successor)
+            ready = next_ready
+        if visited != len(self.nodes):
+            raise ValueError("execution-graph must be acyclic")
+        return waves
+
+
 class SubTaskRef(_Doc):
     """One slice in a master's series index; ``status`` drives the ✅/🔨/⬜ marker."""
 
@@ -199,6 +278,11 @@ class TaskDocument(_Doc):
     # Sprint-owned branch identity.  A manager's master integration edge is based on this
     # declaration, never on whichever branch the repository checkout happens to have active.
     integrationBranch: str | None = None
+    # Organizational containment and Git execution topology are distinct. Legacy documents may
+    # omit these fields only so the explicit migration operation can read and upgrade them; no
+    # consumer may infer a default.
+    executionNature: MasterExecutionNature | None = None
+    executionGraph: SprintExecutionGraph | None = None
     enclosures: list[TaskEnclosureRef] = Field(default_factory=list)
     lifecycleId: str | None = None
     objective: str = ""
@@ -249,8 +333,21 @@ class TaskDocument(_Doc):
                     "codeExamplesNote explains why code examples are absent; "
                     "it cannot be set alongside codeExamples"
                 )
+            if self.executionNature is not None or self.executionGraph is not None:
+                raise ValueError(
+                    f"a {self.kind} document has no executionNature or executionGraph (master-only)"
+                )
+        self._check_execution_fields()
         self._normalize_integration_branch()
         return self
+
+    def _check_execution_fields(self) -> None:
+        if self.kind != "master":
+            return
+        if self.orchestrates and self.executionNature is not None:
+            raise ValueError("an orchestration sprint has no executionNature")
+        if not self.orchestrates and self.executionGraph is not None:
+            raise ValueError("executionGraph belongs only to an orchestration sprint")
 
     def _normalize_integration_branch(self) -> None:
         if self.integrationBranch is None:

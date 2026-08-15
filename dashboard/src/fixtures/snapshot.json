@@ -506,7 +506,101 @@
         ],
         "sections": [{ "kind": "freeform", "heading": "Notes", "body": "the fixture is the server here" }],
         "masterLifecycleId": "sim-master-lifecycle",
-        "orchestrates": ["SIM-2"]
+        "orchestrates": [],
+        "executionWaves": []
+      },
+      {
+        "id": "SIM-SPRINT",
+        "repository": "agents-remember",
+        "title": "dependency-aware sprint",
+        "status": "planning",
+        "kind": "master",
+        "stepsDone": 0,
+        "stepsTotal": 0,
+        "docPath": "/tasks/agents-remember/sim-sprint/task.json",
+        "bodyRevision": "sim-sprint-r1",
+        "createdAt": "2026-06-14T08:40:00+00:00",
+        "steps": [],
+        "objective": "derive execution waves from reasoned dependencies",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "subTasks": [],
+        "sections": [],
+        "orchestrates": ["sim-master-a", "sim-master-b"],
+        "executionGraph": {
+          "nodes": [
+            { "repository": "agents-remember", "path": "sim-master-a/task.json" },
+            { "repository": "agents-remember", "path": "sim-master-b/task.json" }
+          ],
+          "edges": [
+            {
+              "predecessor": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "successor": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "reason": "the shared framework must land first"
+            }
+          ]
+        },
+        "executionWaves": [
+          [{ "repository": "agents-remember", "path": "sim-master-a/task.json" }],
+          [{ "repository": "agents-remember", "path": "sim-master-b/task.json" }]
+        ]
+      },
+      {
+        "id": "SIM-MASTER-A",
+        "repository": "agents-remember",
+        "title": "parallel feature work",
+        "status": "planning",
+        "kind": "master",
+        "stepsDone": 0,
+        "stepsTotal": 0,
+        "docPath": "/tasks/agents-remember/sim-master-a/task.json",
+        "bodyRevision": "sim-master-a-r1",
+        "createdAt": "2026-06-14T08:41:00+00:00",
+        "steps": [],
+        "objective": "coordinate independently landable leaves",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "subTasks": [],
+        "sections": [],
+        "orchestrates": [],
+        "executionNature": "organizational",
+        "executionWaves": []
+      },
+      {
+        "id": "SIM-MASTER-B",
+        "repository": "agents-remember",
+        "title": "atomic framework block",
+        "status": "planning",
+        "kind": "master",
+        "stepsDone": 0,
+        "stepsTotal": 0,
+        "docPath": "/tasks/agents-remember/sim-master-b/task.json",
+        "bodyRevision": "sim-master-b-r1",
+        "createdAt": "2026-06-14T08:42:00+00:00",
+        "steps": [],
+        "objective": "land one indivisible dependency block",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "subTasks": [],
+        "sections": [],
+        "orchestrates": [],
+        "executionNature": "atomic",
+        "executionWaves": []
       }
     ],
     "attentionQueue": [

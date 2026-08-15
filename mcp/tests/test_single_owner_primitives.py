@@ -365,6 +365,14 @@ class TaskDocumentWriterCensusTests(unittest.TestCase):
         self.assertEqual(
             _task_writers(alias), ["2 [TaskDocument writer] calls write_task_doc(...)"]
         )
+        batch = (
+            "from agents_remember.tasks import write_task_doc_batch as publish\n"
+            "publish(documents)\n"
+        )
+        self.assertEqual(
+            _task_writers(batch),
+            ["2 [TaskDocument writer] calls write_task_doc_batch(...)"],
+        )
 
     def test_module_aliases_are_caught(self) -> None:
         tasks_alias = (
@@ -381,12 +389,25 @@ class TaskDocumentWriterCensusTests(unittest.TestCase):
             _task_writers(store_alias),
             ["2 [TaskDocument writer] calls write_task_doc(...)"],
         )
+        batch_alias = (
+            "import agents_remember.tasks.store as store_api\n"
+            "store_api.write_task_doc_batch(documents)\n"
+        )
+        self.assertEqual(
+            _task_writers(batch_alias),
+            ["2 [TaskDocument writer] calls write_task_doc_batch(...)"],
+        )
 
     def test_relative_import_aliases_are_caught(self) -> None:
         source = "from ..tasks.store import write_task_docs as publish\npublish(root, docs)\n"
         self.assertEqual(
             _task_writers(source, "worktrees/new_writer.py"),
             ["2 [TaskDocument writer] calls write_task_docs(...)"],
+        )
+        batch = "from ..tasks.store import write_task_doc_batch as publish\npublish(docs)\n"
+        self.assertEqual(
+            _task_writers(batch, "worktrees/new_writer.py"),
+            ["2 [TaskDocument writer] calls write_task_doc_batch(...)"],
         )
 
     def test_reexport_without_a_call_and_unrelated_local_names_are_not_callers(self) -> None:

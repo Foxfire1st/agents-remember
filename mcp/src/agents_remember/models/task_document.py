@@ -16,6 +16,9 @@ StepStatus = Literal["pending", "inProgress", "blocked", "done"]
 # Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
 # the rendered ``**Status:**`` line is always a valid template value.
 DocStatus = Literal["planning", "inProgress", "Completed"]
+# A commanded master's closed execution contract. This is shared by persisted task documents and
+# the served projection so generated clients receive the same finite vocabulary.
+MasterExecutionNature = Literal["organizational", "atomic"]
 
 CompletionUnitStatus = StepStatus | DocStatus
 

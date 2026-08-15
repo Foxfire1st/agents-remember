@@ -44,11 +44,19 @@ def write_task_docs(task_root: Path, docs: list[TaskDocument]) -> list[tuple[Pat
     the set supplies failure atomicity for composite leaf/master transitions: a failure on
     a later destination cannot leave earlier task-document files at the new generation.
     """
-    task_root.mkdir(parents=True, exist_ok=True)
+    return write_task_doc_batch([(task_root, doc) for doc in docs])
+
+
+def write_task_doc_batch(
+    documents: list[tuple[Path, TaskDocument]],
+) -> list[tuple[Path, Path]]:
+    """Atomically publish task documents that may live under different task roots."""
+
     writes: list[tuple[Path, str]] = []
     paths: list[tuple[Path, Path]] = []
     seen: set[Path] = set()
-    for doc in docs:
+    for task_root, doc in documents:
+        task_root.mkdir(parents=True, exist_ok=True)
         json_path = json_path_for(task_root, doc)
         markdown_path = markdown_path_for(task_root, doc)
         if json_path in seen or markdown_path in seen:

@@ -164,6 +164,7 @@ const BASE_TASK_DOC: TaskDocNode = {
   subTasks: [],
   sections: [],
   orchestrates: [],
+  executionWaves: [],
 };
 
 const BASE_ENGINE_PROCESS: EngineProcessNode = {

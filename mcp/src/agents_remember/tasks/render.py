@@ -19,6 +19,7 @@ from .document import (
     Decision,
     RouteReviewRecord,
     Section,
+    SprintExecutionGraph,
     Step,
     StepDisposition,
     SubTaskRef,
@@ -61,6 +62,8 @@ def _render_master(doc: TaskDocument) -> str:
     section ``body`` rendered first as optional intro prose.
     """
     parts: list[str] = [f"# Task: {doc.title}", "", *_header_lines(doc)]
+    if doc.executionGraph is not None:
+        parts += _section("Execution Graph", _execution_graph_lines(doc.executionGraph))
     for section in doc.sections:
         parts += _section(section.heading, _master_body(doc, section))
     return "\n".join(parts) + "\n"
@@ -106,10 +109,37 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         lines.append("**Orchestrates:** " + ", ".join(f"`{name}`" for name in doc.orchestrates))
     if doc.integrationBranch:
         lines.append(f"**Integration branch:** `{doc.integrationBranch}`")
+    if doc.executionNature:
+        lines.append(f"**Execution nature:** `{doc.executionNature}`")
     lines += [
         f"**{note.label}:** {note.value}" for note in doc.headerNotes
     ]  # extra header lines (R4)
     return lines
+
+
+def _execution_graph_lines(graph: SprintExecutionGraph) -> list[str]:
+    nodes = [f"- `{node.key}`" for node in graph.nodes]
+    edges = [
+        f"- `{edge.predecessor.key}` → `{edge.successor.key}` — {edge.reason}"
+        for edge in graph.edges
+    ] or ["- _None._"]
+    waves = [
+        f"- Wave {index}: " + ", ".join(f"`{node.key}`" for node in wave)
+        for index, wave in enumerate(graph.derived_waves(), start=1)
+    ]
+    return [
+        "### Nodes",
+        "",
+        *nodes,
+        "",
+        "### Dependencies",
+        "",
+        *edges,
+        "",
+        "### Derived Waves",
+        "",
+        *waves,
+    ]
 
 
 def _section(heading: str, body: list[str]) -> list[str]:

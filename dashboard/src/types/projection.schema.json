@@ -2726,6 +2726,43 @@
           "title": "Docpath",
           "type": "string"
         },
+        "executionGraph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskExecutionGraphNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "executionNature": {
+          "anyOf": [
+            {
+              "enum": [
+                "organizational",
+                "atomic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executionnature"
+        },
+        "executionWaves": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            "type": "array"
+          },
+          "title": "Executionwaves",
+          "type": "array"
+        },
         "id": {
           "title": "Id",
           "type": "string"
@@ -2864,6 +2901,51 @@
         "path"
       ],
       "title": "TaskDocumentRef",
+      "type": "object"
+    },
+    "TaskExecutionEdgeNode": {
+      "additionalProperties": false,
+      "description": "One reasoned dependency edge in a sprint task document.",
+      "properties": {
+        "predecessor": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "successor": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "predecessor",
+        "successor",
+        "reason"
+      ],
+      "title": "TaskExecutionEdgeNode",
+      "type": "object"
+    },
+    "TaskExecutionGraphNode": {
+      "additionalProperties": false,
+      "description": "Persisted AON graph projected without adding scheduler judgment.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionEdgeNode"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TaskDocumentRef"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "title": "TaskExecutionGraphNode",
       "type": "object"
     },
     "TaskSectionNode": {
