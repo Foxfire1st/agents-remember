@@ -128,6 +128,7 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
 
         lineage_fixture = QueueFixture(self.root / "lineage")
         lineage_fixture.declare(MASTER_A)
+        git(lineage_fixture.code, "checkout", "super")
         git(lineage_fixture.code, "commit", "--allow-empty", "-m", "advance super")
         reasons = lineage_fixture.status()["blocked"][0]["reasons"]
         self.assertIn("source-lineage-stale", reasons)
@@ -345,8 +346,37 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
             write_task_doc(fixture.tasks / Path(master_ref.path).parent, completed_master)
             return completed
 
-        own = prepare_completed_leaf(MASTER_B, LEAF_B)
         other = prepare_completed_leaf(MASTER_A, LEAF_A)
+        stale_atomic = fixture.contracts[MASTER_B]
+        assert stale_atomic.memory_worktree is not None
+        git(
+            fixture.code,
+            "worktree",
+            "remove",
+            "--force",
+            str(stale_atomic.code_worktree),
+        )
+        git(
+            fixture.memory,
+            "worktree",
+            "remove",
+            "--force",
+            str(stale_atomic.memory_worktree),
+        )
+        for repo, branch in (
+            (fixture.code, stale_atomic.code_work_branch),
+            (fixture.code, stale_atomic.code_source_branch),
+            (fixture.memory, stale_atomic.memory_work_branch),
+            (fixture.memory, stale_atomic.memory_source_branch),
+        ):
+            git(repo, "branch", "-D", branch)
+        fixture.contracts[MASTER_B] = fixture._contract(
+            "master-b",
+            "LEAF-B",
+            git(fixture.code, "rev-parse", "super"),
+            git(fixture.memory, "rev-parse", "super"),
+        )
+        own = prepare_completed_leaf(MASTER_B, LEAF_B)
         fixture.mutate(
             "acquire-barrier",
             barrier=MASTER_B,
@@ -390,7 +420,7 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         contract = fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
@@ -415,6 +445,20 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         )
         closed = fixture.close_contract(MASTER_A)
         certify_queue_candidate_closeout(closed, closeout_record.operationKey)
+        closeout_store.update(
+            lambda current: current.model_copy(
+                update={"status": "running", "phase": "contract-finalization"}
+            )
+        )
+        closeout_store.update(
+            lambda current: current.model_copy(
+                update={
+                    "status": "completed",
+                    "phase": "completed",
+                    "finishedAt": "2026-08-15T00:01:00+00:00",
+                }
+            )
+        )
         certified = fixture.status()["inFlight"][0]
         self.assertEqual(certified["legalNextOperations"], [])
         manager_certified = fixture.status(QueueActor(role="manager", task_document_ref=MASTER_A))[
@@ -423,7 +467,7 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         self.assertEqual(manager_certified["legalNextOperations"], ["worktree_integrate"])
         start_or_observe_operation(
             IntegrateOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
             ),
             launcher=lambda *_: None,

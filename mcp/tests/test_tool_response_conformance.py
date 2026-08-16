@@ -62,6 +62,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxPoster,
 )
 from agents_remember.controlplane.records import GateAnchor, GateRequest, GateVerdict
+from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
@@ -89,6 +90,13 @@ from agents_remember.observer import (
 from agents_remember.observer.ambient import AmbientTiming
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 from test_config import settings_payload
 from test_worktree_support import (
     commit_file,
@@ -100,7 +108,7 @@ from test_worktree_support import (
 
 REPO = "agents-remember"
 DRY_RUN_SCOPE = ProviderQueryScope(dry_run=True)
-DISABLED_MEMORY_BASES = TaskBases(memory_mode="disabled", memory_choice="disabled-memory")
+EXTERNAL_MEMORY_BASES = TaskBases(memory_mode="external")
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -135,7 +143,7 @@ def _write_leaf_task(
                 "kind": "master",
                 "repo": repo,
                 "createdAt": "2026-07-07T10:00",
-                "executionNature": "organizational",
+                "executionNature": "organizational" if execution_graph else "atomic",
                 "subTasks": [
                     {
                         "number": doc_id,
@@ -147,6 +155,23 @@ def _write_leaf_task(
             }
         ),
     )
+    if not execution_graph:
+        write_task_doc(
+            task_root,
+            TaskDocument.model_validate(
+                {
+                    "id": doc_id,
+                    "slug": slug,
+                    "title": "Leaf",
+                    "kind": "subTask",
+                    "repo": repo,
+                    "createdAt": "2026-07-07T10:01",
+                    "master": "task.md",
+                }
+            ),
+        )
+        return
+
     sprint_root = coordination_root / "tasks" / repo / "sprint"
     orchestrates = sorted(
         path.name
@@ -161,13 +186,12 @@ def _write_leaf_task(
         "repo": repo,
         "createdAt": "2026-07-07T09:00",
         "orchestrates": orchestrates,
-        "integrationBranch": "main",
+        "integrationBranch": "super",
     }
-    if execution_graph:
-        sprint_fields["executionGraph"] = {
-            "nodes": [{"repository": repo, "path": f"{item}/task.json"} for item in orchestrates],
-            "edges": [],
-        }
+    sprint_fields["executionGraph"] = {
+        "nodes": [{"repository": repo, "path": f"{item}/task.json"} for item in orchestrates],
+        "edges": [],
+    }
     write_task_doc(
         sprint_root,
         TaskDocument.model_validate(sprint_fields),
@@ -203,6 +227,17 @@ def _base_fixture(root: Path, *, execution_graph: bool = True):
     (repo / "README.md").write_text("# Fixture\n", encoding="utf-8")
     _run_git(repo, ["add", "README.md"])
     _run_git(repo, ["commit", "-m", "init"])
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    _run_git(repo, ["update-ref", "refs/remotes/origin/main", head])
+    _run_git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"])
+    if execution_graph:
+        _run_git(repo, ["branch", "super", head])
     path = root / ".codex" / "mcp" / "settings.json"
     _write_json(path, settings_payload(root))
     return load_config(path)
@@ -317,7 +352,7 @@ def _simple_payloads(config) -> dict[str, dict]:
         "drift_check": tools.drift_check_payload(config, REPO),
         "memory_quality_check": tools.memory_quality_check_payload(config, REPO),
         "citation_fix": citation_fix,
-        "route_index_refresh": tools.route_index_refresh_payload(config, REPO),
+        "route_index_refresh": tools.route_index_refresh_payload(config, REPO, dry_run=True),
         "memory_init": tools.memory_init_payload(config, REPO),
         "skills_install": tools.skills_install_payload(config),
         "provider_status": tools.provider_status_payload(config),
@@ -352,9 +387,18 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     # worktree_start needs a memory git repo to exist even when memory is disabled.
     tools.memory_init_payload(config, REPO, dry_run=False, initialize_git=True)
     memory_root = root / "ar-coordination" / "memory-repos" / f"ar-{REPO}"
-    (memory_root / "memory.md").write_text("# Memory ledger\n", encoding="utf-8")
+    _run_git(memory_root, ["config", "user.email", "agents-remember@example.invalid"])
+    _run_git(memory_root, ["config", "user.name", "Agents Remember"])
     _run_git(memory_root, ["add", "-A"])
-    _run_git(memory_root, ["commit", "-m", "seed"])
+    _run_git(memory_root, ["commit", "-m", "seed memory content"])
+    memory_content = git(memory_root, "rev-parse", "HEAD")
+    code_head = git(config.workspace_root / REPO, "rev-parse", "main")
+    write_ledger(
+        memory_root / "memory.md",
+        create_initial_ledger(REPO, code_head, memory_content),
+    )
+    _run_git(memory_root, ["add", "memory.md"])
+    _run_git(memory_root, ["commit", "-m", "seed memory ledger"])
     _write_leaf_task(
         config.coordination_root,
         master="demo-task",
@@ -372,7 +416,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     abandon_start = tools.worktree_start_payload(
         config,
         TaskIdentity(repo_id=REPO, task_name="abandon-task", worktree_name="abandon-wt"),
-        bases=DISABLED_MEMORY_BASES,
+        bases=EXTERNAL_MEMORY_BASES,
         execution=StartExecution(skip_provider_setup=True),
     )
     payloads["worktree_abandon"] = tools.worktree_abandon_payload(
@@ -381,7 +425,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_start"] = tools.worktree_start_payload(
         config,
         TaskIdentity(repo_id=REPO, task_name="demo-task", worktree_name="demo-wt"),
-        bases=DISABLED_MEMORY_BASES,
+        bases=EXTERNAL_MEMORY_BASES,
         execution=StartExecution(skip_provider_setup=True),
     )
     contract_path = payloads["worktree_start"]["contract_path"]
@@ -393,13 +437,23 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     )
     payloads["worktree_sync"] = tools.worktree_sync_payload(config, contract_path, dry_run=True)
     payloads["worktree_closeout_preview"] = tools.worktree_closeout_preview_payload(
-        config, contract_path, CloseoutCommitMessages(code="code commit message")
+        config,
+        contract_path,
+        CloseoutCommitMessages(
+            code="code commit message",
+            memory="memory commit message",
+            ledger="ledger commit message",
+        ),
     )
     with mock.patch("agents_remember.worktrees.lifecycle_operations.launch_detached_worker"):
         payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
             config,
             contract_path,
-            CloseoutCommitMessages(code="code commit message"),
+            CloseoutCommitMessages(
+                code="code commit message",
+                memory="memory commit message",
+                ledger="ledger commit message",
+            ),
             CloseoutApproval(intent_note="intent note"),
         )
     assert run_worker(Path(contract_path), "closeout") == 0
@@ -455,20 +509,65 @@ def _carryover_payloads(root: Path) -> dict[str, dict]:
     path = root / ".codex" / "mcp" / "settings.json"
     _write_json(path, settings)
     config = load_config(path)
+    contract = default_contract(
+        ContractTask(
+            name="carryover-recovery",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="carryover-recovery", leaf_id="CARRYOVER-RECOVERY"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="carryover-recovery",
+            base_commit=source_head,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=official_memory,
+            source_branch="main",
+            work_branch="carryover-recovery",
+            base_commit=git(official_memory, "rev-parse", "main"),
+        ),
+    )
+    git(
+        code_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.code_work_branch,
+        str(contract.code_worktree),
+        "main",
+    )
+    assert contract.memory_worktree is not None
+    git(
+        official_memory,
+        "worktree",
+        "add",
+        "-b",
+        contract.memory_work_branch,
+        str(contract.memory_worktree),
+        "main",
+    )
+    write_contract(contract.contract_path, contract)
     source = source_memory.as_posix()
     return {
         "memory_carryover_plan": tools.memory_carryover_plan_payload(
-            config, _carryover_selection(source, old_base)
+            config, _carryover_selection(source, old_base, contract.contract_path)
         ),
         "memory_carryover_apply": tools.memory_carryover_apply_payload(
-            config, _carryover_selection(source, old_base), intent_note="intent note"
+            config,
+            _carryover_selection(source, old_base, contract.contract_path),
+            intent_note="intent note",
         ),
     }
 
 
-def _carryover_selection(source: str, old_base: str) -> CarryoverSelection:
+def _carryover_selection(source: str, old_base: str, contract_path: Path) -> CarryoverSelection:
     return CarryoverSelection(
         repo_id="repo-a",
+        contract_path=contract_path.as_posix(),
         source_memory=source,
         official_code_ref="main",
         source_code_ref="workbench/reado/v1.2",

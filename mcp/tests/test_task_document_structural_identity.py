@@ -215,7 +215,7 @@ def test_task_document_topology_parent_fail_closed_paths(tmp_path: Path) -> None
     topology = refs.TaskDocumentTopology(tmp_path)
     master = _task_ref("master/task.json")
     sprint = _task_ref("sprint/task.json")
-    master_doc = SimpleNamespace(kind="master", orchestrates=[])
+    master_doc = SimpleNamespace(kind="master", orchestrates=[], executionNature=None)
     resolved = SimpleNamespace(ref=master, document=master_doc)
     topology.resolve = Mock(return_value=resolved)
 

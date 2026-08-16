@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,12 +30,111 @@ from agents_remember.kernel.primitives.gate_policy import (
     make_gate_policy,
     named_gate_policy,
 )
+from agents_remember.kernel.primitives.runtime_config import RepositoryScope
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.paths import observer_logs_root
+from agents_remember.tasks import SprintExecutionGraph, TaskDocument, write_task_doc
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import IntegrationSources
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    WorktreeContract,
+    default_contract,
+    write_contract,
+)
 from test_controlplane_gates import HANDOVER_SEAM_POLICY, T1, T2
+from test_worktree_support import git, init_repo
+
+
+def _real_gate_contract(coordination_root: Path) -> WorktreeContract:
+    repo = coordination_root / "repo"
+    base = init_repo(repo, "main")
+    (repo / "ar-memory").mkdir()
+    git(repo, "branch", "super", "main")
+    task_name = HandoverEnforcementHelperTests.MASTER
+    task_root = coordination_root / "tasks" / "agents-remember" / task_name
+    master_ref = TaskDocumentRef(
+        repository="agents-remember",
+        path=f"{task_name}/task.json",
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "M1",
+                "slug": task_name,
+                "title": "Manager one",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "executionNature": "organizational",
+                "subTasks": [
+                    {
+                        "number": "m1",
+                        "name": "Leaf m1",
+                        "file": "m1.md",
+                        "status": "inProgress",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        coordination_root / "tasks" / "agents-remember" / "sprint",
+        TaskDocument.model_validate(
+            {
+                "id": "SPRINT",
+                "slug": "sprint",
+                "title": "Sprint",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "orchestrates": [task_name],
+                "integrationBranch": "super",
+                "executionGraph": SprintExecutionGraph(nodes=[master_ref]),
+            }
+        ),
+    )
+    contract = default_contract(
+        ContractTask(
+            task_name,
+            "agents-remember",
+            coordination_root,
+            "light-task",
+            "internal",
+        ),
+        leaf=LeafIdentity(worktree_name="m1", leaf_id="m1"),
+        code=RepoBranchPlan(repo, "super", "ar/m1", base),
+    )
+    contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
+    git(
+        repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.code_work_branch,
+        str(contract.code_worktree),
+        contract.code_source_branch,
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "m1",
+                "slug": "m1",
+                "title": "Leaf m1",
+                "kind": "subTask",
+                "repo": "agents-remember",
+                "createdAt": "2026-08-15T00:01:00+00:00",
+                "master": "task.md",
+            }
+        ),
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
 
 
 # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_controlplane_gates_seam.py:38).
@@ -227,8 +327,31 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
     def test_worktree_integrate_tool_passes_configured_policy(self) -> None:
         # The application/args layer (mirror of the closeout path): the CONFIGURED
         # policy reaches integrate_result's guard, not the dataclass default.
+        contract = _real_gate_contract(self.coord)
+        configured_repo = self.coord / "agents-remember"
+        configured_repo.symlink_to(contract.code_repo_path, target_is_directory=True)
+        config_path = self.coord.with_name(f"{self.coord.name}-settings.json")
+        self.addCleanup(config_path.unlink, missing_ok=True)
+        config_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "coordinationRoot": self.coord.as_posix(),
+                    "workspaceRoot": self.coord.as_posix(),
+                    "repositories": {"agents-remember": {}},
+                }
+            ),
+            encoding="utf-8",
+        )
         config = SimpleNamespace(
+            config_path=config_path,
             coordination_root=self.coord,
+            repositories={
+                "agents-remember": RepositoryScope(
+                    "agents-remember",
+                    contract.code_repo_path,
+                )
+            },
             orchestration=SimpleNamespace(gate_policy=HANDOVER_SEAM_POLICY),
             # The auto-land hook is orthogonal to this test's gate-policy-plumbing
             # focus -- disabled so it never fires against this fake, unattached contract.
@@ -241,7 +364,7 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
         ) as integrate_result:
             worktree_tools.worktree_integrate_tool(
                 config,  # type: ignore[arg-type]
-                contract_path=str(self.coord / "enclosures" / "contract.md"),
+                contract_path=contract.contract_path.as_posix(),
                 dry_run=True,
             )
         (args,), _kwargs = integrate_result.call_args
@@ -302,26 +425,7 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.coord = Path(tmp.name)
         self.store = GateStore(observer_logs_root(self.coord))
-        task_root = self.coord / "tasks" / "agents-remember" / self.MASTER
-        self.contract = WorktreeContract(
-            task_id="260703-AGENT-ORCHESTRATION-M1",
-            task_name=self.MASTER,
-            repo_name="agents-remember",
-            workflow_kind="light-task",
-            memory_mode="internal",
-            coordination_root=self.coord,
-            task_root=task_root,
-            contract_path=task_root / "enclosures" / "m1" / "series-contract.md",
-            task_artifact=task_root / "task.md",
-            worktree_group=self.coord / "worktrees" / "agents-remember" / "m1-ar",
-            code_repo_path=self.coord / "repo",
-            code_source_branch="main",
-            code_work_branch="ar/m1",
-            code_base_commit="c0",
-            code_worktree=self.coord / "worktrees" / "agents-remember" / "m1-ar" / "m1",
-            leaf_id="m1",
-            parent_task_name=self.SERIES,
-        )
+        self.contract = _real_gate_contract(self.coord)
 
     def _seed_gate(self, *, enclosure: str, gate_id: str = "G-HANDOVER") -> GateRecord:
         gate = create_gate(
@@ -383,7 +487,30 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
         )
         with (
             mock.patch.object(integrate_mod, "load_contract", return_value=self.contract),
+            mock.patch.object(
+                integrate_mod,
+                "require_plane_integration_operation",
+                return_value=SimpleNamespace(
+                    integrationAuthority=None,
+                    recoveryCommits=None,
+                ),
+            ),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(
+                integrate_mod,
+                "_integration_replay_requirements",
+                return_value=IntegrationSources(
+                    current_code_source="c1",
+                    current_memory_source="",
+                    code_replay_required=False,
+                    memory_replay_required=False,
+                ),
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "require_current_integration_sources",
+                return_value=SimpleNamespace(integrationAuthority=None),
+            ),
             mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(integrate_mod, "_apply_integration") as apply,
         ):

@@ -16,6 +16,7 @@ from agents_remember.controlplane.closeout_queue_store import (
     CloseoutQueueStore,
     QueueTransaction,
 )
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -39,11 +40,12 @@ from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
 )
+from agents_remember.worktrees.atomic_series_seal import require_series_path_accepting_leaves
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.modules.git import head_commit, is_ancestor
+from agents_remember.worktrees.modules.git import branch_commit, is_ancestor
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
     code_candidate_tree,
@@ -52,6 +54,7 @@ from agents_remember.worktrees.source_lineage import (
     lineage_refusal,
     source_lineage_for_contract,
 )
+from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -60,6 +63,7 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 from .closeout_queue_candidate_evidence import (
+    atomic_master_landing_authority,
     commit_tree,
     ledger_mapping,
     memory_candidate_tree,
@@ -102,8 +106,6 @@ _ACTIONS = frozenset(
 
 @dataclass(frozen=True)
 class QueueActor:
-    """Plane-proven structural caller; never accepted from the public request."""
-
     role: str
     task_document_ref: TaskDocumentRef
 
@@ -178,8 +180,6 @@ def closeout_queue_tool(
     actor: QueueActor,
     now: str | None = None,
 ) -> dict[str, Any]:
-    """Apply one durable queue transition or return the current recomputed projection."""
-
     action = _queue_action(request.action)
     sprint_ref = _task_ref(request.sprint_task_document_ref, "sprint_task_document_ref")
     topology = TaskDocumentTopology(config.coordination_root)
@@ -196,8 +196,7 @@ def closeout_queue_tool(
                 "closeout-queue-sprint-completed",
                 "completed sprint queues are reclaimed and cannot accept mutations",
             )
-        # Task-document publication is the sole close/reopen owner and holds this store's lock.
-        # A status read never rewrites state, so it cannot race a serialized sprint reopen.
+        # Status never rewrites state or races the task-document-owned sprint transition.
         state = store.read(initial)
     elif action == "status":
         state = store.read(initial)
@@ -240,8 +239,6 @@ def closeout_queue_tool(
             ),
             transform=apply_current_graph,
         )
-    # A task-doc graph publication uses the same store lock. Re-read after the state operation so
-    # the response either projects the transaction's graph or visibly blocks it as stale.
     graph = _graph_context(topology, sprint_ref)
     _authorize_status_scope(actor, graph)
     return _projection(topology, graph, state, action, actor)
@@ -270,7 +267,7 @@ def _apply_action(
         )
     if context.action == "release-barrier":
         _require_sprint_role(actor, context.graph, "orchestrator")
-        return _release_barrier(context.graph, current, context.request)
+        return _release_barrier(context.graph, current, context.request, context.config)
     if context.action == "abort-barrier":
         _require_sprint_role(actor, context.graph, "orchestrator")
         return _abort_barrier(context.graph, current, context.request)
@@ -346,6 +343,16 @@ def _release_selection(candidate: CloseoutCandidateRecord) -> CloseoutCandidateR
 def _declare_candidate(
     state: CloseoutQueueState, context: _ActionContext, actor: QueueActor
 ) -> CloseoutQueueState:
+    with integration_authority_lock(
+        context.config.coordination_root,
+        context.graph.sprint.ref.repository,
+    ):
+        return _declare_candidate_under_authority(state, context, actor)
+
+
+def _declare_candidate_under_authority(
+    state: CloseoutQueueState, context: _ActionContext, actor: QueueActor
+) -> CloseoutQueueState:
     request = context.request
     path, contract, leaf_ref, owning_master = _declaration_identity(context)
     if actor.role != "manager" or actor.task_document_ref != owning_master:
@@ -353,6 +360,18 @@ def _declare_candidate(
             "closeout-queue-caller-refused",
             "only the owning master manager may declare its reviewed leaf candidate",
         )
+    if context.graph.masters[owning_master].document.executionNature == "atomic":
+        parent_path = series_contract_path(context.graph.masters[owning_master].path.parent)
+        try:
+            require_series_path_accepting_leaves(
+                parent_path,
+                operation="closeout candidate declaration",
+            )
+        except RuntimeError as exc:
+            raise CloseoutQueueError(
+                "closeout-candidate-parent-series-sealed",
+                str(exc),
+            ) from exc
     existing = state.candidates.get(leaf_ref.key)
     if existing is not None:
         raise CloseoutQueueError(
@@ -480,6 +499,7 @@ def _acquire_barrier(
         raise CloseoutQueueError(
             "atomic-barrier-nature-required", "only an atomic master can own a barrier"
         )
+    _require_unsealed_barrier_series(master)
     if state.activeBarrier is not None:
         if (
             state.activeBarrier.master == master_ref
@@ -522,8 +542,25 @@ def _acquire_barrier(
     )
 
 
+def _require_unsealed_barrier_series(master: Any) -> None:
+    path = series_contract_path(master.path.parent)
+    try:
+        require_series_path_accepting_leaves(
+            path,
+            operation="atomic barrier acquisition",
+        )
+    except RuntimeError as exc:
+        raise CloseoutQueueError(
+            "atomic-barrier-series-sealed",
+            str(exc),
+        ) from exc
+
+
 def _release_barrier(
-    graph: _GraphContext, state: CloseoutQueueState, request: CloseoutQueueRequest
+    graph: _GraphContext,
+    state: CloseoutQueueState,
+    request: CloseoutQueueRequest,
+    config: McpRuntimeConfig,
 ) -> CloseoutQueueState:
     if state.activeBarrier is None:
         raise CloseoutQueueError("atomic-barrier-not-active", "no atomic barrier is active")
@@ -544,7 +581,10 @@ def _release_barrier(
             "atomic-barrier-master-incomplete",
             "normal barrier release requires the canonical atomic master completion edge",
         )
-    require_atomic_master_landed(master)
+    require_atomic_master_landed(
+        master,
+        atomic_master_landing_authority(config, graph.sprint),
+    )
     if not request.rationale.strip():
         raise CloseoutQueueError(
             "atomic-barrier-rationale-required", "barrier release requires rationale"
@@ -656,6 +696,10 @@ def _project_candidates(
     for name in ("waiting", "blocked", "inFlight"):
         groups[name].sort(key=lambda item: item.taskDocumentRef.key)
     return groups
+
+
+def _group_name(classification: str) -> str:
+    return "inFlight" if classification == "in-flight" else classification
 
 
 def _declared_legal_operations(
@@ -861,9 +905,8 @@ def _closed_tree_blockers(
         or commit_tree(contract.code_worktree, contract.code_commit) != candidate.candidateTree
     ):
         return ["closeout-code-tree-mismatch"]
-    # External-memory closeout deliberately refreshes verification metadata after the
-    # pre-closeout candidate was selected, so its content tree is expected to change. The
-    # owning lifecycle operation and the ledger mapping below bind that deterministic result;
+    # External-memory closeout refreshes verification metadata after candidate selection.
+    # The lifecycle operation and ledger mapping below bind that deterministic result;
     # pre-closeout revalidation already proved the curated input tree immediately before claim.
     if contract.memory_mode == "external" and (
         not contract.memory_content_commit or contract.memory_worktree is None
@@ -961,7 +1004,7 @@ def _source_and_ledger_blockers(
     if lineage is not None:
         blockers.append(lineage[0])
     if (
-        head_commit(contract.code_repo_path, contract.code_source_branch)
+        branch_commit(contract.code_repo_path, contract.code_source_branch)
         != candidate.codeBaseCommit
     ):
         blockers.append("code-source-moved")
@@ -971,7 +1014,7 @@ def _source_and_ledger_blockers(
         blockers.append("memory-source-missing")
         return blockers
     if (
-        head_commit(contract.memory_repo_path, contract.memory_source_branch)
+        branch_commit(contract.memory_repo_path, contract.memory_source_branch)
         != candidate.memoryBaseCommit
     ):
         blockers.append("memory-source-moved")
@@ -1110,10 +1153,7 @@ def _candidate_or_error(
 ) -> CloseoutCandidateRecord:
     candidate = state.candidates.get(candidate_ref.key)
     if candidate is None:
-        raise CloseoutQueueError(
-            "closeout-candidate-not-declared",
-            f"candidate is not declared in the sprint queue: {candidate_ref.key}",
-        )
+        raise CloseoutQueueError("closeout-candidate-not-declared", candidate_ref.key)
     return candidate
 
 
@@ -1133,10 +1173,6 @@ def _ready_sort_key(graph: _GraphContext, view: CloseoutQueueCandidateView) -> t
         graph.node_order[view.owningMaster],
         view.taskDocumentRef.key,
     )
-
-
-def _group_name(classification: str) -> str:
-    return "inFlight" if classification == "in-flight" else classification
 
 
 def _initial_state(

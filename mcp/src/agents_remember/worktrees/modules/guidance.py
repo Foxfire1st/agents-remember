@@ -6,14 +6,15 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
-from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
+from agents_remember.kernel.memory_ledger import LedgerError, find_mapping
 from agents_remember.models.worktree import (
     NextOperation,
     NextTool,
     WorktreePhase,
 )
-from agents_remember.worktrees.modules.git import worktree_dirty
+from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
+from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
 from agents_remember.worktrees.worktree_contract import (
@@ -188,26 +189,34 @@ def contract_payload(contract: WorktreeContract) -> dict[str, object]:
 
 
 def carryover_done(contract: WorktreeContract) -> tuple[bool, str]:
-    """Has the parked memory been carried into official memory? -> ``(done, carryoverDoneAt)`` (05m).
-
-    The existing ``memory_carryover_apply`` is contract-decoupled and leaves no contract stamp, so the
-    honest signal is the official ledger itself: a successful carry prepends a row to the official
-    ``memory.md`` mapping the landed code commit -> the carried memory commit. We read that ledger and
-    look the landed commit up with :func:`find_mapping`; the carried memory commit's ``%cI`` is the
-    milestone time. Internal/disabled memory has nothing to carry, so it is reported done -- the
-    carryover route + cleanup guard are external-only no-ops there.
-    """
+    """Prove the exact landed code-to-memory pair on the named integration ref."""
     if contract.memory_mode != "external" or contract.memory_repo_path is None:
         return (True, "")
     landed = contract.integrated_code_commit or contract.code_commit
-    ledger_path = contract.memory_repo_path / "memory.md"
-    if not landed or not ledger_path.exists():
+    if not landed:
+        return (False, "")
+    expected_memory = contract.integrated_memory_content_commit or contract.memory_content_commit
+    if not expected_memory:
         return (False, "")
     try:
-        row = find_mapping(load_ledger(ledger_path), landed)
-    except LedgerError:
+        ledger_tip = branch_commit(
+            contract.memory_repo_path,
+            contract.memory_source_branch,
+        )
+        row = find_mapping(
+            load_named_ref_ledger(
+                contract.memory_repo_path,
+                contract.memory_source_branch,
+            ),
+            landed,
+        )
+    except (LedgerError, RuntimeError):
         return (False, "")
-    if row is None:
+    if (
+        row is None
+        or row.memory_commit != expected_memory
+        or not is_ancestor(contract.memory_repo_path, expected_memory, ledger_tip)
+    ):
         return (False, "")
     dated = run_git(contract.memory_repo_path, ["show", "-s", "--format=%cI", row.memory_commit])
     return (True, dated.stdout.strip() if dated.returncode == 0 else "")
@@ -258,24 +267,26 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
     if contract.integration_status == "completed":
         carried, carryover_done_at = carryover_done(contract)
         if not carried:
-            # 05m: carryover must run while the worktree (its parked memory) still exists -- before
-            # cleanup deletes it. Route the existing memory_carryover_apply (its own plan->apply gate
-            # stays intact); cleanup hard-guards on this same signal.
             return {
                 "phase": "carryover-pending",
-                "summary": "Integration completed; carry the parked memory home before cleanup.",
+                "summary": (
+                    "Integration completed without the exact landed memory mapping; create an "
+                    "open recovery leaf, plan the parked-memory carryover there, then close and "
+                    "integrate that leaf before cleanup."
+                ),
                 **next_guidance(
                     "request_carryover_decision",
-                    tool="memory_carryover_apply",
+                    tool="memory_carryover_plan",
                     args={
                         "repo_id": contract.repo_name,
                         "source_memory": contract.memory_worktree.as_posix()
                         if contract.memory_worktree
                         else "",
-                        "official_code_ref": contract.integrated_code_commit
-                        or contract.code_commit,
+                        "official_code_ref": contract.code_source_branch,
+                        "source_code_ref": contract.code_work_branch,
+                        "old_base": contract.code_base_commit,
                     },
-                    required_args=["intent_note"],
+                    required_args=["contract_path"],
                 ),
             }
         return {

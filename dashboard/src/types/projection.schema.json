@@ -2481,7 +2481,8 @@
         "relation": {
           "enum": [
             "super-to-master",
-            "master-to-leaf"
+            "master-to-leaf",
+            "super-to-leaf"
           ],
           "title": "Relation",
           "type": "string"

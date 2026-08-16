@@ -104,49 +104,88 @@ class CloseoutQueueStore:
         QUEUE_OWNERSHIP.check_declared_writer()
         with exclusive_access(self.state_path, QUEUE_OWNERSHIP):
             current = self._recover(initial)
-            receipt = next(
-                (item for item in current.appliedRequests if item.requestId == event.request_id),
-                None,
-            )
-            if receipt is not None:
-                if receipt.fingerprint != event.fingerprint:
-                    raise CloseoutQueueStoreError(
-                        "closeout queue request id was reused with a different payload"
-                    )
+            if self._request_was_applied(current, event):
                 return current
             candidate = transform(current)
-            next_revision = current.revision + 1
-            receipts = [
-                *current.appliedRequests,
-                AppliedQueueRequest(
-                    requestId=event.request_id,
-                    fingerprint=event.fingerprint,
-                    revision=next_revision,
-                ),
-            ][-QUEUE_REQUEST_RECEIPT_LIMIT:]
-            updated = CloseoutQueueState.model_validate(
-                {
-                    **candidate.model_dump(mode="json"),
-                    "revision": next_revision,
-                    "appliedRequests": receipts,
-                    "updatedAt": event.recorded_at,
-                }
+            return self._commit_transaction(current, candidate, event)
+
+    def transact_with_publication(
+        self,
+        *,
+        initial: CloseoutQueueState,
+        event: QueueTransaction,
+        transform: Callable[[CloseoutQueueState], CloseoutQueueState],
+        publication: Callable[[], None],
+    ) -> CloseoutQueueState:
+        """Publish dependent durable facts before committing their queue transition.
+
+        The transform is validated under the queue lock before publication. If the process
+        dies after publication but before the queue WAL is written, retry sees the old queue
+        state, proves the same transition again, and republishes idempotently. The inverse
+        ordering would lose the only candidate that identifies a still-closed contract.
+        """
+
+        QUEUE_OWNERSHIP.check_declared_writer()
+        with exclusive_access(self.state_path, QUEUE_OWNERSHIP):
+            current = self._recover(initial)
+            if self._request_was_applied(current, event):
+                return current
+            candidate = transform(current)
+            publication()
+            return self._commit_transaction(current, candidate, event)
+
+    @staticmethod
+    def _request_was_applied(current: CloseoutQueueState, event: QueueTransaction) -> bool:
+        receipt = next(
+            (item for item in current.appliedRequests if item.requestId == event.request_id),
+            None,
+        )
+        if receipt is None:
+            return False
+        if receipt.fingerprint != event.fingerprint:
+            raise CloseoutQueueStoreError(
+                "closeout queue request id was reused with a different payload"
             )
-            pending = CloseoutQueuePendingTransaction(
-                transactionKind="queue-mutation",
+        return True
+
+    def _commit_transaction(
+        self,
+        current: CloseoutQueueState,
+        candidate: CloseoutQueueState,
+        event: QueueTransaction,
+    ) -> CloseoutQueueState:
+        next_revision = current.revision + 1
+        receipts = [
+            *current.appliedRequests,
+            AppliedQueueRequest(
                 requestId=event.request_id,
-                requestFingerprint=event.fingerprint,
-                action=event.action,
-                recordedAt=event.recorded_at,
-                actor=event.actor,
-                rationale=event.rationale.strip(),
-                previousRevision=current.revision,
-                state=updated,
-            )
-            atomic_write_text(self.pending_path, pending.model_dump_json(exclude_none=True) + "\n")
-            self._publish(updated)
-            self._clear_pending_best_effort()
-            return updated
+                fingerprint=event.fingerprint,
+                revision=next_revision,
+            ),
+        ][-QUEUE_REQUEST_RECEIPT_LIMIT:]
+        updated = CloseoutQueueState.model_validate(
+            {
+                **candidate.model_dump(mode="json"),
+                "revision": next_revision,
+                "appliedRequests": receipts,
+                "updatedAt": event.recorded_at,
+            }
+        )
+        pending = CloseoutQueuePendingTransaction(
+            transactionKind="queue-mutation",
+            requestId=event.request_id,
+            requestFingerprint=event.fingerprint,
+            action=event.action,
+            recordedAt=event.recorded_at,
+            actor=event.actor,
+            rationale=event.rationale.strip(),
+            previousRevision=current.revision,
+            state=updated,
+        )
+        atomic_write_text(self.pending_path, pending.model_dump_json(exclude_none=True) + "\n")
+        self._publish(updated)
+        self._clear_pending_best_effort()
+        return updated
 
     def publish_sprint_update(
         self,

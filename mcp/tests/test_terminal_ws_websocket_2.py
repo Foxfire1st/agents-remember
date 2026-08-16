@@ -16,10 +16,12 @@ class TerminalWebSocketTests2(TerminalWebSocketTests):
 
     def _move_super(self) -> None:
         repo = self.tmp / "fixture-repositories" / "repo"
+        git(repo, "switch", "super")
         marker = repo / "super-moved.txt"
         marker.write_text("new super\n", encoding="utf-8")
         git(repo, "add", marker.name)
         git(repo, "commit", "-m", "move super")
+        git(repo, "switch", "main")
 
     def test_post_open_409_when_source_lineage_is_stale(self) -> None:
         self._move_super()

@@ -3,12 +3,14 @@ from __future__ import annotations
 import inspect
 import tempfile
 import unittest
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
 from agents_remember.application import lifecycle_operation_worker
 from agents_remember.application.closeout_queue import CloseoutQueueError
-from agents_remember.controlplane.closeout_queue_store import queue_store_paths
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore, queue_store_paths
 from agents_remember.models.closeout_queue import CloseoutQueueState
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
@@ -16,6 +18,9 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.tasks import read_task_doc, write_task_doc
+from agents_remember.worktrees import closeout_queue as queue_module
+from agents_remember.worktrees import closeout_queue_lifecycle as queue_lifecycle
+from agents_remember.worktrees import integration_operation_authority
 from agents_remember.worktrees.closeout_queue import QueueActor
 from agents_remember.worktrees.closeout_queue_lifecycle import (
     certify_queue_candidate_closeout,
@@ -34,11 +39,16 @@ from agents_remember.worktrees.lifecycle_operations import (
 )
 from agents_remember.worktrees.modules import closeout as closeout_mod
 from agents_remember.worktrees.modules import integrate as integrate_mod
+from agents_remember.worktrees.modules import sync as sync_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.route_review import code_candidate_tree
-from agents_remember.worktrees.worktree_contract import load_contract
-from test_closeout_queue import LEAF_A, MASTER_A, SPRINT, QueueFixture
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    write_contract,
+)
+from test_closeout_queue import LEAF_A, MASTER_A, SPRINT, QueueFixture, _leaf
 from test_worktree_support import git
 
 
@@ -56,21 +66,36 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         candidate_contract = self.fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(candidate_contract.coordination_root / "settings.json").as_posix(),
+                configPath=(candidate_contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=candidate_contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
             ),
             launcher=lambda *_: None,
         )
-        closeout_record = LifecycleOperationStore(
+        closeout_store = LifecycleOperationStore(
             operation_record_path(candidate_contract.worktree_group, "closeout")
-        ).read()
+        )
+        closeout_record = closeout_store.read()
         assert closeout_record is not None
         closeout_key = closeout_record.operationKey
         claim_queue_candidate_for_closeout(candidate_contract, closeout_key)
         contract = self.fixture.close_contract(MASTER_A)
         certify_queue_candidate_closeout(contract, closeout_key)
+        closeout_store.update(
+            lambda record: record.model_copy(
+                update={"status": "running", "phase": "contract-finalization"}
+            )
+        )
+        closeout_store.update(
+            lambda record: record.model_copy(
+                update={
+                    "status": "completed",
+                    "phase": "completed",
+                    "finishedAt": "2026-08-15T00:01:00+00:00",
+                }
+            )
+        )
         git(contract.code_repo_path, "checkout", contract.code_source_branch)
         assert contract.memory_repo_path is not None
         git(contract.memory_repo_path, "checkout", contract.memory_source_branch)
@@ -79,16 +104,13 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
     def _integration_key(self, contract) -> str:
         start_or_observe_operation(
             IntegrateOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
             ),
             launcher=lambda *_: None,
         )
-        record = LifecycleOperationStore(
-            operation_record_path(contract.worktree_group, "integrate")
-        ).read()
-        assert record is not None
-        return record.operationKey
+        store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
+        return lifecycle_operation_worker.OperationRuntime(store).start().operationKey
 
     def test_production_integrate_claims_revalidates_and_consumes_exact_candidate(self) -> None:
         contract = self._certified_contract()
@@ -129,6 +151,146 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(self.fixture.status()["inFlight"], [])
 
+    def test_governed_integration_acquires_queue_before_repository_authority(self) -> None:
+        contract = self._certified_contract()
+        integration_key = self._integration_key(contract)
+        claim_queue_candidate_for_integration(contract, integration_key)
+        original_inspect = CloseoutQueueStore.inspect
+        queue_active = False
+        order: list[str] = []
+
+        def inspect_under_marker(store, initial, reader):
+            def marked(state):
+                nonlocal queue_active
+                queue_active = True
+                order.append("queue")
+                try:
+                    return reader(state)
+                finally:
+                    queue_active = False
+
+            return original_inspect(store, initial, marked)
+
+        @contextmanager
+        def repository_authority(*_args):
+            self.assertTrue(queue_active)
+            order.append("repository")
+            yield
+
+        with (
+            mock.patch.object(CloseoutQueueStore, "inspect", new=inspect_under_marker),
+            mock.patch.object(
+                queue_lifecycle,
+                "integration_authority_lock",
+                new=repository_authority,
+            ),
+        ):
+            result = queue_lifecycle.publish_queue_candidate_integration_under_authority(
+                contract,
+                lambda: order.append("publication") or "published",
+                operation_key=integration_key,
+                commits=(
+                    contract.code_commit,
+                    contract.memory_content_commit,
+                    contract.ledger_commit,
+                ),
+            )
+
+        self.assertEqual(result, "published")
+        self.assertEqual(order, ["queue", "repository", "publication"])
+
+    def test_declaration_binds_contract_under_queue_then_repository_authority(self) -> None:
+        original_transact = CloseoutQueueStore.transact
+        queue_active = False
+        order: list[str] = []
+
+        def transact_under_marker(store, **kwargs):
+            nonlocal queue_active
+            queue_active = True
+            order.append("queue")
+            try:
+                return original_transact(store, **kwargs)
+            finally:
+                queue_active = False
+
+        @contextmanager
+        def repository_authority(*_args):
+            self.assertTrue(queue_active)
+            order.append("repository")
+            yield
+
+        with (
+            mock.patch.object(
+                CloseoutQueueStore,
+                "transact",
+                new=transact_under_marker,
+            ),
+            mock.patch.object(
+                queue_module,
+                "integration_authority_lock",
+                new=repository_authority,
+            ),
+        ):
+            self.fixture.declare(MASTER_A, priority=None)
+
+        rebound = load_contract(self.fixture.contracts[MASTER_A].contract_path)
+        self.assertEqual(order, ["queue", "repository"])
+        self.assertEqual(rebound.queue_sprint_task_document, SPRINT.key)
+        self.assertEqual(rebound.queue_candidate_task_document, LEAF_A.key)
+
+    def test_safe_ref_race_does_not_consume_the_in_flight_candidate(self) -> None:
+        contract = self._certified_contract()
+        integration_key = self._integration_key(contract)
+        claim_queue_candidate_for_integration(contract, integration_key)
+        commits = integrate_mod.IntegratedCommits(
+            contract.code_commit,
+            contract.memory_content_commit,
+            contract.ledger_commit,
+        )
+        with (
+            mock.patch.object(
+                integrate_mod,
+                "_prepare_integration_commits",
+                return_value=(commits, {"passed": True}),
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "_integration_source_state_block",
+                return_value=None,
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "prepare_integration_ref_move",
+                return_value=mock.sentinel.snapshot,
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "merge_integrated_commits",
+                side_effect=integrate_mod.IntegrationRefRace(
+                    "expected-old changed before first CAS",
+                    safe_to_replace=True,
+                ),
+            ),
+        ):
+            result = integrate_mod._apply_integration(
+                contract,
+                WorktreeArgs(operation_key=integration_key),
+                integrate_mod.IntegrationSources(
+                    contract.code_base_commit,
+                    contract.memory_base_commit,
+                    False,
+                    False,
+                ),
+                handover_warning=None,
+            )
+
+        self.assertEqual(result.payload["state"], "integration-ref-raced")
+        projected = self.fixture.status(QueueActor(role="manager", task_document_ref=MASTER_A))
+        self.assertEqual(
+            projected["inFlight"][0]["candidateState"],
+            "integration-in-flight",
+        )
+
     def test_boundary_rechecks_evidence_after_claim_before_source_merge(self) -> None:
         contract = self._certified_contract()
         integration_key = self._integration_key(contract)
@@ -146,7 +308,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
                 "_integrated_memory_commits",
                 side_effect=mutate_after_memory,
             ),
-            mock.patch.object(integrate_mod, "_merge_integrated_commits") as merge,
+            mock.patch.object(integrate_mod, "merge_integrated_commits") as merge,
             self.assertRaises(CloseoutQueueError) as raised,
         ):
             integrate_mod.integrate_result(
@@ -174,6 +336,8 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         sprint = read_task_doc(sprint_path)
         write_task_doc(sprint_path.parent, sprint.model_copy(update={"executionGraph": None}))
         with (
+            mock.patch.object(closeout_mod, "require_ordinary_worktree"),
+            mock.patch.object(closeout_mod, "require_current_source_lineage"),
             mock.patch.object(closeout_mod, "_refuse_unsatisfied_closeout_gate"),
             mock.patch.object(
                 closeout_mod,
@@ -196,11 +360,30 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
 
     def test_production_integration_refuses_when_bound_sprint_graph_disappears(self) -> None:
         contract = self._certified_contract()
+        integration_key = self._integration_key(contract)
+        targets = integrate_mod.integration_targets(contract)
         sprint_path = self.fixture.tasks / "sprint" / "task.json"
         sprint = read_task_doc(sprint_path)
         write_task_doc(sprint_path.parent, sprint.model_copy(update={"executionGraph": None}))
         with (
-            mock.patch.object(integrate_mod, "_merge_integrated_commits") as merge,
+            mock.patch.object(integrate_mod, "require_ordinary_worktree"),
+            mock.patch.object(integrate_mod, "integration_targets", return_value=targets),
+            mock.patch.object(
+                integration_operation_authority,
+                "integration_targets",
+                return_value=targets,
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "_integration_source_state_block",
+                return_value=None,
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "_integration_lineage_block",
+                return_value=None,
+            ),
+            mock.patch.object(integrate_mod, "merge_integrated_commits") as merge,
             self.assertRaisesRegex(CloseoutQueueError, "lost its executionGraph"),
         ):
             integrate_mod.integrate_result(
@@ -208,7 +391,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
                     contract_path=contract.contract_path,
                     approved=True,
                     strategy="ff-only",
-                    operation_key="1" * 64,
+                    operation_key=integration_key,
                 )
             )
         merge.assert_not_called()
@@ -219,7 +402,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         contract = self.fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
@@ -247,7 +430,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         certify_queue_candidate_closeout(certified_contract, "2" * 64)
         start_or_observe_operation(
             IntegrateOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
             ),
             launcher=lambda *_: None,
@@ -273,7 +456,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         contract = self.fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
@@ -301,7 +484,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         self.fixture.mutate("select", candidate=LEAF_A)
         contract = self.fixture.contracts[MASTER_A]
         operation_input = CloseoutOperationInput(
-            configPath=(contract.coordination_root / "settings.json").as_posix(),
+            configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
             contractPath=contract.contract_path.as_posix(),
             codeCommitMessage="close candidate",
             approvalNote="approved",
@@ -341,7 +524,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         contract = self.fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
@@ -383,7 +566,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         self.assertEqual(blocked["legalNextOperations"], ["worktree_closeout_apply"])
         retried = start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
@@ -398,7 +581,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         contract = self.fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close candidate",
                 approvalNote="approved",
@@ -449,7 +632,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         candidate_tree = code_candidate_tree(contract)
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close exact queue candidate",
                 approvalNote="developer approved exact closeout",
@@ -494,7 +677,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         contract = fixture.contracts[MASTER_A]
         start_or_observe_operation(
             CloseoutOperationInput(
-                configPath=(contract.coordination_root / "settings.json").as_posix(),
+                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
                 codeCommitMessage="close exact queue candidate",
                 approvalNote="developer approved exact closeout",
@@ -556,6 +739,143 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(recovered.payload["state"], "already-closed")
         self.assertEqual(fixture.status()["inFlight"][0]["candidateState"], "certified")
+
+    def test_certified_conflict_cancels_into_new_closeout_and_integration(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name) / "conflict-resolution", memory_mode="internal")
+        fixture.declare(MASTER_A)
+        fixture.mutate("select", candidate=LEAF_A)
+        candidate = fixture.contracts[MASTER_A]
+        closed = _close_and_certify_candidate(
+            fixture,
+            candidate,
+            "close original candidate",
+            "2026-08-15T00:01:00+00:00",
+        )
+
+        git(closed.code_repo_path, "checkout", closed.code_source_branch)
+        (closed.code_repo_path / "parallel.txt").write_text("parallel\n", encoding="utf-8")
+        git(closed.code_repo_path, "add", "parallel.txt")
+        git(closed.code_repo_path, "commit", "-m", "parallel source")
+        integration_input = IntegrateOperationInput(
+            configPath=(closed.code_repo_path.parent / "settings.json").as_posix(),
+            contractPath=closed.contract_path.as_posix(),
+            strategy="replay",
+        )
+        start_or_observe_operation(integration_input, launcher=lambda *_: None)
+        integration_store = LifecycleOperationStore(
+            operation_record_path(closed.worktree_group, "integrate")
+        )
+        integration_record = lifecycle_operation_worker.OperationRuntime(integration_store).start()
+        handoff = integrate_mod.integrate_result(
+            WorktreeArgs(
+                contract_path=closed.contract_path,
+                approved=True,
+                strategy="replay",
+                operation_key=integration_record.operationKey,
+            )
+        )
+        self.assertEqual(handoff.payload["state"], "integration-resolution-required")
+        self.assertIsNotNone(handoff.payload["conflictTransaction"])
+
+        cancelled = cancel_operation(closed.contract_path, "integrate")
+        self.assertEqual(cancelled.status, "cancelled")
+        reset = load_contract(closed.contract_path)
+        self.assertEqual((reset.closeout_status, reset.code_commit), ("not-started", ""))
+        _assert_candidate_absent(self, fixture)
+
+        synced = sync_mod.sync_result(WorktreeArgs(contract_path=reset.contract_path))
+        self.assertEqual(synced.payload["state"], "synced")
+        reset = load_contract(reset.contract_path)
+        (reset.code_worktree / "resolution.txt").write_text("resolved\n", encoding="utf-8")
+        write_task_doc(reset.task_root, _leaf(reset, "leaf-a"))
+        fixture.contracts[MASTER_A] = reset
+        fixture.declare(MASTER_A)
+        fixture.mutate("select", candidate=LEAF_A)
+        resolved = _close_and_certify_candidate(
+            fixture,
+            reset,
+            "close resolved candidate",
+            "2026-08-15T00:02:00+00:00",
+        )
+
+        second_integration_input = IntegrateOperationInput(
+            configPath=integration_input.configPath,
+            contractPath=integration_input.contractPath,
+        )
+        start_or_observe_operation(second_integration_input, launcher=lambda *_: None)
+        second_integration = lifecycle_operation_worker.OperationRuntime(integration_store).start()
+        with mock.patch.object(
+            integrate_mod,
+            "_run_integration_quality_gate",
+            return_value=({"passed": True}, None),
+        ):
+            integrated = integrate_mod.integrate_result(
+                WorktreeArgs(
+                    contract_path=resolved.contract_path,
+                    approved=True,
+                    operation_key=second_integration.operationKey,
+                )
+            )
+        self.assertEqual(integrated.payload["state"], "integrated")
+        _assert_candidate_absent(self, fixture)
+
+
+def _close_and_certify_candidate(
+    fixture: QueueFixture,
+    contract: WorktreeContract,
+    message: str,
+    finished_at: str,
+) -> WorktreeContract:
+    operation_input = CloseoutOperationInput(
+        configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
+        contractPath=contract.contract_path.as_posix(),
+        codeCommitMessage=message,
+        approvalNote="approved",
+    )
+    start_or_observe_operation(operation_input, launcher=lambda *_: None)
+    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
+    record = store.read()
+    assert record is not None
+    claim_queue_candidate_for_closeout(contract, record.operationKey)
+    git(contract.code_worktree, "add", "-A")
+    git(contract.code_worktree, "commit", "-m", message)
+    closed = replace(
+        contract,
+        human_review_status="approved",
+        approved_for_commit=True,
+        closeout_status="completed",
+        code_commit=git(contract.code_worktree, "rev-parse", "HEAD"),
+    )
+    write_contract(closed.contract_path, closed)
+    certify_queue_candidate_closeout(closed, record.operationKey)
+    _finish_operation(store, finished_at)
+    fixture.contracts[MASTER_A] = closed
+    return closed
+
+
+def _finish_operation(store: LifecycleOperationStore, finished_at: str) -> None:
+    store.update(
+        lambda record: record.model_copy(
+            update={"status": "running", "phase": "contract-finalization"}
+        )
+    )
+    store.update(
+        lambda record: record.model_copy(
+            update={
+                "status": "completed",
+                "phase": "completed",
+                "finishedAt": finished_at,
+            }
+        )
+    )
+
+
+def _assert_candidate_absent(test: unittest.TestCase, fixture: QueueFixture) -> None:
+    projected = fixture.status()
+    for lane in ("ready", "inFlight", "blocked"):
+        test.assertFalse(
+            any(item["taskDocumentRef"] == LEAF_A.model_dump() for item in projected[lane])
+        )
 
 
 if __name__ == "__main__":

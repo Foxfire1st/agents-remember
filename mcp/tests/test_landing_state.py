@@ -570,8 +570,15 @@ class LandingFreezeResurrectionTests(unittest.IsolatedAsyncioTestCase):
             await frozen.refresh_once(now=NOW)
             self.assertTrue(final.exists())
 
-            with mock.patch(
-                "agents_remember.worktrees.reopen.parent_source_lineage", return_value=None
+            with (
+                mock.patch(
+                    "agents_remember.worktrees.reopen.parent_source_lineage",
+                    return_value=None,
+                ),
+                mock.patch(
+                    "agents_remember.worktrees.reopen.require_parent_series_accepting_leaves",
+                    return_value=None,
+                ),
             ):
                 result = reopen_task(contract.contract_path)
 

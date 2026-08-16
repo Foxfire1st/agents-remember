@@ -7,18 +7,46 @@ import os
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     write_ledger,
 )
+from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.memory import carryover as carryover_module
 from agents_remember.memory.carryover import (
     FILE_SIDECAR_KIND,
     ROUTE_OVERVIEW_KIND,
+    CarryoverApplyOptions,
     CarryoverRequest,
     build_plan_for_request,
 )
+from agents_remember.memory.carryover import (
+    _apply_carryover_for_request as _apply_carryover_owner,
+)
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
+
+
+def _apply_carryover_for_request(
+    request: CarryoverRequest,
+    **kwargs: Any,
+) -> dict[str, object]:
+    """Drive the private mutator with the same loaded authority as the MCP application."""
+
+    return _apply_carryover_owner(
+        request,
+        authority=load_config(request.config_path),
+        options=CarryoverApplyOptions(**kwargs),
+    )
 
 
 # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_carryover.py:24).
@@ -174,6 +202,8 @@ class CarryoverFixture:
     """Code repo with a landed task branch plus official and source memory roots."""
 
     def __init__(self, workspace: Path) -> None:
+        self.coordination_root = workspace / "coordination"
+        (self.coordination_root / "tasks" / "repo-a").mkdir(parents=True)
         self.code_repo = workspace / "repo-a"
         self.old_base = init_repo(self.code_repo, "main")
         git(self.code_repo, "checkout", "-b", "task/one")
@@ -184,15 +214,72 @@ class CarryoverFixture:
         git(self.code_repo, "merge", "--ff-only", "task/one")
         self.official_head = git(self.code_repo, "rev-parse", "main")
 
-        self.official_memory = workspace / "memory-official"
-        memory_seed = init_repo(self.official_memory, "main")
+        self.target_memory = workspace / "memory-official"
+        memory_seed = init_repo(self.target_memory, "main")
         write_ledger(
-            self.official_memory / "memory.md",
+            self.target_memory / "memory.md",
             create_initial_ledger("repo-a", self.old_base, memory_seed),
         )
-        write_memory_settings(self.official_memory)
-        git(self.official_memory, "add", "memory.md", "system/settings.json")
-        git(self.official_memory, "commit", "-m", "Add memory ledger")
+        write_memory_settings(self.target_memory)
+        git(self.target_memory, "add", "memory.md", "system/settings.json")
+        git(self.target_memory, "commit", "-m", "Add memory ledger")
+        git(self.target_memory, "checkout", "-b", "carryover-work")
+        configured_memory = self.coordination_root / "memory-repos" / "ar-repo-a"
+        configured_memory.parent.mkdir(parents=True)
+        configured_memory.symlink_to(self.target_memory, target_is_directory=True)
+        self.config_path = workspace / "settings.json"
+        self.config_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "coordinationRoot": self.coordination_root.as_posix(),
+                    "workspaceRoot": workspace.as_posix(),
+                    "repositories": {"repo-a": {}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        for repository in (self.code_repo, self.target_memory):
+            main = git(repository, "rev-parse", "main")
+            git(repository, "update-ref", "refs/remotes/origin/main", main)
+            git(
+                repository,
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            )
+        git(self.code_repo, "checkout", "task/one")
+        self.target_contract = replace(
+            default_contract(
+                ContractTask(
+                    name="carryover-recovery",
+                    repo_name="repo-a",
+                    coordination_root=self.coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(
+                    worktree_name="carryover-recovery",
+                    leaf_id="CARRYOVER-RECOVERY",
+                ),
+                code=RepoBranchPlan(
+                    repo_path=self.code_repo,
+                    source_branch="main",
+                    work_branch="task/one",
+                    base_commit=self.official_head,
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=self.target_memory,
+                    source_branch="main",
+                    work_branch="carryover-work",
+                    base_commit=git(self.target_memory, "rev-parse", "HEAD"),
+                ),
+            ),
+            code_worktree=self.code_repo,
+            memory_worktree=self.target_memory,
+            ledger_path=self.target_memory / "memory.md",
+        )
+        write_contract(self.target_contract.contract_path, self.target_contract)
 
         self.source_memory = workspace / "memory-branch"
         self.source_memory.mkdir(parents=True)
@@ -200,17 +287,19 @@ class CarryoverFixture:
             self.source_memory / "onboarding", "repo-a", "src/app/feature.py", self.source_head
         )
 
-    def commit_official(self, message: str = "Seed official onboarding") -> None:
-        git(self.official_memory, "add", "-A")
-        git(self.official_memory, "commit", "-m", message)
+    def commit_target(self, message: str = "Seed target onboarding") -> None:
+        git(self.target_memory, "add", "-A")
+        git(self.target_memory, "commit", "-m", message)
 
     def request(self) -> CarryoverRequest:
         return CarryoverRequest(
+            config_path=self.config_path,
+            target_contract_path=self.target_contract.contract_path,
             code_repository_root=self.code_repo,
             official_code_ref="main",
             source_code_ref="task/one",
             old_base=self.old_base,
-            official_memory=self.official_memory,
+            target_memory=self.target_memory,
             source_memory=self.source_memory,
             code_repository_name="repo-a",
         )
@@ -219,7 +308,7 @@ class CarryoverFixture:
 def carryover_snapshot(
     fixture: CarryoverFixture,
 ) -> tuple[tuple[str, str, dict[str, bytes]], dict[str, bytes]]:
-    return repository_snapshot(fixture.official_memory), tree_snapshot(fixture.source_memory)
+    return repository_snapshot(fixture.target_memory), tree_snapshot(fixture.source_memory)
 
 
 def overview_candidates_of(plan: dict[str, object]) -> list[dict[str, object]]:
@@ -229,6 +318,29 @@ def overview_candidates_of(plan: dict[str, object]) -> list[dict[str, object]]:
 
 
 class CarryoverOverviewPlanTests(unittest.TestCase):
+    def test_direct_cli_exposes_plan_only_and_cannot_apply(self) -> None:
+        with self.assertRaises(SystemExit):
+            carryover_module.main(["apply"])
+
+    def test_private_writer_requires_the_exact_loaded_runtime_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CarryoverFixture(Path(tmp))
+            other_config = Path(tmp) / "other-settings.json"
+            other_config.write_text(
+                fixture.config_path.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            before = carryover_snapshot(fixture)
+
+            with self.assertRaisesRegex(RuntimeError, "runtime config authority"):
+                _apply_carryover_owner(
+                    fixture.request(),
+                    authority=load_config(other_config),
+                    options=CarryoverApplyOptions(intent_note="attempt mismatched authority"),
+                )
+
+            self.assertEqual(carryover_snapshot(fixture), before)
+
     def test_plan_includes_differing_overview_as_review_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
@@ -245,7 +357,7 @@ class CarryoverOverviewPlanTests(unittest.TestCase):
             self.assertEqual(overviews[0]["source_path"], "src/app")
             self.assertEqual(overviews[0]["decision"], "review-required")
             self.assertEqual(overviews[0]["evidence"], "route-covers-landed-paths")
-            self.assertFalse(overviews[0]["official_exists"])
+            self.assertFalse(overviews[0]["target_exists"])
 
     def test_plan_skips_overview_without_landed_path_under_route(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,9 +375,9 @@ class CarryoverOverviewPlanTests(unittest.TestCase):
                 fixture.source_memory / "onboarding", "repo-a", ".", fixture.old_base
             )
             write_route_overview(
-                fixture.official_memory / "onboarding", "repo-a", ".", fixture.old_base
+                fixture.target_memory / "onboarding", "repo-a", ".", fixture.old_base
             )
-            fixture.commit_official()
+            fixture.commit_target()
             plan = build_plan_for_request(fixture.request())
             overviews = overview_candidates_of(plan)
             self.assertEqual(len(overviews), 1)

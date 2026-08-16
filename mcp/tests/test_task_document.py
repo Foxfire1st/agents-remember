@@ -7,15 +7,12 @@ store, the ``task_doc`` application operations and error paths (including contra
 lifecycle-key pickup), and the MCP tool registration.
 """
 
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from typing import (
-    Any,
-    cast,
-)
+from typing import Any
 from unittest.mock import patch
 
 from pydantic import ValidationError
@@ -31,6 +28,7 @@ from agents_remember.application.task_doc_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
+    RepositoryScope,
 )
 from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
@@ -78,8 +76,51 @@ def _master(**over: Any) -> TaskDocument:
 
 
 def _config(coord: Path) -> McpRuntimeConfig:
-    """A lightweight stand-in: the task-doc entry point only reads coordination_root."""
-    return cast(McpRuntimeConfig, SimpleNamespace(coordination_root=coord))
+    """Build the configured repository authority used by task-doc publication."""
+    repo = coord / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "base"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    return McpRuntimeConfig(
+        config_path=coord / "settings.json",
+        coordination_root=coord,
+        workspace_root=coord,
+        transcript_root=coord / "logs" / "mcp",
+        repositories={"agents-remember": RepositoryScope(repo_id="agents-remember", path=repo)},
+    )
 
 
 class SchemaTests(unittest.TestCase):

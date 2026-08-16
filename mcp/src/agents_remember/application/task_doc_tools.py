@@ -20,11 +20,13 @@ from typing import Any, cast
 from pydantic import ValidationError
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SubTaskRef,
     TaskDocument,
@@ -46,6 +48,9 @@ from agents_remember.tasks.master_sync import MasterSyncError, MasterSyncPlan, p
 from agents_remember.tasks.readiness import (
     completed_master_rows_to_validate,
     missing_unresolved_master_rows,
+)
+from agents_remember.worktrees.integration_branch_authority import (
+    require_topology_publication_authority,
 )
 from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.route_review import RouteReviewError, build_route_review
@@ -244,11 +249,14 @@ def task_doc_tool(
         master_sync = plan_master_sync(task_root, doc)
     except MasterSyncError as exc:
         raise TaskDocError(str(exc)) from exc
-    if dry_run:
-        return _preview(operation, doc, task_root, master_sync=master_sync)
     docs: list[TaskDocument] = [doc]
     if master_sync.changed and master_sync.master is not None:
         docs.append(master_sync.master)
+    if dry_run:
+        preview_context = _TaskDocPublication(config, target, task_root, original, doc, docs)
+        with integration_authority_lock(config.coordination_root, target.repo_id):
+            _validate_task_doc_publication_authority(preview_context)
+        return _preview(operation, doc, task_root, master_sync=master_sync)
     written = _publish_task_doc_set(
         _TaskDocPublication(config, target, task_root, original, doc, docs)
     )
@@ -258,11 +266,16 @@ def task_doc_tool(
 
 def _publish_task_doc_set(context: _TaskDocPublication) -> list[tuple[Path, Path]]:
     def publication() -> list[tuple[Path, Path]]:
-        return (
-            context.publisher()
-            if context.publisher is not None
-            else write_task_docs(context.task_root, context.documents)
-        )
+        with integration_authority_lock(
+            context.config.coordination_root,
+            context.target.repo_id,
+        ):
+            _validate_task_doc_publication_authority(context)
+            return (
+                context.publisher()
+                if context.publisher is not None
+                else write_task_docs(context.task_root, context.documents)
+            )
 
     try:
         scope = governing_queue_scope(
@@ -300,6 +313,39 @@ def _publish_task_doc_set(context: _TaskDocPublication) -> list[tuple[Path, Path
     )
 
 
+def _validate_task_doc_publication_authority(context: _TaskDocPublication) -> None:
+    repository = context.config.repositories[context.target.repo_id]
+    try:
+        require_topology_publication_authority(
+            context.config.coordination_root,
+            context.target.repo_id,
+            repository.path,
+            repository.memory_root,
+            _task_doc_publication_overrides(context),
+        )
+    except RuntimeError as exc:
+        raise TaskDocError(str(exc)) from exc
+
+
+def _task_doc_publication_overrides(
+    context: _TaskDocPublication,
+) -> dict[TaskDocumentRef, TaskDocument]:
+    root = (context.config.coordination_root / "tasks" / context.target.repo_id).resolve(
+        strict=False
+    )
+    overrides: dict[TaskDocumentRef, TaskDocument] = {}
+    for document in context.documents:
+        path = json_path_for(context.task_root, document).resolve(strict=False)
+        if not path.is_relative_to(root):
+            raise TaskDocError(f"task document publication escapes tasks root: {path}")
+        ref = TaskDocumentRef(
+            repository=context.target.repo_id,
+            path=path.relative_to(root).as_posix(),
+        )
+        overrides[ref] = document
+    return overrides
+
+
 def _task_topology_stable(original: TaskDocument | None, candidate: TaskDocument) -> bool:
     """Whether an in-barrier task update preserves scheduling identity and membership."""
 
@@ -330,11 +376,14 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
             markdown_path_for(context.task_root, doc),
         )
     if context.operation == "migrate_execution_topology":
+        repository = context.config.repositories[context.target.repo_id]
         try:
             return migrate_execution_topology(
                 ExecutionTopologyMigrationRequest(
                     coordination_root=context.config.coordination_root,
                     repo_id=context.target.repo_id,
+                    code_repository=repository.path,
+                    memory_repository=repository.memory_root,
                     task_root=context.task_root,
                     slug=context.target.slug,
                     fields=context.fields,
@@ -932,6 +981,19 @@ def _remove_subtask(
     )
     leaf_files = _leaf_doc_files(context.task_root, match)
     if context.dry_run:
+        preview_context = _TaskDocPublication(
+            context.config,
+            context.target,
+            context.task_root,
+            doc,
+            updated,
+            [updated],
+        )
+        with integration_authority_lock(
+            context.config.coordination_root,
+            context.target.repo_id,
+        ):
+            _validate_task_doc_publication_authority(preview_context)
         result = _preview("remove_subtask", updated, context.task_root)
         result["removedSubtask"] = number
         result["wouldDeleteFiles"] = (

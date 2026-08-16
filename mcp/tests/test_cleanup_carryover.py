@@ -1,9 +1,8 @@
-"""Tests for 05m: carryover-before-cleanup ordering + task work-branch retirement.
+"""Tests for exact landed-memory proof before cleanup + task work-branch retirement.
 
-The lifecycle must carry the parked memory home (via the existing ``memory_carryover_apply``) *before*
-cleanup deletes the worktree it reads from, and cleanup must then retire the just-finalized task work
-branches. Parent/source branches belong to the next edge up the task tree and must survive this
-child-edge cleanup. The "carryover done" signal is the official ledger itself (no contract stamp).
+An integrated external-memory task must prove its exact code-to-memory mapping on the named
+source ref before cleanup deletes its parked worktree. A missing pair routes through a separate
+open recovery leaf; the completed contract is never reused as a carryover workbench.
 """
 
 import json
@@ -35,14 +34,18 @@ from agents_remember.tasks import (
     read_task_doc,
     write_task_doc,
 )
+from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import terminal_validation
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     LocalBranchPresence,
+    _terminal_mutation_authority,
     cleanup_result,
+    delete_branch_force,
     delete_branch_if_merged,
     delete_branch_if_merged_into,
     delete_remote_branch_if_present,
+    remove_registered_worktree,
 )
 from agents_remember.worktrees.modules.guidance import (
     carryover_done,
@@ -86,12 +89,75 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
         "ledger_path": tmp / "memwt" / "memory.md",
         "integration_status": "completed",
         "integrated_code_commit": "LANDED1234",
+        "integrated_memory_content_commit": "MEMORY1234",
         "code_commit": "CLOSE1234",
         "cleanup": "pending",
         "lifecycle_id": "LC-T",
     }
     base.update(over)
     return WorktreeContract(**base)  # type: ignore[arg-type]
+
+
+def _real_external_contract(tmp: Path, name: str) -> WorktreeContract:
+    """Create one exact code+memory leaf enclosure for terminal-owner tests."""
+
+    code_repo = tmp / f"{name}-code-repo"
+    memory_repo = tmp / f"{name}-memory-repo"
+    code_base = init_repo(code_repo, "main")
+    memory_content = init_repo(memory_repo, "main")
+    (memory_repo / "memory.md").write_text(
+        ledger_to_text(create_initial_ledger("repo-a", code_base, memory_content)),
+        encoding="utf-8",
+    )
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "ledger")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    code_source = "feat/x"
+    code_work = "ar/x"
+    memory_source = "feat/x"
+    memory_work = "ar/x"
+    git(code_repo, "branch", code_source, "main")
+    git(memory_repo, "branch", memory_source, "main")
+    worktree_group = tmp / f"{name}-group"
+    code_worktree = worktree_group / "code"
+    memory_worktree = worktree_group / "memory"
+    git(code_repo, "worktree", "add", "-b", code_work, str(code_worktree), code_source)
+    git(
+        memory_repo,
+        "worktree",
+        "add",
+        "-b",
+        memory_work,
+        str(memory_worktree),
+        memory_source,
+    )
+    task_root = tmp / "tasks" / name
+    contract = _contract(
+        tmp,
+        task_name=name,
+        task_root=task_root,
+        contract_path=task_root / "series-contract.md",
+        worktree_group=worktree_group,
+        code_repo_path=code_repo,
+        code_source_branch=code_source,
+        code_work_branch=code_work,
+        code_base_commit=code_base,
+        code_worktree=code_worktree,
+        code_commit=code_base,
+        integrated_code_commit=code_base,
+        memory_repo_path=memory_repo,
+        memory_source_branch=memory_source,
+        memory_work_branch=memory_work,
+        memory_base_commit=memory_base,
+        memory_worktree=memory_worktree,
+        ledger_path=memory_worktree / "memory.md",
+        memory_content_commit=memory_content,
+        integrated_memory_content_commit=memory_content,
+        ledger_commit=memory_base,
+        integrated_ledger_commit=memory_base,
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
 
 
 def _write_drift_snapshot(coordination_root: Path, *, repository: str, branch: str) -> Path:
@@ -115,7 +181,7 @@ def _write_drift_snapshot(coordination_root: Path, *, repository: str, branch: s
 
 
 class CarryoverDoneTests(unittest.TestCase):
-    """The carryover signal is the official ledger mapping the landed code commit (no contract stamp)."""
+    """Cleanup requires the exact landed pair on the named memory source ref."""
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
@@ -141,15 +207,60 @@ class CarryoverDoneTests(unittest.TestCase):
 
     def test_external_done_when_ledger_maps_landed_commit(self) -> None:
         mem = self._official_memory("LANDED1234")
-        done, done_at = carryover_done(_contract(self.tmp, memory_repo_path=mem))
+        memory_commit = git(mem, "rev-parse", "HEAD^")
+        done, done_at = carryover_done(
+            _contract(
+                self.tmp,
+                memory_repo_path=mem,
+                memory_source_branch="main",
+                integrated_memory_content_commit=memory_commit,
+            )
+        )
         self.assertTrue(done)
         self.assertTrue(done_at)  # a real ISO timestamp from `git show %cI`
 
     def test_external_not_done_when_ledger_lacks_landed_commit(self) -> None:
         mem = self._official_memory("SOMETHINGELSE")
-        done, done_at = carryover_done(_contract(self.tmp, memory_repo_path=mem))
+        done, done_at = carryover_done(
+            _contract(self.tmp, memory_repo_path=mem, memory_source_branch="main")
+        )
         self.assertFalse(done)
         self.assertEqual(done_at, "")
+
+    def test_external_not_done_for_wrong_or_unreachable_mapped_content(self) -> None:
+        mem = self._official_memory("LANDED1234")
+        mapped = git(mem, "rev-parse", "HEAD^")
+        wrong = git(mem, "rev-parse", "HEAD")
+        done, _ = carryover_done(
+            _contract(
+                self.tmp,
+                memory_repo_path=mem,
+                memory_source_branch="main",
+                integrated_memory_content_commit=wrong,
+            )
+        )
+        self.assertFalse(done)
+
+        git(mem, "checkout", "-b", "unreachable-content")
+        (mem / "detached.md").write_text("unreachable\n", encoding="utf-8")
+        git(mem, "add", "detached.md")
+        git(mem, "commit", "-m", "unreachable content")
+        unreachable = git(mem, "rev-parse", "HEAD")
+        git(mem, "checkout", "main")
+        ledger = create_initial_ledger("repo-a", "BASECODE", mapped)
+        ledger = prepend_mapping(ledger, "LANDED1234", unreachable)
+        (mem / "memory.md").write_text(ledger_to_text(ledger), encoding="utf-8")
+        git(mem, "add", "memory.md")
+        git(mem, "commit", "-m", "map unreachable content")
+        done, _ = carryover_done(
+            _contract(
+                self.tmp,
+                memory_repo_path=mem,
+                memory_source_branch="main",
+                integrated_memory_content_commit=unreachable,
+            )
+        )
+        self.assertFalse(done)
 
     def test_internal_memory_is_vacuously_done(self) -> None:
         done, done_at = carryover_done(
@@ -174,7 +285,11 @@ class GuidanceCarryoverRoutingTests(unittest.TestCase):
         cd.return_value = (False, "")
         guidance = lifecycle_guidance(_contract(self.tmp))
         self.assertEqual(guidance["phase"], "carryover-pending")
-        self.assertEqual(guidance.get("nextTool"), "memory_carryover_apply")
+        self.assertEqual(guidance.get("nextTool"), "memory_carryover_plan")
+        self.assertEqual(guidance.get("nextRequiredArgs"), ["contract_path"])
+        next_args = guidance.get("nextArgs")
+        assert next_args is not None
+        self.assertEqual(next_args["source_code_ref"], "ar/x")
 
     @patch("agents_remember.worktrees.modules.guidance.carryover_done")
     def test_routes_cleanup_pending_with_done_at_when_carried(self, cd: MagicMock) -> None:
@@ -196,8 +311,7 @@ class CleanupCarryoverGuardTests(unittest.TestCase):
     @patch("agents_remember.worktrees.modules.cleanup.carryover_done")
     def test_cleanup_refuses_before_carryover(self, cd: MagicMock) -> None:
         cd.return_value = (False, "")
-        contract = _contract(self.tmp)
-        write_contract(contract.contract_path, contract)
+        contract = _real_external_contract(self.tmp, "carryover-refusal")
         args = WorktreeArgs(contract_path=contract.contract_path, approved=True, dry_run=False)
         with self.assertRaises(RuntimeError) as caught:
             cleanup_result(args)
@@ -215,6 +329,20 @@ class SourceBranchProofTests(unittest.TestCase):
         (self.repo / "dashboard.txt").write_text("dashboard\n", encoding="utf-8")
         git(self.repo, "add", "dashboard.txt")
         git(self.repo, "commit", "-m", "dashboard source")
+        self.authority = _terminal_mutation_authority(
+            _contract(
+                Path(self._td.name),
+                memory_mode="disabled",
+                memory_repo_path=None,
+                memory_worktree=None,
+                ledger_path=None,
+                code_repo_path=self.repo,
+                code_source_branch="feat/dashboard",
+                code_work_branch="ar/task",
+                code_worktree=Path(self._td.name) / "absent-worktree",
+            ),
+            operation="worktree_cleanup",
+        )
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -230,7 +358,13 @@ class SourceBranchProofTests(unittest.TestCase):
         git(self.repo, "merge", "--ff-only", "ar/task")
         git(self.repo, "checkout", "main")
 
-        out = delete_branch_if_merged_into(self.repo, "ar/task", "feat/dashboard", dry_run=False)
+        out = delete_branch_if_merged_into(
+            self.repo,
+            "ar/task",
+            "feat/dashboard",
+            dry_run=False,
+            authority=self.authority,
+        )
 
         self.assertTrue(out["deleted"])
         self.assertEqual(out["target"], "feat/dashboard")
@@ -245,7 +379,24 @@ class SourceBranchProofTests(unittest.TestCase):
         git(self.repo, "checkout", "main")
 
         out = delete_branch_if_merged_into(
-            self.repo, "ar/unmerged", "feat/dashboard", dry_run=False
+            self.repo,
+            "ar/unmerged",
+            "feat/dashboard",
+            dry_run=False,
+            authority=_terminal_mutation_authority(
+                _contract(
+                    Path(self._td.name),
+                    memory_mode="disabled",
+                    memory_repo_path=None,
+                    memory_worktree=None,
+                    ledger_path=None,
+                    code_repo_path=self.repo,
+                    code_source_branch="feat/dashboard",
+                    code_work_branch="ar/unmerged",
+                    code_worktree=Path(self._td.name) / "absent-worktree",
+                ),
+                operation="worktree_cleanup",
+            ),
         )
 
         self.assertFalse(out["deleted"])
@@ -357,8 +508,7 @@ class CleanupChildEdgeTests(unittest.TestCase):
         self.assertTrue(directories["reports"]["removed"])
         self.assertFalse(reports.exists())
         assert isinstance(branches, dict)
-        self.assertEqual(sorted(branches.keys()), ["code", "memory", "memory_integration"])
-        self.assertEqual(branches["memory_integration"]["reason"], "already-absent")
+        self.assertEqual(sorted(branches.keys()), ["code", "memory"])
         self.assertEqual(git(code_repo, "branch", "--list", "ar/task").strip(), "")
         self.assertEqual(git(memory_repo, "branch", "--list", "ar/task").strip(), "")
         self.assertIn("feat/dashboard", git(code_repo, "branch", "--list", "feat/dashboard"))
@@ -439,17 +589,10 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
         self, carryover: MagicMock, teardown: MagicMock
     ) -> None:
         carryover.return_value = (True, "2026-06-23T09:00:00+02:00")
-        code_repo = self.tmp / "code"
-        memory_repo = self.tmp / "mem"
-        init_repo(code_repo, "main")
-        init_repo(memory_repo, "main")
-        worktree_group = self.tmp / "grp"
-        code_worktree = worktree_group / "code"
-        memory_worktree = worktree_group / "memory"
+        contract = _real_external_contract(self.tmp, "dry-run-directories")
+        worktree_group = contract.worktree_group
         provider_runtime = worktree_group / "provider-runtime"
         reports = worktree_group / "reports"
-        code_worktree.mkdir(parents=True)
-        memory_worktree.mkdir()
         provider_runtime.mkdir()
         reports.mkdir()
         (reports / "curator-memory-quality.md").write_text("temporary\n", encoding="utf-8")
@@ -461,17 +604,6 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
                 "would_remove": True,
             },
         }
-        contract = _contract(
-            self.tmp,
-            code_repo_path=code_repo,
-            memory_repo_path=memory_repo,
-            worktree_group=worktree_group,
-            code_worktree=code_worktree,
-            memory_worktree=memory_worktree,
-            ledger_path=memory_worktree / "memory.md",
-        )
-        write_contract(contract.contract_path, contract)
-
         result = cleanup_result(WorktreeArgs(contract_path=contract.contract_path, dry_run=True))
         directories = result.payload["directories"]  # type: ignore[index]
 
@@ -555,21 +687,69 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
 
 
 class RemoteBranchDeleteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+        self.repo = self.tmp / "repo"
+        init_repo(self.repo, "main")
+        git(self.repo, "branch", "feat/x", "main")
+        self.authority = _terminal_mutation_authority(
+            _contract(
+                self.tmp,
+                memory_mode="disabled",
+                memory_repo_path=None,
+                memory_worktree=None,
+                ledger_path=None,
+                code_repo_path=self.repo,
+                code_source_branch="main",
+                code_work_branch="feat/x",
+                code_worktree=self.tmp / "absent-worktree",
+            ),
+            operation="worktree_cleanup",
+        )
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_lowest_terminal_writers_refuse_without_contract_authority(self) -> None:
+        attempts = (
+            lambda: remove_registered_worktree(self.repo, self.tmp / "worktree", False),
+            lambda: delete_branch_if_merged_into(self.repo, "feat/x", "main", False),
+            lambda: delete_branch_force(self.repo, "feat/x", False),
+            lambda: delete_remote_branch_if_present(self.repo, "feat/x", False),
+            lambda: cleanup_module._push_branch_deletion(self.repo, "feat/x"),
+        )
+        for attempt in attempts:
+            with (
+                self.subTest(attempt=attempt),
+                self.assertRaisesRegex(RuntimeError, "contract-derived authority"),
+            ):
+                attempt()
+
     @patch("agents_remember.worktrees.modules.cleanup.run_git")
     def test_absent_remote_is_not_pushed(self, run_git: MagicMock) -> None:
         run_git.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
-        out = delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+        out = delete_remote_branch_if_present(
+            self.repo,
+            "feat/x",
+            dry_run=False,
+            authority=self.authority,
+        )
         self.assertFalse(out["remote_deleted"])
         self.assertEqual(out["reason"], "already-absent")
 
     @patch("agents_remember.worktrees.modules.cleanup.run_git")
     def test_present_remote_is_deleted(self, run_git: MagicMock) -> None:
         run_git.side_effect = [
-            SimpleNamespace(returncode=0, stdout="origin\n", stderr=""),
             SimpleNamespace(returncode=0, stdout="sha1234\trefs/heads/feat/x\n", stderr=""),
             SimpleNamespace(returncode=0, stdout="", stderr=""),
         ]
-        out = delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+        out = delete_remote_branch_if_present(
+            self.repo,
+            "feat/x",
+            dry_run=False,
+            authority=self.authority,
+        )
         self.assertTrue(out["remote_deleted"])
 
     @patch("agents_remember.worktrees.modules.cleanup.run_git")
@@ -577,7 +757,12 @@ class RemoteBranchDeleteTests(unittest.TestCase):
         run_git.return_value = SimpleNamespace(
             returncode=128, stdout="", stderr="remote config exploded"
         )
-        out = delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+        out = delete_remote_branch_if_present(
+            self.repo,
+            "feat/x",
+            dry_run=False,
+            authority=self.authority,
+        )
         self.assertEqual(out["reason"], "remote config exploded")
 
     def test_terminal_remote_preflight_reports_present_and_absent_refs(self) -> None:
@@ -633,56 +818,90 @@ class RemoteBranchDeleteTests(unittest.TestCase):
 
 
 class LocalBranchDeleteTests(unittest.TestCase):
-    def test_presence_error_and_absence_are_truthful_without_deletion(self) -> None:
-        cases = (
-            (LocalBranchPresence("error", "ref query exploded"), "ref query exploded"),
-            (LocalBranchPresence("absent"), "already-absent"),
+    def _authority(self, root: Path):
+        repo = root / "repo"
+        init_repo(repo, "main")
+        git(repo, "branch", "ar/task", "main")
+        contract = _contract(
+            root,
+            memory_mode="disabled",
+            memory_repo_path=None,
+            memory_worktree=None,
+            ledger_path=None,
+            code_repo_path=repo,
+            code_source_branch="main",
+            code_work_branch="ar/task",
+            code_worktree=root / "absent-worktree",
         )
-        for presence, reason in cases:
-            with (
-                self.subTest(reason=reason),
-                patch(
-                    "agents_remember.worktrees.modules.cleanup.local_branch_presence",
-                    return_value=presence,
-                ),
-                patch("agents_remember.worktrees.modules.cleanup.run_git") as run_git_mock,
-            ):
-                result = delete_branch_if_merged(Path("/x"), "ar/task", dry_run=False)
-                self.assertFalse(result["deleted"])
-                self.assertEqual(result["reason"], reason)
-                run_git_mock.assert_not_called()
+        return repo, _terminal_mutation_authority(
+            contract,
+            operation="worktree_cleanup",
+        )
+
+    def test_presence_error_and_absence_are_truthful_without_deletion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, authority = self._authority(Path(tmp))
+            cases = (
+                (LocalBranchPresence("error", "ref query exploded"), "ref query exploded"),
+                (LocalBranchPresence("absent"), "already-absent"),
+            )
+            for presence, reason in cases:
+                with (
+                    self.subTest(reason=reason),
+                    patch(
+                        "agents_remember.worktrees.modules.cleanup.local_branch_presence",
+                        return_value=presence,
+                    ),
+                    patch("agents_remember.worktrees.modules.cleanup.run_git") as run_git_mock,
+                ):
+                    result = delete_branch_if_merged(
+                        repo,
+                        "ar/task",
+                        dry_run=False,
+                        authority=authority,
+                    )
+                    self.assertFalse(result["deleted"])
+                    self.assertEqual(result["reason"], reason)
+                    run_git_mock.assert_not_called()
 
     def test_present_branch_dry_run_success_and_failure_are_distinct(self) -> None:
-        outcomes = (
-            (True, None, {"deleted": False, "would_delete": True}),
-            (False, SimpleNamespace(returncode=0, stdout="", stderr=""), {"deleted": True}),
-            (
-                False,
-                SimpleNamespace(returncode=1, stdout="", stderr="delete refused"),
-                {"deleted": False, "reason": "delete refused"},
-            ),
-        )
-        for dry_run, git_result, expected in outcomes:
-            with (
-                self.subTest(dry_run=dry_run, expected=expected),
-                patch(
-                    "agents_remember.worktrees.modules.cleanup.local_branch_presence",
-                    return_value=LocalBranchPresence("present"),
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, authority = self._authority(Path(tmp))
+            outcomes = (
+                (True, None, {"deleted": False, "would_delete": True}),
+                (False, SimpleNamespace(returncode=0, stdout="", stderr=""), {"deleted": True}),
+                (
+                    False,
+                    SimpleNamespace(returncode=1, stdout="", stderr="delete refused"),
+                    {"deleted": False, "reason": "delete refused"},
                 ),
-                patch(
-                    "agents_remember.worktrees.modules.cleanup.run_git",
-                    return_value=git_result,
-                ) as run_git_mock,
-            ):
-                result = delete_branch_if_merged(Path("/x"), "ar/task", dry_run=dry_run)
-                self.assertEqual(
-                    {key: result[key] for key in expected},
-                    expected,
-                )
-                if dry_run:
-                    run_git_mock.assert_not_called()
-                else:
-                    run_git_mock.assert_called_once_with(Path("/x"), ["branch", "-d", "ar/task"])
+            )
+            for dry_run, git_result, expected in outcomes:
+                with (
+                    self.subTest(dry_run=dry_run, expected=expected),
+                    patch(
+                        "agents_remember.worktrees.modules.cleanup.local_branch_presence",
+                        return_value=LocalBranchPresence("present"),
+                    ),
+                    patch(
+                        "agents_remember.worktrees.modules.cleanup.run_git",
+                        return_value=git_result,
+                    ) as run_git_mock,
+                ):
+                    result = delete_branch_if_merged(
+                        repo,
+                        "ar/task",
+                        dry_run=dry_run,
+                        authority=authority,
+                    )
+                    self.assertEqual({key: result[key] for key in expected}, expected)
+                    if dry_run:
+                        run_git_mock.assert_not_called()
+                    else:
+                        run_git_mock.assert_called_once_with(
+                            repo,
+                            ["branch", "-d", "ar/task"],
+                        )
 
 
 class CitationCacheLifecycleTests(unittest.TestCase):
@@ -692,20 +911,7 @@ class CitationCacheLifecycleTests(unittest.TestCase):
         self.tmp = Path(self._td.name)
 
     def contract(self, name: str) -> WorktreeContract:
-        code = self.tmp / f"{name}-code"
-        memory = self.tmp / f"{name}-memory"
-        code.mkdir()
-        memory.mkdir()
-        contract = _contract(
-            self.tmp,
-            task_name=name,
-            contract_path=self.tmp / "tasks" / name / "series-contract.md",
-            code_worktree=code,
-            memory_worktree=memory,
-            worktree_group=self.tmp / f"{name}-group",
-        )
-        write_contract(contract.contract_path, contract)
-        return contract
+        return _real_external_contract(self.tmp, name)
 
     def preflight(self, *blockers: dict[str, object]) -> TerminalPreflight:
         return TerminalPreflight(
@@ -716,7 +922,6 @@ class CitationCacheLifecycleTests(unittest.TestCase):
             branches={
                 "code": {"deleted": False, "would_delete": True},
                 "memory": {"deleted": False, "would_delete": True},
-                "memory_integration": {"deleted": False, "reason": "already-absent"},
             },
             blockers=tuple(blockers),
         )

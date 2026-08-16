@@ -391,6 +391,11 @@ class TestCleanupBranches:
         with (
             mock.patch.object(
                 cleanup,
+                "_terminal_mutation_authority",
+                return_value=mock.sentinel.authority,
+            ),
+            mock.patch.object(
+                cleanup,
                 "terminal_result_blockers",
                 side_effect=[False, False, False, True],
             ),

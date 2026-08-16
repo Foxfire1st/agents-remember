@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application import task_doc_tools as task_doc_tools_module
 from agents_remember.application.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
@@ -23,7 +24,6 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     default_contract,
-    write_contract,
 )
 from test_task_document import _config, _doc, _master
 
@@ -394,8 +394,19 @@ class MasterApplicationTests(unittest.TestCase):
                 repo_path=self.coord, source_branch="main", work_branch="wb", base_commit="abc123"
             ),
         )
-        write_contract(contract.contract_path, contract)
-        self.assertIsNone(self._create()["lifecycleId"])
+        document = task_doc_tools_module._build_doc(
+            {
+                "id": "series",
+                "slug": "series",
+                "title": "Series",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-01-01T00:00",
+            },
+            contract,
+            contract.task_root,
+        )
+        self.assertIsNone(document.lifecycleId)
 
     def test_master_rejects_step_op(self) -> None:
         self._create()

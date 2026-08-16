@@ -8,9 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agents_remember.errors import AuthorityError
-from agents_remember.memory.carryover import apply_carryover_for_request
 from test_carryover import (
     CarryoverFixture,
+    _apply_carryover_for_request,
     carryover_snapshot,
     git,
     write_memory_settings,
@@ -30,7 +30,7 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, onboarding in enumerate(settings):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(
                         {"version": 2, "onboarding": onboarding},
                         indent=2,
@@ -38,15 +38,15 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit empty path-rule member {index}")
-                route_index = fixture.official_memory / "onboarding" / "overview.index.json"
+                fixture.commit_target(f"Commit empty path-rule member {index}")
+                route_index = fixture.target_memory / "onboarding" / "overview.index.json"
                 self.assertFalse(route_index.exists())
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -62,22 +62,22 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, block in enumerate(settings_blocks):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit blank Markdown path-rule member {index}")
-                route_index = fixture.official_memory / "onboarding" / "overview.index.json"
+                fixture.commit_target(f"Commit blank Markdown path-rule member {index}")
+                route_index = fixture.target_memory / "onboarding" / "overview.index.json"
                 self.assertFalse(route_index.exists())
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -155,22 +155,22 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for name, block in settings_blocks:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit {name}")
-                route_index = fixture.official_memory / "onboarding" / "overview.index.json"
+                fixture.commit_target(f"Commit {name}")
+                route_index = fixture.target_memory / "onboarding" / "overview.index.json"
                 self.assertFalse(route_index.exists())
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -193,20 +193,20 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for name, block in settings_blocks:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit {name}")
+                fixture.commit_target(f"Commit {name}")
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -311,16 +311,16 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for name, block in settings_blocks:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit {name}")
+                fixture.commit_target(f"Commit {name}")
 
-                payload = apply_carryover_for_request(
+                payload = _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved Markdown rule authority",
                 )
@@ -329,7 +329,7 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
                 index_refresh = payload["route_index_refresh"]
                 assert isinstance(index_refresh, dict)
                 self.assertEqual(index_refresh["state"], "refreshed")
-                self.assertEqual(git(fixture.official_memory, "status", "--porcelain"), "")
+                self.assertEqual(git(fixture.target_memory, "status", "--porcelain"), "")
 
     def test_markdown_unsupported_rule_lists_refuse_before_mutation(self) -> None:
         settings_blocks = [
@@ -365,22 +365,22 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, block in enumerate(settings_blocks):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit unsupported Markdown list {index}")
-                route_index = fixture.official_memory / "onboarding" / "overview.index.json"
+                fixture.commit_target(f"Commit unsupported Markdown list {index}")
+                route_index = fixture.target_memory / "onboarding" / "overview.index.json"
                 self.assertFalse(route_index.exists())
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -432,16 +432,16 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, block in enumerate(settings_blocks):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit recognized Markdown list {index}")
+                fixture.commit_target(f"Commit recognized Markdown list {index}")
 
-                payload = apply_carryover_for_request(
+                payload = _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved Markdown list authority",
                 )
@@ -450,7 +450,7 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
                 index_refresh = payload["route_index_refresh"]
                 assert isinstance(index_refresh, dict)
                 self.assertEqual(index_refresh["state"], "refreshed")
-                self.assertEqual(git(fixture.official_memory, "status", "--porcelain"), "")
+                self.assertEqual(git(fixture.target_memory, "status", "--porcelain"), "")
 
     def test_supported_nonempty_path_rules_remain_authoritative(self) -> None:
         settings_documents = [
@@ -474,15 +474,15 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
                 if kind == "json":
-                    settings_path = fixture.official_memory / "system" / "settings.json"
+                    settings_path = fixture.target_memory / "system" / "settings.json"
                 else:
-                    git(fixture.official_memory, "rm", "system/settings.json")
-                    settings_path = fixture.official_memory / "system" / "settings.md"
+                    git(fixture.target_memory, "rm", "system/settings.json")
+                    settings_path = fixture.target_memory / "system" / "settings.md"
                     settings_path.parent.mkdir(parents=True, exist_ok=True)
                 settings_path.write_text(content, encoding="utf-8")
-                fixture.commit_official(f"Commit valid {kind} path-rule authority")
+                fixture.commit_target(f"Commit valid {kind} path-rule authority")
 
-                payload = apply_carryover_for_request(
+                payload = _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved explicit path-rule authority",
                 )
@@ -491,7 +491,7 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
                 index_refresh = payload["route_index_refresh"]
                 assert isinstance(index_refresh, dict)
                 self.assertEqual(index_refresh["state"], "refreshed")
-                self.assertEqual(git(fixture.official_memory, "status", "--porcelain"), "")
+                self.assertEqual(git(fixture.target_memory, "status", "--porcelain"), "")
 
     def test_unsupported_json_storage_labels_refuse_before_any_mutation(self) -> None:
         settings = [
@@ -519,15 +519,15 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, setting in enumerate(settings):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(setting, indent=2) + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit unsupported JSON authority {index}")
+                fixture.commit_target(f"Commit unsupported JSON authority {index}")
                 before = carryover_snapshot(fixture)
 
-                with self.assertRaisesRegex(AuthorityError, "unsupported official-memory"):
-                    apply_carryover_for_request(
+                with self.assertRaisesRegex(AuthorityError, "unsupported target-memory"):
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -546,20 +546,20 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, block in enumerate(settings_blocks):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit semantically empty Markdown authority {index}")
+                fixture.commit_target(f"Commit semantically empty Markdown authority {index}")
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -584,29 +584,29 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
         for index, block in enumerate(settings_blocks):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                git(fixture.official_memory, "rm", "system/settings.json")
-                markdown_settings = fixture.official_memory / "system" / "settings.md"
+                git(fixture.target_memory, "rm", "system/settings.json")
+                markdown_settings = fixture.target_memory / "system" / "settings.md"
                 markdown_settings.parent.mkdir(parents=True, exist_ok=True)
                 markdown_settings.write_text(
                     f"# Settings\n\n```yaml\n{block}```\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit unsupported Markdown authority {index}")
+                fixture.commit_target(f"Commit unsupported Markdown authority {index}")
                 before = carryover_snapshot(fixture)
 
-                with self.assertRaisesRegex(AuthorityError, "unsupported official-memory"):
-                    apply_carryover_for_request(
+                with self.assertRaisesRegex(AuthorityError, "unsupported target-memory"):
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
 
                 self.assertEqual(carryover_snapshot(fixture), before)
 
-    def test_official_settings_override_conflicting_source_settings(self) -> None:
+    def test_target_settings_override_conflicting_source_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            write_memory_settings(fixture.official_memory, includes=["README.md"])
-            fixture.commit_official("Limit official source authority")
+            write_memory_settings(fixture.target_memory, includes=["README.md"])
+            fixture.commit_target("Limit target source authority")
             write_memory_settings(fixture.source_memory, includes=["*"])
             write_route_overview(
                 fixture.source_memory / "onboarding",
@@ -615,7 +615,7 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
                 fixture.source_head,
             )
 
-            payload = apply_carryover_for_request(
+            payload = _apply_carryover_for_request(
                 fixture.request(),
                 intent_note="developer approved official authority proof",
                 include_review_required=["."],
@@ -623,7 +623,7 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
 
             self.assertEqual(payload["state"], "carried-over")
             index = json.loads(
-                (fixture.official_memory / "onboarding" / "overview.index.json").read_text(
+                (fixture.target_memory / "onboarding" / "overview.index.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -634,17 +634,17 @@ class CarryoverOverviewApplyTests2(unittest.TestCase):
             fixture = CarryoverFixture(Path(tmp))
             alternate_index = Path(tmp) / "alternate-memory-index"
             git(
-                fixture.official_memory,
+                fixture.target_memory,
                 "read-tree",
                 "--empty",
                 env={"GIT_INDEX_FILE": str(alternate_index)},
             )
 
             with patch.dict(os.environ, {"GIT_INDEX_FILE": str(alternate_index)}):
-                payload = apply_carryover_for_request(
+                payload = _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved sidecar carryover",
                 )
 
             self.assertEqual(payload["state"], "carried-over")
-            self.assertEqual(git(fixture.official_memory, "status", "--porcelain"), "")
+            self.assertEqual(git(fixture.target_memory, "status", "--porcelain"), "")

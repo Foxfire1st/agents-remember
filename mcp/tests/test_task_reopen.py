@@ -19,7 +19,12 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.mcp.tools import task_doc as task_doc_payload_module
 from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming, install_ambient
 from agents_remember.observer.store import EventStore
-from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
 from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampBlocked,
     find_leaf_doc,
@@ -39,7 +44,6 @@ from agents_remember.worktrees.worktree_contract import (
     RepoBranchPlan,
     WorktreeContract,
     default_contract,
-    default_series_contract,
     load_contract,
     write_contract,
 )
@@ -53,9 +57,9 @@ def _publish_restamp(task_root: Path, document: TaskDocument) -> object:
 def _completed_leaf_contract(workspace: Path):
     coordination_root = workspace / "ar-coordination"
     code_repo = workspace / "repo-a"
-    base = init_repo(code_repo, "super")
-    git(code_repo, "branch", "ar/260698_demo-series", "super")
-    git(code_repo, "branch", "ar/01-demo-leaf", "ar/260698_demo-series")
+    base = init_repo(code_repo, "main")
+    git(code_repo, "branch", "super", "main")
+    git(code_repo, "branch", "ar/01-demo-leaf", "super")
     task = ContractTask(
         name="260698_demo-series",
         repo_name="repo-a",
@@ -63,22 +67,12 @@ def _completed_leaf_contract(workspace: Path):
         workflow_kind="light-task",
         memory_mode="disabled",
     )
-    parent = default_series_contract(
-        task,
-        code=RepoBranchPlan(
-            repo_path=code_repo,
-            source_branch="super",
-            work_branch="ar/260698_demo-series",
-            base_commit=base,
-        ),
-    )
-    write_contract(parent.contract_path, parent)
     contract = default_contract(
         task,
         leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id="260698-l1", lifecycle_id="LC-OLD"),
         code=RepoBranchPlan(
             repo_path=code_repo,
-            source_branch="ar/260698_demo-series",
+            source_branch="super",
             work_branch="ar/01-demo-leaf",
             base_commit=base,
         ),
@@ -88,9 +82,9 @@ def _completed_leaf_contract(workspace: Path):
         human_review_status="approved",
         approved_for_commit=True,
         closeout_status="completed",
-        code_commit="c1",
+        code_commit=base,
         integration_status="completed",
-        integrated_code_commit="c1",
+        integrated_code_commit=base,
         cleanup="completed",
     )
     write_contract(contract.contract_path, contract)
@@ -147,10 +141,6 @@ def _master_doc(
     row_file: str = "01_demo-leaf.md",
     statuses: tuple[str, str] = ("Completed", "Completed"),
 ) -> Path:
-    parent_contract = series_contract_path(task_root)
-    integration_branch = (
-        load_contract(parent_contract).code_source_branch if parent_contract.exists() else "main"
-    )
     write_task_doc(
         task_root.parent / "260698_demo-sprint",
         TaskDocument(
@@ -162,7 +152,18 @@ def _master_doc(
             repo="repo-a",
             createdAt="2026-07-01T08:00",
             orchestrates=[task_root.name],
-            integrationBranch=integration_branch,
+            integrationBranch="super",
+            executionGraph=SprintExecutionGraph.model_validate(
+                {
+                    "nodes": [
+                        {
+                            "repository": "repo-a",
+                            "path": f"{task_root.name}/task.json",
+                        }
+                    ],
+                    "edges": [],
+                }
+            ),
         ),
     )
     status, row_status = statuses
@@ -181,6 +182,7 @@ def _master_doc(
             "status": status,
             "repo": "repo-a",
             "createdAt": "2026-07-01T09:00",
+            "executionNature": "organizational",
             "subTasks": [row, dict(row)] if duplicate_row else [row],
         }
     )
@@ -413,7 +415,7 @@ class ReopenResetTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
             self.assertIn(
-                "cannot read parent master",
+                "cannot read task document",
                 " ".join(cast("list[str]", result.payload["blockers"])),
             )
             self.assertEqual(contract.contract_path.read_bytes(), contract_before)
@@ -484,9 +486,10 @@ class ReopenResetTests(unittest.TestCase):
             self.assertEqual(contract.contract_path.read_bytes(), contract_before)
             self.assertEqual(doc_path.read_bytes(), leaf_before)
 
-    def test_standalone_leaf_without_parent_still_reopens(self) -> None:
+    def test_leaf_without_legacy_master_field_uses_its_canonical_parent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = _completed_leaf_contract(Path(tmp))
+            _master_doc(contract.task_root)
             doc_path = _leaf_doc(contract.task_root, master=None)
 
             result = reopen_task(contract.contract_path)
@@ -494,13 +497,14 @@ class ReopenResetTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(
                 cast("dict[str, object]", result.payload["doc"])["masterIndex"],
-                "no-master",
+                "reset",
             )
             self.assertEqual(read_task_doc(doc_path).status, "planning")
 
     def test_refuses_a_leaf_without_a_doc_before_mutating_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = _completed_leaf_contract(Path(tmp))
+            _master_doc(contract.task_root)
             before = contract.contract_path.read_bytes()
             result = reopen_task(contract.contract_path)
             self.assertEqual((result.returncode, result.payload["state"]), (2, "blocked"))
@@ -868,8 +872,8 @@ class StartAfterReopenTests(unittest.TestCase):
 
                 with (
                     mock.patch.object(
-                        start_contract_module, "_create_series_branch"
-                    ) as create_branch,
+                        start_contract_module, "_require_bootstrap_ref"
+                    ) as publish_branch,
                     mock.patch.object(start_contract_module, "write_contract") as publish_contract,
                     mock.patch.object(start_module, "ensure_worktree") as ensure_worktree,
                     mock.patch.object(start_module, "prepare_memory_for_start") as prepare_memory,
@@ -927,7 +931,7 @@ class StartAfterReopenTests(unittest.TestCase):
                 self.assertEqual(after, before)
                 self.assertFalse(series_contract_path(task_root).exists())
                 self.assertFalse(contract.code_worktree.exists())
-                create_branch.assert_not_called()
+                publish_branch.assert_not_called()
                 publish_contract.assert_not_called()
                 ensure_worktree.assert_not_called()
                 prepare_memory.assert_not_called()
@@ -940,7 +944,8 @@ class StartAfterReopenTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             code_repo = workspace / "repo-a"
-            init_repo(code_repo, "main")
+            base_commit = init_repo(code_repo, "main")
+            git(code_repo, "branch", "super", "main")
             coordination_root = workspace / "ar-coordination"
             _external_memory_dirs(coordination_root)
             task_root = coordination_root / "tasks" / "repo-a" / "260698_demo-series"
@@ -963,9 +968,9 @@ class StartAfterReopenTests(unittest.TestCase):
                 leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id="260698-l1"),
                 code=RepoBranchPlan(
                     repo_path=code_repo,
-                    source_branch="main",
+                    source_branch="super",
                     work_branch="ar/01-demo-leaf",
-                    base_commit="stale",
+                    base_commit=base_commit,
                 ),
             )
             contract = replace(contract, cleanup="reopened")
@@ -1000,7 +1005,8 @@ class StartAfterReopenTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             code_repo = workspace / "repo-a"
-            init_repo(code_repo, "main")
+            base_commit = init_repo(code_repo, "main")
+            git(code_repo, "branch", "super", "main")
             coordination_root = workspace / "ar-coordination"
             _external_memory_dirs(coordination_root)
             task_root = coordination_root / "tasks" / "repo-a" / "260698_demo-series"
@@ -1023,9 +1029,9 @@ class StartAfterReopenTests(unittest.TestCase):
                     leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id="260698-l1"),
                     code=RepoBranchPlan(
                         repo_path=code_repo,
-                        source_branch="main",
+                        source_branch="super",
                         work_branch="ar/01-demo-leaf",
-                        base_commit="stale",
+                        base_commit=base_commit,
                     ),
                 ),
                 cleanup="reopened",
@@ -1070,7 +1076,7 @@ class StartAfterReopenTests(unittest.TestCase):
             }
             self.assertEqual(after, before)
             self.assertFalse(contract.code_worktree.exists())
-            self.assertNotIn("source_branch", next_args)
+            self.assertEqual(next_args["source_branch"], "super")
 
             applied = worktree_manager.start_result(
                 WorktreeArgs(
@@ -1095,13 +1101,9 @@ class StartAfterReopenTests(unittest.TestCase):
             )
 
             self.assertEqual((applied.returncode, applied.payload["state"]), (0, "started"))
-            parent = load_contract(series_contract_path(task_root))
-            self.assertEqual(
-                (parent.code_source_branch, parent.code_work_branch),
-                ("main", "ar/260698_demo-series"),
-            )
+            self.assertFalse(series_contract_path(task_root).exists())
             recreated = load_contract(leaf_enclosure_path(task_root, "260698-l1"))
-            self.assertEqual(recreated.code_source_branch, "ar/260698_demo-series")
+            self.assertEqual(recreated.code_source_branch, "super")
             self.assertEqual(recreated.lifecycle_id, "LC-NEW")
             self.assertEqual(read_task_doc(doc_path).lifecycleId, "LC-NEW")
 
@@ -1110,6 +1112,7 @@ class StartAfterReopenTests(unittest.TestCase):
             workspace = Path(tmp)
             code_repo = workspace / "repo-a"
             init_repo(code_repo, "main")
+            git(code_repo, "branch", "super", "main")
             coordination_root = workspace / "ar-coordination"
             _external_memory_dirs(coordination_root)
             task_root = coordination_root / "tasks" / "repo-a" / "260698_demo-series"

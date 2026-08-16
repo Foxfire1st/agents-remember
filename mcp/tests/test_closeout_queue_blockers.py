@@ -294,7 +294,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
                 queue, "source_lineage_for_contract", return_value=mock.sentinel.fact
             ),
             mock.patch.object(queue, "lineage_refusal", return_value=("lineage", "detail")),
-            mock.patch.object(queue, "head_commit", return_value="f" * 40),
+            mock.patch.object(queue, "branch_commit", return_value="f" * 40),
         ):
             self.assertEqual(
                 queue._source_and_ledger_blockers(
@@ -306,7 +306,11 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         missing = replace(self.contract, memory_repo_path=None)
         with (
             mock.patch.object(queue, "lineage_refusal", return_value=None),
-            mock.patch.object(queue, "head_commit", return_value=self.candidate.codeBaseCommit),
+            mock.patch.object(
+                queue,
+                "branch_commit",
+                return_value=self.candidate.codeBaseCommit,
+            ),
         ):
             self.assertEqual(
                 queue._source_and_ledger_blockers(self.candidate, missing),
@@ -315,7 +319,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         heads = [self.candidate.codeBaseCommit, "f" * 40]
         with (
             mock.patch.object(queue, "lineage_refusal", return_value=None),
-            mock.patch.object(queue, "head_commit", side_effect=heads),
+            mock.patch.object(queue, "branch_commit", side_effect=heads),
             mock.patch.object(queue, "ledger_mapping", return_value="d" * 40),
         ):
             blockers = queue._source_and_ledger_blockers(self.candidate, self.contract)

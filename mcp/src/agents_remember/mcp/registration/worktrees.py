@@ -56,10 +56,10 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         Stale-base preflight (issue #54): start refuses when a source branch is behind or
         diverged from its remote tracking branch (a stale base produces wrong code and
         defeats the provider seed fast-path). On a blocked 'choose_stale_base_recovery'
-        result, re-run with stale_base_choice='fast-forward' (ff the local branches, then
-        start) or 'proceed-stale' (explicit override). A missing external-memory source
-        branch is auto-created off the official memory tip using the code source branch
-        name as template.
+        result, advance the protected source through its repository landing plane and retry,
+        or re-run with stale_base_choice='proceed-stale' as an explicit override. A missing
+        external-memory source branch is a topology refusal; start never creates or advances
+        protected source refs.
 
         Returns within seconds: provider setup runs in the background and the response's
         providers block reports state 'starting' with a progressFile. Poll worktree_status

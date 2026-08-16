@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import threading
 import time
+from dataclasses import replace
 from unittest.mock import patch
 
 from agents_remember.memory_quality.style.citations import source_index, source_index_cache
@@ -14,7 +15,7 @@ from agents_remember.worktrees.worktree_contract import (
     amend_contract,
     write_contract,
 )
-from test_cleanup_carryover import CitationCacheLifecycleTests, _contract
+from test_cleanup_carryover import CitationCacheLifecycleTests
 
 
 class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
@@ -44,13 +45,8 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
         self.assertNotIn("citation_source_index", result.payload)
 
     def test_cleanup_integration_refusal_precedes_cache_reclamation(self) -> None:
-        contract = _contract(
-            self.tmp,
-            integration_status="not-started",
-            contract_path=self.tmp / "tasks" / "pending" / "series-contract.md",
-            code_worktree=self.tmp / "pending-code",
-            memory_worktree=self.tmp / "pending-memory",
-        )
+        contract = replace(self.contract("pending"), integration_status="not-started")
+        write_contract(contract.contract_path, contract)
         cache = self.cache(contract)
         with (
             patch("agents_remember.worktrees.modules.cleanup.load_contract", return_value=contract),
@@ -194,7 +190,6 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
                 return_value={
                     "code": {"deleted": True},
                     "memory": {"deleted": True},
-                    "memory_integration": {"deleted": False, "reason": "already-absent"},
                 },
             ),
             patch(
@@ -415,9 +410,7 @@ class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
 
     def test_post_preflight_ref_query_error_is_not_already_absent(self) -> None:
         contract = self.contract("post-preview-query-error")
-        contract.code_repo_path.mkdir()
         assert contract.memory_repo_path is not None
-        contract.memory_repo_path.mkdir()
         cache = self.cache(contract)
         before_cache = self.cache_bytes(cache)
         with (

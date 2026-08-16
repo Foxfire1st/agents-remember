@@ -4,12 +4,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.memory_ledger import parse_ledger_text
-from agents_remember.memory.carryover import apply_carryover_for_request
+from agents_remember.memory import carryover
 from test_carryover import (
     CarryoverFixture,
+    _apply_carryover_for_request,
     carryover_snapshot,
     git,
     read_onboarding_field,
@@ -28,7 +30,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                 fixture.source_head,
                 body="Branch-learned route behavior.",
             )
-            payload = apply_carryover_for_request(
+            payload = _apply_carryover_for_request(
                 fixture.request(),
                 intent_note="developer approved overview carryover",
                 include_review_required=["src/app"],
@@ -38,26 +40,24 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
             assert isinstance(carried, list)
             carried_keys = {candidate["source_path"] for candidate in carried}
             self.assertEqual(carried_keys, {"src/app/feature.py", "src/app"})
-            official_overview = (
-                fixture.official_memory / "onboarding" / "src" / "app" / "overview.md"
-            )
+            target_overview = fixture.target_memory / "onboarding" / "src" / "app" / "overview.md"
             self.assertIn(
                 "Branch-learned route behavior.",
-                official_overview.read_text(encoding="utf-8"),
+                target_overview.read_text(encoding="utf-8"),
             )
             self.assertEqual(
-                read_onboarding_field(official_overview, "lastVerifiedCommitHash"),
+                read_onboarding_field(target_overview, "lastVerifiedCommitHash"),
                 fixture.official_head,
             )
             index_refresh = payload["route_index_refresh"]
             assert isinstance(index_refresh, dict)
             self.assertEqual(index_refresh["state"], "refreshed")
             index_path = (
-                fixture.official_memory / "onboarding" / "src" / "app" / "overview.index.json"
+                fixture.target_memory / "onboarding" / "src" / "app" / "overview.index.json"
             )
             self.assertTrue(index_path.exists())
             committed = git(
-                fixture.official_memory,
+                fixture.target_memory,
                 "show",
                 "--name-only",
                 "--format=",
@@ -65,18 +65,31 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
             )
             self.assertIn("onboarding/src/app/overview.index.json", committed)
             ledger = parse_ledger_text(
-                (fixture.official_memory / "memory.md").read_text(encoding="utf-8")
+                (fixture.target_memory / "memory.md").read_text(encoding="utf-8")
             )
             self.assertEqual(ledger.rows[0].code_commit, fixture.official_head)
 
     def test_apply_skips_index_refresh_off_official_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            git(fixture.code_repo, "checkout", fixture.old_base)
-            payload = apply_carryover_for_request(
-                fixture.request(),
-                intent_note="developer approved sidecar carryover",
-            )
+            build_plan = carryover.build_plan_for_request
+
+            def move_checkout_after_authority(
+                request: carryover.CarryoverRequest,
+            ) -> dict[str, object]:
+                plan = build_plan(request)
+                git(fixture.code_repo, "checkout", fixture.old_base)
+                return plan
+
+            with patch.object(
+                carryover,
+                "build_plan_for_request",
+                side_effect=move_checkout_after_authority,
+            ):
+                payload = _apply_carryover_for_request(
+                    fixture.request(),
+                    intent_note="developer approved sidecar carryover",
+                )
             self.assertEqual(payload["state"], "carried-over")
             index_refresh = payload["route_index_refresh"]
             assert isinstance(index_refresh, dict)
@@ -87,7 +100,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
             (fixture.source_memory / "onboarding" / "src" / "app" / "feature.py.md").unlink()
-            payload = apply_carryover_for_request(
+            payload = _apply_carryover_for_request(
                 fixture.request(),
                 intent_note="developer approved carryover check",
             )
@@ -100,12 +113,12 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
     def test_missing_official_settings_refuses_before_any_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            git(fixture.official_memory, "rm", "system/settings.json")
-            git(fixture.official_memory, "commit", "-m", "Remove settings authority")
+            git(fixture.target_memory, "rm", "system/settings.json")
+            git(fixture.target_memory, "commit", "-m", "Remove settings authority")
             before = carryover_snapshot(fixture)
 
             with self.assertRaisesRegex(AuthorityError, "must provide route-index authority"):
-                apply_carryover_for_request(
+                _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved sidecar carryover",
                 )
@@ -115,14 +128,14 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
     def test_invalid_official_settings_refuses_before_any_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            (fixture.official_memory / "system" / "settings.json").write_text(
+            (fixture.target_memory / "system" / "settings.json").write_text(
                 "{not-json\n", encoding="utf-8"
             )
-            fixture.commit_official("Commit invalid settings authority")
+            fixture.commit_target("Commit invalid settings authority")
             before = carryover_snapshot(fixture)
 
-            with self.assertRaisesRegex(AuthorityError, "invalid official-memory"):
-                apply_carryover_for_request(
+            with self.assertRaisesRegex(AuthorityError, "invalid target-memory"):
+                _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved sidecar carryover",
                 )
@@ -132,15 +145,15 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
     def test_settings_without_route_authority_refuse_before_any_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            (fixture.official_memory / "system" / "settings.json").write_text(
+            (fixture.target_memory / "system" / "settings.json").write_text(
                 json.dumps({"version": 2, "crossRepo": {"allow": []}}) + "\n",
                 encoding="utf-8",
             )
-            fixture.commit_official("Commit settings without route authority")
+            fixture.commit_target("Commit settings without route authority")
             before = carryover_snapshot(fixture)
 
             with self.assertRaisesRegex(AuthorityError, "do not declare storage/path authority"):
-                apply_carryover_for_request(
+                _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved sidecar carryover",
                 )
@@ -158,17 +171,17 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         for index, setting in enumerate(settings):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(setting, indent=2) + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit semantically empty JSON authority {index}")
+                fixture.commit_target(f"Commit semantically empty JSON authority {index}")
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -180,17 +193,17 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            (fixture.official_memory / "system" / "settings.json").write_text(
+            (fixture.target_memory / "system" / "settings.json").write_text(
                 json.dumps({"version": 2, "onboarding": None}, indent=2) + "\n",
                 encoding="utf-8",
             )
-            fixture.commit_official("Commit null onboarding authority")
-            route_index = fixture.official_memory / "onboarding" / "overview.index.json"
+            fixture.commit_target("Commit null onboarding authority")
+            route_index = fixture.target_memory / "onboarding" / "overview.index.json"
             self.assertFalse(route_index.exists())
             before = carryover_snapshot(fixture)
 
             with self.assertRaisesRegex(AuthorityError, "do not declare storage/path authority"):
-                apply_carryover_for_request(
+                _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved sidecar carryover",
                 )
@@ -204,17 +217,17 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         for index, onboarding in enumerate([[], "invalid", 1]):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps({"version": 2, "onboarding": onboarding}, indent=2) + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit invalid onboarding shape {index}")
+                fixture.commit_target(f"Commit invalid onboarding shape {index}")
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
-                    AuthorityError, "invalid official-memory.*onboarding must be an object"
+                    AuthorityError, "invalid target-memory.*onboarding must be an object"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -226,7 +239,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         for index, onboarding in enumerate(onboarding_values):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(
                         {
                             "version": 2,
@@ -238,9 +251,9 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit root storage fallback {index}")
+                fixture.commit_target(f"Commit root storage fallback {index}")
 
-                payload = apply_carryover_for_request(
+                payload = _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved root storage authority",
                 )
@@ -249,7 +262,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                 index_refresh = payload["route_index_refresh"]
                 assert isinstance(index_refresh, dict)
                 self.assertEqual(index_refresh["state"], "refreshed")
-                self.assertEqual(git(fixture.official_memory, "status", "--porcelain"), "")
+                self.assertEqual(git(fixture.target_memory, "status", "--porcelain"), "")
 
     def test_json_storage_without_effective_selected_name_refuses_before_mutation(
         self,
@@ -265,7 +278,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         for index, storage in enumerate(storage_values):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(
                         {"version": 2, "onboarding": {"storage": storage}},
                         indent=2,
@@ -273,15 +286,15 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit ineffective selected storage {index}")
-                route_index = fixture.official_memory / "onboarding" / "overview.index.json"
+                fixture.commit_target(f"Commit ineffective selected storage {index}")
+                route_index = fixture.target_memory / "onboarding" / "overview.index.json"
                 self.assertFalse(route_index.exists())
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
                     AuthorityError, "do not declare storage/path authority"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )
@@ -294,7 +307,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         for index, mode in enumerate(mode_values):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(
                         {
                             "version": 2,
@@ -305,9 +318,9 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit effective layout fallthrough {index}")
+                fixture.commit_target(f"Commit effective layout fallthrough {index}")
 
-                payload = apply_carryover_for_request(
+                payload = _apply_carryover_for_request(
                     fixture.request(),
                     intent_note="developer approved layout authority",
                 )
@@ -316,7 +329,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                 index_refresh = payload["route_index_refresh"]
                 assert isinstance(index_refresh, dict)
                 self.assertEqual(index_refresh["state"], "refreshed")
-                self.assertEqual(git(fixture.official_memory, "status", "--porcelain"), "")
+                self.assertEqual(git(fixture.target_memory, "status", "--porcelain"), "")
 
     def test_truthy_nonstring_json_mode_delegates_to_typed_parser_before_mutation(
         self,
@@ -325,7 +338,7 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
         for index, mode in enumerate(mode_values):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as tmp:
                 fixture = CarryoverFixture(Path(tmp))
-                (fixture.official_memory / "system" / "settings.json").write_text(
+                (fixture.target_memory / "system" / "settings.json").write_text(
                     json.dumps(
                         {
                             "version": 2,
@@ -336,13 +349,13 @@ class CarryoverOverviewApplyTests1(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                fixture.commit_official(f"Commit invalid selected storage type {index}")
+                fixture.commit_target(f"Commit invalid selected storage type {index}")
                 before = carryover_snapshot(fixture)
 
                 with self.assertRaisesRegex(
-                    AuthorityError, "invalid official-memory.*mode/layout must be a string"
+                    AuthorityError, "invalid target-memory.*mode/layout must be a string"
                 ):
-                    apply_carryover_for_request(
+                    _apply_carryover_for_request(
                         fixture.request(),
                         intent_note="developer approved sidecar carryover",
                     )

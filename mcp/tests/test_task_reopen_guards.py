@@ -53,6 +53,7 @@ class ReopenGuardTests(unittest.TestCase):
             _master_doc(contract.task_root)
             contract_before = contract.contract_path.read_bytes()
             doc_before = doc_path.read_bytes()
+            git(contract.code_repo_path, "checkout", "super")
             marker = contract.code_repo_path / "super-moved.txt"
             marker.write_text("new super\n", encoding="utf-8")
             git(contract.code_repo_path, "add", marker.name)

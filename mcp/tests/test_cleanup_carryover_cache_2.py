@@ -107,7 +107,6 @@ class CitationCacheLifecycleTests2(CitationCacheLifecycleTests):
                 return_value={
                     "code": {"deleted": True},
                     "memory": {"deleted": True},
-                    "memory_integration": {"deleted": False, "reason": "already-absent"},
                 },
             ),
             patch(
@@ -174,7 +173,6 @@ class CitationCacheLifecycleTests2(CitationCacheLifecycleTests):
                 return_value={
                     "code": {"deleted": True},
                     "memory": {"deleted": True},
-                    "memory_integration": {"deleted": False, "reason": "already-absent"},
                 },
             ),
             patch(
@@ -243,7 +241,6 @@ class CitationCacheLifecycleTests2(CitationCacheLifecycleTests):
                 return_value={
                     "code": {"deleted": True},
                     "memory": {"deleted": True},
-                    "memory_integration": {"deleted": False, "reason": "already-absent"},
                 },
             ),
             patch(
@@ -300,7 +297,6 @@ class CitationCacheLifecycleTests2(CitationCacheLifecycleTests):
                 return_value={
                     "code": {"deleted": True},
                     "memory": {"deleted": True},
-                    "memory_integration": {"deleted": False, "reason": "already-absent"},
                 },
             ),
             patch(

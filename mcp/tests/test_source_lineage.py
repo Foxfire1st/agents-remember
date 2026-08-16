@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,7 +18,8 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import repository_identity
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -80,6 +82,153 @@ class SourceLineageTests(unittest.TestCase):
             )
             self.assertIsNone(lineage_refusal(projection))
 
+    def test_organizational_master_and_leaf_use_the_direct_super_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _organizational_fixture(Path(tmp), external_memory=True)
+
+            master_projection = source_lineage_for_task(
+                fixture.coordination,
+                TaskDocumentRef(repository="repo", path="master/task.json"),
+            )
+            leaf_projection = source_lineage_for_task(fixture.coordination, fixture.leaf_ref)
+
+            assert master_projection is not None
+            assert leaf_projection is not None
+            self.assertEqual(master_projection.state, "current")
+            self.assertEqual(master_projection.edges, [])
+            self.assertEqual(leaf_projection.state, "current")
+            self.assertEqual(
+                [(edge.relation, edge.side) for edge in leaf_projection.edges],
+                [("super-to-leaf", "code"), ("super-to-leaf", "memory")],
+            )
+            self.assertEqual(parent_source_lineage(fixture.leaf_contract).state, "current")  # type: ignore[union-attr]
+
+    def test_organizational_super_move_blocks_the_leaf_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _organizational_fixture(Path(tmp))
+            _commit_on(fixture.code_repo, "super", "super.txt")
+
+            projection = source_lineage_for_contract(fixture.leaf_contract)
+
+            assert projection is not None
+            self.assertEqual(projection.state, "blocked")
+            self.assertEqual(projection.edges[0].relation, "super-to-leaf")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "closeout requires current transitive source lineage",
+            ):
+                require_current_source_lineage(fixture.leaf_contract, operation="closeout")
+
+    def test_start_requires_exact_code_and_memory_source_tip_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _organizational_fixture(root, external_memory=True)
+
+            _commit_on(fixture.code_repo, "super", "code-forward.txt")
+            forward = parent_source_lineage(fixture.leaf_contract)
+            assert forward is not None
+            self.assertEqual(forward.state, "blocked")
+            self.assertEqual(
+                [(edge.side, edge.state) for edge in forward.edges],
+                [("code", "behind"), ("memory", "current")],
+            )
+
+            rewound = _organizational_fixture(root / "rewound", external_memory=True)
+            memory_repo = rewound.leaf_contract.memory_repo_path
+            assert memory_repo is not None
+            old_memory = _git(memory_repo, "rev-parse", "super")
+            _commit_on(memory_repo, "super", "memory-new.txt")
+            new_memory = _git(memory_repo, "rev-parse", "super")
+            rewound_contract = replace(rewound.leaf_contract, memory_base_commit=new_memory)
+            write_contract(rewound_contract.contract_path, rewound_contract)
+            _git(memory_repo, "reset", "--hard", old_memory)
+
+            projection = parent_source_lineage(rewound_contract)
+            assert projection is not None
+            self.assertEqual(projection.state, "blocked")
+            self.assertEqual(
+                [(edge.side, edge.state) for edge in projection.edges],
+                [("code", "current"), ("memory", "diverged")],
+            )
+
+    def test_atomic_start_requires_exact_code_and_memory_source_tip_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp), external_memory=True)
+            memory_repo = fixture.leaf_contract.memory_repo_path
+            assert memory_repo is not None
+            old_memory = _git(memory_repo, "rev-parse", "ar/master")
+            _commit_on(fixture.code_repo, "ar/master", "atomic-code-forward.txt")
+            _commit_on(memory_repo, "ar/master", "atomic-memory-new.txt")
+            new_memory = _git(memory_repo, "rev-parse", "ar/master")
+            contract = replace(fixture.leaf_contract, memory_base_commit=new_memory)
+            write_contract(contract.contract_path, contract)
+            _git(memory_repo, "reset", "--hard", old_memory)
+            contract_before = contract.contract_path.read_bytes()
+
+            projection = parent_source_lineage(contract)
+            assert projection is not None
+            self.assertEqual(projection.state, "blocked")
+            self.assertEqual(
+                [
+                    (edge.relation, edge.side, edge.state)
+                    for edge in projection.edges
+                    if edge.state != "current"
+                ],
+                [
+                    ("master-to-leaf", "code", "behind"),
+                    ("master-to-leaf", "memory", "diverged"),
+                ],
+            )
+
+            result = _preflighted_contract(
+                SimpleNamespace(code_repository_name="repo"),
+                contract,
+                WorktreeArgs(dry_run=True, stale_base_choice="proceed-stale"),
+            )
+
+            self.assertIsInstance(result, WorktreeCommandResult)
+            self.assertFalse(contract.code_worktree.exists())
+            assert contract.memory_worktree is not None
+            self.assertFalse(contract.memory_worktree.exists())
+            self.assertEqual(contract.contract_path.read_bytes(), contract_before)
+
+    def test_start_rechecks_exact_source_tips_inside_repository_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _organizational_fixture(Path(tmp), external_memory=True)
+            contract = fixture.leaf_contract
+            args = WorktreeArgs(dry_run=False, stale_base_choice="proceed-stale")
+            context = SimpleNamespace(
+                code_repository_name="repo",
+                coordination_root=fixture.coordination,
+            )
+            before_contract = contract.contract_path.read_bytes()
+            self.assertFalse(contract.code_worktree.exists())
+            assert contract.memory_worktree is not None
+            self.assertFalse(contract.memory_worktree.exists())
+            self.assertIs(
+                _preflighted_contract(context, contract, args),
+                contract,
+            )
+
+            @contextmanager
+            def raced_authority(*_args):
+                _commit_on(fixture.code_repo, "super", "raced-super.txt")
+                yield
+
+            with (
+                mock.patch.object(start_module, "integration_authority_lock", raced_authority),
+                mock.patch.object(start_module, "_record_start_progress"),
+                mock.patch.object(start_module, "_record_start_block"),
+                mock.patch.object(start_module, "ensure_worktree") as ensure,
+            ):
+                result = start_module._create_start_enclosure(context, contract, args)
+
+            self.assertEqual((result.returncode, result.payload["state"]), (2, "blocked"))
+            ensure.assert_not_called()
+            self.assertFalse(contract.code_worktree.exists())
+            self.assertFalse(contract.memory_worktree.exists())
+            self.assertEqual(contract.contract_path.read_bytes(), before_contract)
+
     def test_super_move_blocks_before_leaf_start_even_with_stale_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _fixture(Path(tmp))
@@ -107,7 +256,7 @@ class SourceLineageTests(unittest.TestCase):
     def test_master_move_blocks_leaf_dispatch_with_leaf_sync_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _fixture(Path(tmp))
-            _commit_on(fixture.code_repo, "master", "master.txt")
+            _commit_on(fixture.code_repo, "ar/master", "master.txt")
 
             projection = source_lineage_for_task(fixture.coordination, fixture.leaf_ref)
 
@@ -279,7 +428,7 @@ class SourceLineageTests(unittest.TestCase):
     def test_diverged_master_reports_divergence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _fixture(Path(tmp))
-            _commit_on(fixture.code_repo, "master", "master.txt")
+            _commit_on(fixture.code_repo, "ar/master", "master.txt")
             _commit_on(fixture.code_repo, "super", "super.txt")
 
             projection = source_lineage_for_contract(fixture.master_contract)
@@ -328,19 +477,34 @@ def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
     _write_task_tree(coordination)
     memory_mode = "external" if external_memory else "disabled"
     memory_plan = (
-        RepoBranchPlan(memory_repo, "super", "master", _git(memory_repo, "rev-parse", "super"))
+        RepoBranchPlan(
+            memory_repo,
+            "super",
+            "ar/master",
+            _git(memory_repo, "rev-parse", "super"),
+        )
         if memory_repo is not None
         else None
     )
     master = default_series_contract(
         ContractTask("master", "repo", coordination, "light-task", memory_mode),
-        code=RepoBranchPlan(code_repo, "super", "master", _git(code_repo, "rev-parse", "super")),
+        code=RepoBranchPlan(
+            code_repo,
+            "super",
+            "ar/master",
+            _git(code_repo, "rev-parse", "super"),
+        ),
         memory=memory_plan,
         task_root=task_root,
     )
     write_contract(master.contract_path, master)
     leaf_memory = (
-        RepoBranchPlan(memory_repo, "master", "leaf", _git(memory_repo, "rev-parse", "master"))
+        RepoBranchPlan(
+            memory_repo,
+            "ar/master",
+            "leaf",
+            _git(memory_repo, "rev-parse", "ar/master"),
+        )
         if memory_repo is not None
         else None
     )
@@ -354,7 +518,12 @@ def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
             parent_contract_path=master.contract_path,
         ),
         leaf=LeafIdentity("leaf", leaf_id="leaf-1"),
-        code=RepoBranchPlan(code_repo, "master", "leaf", _git(code_repo, "rev-parse", "master")),
+        code=RepoBranchPlan(
+            code_repo,
+            "ar/master",
+            "leaf",
+            _git(code_repo, "rev-parse", "ar/master"),
+        ),
         memory=leaf_memory,
     )
     write_contract(leaf.contract_path, leaf)
@@ -367,11 +536,48 @@ def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
     )
 
 
+def _organizational_fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
+    fixture = _fixture(root, external_memory=external_memory)
+    master_path = fixture.coordination / "tasks" / "repo" / "master"
+    master_doc = read_task_doc(master_path / "task.json")
+    write_task_doc(
+        master_path,
+        master_doc.model_copy(update={"executionNature": "organizational"}),
+    )
+    fixture.master_contract.contract_path.unlink()
+    leaf = replace(
+        fixture.leaf_contract,
+        parent_contract_path=None,
+        code_source_branch="super",
+        code_base_commit=_git(fixture.code_repo, "rev-parse", "super"),
+        memory_source_branch="super" if external_memory else "",
+        memory_base_commit=(
+            _git(fixture.leaf_contract.memory_repo_path, "rev-parse", "super")
+            if fixture.leaf_contract.memory_repo_path is not None
+            else ""
+        ),
+    )
+    write_contract(leaf.contract_path, leaf)
+    fixture.leaf_contract = leaf
+    return fixture
+
+
 def _write_task_tree(coordination: Path) -> None:
     task_root = coordination / "tasks" / "repo"
     write_task_doc(
         task_root / "sprint",
-        _doc(id="SPRINT", slug="sprint", title="Sprint", kind="master", orchestrates=["master"]),
+        _doc(
+            id="SPRINT",
+            slug="sprint",
+            title="Sprint",
+            kind="master",
+            orchestrates=["master"],
+            integrationBranch="super",
+            executionGraph={
+                "nodes": [{"repository": "repo", "path": "master/task.json"}],
+                "edges": [],
+            },
+        ),
     )
     write_task_doc(
         task_root / "master",
@@ -380,6 +586,7 @@ def _write_task_tree(coordination: Path) -> None:
             slug="master",
             title="Master",
             kind="master",
+            executionNature="atomic",
             subTasks=[
                 {"number": "leaf-1", "name": "Leaf", "file": "leaf-1.md", "status": "inProgress"}
             ],
@@ -409,8 +616,11 @@ def _repo(path: Path) -> Path:
     (path / "base.txt").write_text("base\n", encoding="utf-8")
     _git(path, "add", "base.txt")
     _git(path, "commit", "-m", "base")
-    _git(path, "branch", "master")
-    _git(path, "branch", "leaf", "master")
+    _git(path, "branch", "main", "super")
+    _git(path, "branch", "ar/master")
+    _git(path, "branch", "leaf", "ar/master")
+    _git(path, "update-ref", "refs/remotes/origin/main", _git(path, "rev-parse", "main"))
+    _git(path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     return path
 
 

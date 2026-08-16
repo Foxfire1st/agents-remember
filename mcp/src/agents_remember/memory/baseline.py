@@ -15,6 +15,7 @@ from typing import Literal
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
@@ -23,7 +24,17 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.integration_branch_authority import (
+    memory_repository_default_branch,
+)
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    commit_if_dirty,
+    ensure_git_identity,
+    local_branch_ref,
+    require_git,
+)
 
 
 @dataclass(frozen=True)
@@ -115,6 +126,45 @@ def head_commit(repo: Path, ref: str = "HEAD") -> str:
     return worktree_manager.head_commit(repo, ref)
 
 
+def _baseline_default_branch(memory_root: Path) -> str:
+    """Prove the existing default, or the exact unborn branch minted by memory_init."""
+
+    head = run_git(memory_root, ["rev-parse", "--verify", "HEAD"])
+    if head.returncode == 0:
+        return memory_repository_default_branch(memory_root)
+    configured = run_git(
+        memory_root,
+        ["config", "--get", "agents-remember.defaultBranch"],
+    )
+    branch = configured.stdout.strip().removeprefix("refs/heads/")
+    if configured.returncode != 0 or branch != "main":
+        raise RuntimeError(
+            "memory baseline adoption requires explicit default-branch authority from memory_init"
+        )
+    ref = local_branch_ref(branch)
+    existing = run_git(memory_root, ["show-ref", "--verify", "--quiet", ref])
+    if existing.returncode == 0:
+        return memory_repository_default_branch(memory_root)
+    if existing.returncode != 1:
+        raise RuntimeError("memory baseline adoption cannot verify its configured default branch")
+    local_heads = run_git(
+        memory_root,
+        ["for-each-ref", "--format=%(refname)", "refs/heads"],
+    )
+    symbolic_head = run_git(memory_root, ["symbolic-ref", "--quiet", "HEAD"])
+    if (
+        local_heads.returncode != 0
+        or local_heads.stdout.strip()
+        or symbolic_head.returncode != 0
+        or symbolic_head.stdout.strip() != ref
+    ):
+        raise RuntimeError(
+            "memory baseline adoption requires the exact unborn default branch created by "
+            "memory_init"
+        )
+    return branch
+
+
 def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> dict[str, object]:
     if not context.memory_root.exists():
         raise RuntimeError(
@@ -127,12 +177,17 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             "Run c-00-initialize-memory-repo before adopting a memory baseline."
         )
 
-    worktree_manager.ensure_git_identity(context.memory_root)
-    if memory_branch and current_branch(context.memory_root) != memory_branch:
-        if worktree_manager.branch_exists(context.memory_root, memory_branch):
-            worktree_manager.require_git(context.memory_root, ["checkout", memory_branch])
-        else:
-            worktree_manager.require_git(context.memory_root, ["checkout", "-b", memory_branch])
+    if context.ledger_path.exists():
+        raise RuntimeError("memory baseline adoption is only valid before the first ledger exists")
+    default_branch = _baseline_default_branch(context.memory_root)
+    requested_branch = memory_branch.removeprefix("refs/heads/")
+    if requested_branch != default_branch or current_branch(context.memory_root) != default_branch:
+        raise RuntimeError(
+            "memory baseline adoption is a bootstrap-only exception on the checked-out "
+            "repository-default branch; it cannot create, switch, or commit an integration ref"
+        )
+
+    ensure_git_identity(context.memory_root)
 
     existing_paths = [
         path.name
@@ -145,19 +200,19 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             "Run c-00-initialize-memory-repo first, then add onboarding before adopting."
         )
 
-    worktree_manager.require_git(context.memory_root, ["add", *existing_paths])
-    memory_content_commit = worktree_manager.commit_if_dirty(
+    require_git(context.memory_root, ["add", *existing_paths])
+    memory_content_commit = commit_if_dirty(
         context.memory_root,
         f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
     )
     ledger = create_initial_ledger(
         context.code_repository_name,
-        head_commit(context.code_repository_root, source_branch),
+        branch_commit(context.code_repository_root, source_branch),
         memory_content_commit,
     )
     write_ledger(context.ledger_path, ledger)
-    worktree_manager.require_git(context.memory_root, ["add", "memory.md"])
-    ledger_commit = worktree_manager.commit_if_dirty(
+    require_git(context.memory_root, ["add", "memory.md"])
+    ledger_commit = commit_if_dirty(
         context.memory_root,
         f"[adopt-{context.code_repository_name}-memory-baseline] Bootstrap memory ledger",
     )

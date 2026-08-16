@@ -61,6 +61,12 @@ from agents_remember.worktrees.modules.git import (
     run_pre_commit_hook_if_configured,
     worktree_candidate_tree,
 )
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+)
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 
@@ -357,11 +363,43 @@ class RunnerContractTests(unittest.TestCase):
 class RemoteBranchStallTests(unittest.TestCase):
     """L3-R7: the two remote calls in cleanup used to run with no timeout at all."""
 
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.root = Path(self._td.name)
+        self.repo = self.root / "repo"
+        _init(self.repo)
+        head = _commit(self.repo, "seed.txt", "seed\n")
+        assert run_git(self.repo, ["branch", "feat/x", head]).returncode == 0
+        assert run_git(self.repo, ["update-ref", "refs/remotes/origin/main", head]).returncode == 0
+        assert (
+            run_git(
+                self.repo,
+                ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+            ).returncode
+            == 0
+        )
+        contract = default_contract(
+            ContractTask("terminal", "repo", self.root / "coordination", "light-task", "disabled"),
+            leaf=LeafIdentity("terminal", leaf_id="T"),
+            code=RepoBranchPlan(self.repo, "main", "feat/x", head),
+        )
+        self.authority = cleanup._terminal_mutation_authority(
+            contract, operation="worktree_cleanup"
+        )
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
     def test_a_stalled_probe_reports_unreachable_instead_of_hanging(self) -> None:
         with patch.object(
             cleanup, "run_git", side_effect=subprocess.TimeoutExpired(cmd=["git"], timeout=120)
         ):
-            out = cleanup.delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+            out = cleanup.delete_remote_branch_if_present(
+                self.repo,
+                "feat/x",
+                dry_run=False,
+                authority=self.authority,
+            )
 
         self.assertEqual(out, {"remote_deleted": False, "reason": "remote-unreachable"})
 
@@ -372,7 +410,12 @@ class RemoteBranchStallTests(unittest.TestCase):
             "run_git",
             side_effect=[present, subprocess.TimeoutExpired(cmd=["git"], timeout=120)],
         ):
-            out = cleanup.delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+            out = cleanup.delete_remote_branch_if_present(
+                self.repo,
+                "feat/x",
+                dry_run=False,
+                authority=self.authority,
+            )
 
         self.assertEqual(out, {"remote_deleted": False, "reason": "remote-unreachable"})
 
@@ -380,7 +423,12 @@ class RemoteBranchStallTests(unittest.TestCase):
         present = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="sha\tref\n")
         pushed = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="")
         with patch.object(cleanup, "run_git", side_effect=[present, pushed]) as runner:
-            cleanup.delete_remote_branch_if_present(Path("/x"), "feat/x", dry_run=False)
+            cleanup.delete_remote_branch_if_present(
+                self.repo,
+                "feat/x",
+                dry_run=False,
+                authority=self.authority,
+            )
 
         self.assertEqual(
             [call.kwargs["timeout"] for call in runner.call_args_list],

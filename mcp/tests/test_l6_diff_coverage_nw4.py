@@ -199,6 +199,11 @@ class TestAbandonTerminalOutputsNw4:
     def test_provider_blockers_stop_before_worktrees(self) -> None:
         with (
             mock.patch.object(
+                abandon,
+                "_terminal_mutation_authority",
+                return_value=mock.sentinel.authority,
+            ),
+            mock.patch.object(
                 provider_runtime, "teardown_worktree_providers", return_value={"p": {}}
             ),
             mock.patch.object(
@@ -215,6 +220,11 @@ class TestAbandonTerminalOutputsNw4:
     def test_worktree_blockers_stop_after_removal(self) -> None:
         with (
             mock.patch.object(
+                abandon,
+                "_terminal_mutation_authority",
+                return_value=mock.sentinel.authority,
+            ),
+            mock.patch.object(
                 provider_runtime, "teardown_worktree_providers", return_value={"p": {}}
             ),
             mock.patch.object(
@@ -230,7 +240,12 @@ class TestAbandonTerminalOutputsNw4:
                 _args(), _contract(), TerminalPreflight({}, {}, ())
             )
         assert result == ({"p": {}}, {"w": {"removed": True}}, {}, {})
-        remove_worktrees.assert_called_once_with(_contract(), dry_run=False, force=False)
+        remove_worktrees.assert_called_once_with(
+            _contract(),
+            dry_run=False,
+            force=False,
+            authority=mock.sentinel.authority,
+        )
 
 
 class TestOrchestrationNudgeRateLimitedNw4:

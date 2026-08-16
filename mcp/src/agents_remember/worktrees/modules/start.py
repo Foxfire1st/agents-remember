@@ -2,34 +2,33 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     MemoryLedger,
     find_mapping,
-    load_ledger,
-    prepend_mapping,
-    write_ledger,
 )
 from agents_remember.tasks.leaf_doc import restamp_leaf_doc_lifecycle
 from agents_remember.tasks.store import write_task_docs
 from agents_remember.worktrees.closeout_queue_lifecycle import publish_queue_bound_task_facts
+from agents_remember.worktrees.integration_branch_authority import (
+    require_ordinary_worktree,
+    require_parent_series_accepting_leaves,
+)
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
 from agents_remember.worktrees.modules.git import (
     branch_exists,
-    commit_if_dirty,
-    current_branch,
     ensure_worktree,
-    has_changes,
     head_commit,
     longest_tracked_path_length,
-    require_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
@@ -40,9 +39,9 @@ from agents_remember.worktrees.modules.guidance import (
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start_contract import (
     build_start_contract,
-    memory_base_for_source,
 )
 from agents_remember.worktrees.modules.start_result import started_result
+from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.reopen import reopen_required_start_result
 from agents_remember.worktrees.services import ProviderSetupRequestSpec, worktree_services
 from agents_remember.worktrees.source_lineage import (
@@ -112,6 +111,11 @@ def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    if contract.kind == "series":
+        raise RuntimeError(
+            "worktree_attach refused: an atomic integration branch is not a resumable workbench"
+        )
+    require_ordinary_worktree(contract, operation="worktree_attach")
     lineage = source_lineage_for_contract(contract)
     if lineage_refusal(lineage) is not None:
         assert lineage is not None
@@ -175,8 +179,6 @@ def _contract_after_memory_start(
         )
     reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
     if isinstance(reconciled_base, str) and reconciled_base:
-        # A reconciliation recovery (finding 7) advanced the official memory tip; persist the base the
-        # mapping was recorded against so a freshly created memory branch carries the mapping.
         return replace(contract, memory_base_commit=reconciled_base)
     return contract
 
@@ -315,9 +317,8 @@ def _stale_base_preflight(
     """Refuse to base a new worktree on a source branch behind its upstream (issue #54).
 
     Only `behind`/`diverged` block; `unknown` (offline) and `no-upstream` are reported
-    by callers via worktree_status freshness, never blocked on. `stale_base_choice`
-    recoveries: `fast-forward` (ff the stale local branches, then proceed) or
-    `proceed-stale` (explicit override).
+    by callers via worktree_status freshness, never blocked on. The only local override is
+    `proceed-stale`; moving a protected source belongs to its landing plane.
     """
     if args.stale_base_choice == "proceed-stale":
         return None
@@ -328,16 +329,12 @@ def _stale_base_preflight(
     ]
     if not stale:
         return None
-    if args.stale_base_choice == "fast-forward":
-        failures = _fast_forward_stale_branches(contract, stale, args.dry_run)
-        if not failures:
-            return None
-        stale = failures
     return {
         "state": "blocked",
         "summary": "Source branches are behind their upstream; a worktree started now "
         "would base on stale code/memory and silently defeat the provider seed "
-        "fast-path. Choose fast-forward or proceed-stale.",
+        "fast-path. Refresh the protected source through its repository landing plane, "
+        "then retry, or explicitly choose proceed-stale.",
         **recovery_guidance(
             "choose_stale_base_recovery",
             tool="worktree_start",
@@ -350,36 +347,12 @@ def _stale_base_preflight(
             required_args=["stale_base_choice"],
         ),
         "staleBases": stale,
+        "retiredChoices": (
+            ["fast-forward moves protected sources outside their landing plane"]
+            if args.stale_base_choice == "fast-forward"
+            else []
+        ),
     }
-
-
-def _fast_forward_stale_branches(
-    contract: WorktreeContract, stale: list[dict[str, object]], dry_run: bool
-) -> list[dict[str, object]]:
-    """Fast-forward `behind` branches to their upstream; return findings that could not be."""
-    failures: list[dict[str, object]] = []
-    for finding in stale:
-        if finding["state"] != "behind":
-            failures.append(
-                {**finding, "recovery_error": "diverged branches cannot be fast-forwarded"}
-            )
-            continue
-        if dry_run:
-            continue
-        repo = contract.code_repo_path if finding["side"] == "code" else contract.memory_repo_path
-        assert repo is not None
-        branch = str(finding["branch"])
-        upstream = str(finding["upstream"])
-        if current_branch(repo) == branch:
-            result = run_git(repo, ["merge", "--ff-only", upstream])
-        else:
-            # state == "behind" proves the branch is an ancestor of its upstream,
-            # so the forced update is a fast-forward; git still refuses branches
-            # checked out in another worktree, which lands in failures.
-            result = run_git(repo, ["branch", "-f", branch, upstream])
-        if result.returncode != 0:
-            failures.append({**finding, "recovery_error": (result.stderr or result.stdout).strip()})
-    return failures
 
 
 def _starting_enclosure(contract: WorktreeContract, worktree_name: str) -> StartingEnclosure:
@@ -469,6 +442,7 @@ def _existing_contract_result(
         return None
     if existing.cleanup == "completed":
         return reopen_required_start_result(existing)
+    require_ordinary_worktree(existing, operation="worktree_start")
     lineage = source_lineage_for_contract(existing)
     refusal = lineage_refusal(lineage)
     if refusal is not None:
@@ -486,8 +460,7 @@ def _preflighted_contract(
 ) -> WorktreeContract | WorktreeCommandResult:
     """Run the pre-creation preflights, returning the blocked result or the usable contract.
 
-    A fast-forward recovery may move the source branches mid-preflight, so the contract
-    is rebuilt on that path and the caller works from the returned one.
+    The returned contract remains bound to the source tips from its ordinary build.
     """
     # A dry-run that is about to create a master's first leaf also plans the parent
     # integration contract and branch without publishing either. That virtual parent was
@@ -495,6 +468,31 @@ def _preflighted_contract(
     # to load its deliberately absent contract would turn preview non-mutation into a false
     # unavailable refusal. Only this in-process planned-parent case bypasses the filesystem
     # projection; existing parent contracts still fail closed through the normal reader.
+    lineage_block = _parent_lineage_start_block(context, contract, args)
+    if lineage_block is not None:
+        return lineage_block
+    stale_base_block = _stale_base_preflight(context, contract, args)
+    if stale_base_block is not None:
+        _record_start_block(
+            context,
+            contract,
+            args,
+            StartBeat(
+                phase="stale-base-blocked",
+                blocked_reason=str(stale_base_block.get("summary", "")),
+            ),
+        )
+        return WorktreeCommandResult(2, stale_base_block)
+    require_ordinary_worktree(contract, operation="worktree_start")
+    long_path_block = _long_path_preflight(contract)
+    if long_path_block is not None:
+        return WorktreeCommandResult(2, long_path_block)
+    return contract
+
+
+def _parent_lineage_start_block(
+    context, contract: WorktreeContract, args: WorktreeArgs
+) -> WorktreeCommandResult | None:
     parent_is_planned = (
         args.dry_run
         and bool(contract.parent_task_name)
@@ -516,101 +514,89 @@ def _preflighted_contract(
             ),
         )
         return WorktreeCommandResult(2, block)
-    stale_base_block = _stale_base_preflight(context, contract, args)
-    if stale_base_block is not None:
-        _record_start_block(
-            context,
-            contract,
-            args,
-            StartBeat(
-                phase="stale-base-blocked",
-                blocked_reason=str(stale_base_block.get("summary", "")),
-            ),
-        )
-        return WorktreeCommandResult(2, stale_base_block)
-    if args.stale_base_choice == "fast-forward":
-        # A fast-forward recovery may have moved the source branches; rebuild the
-        # contract so the recorded base commits reflect the recovered tips.
-        rebuilt = build_start_contract(context, args)
-        if isinstance(rebuilt, WorktreeCommandResult):
-            return rebuilt
-        contract = rebuilt
-    long_path_block = _long_path_preflight(contract)
-    if long_path_block is not None:
-        return WorktreeCommandResult(2, long_path_block)
-    return contract
+    return None
 
 
 def _create_start_enclosure(
     context, contract: WorktreeContract, args: WorktreeArgs
 ) -> WorktreeCommandResult:
     """Create the code worktree, prepare memory, write the contract, and set the providers up."""
-    repo = context.code_repository_root
     _record_start_progress(context, contract, args, StartBeat(phase="preflight"))
-
-    code_state = ensure_worktree(
-        repo,
-        contract.code_worktree,
-        contract.code_work_branch,
-        contract.code_source_branch,
-        args.dry_run,
+    authority = (
+        nullcontext()
+        if args.dry_run
+        else integration_authority_lock(contract.coordination_root, contract.repo_name)
     )
-    _record_start_progress(
-        context, contract, args, StartBeat(phase="code-worktree", completed_phases=("preflight",))
-    )
-    memory_state = prepare_memory_for_start(contract, args)
-    if memory_state["state"] == "blocked":
-        raw_choices = memory_state.get("choices")
-        _record_start_block(
+    with authority:
+        lineage_block = _parent_lineage_start_block(context, contract, args)
+        if lineage_block is not None:
+            return lineage_block
+        require_parent_series_accepting_leaves(contract, operation="worktree_start")
+        require_ordinary_worktree(contract, operation="worktree_start")
+        memory_preview = prepare_memory_for_start(contract, replace(args, dry_run=True))
+        if memory_preview["state"] == "blocked":
+            return _blocked_memory_start_result(
+                context,
+                args,
+                "not-created",
+                memory_preview,
+            )
+        code_state = ensure_worktree(contract, side="code", dry_run=args.dry_run)
+        _record_start_progress(
             context,
             contract,
             args,
-            StartBeat(
-                phase="memory-blocked",
-                completed_phases=("preflight", "code-worktree"),
-                choices=tuple(str(choice) for choice in raw_choices)
-                if isinstance(raw_choices, list)
-                else (),
-                blocked_reason=str(memory_state.get("reason", "")),
-            ),
+            StartBeat(phase="code-worktree", completed_phases=("preflight",)),
         )
-        return _blocked_memory_start_result(context, args, code_state, memory_state)
-    contract = _contract_after_memory_start(contract, memory_state)
-    provider_plan = plan_providers_for_start(context, contract, args)
-    if provider_plan["state"] == "blocked":
-        _record_start_block(
-            context,
-            contract,
-            args,
-            StartBeat(
-                phase="provider-blocked",
-                completed_phases=("preflight", "code-worktree", "memory-compatible"),
-                blocked_reason=str(provider_plan.get("reason", "")),
-            ),
-        )
-        return _blocked_provider_start_result(
-            context, args, code_state, memory_state, provider_plan
-        )
-    # The contract is written BEFORE provider setup launches: it is the durable
-    # anchor worktree_status polls while the background thread runs (GitHub #53).
-    if not args.dry_run:
-        write_contract(contract.contract_path, contract)
-        _clear_start_block(context, contract, args)
-        # Explicit-linkage restamp (L11): a leaf whose doc already exists — a
-        # reopened leaf, or one whose doc points at a finalized lifecycle — must
-        # follow THIS enclosure's fresh lifecycle. First starts are a no-op (the
-        # doc is authored afterwards, stamped by task_doc against the contract).
-        if contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
-            restamp_leaf_doc_lifecycle(
-                contract.task_root,
-                contract.leaf_id,
-                contract.lifecycle_id,
-                publish=lambda task_root, document: publish_queue_bound_task_facts(
-                    contract,
-                    lambda: write_task_docs(task_root, [document]),
-                    topology_stable=True,
+        memory_state = memory_preview if args.dry_run else prepare_memory_for_start(contract, args)
+        if memory_state["state"] == "blocked":
+            raw_choices = memory_state.get("choices")
+            _record_start_block(
+                context,
+                contract,
+                args,
+                StartBeat(
+                    phase="memory-blocked",
+                    completed_phases=("preflight", "code-worktree"),
+                    choices=tuple(str(choice) for choice in raw_choices)
+                    if isinstance(raw_choices, list)
+                    else (),
+                    blocked_reason=str(memory_state.get("reason", "")),
                 ),
             )
+            return _blocked_memory_start_result(context, args, code_state, memory_state)
+        contract = _contract_after_memory_start(contract, memory_state)
+        provider_plan = plan_providers_for_start(context, contract, args)
+        if provider_plan["state"] == "blocked":
+            _record_start_block(
+                context,
+                contract,
+                args,
+                StartBeat(
+                    phase="provider-blocked",
+                    completed_phases=("preflight", "code-worktree", "memory-compatible"),
+                    blocked_reason=str(provider_plan.get("reason", "")),
+                ),
+            )
+            return _blocked_provider_start_result(
+                context, args, code_state, memory_state, provider_plan
+            )
+        # The contract is durable before task-doc restamp or provider setup begins.
+        if not args.dry_run:
+            write_contract(contract.contract_path, contract)
+            _clear_start_block(context, contract, args)
+    # Task-doc publication acquires queue then integration-authority locks in that order.
+    if not args.dry_run and contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
+        restamp_leaf_doc_lifecycle(
+            contract.task_root,
+            contract.leaf_id,
+            contract.lifecycle_id,
+            publish=lambda task_root, document: publish_queue_bound_task_facts(
+                contract,
+                lambda: write_task_docs(task_root, [document]),
+                topology_stable=True,
+            ),
+        )
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(
@@ -622,11 +608,7 @@ def _create_start_enclosure(
 def prepare_providers_for_start(
     context, contract: WorktreeContract, args: WorktreeArgs
 ) -> dict[str, object]:
-    """Preflight + execute/launch in one call (facade/CLI surface).
-
-    `start_result` calls the two halves separately so the contract write lands
-    between them; this wrapper preserves the established public contract.
-    """
+    """Preserve the facade while start_result writes the contract between both halves."""
     plan = plan_providers_for_start(context, contract, args)
     if plan["state"] != "enabled":
         return plan
@@ -918,49 +900,23 @@ def _memory_source_state(
     assert contract.memory_repo_path is not None
     if not contract.memory_repo_path.exists():
         return _missing_memory_repo_state(args)
-    if (contract.memory_repo_path / ".git").exists() and has_changes(contract.memory_repo_path):
-        return _dirty_memory_source_state(args)
     return None
-
-
-def _rebased_on_mapped_commit(
-    contract: WorktreeContract, ledger: MemoryLedger, args: WorktreeArgs
-) -> tuple[WorktreeContract, MemoryLedger] | dict[str, object]:
-    """Rebind the contract onto a base the official ledger maps, or the state that blocks start."""
-    disabled = _disabled_memory_choice(args)
-    if disabled:
-        return disabled
-    reconciled = _reconcile_missing_mapping(contract, ledger, args)
-    if reconciled is None:
-        return _missing_mapping_state(contract, ledger)
-    return reconciled
 
 
 def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, object]:
     source_state = _memory_source_state(contract, args)
     if source_state is not None:
         return source_state
+    memory_source_branch = _ensure_memory_source_branch(contract)
     ledger = _load_memory_ledger(contract, args)
     if isinstance(ledger, dict):
         return ledger
-    reconciled_base: str | None = None
     if find_mapping(ledger, contract.code_base_commit) is None:
-        rebased = _rebased_on_mapped_commit(contract, ledger, args)
-        if isinstance(rebased, dict):
-            return rebased
-        contract, ledger = rebased
-        reconciled_base = contract.memory_base_commit
-    # The reconciliation rebind re-widens the contract's optional memory fields; re-narrow both.
+        disabled = _disabled_memory_choice(args)
+        return disabled or _missing_mapping_state(contract, ledger)
     assert contract.memory_repo_path is not None
     assert contract.memory_worktree is not None
-    memory_source_branch = _ensure_memory_source_branch(contract, args.dry_run)
-    memory_branch_state = ensure_worktree(
-        contract.memory_repo_path,
-        contract.memory_worktree,
-        contract.memory_work_branch,
-        contract.memory_source_branch,
-        args.dry_run,
-    )
+    memory_branch_state = ensure_worktree(contract, side="memory", dry_run=args.dry_run)
     mtime_sync = _sync_worktree_memory_mtimes(contract, args.dry_run)
     result: dict[str, object] = {
         "state": "compatible",
@@ -970,39 +926,18 @@ def prepare_memory_for_start(contract: WorktreeContract, args: WorktreeArgs) -> 
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
     }
-    if reconciled_base is not None:
-        # A reconciliation just advanced the official memory tip; the caller re-bases the persisted
-        # contract onto it so status/closeout see the base the mapping was recorded against.
-        result["reconciledMemoryBaseCommit"] = reconciled_base
     return result
 
 
-def _ensure_memory_source_branch(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
-    """Auto-create a missing memory source branch off the official memory tip (issue #54).
-
-    The code source branch name is the template; agents previously had to create the
-    matching memory branch by hand before worktree_start would succeed. The branch
-    bases on the validated official checkout HEAD (`memory_base_commit`), whose ledger
-    was just proven to map `code_base_commit`.
-    """
+def _ensure_memory_source_branch(contract: WorktreeContract) -> dict[str, object]:
+    """Require the exact task-derived memory source; start never creates protected refs."""
     assert contract.memory_repo_path is not None
     if branch_exists(contract.memory_repo_path, contract.memory_source_branch):
         return {"state": "existing", "branch": contract.memory_source_branch}
-    if dry_run:
-        return {
-            "state": "would-create-from-official-tip",
-            "branch": contract.memory_source_branch,
-            "base": contract.memory_base_commit,
-        }
-    require_git(
-        contract.memory_repo_path,
-        ["branch", contract.memory_source_branch, contract.memory_base_commit],
+    raise RuntimeError(
+        "task-derived memory source branch is missing; create or advance protected source "
+        "refs only through their repository landing plane"
     )
-    return {
-        "state": "created-from-official-tip",
-        "branch": contract.memory_source_branch,
-        "base": contract.memory_base_commit,
-    }
 
 
 def _sync_worktree_memory_mtimes(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
@@ -1092,18 +1027,7 @@ def _missing_memory_repo_state(args: WorktreeArgs) -> dict[str, object]:
     return {
         "state": "blocked",
         "reason": "external memory repo is missing; run c-00-initialize-memory-repo before starting an external-memory worktree",
-        "choices": ["initialize-memory-repo", "disabled-memory", "custom"],
-    }
-
-
-def _dirty_memory_source_state(args: WorktreeArgs) -> dict[str, object]:
-    disabled = _disabled_memory_choice(args)
-    if disabled:
-        return disabled
-    return {
-        "state": "blocked",
-        "reason": "external memory source repo has uncommitted changes; commit refreshed onboarding and ledger before starting worktrees",
-        "choices": ["commit-memory-and-ledger-first", "disabled-memory", "custom"],
+        "choices": ["initialize-memory-repo", "disabled-memory"],
     }
 
 
@@ -1112,7 +1036,10 @@ def _load_memory_ledger(
 ) -> MemoryLedger | dict[str, object]:
     assert contract.memory_repo_path is not None
     try:
-        return load_ledger(contract.memory_repo_path / "memory.md")
+        return load_named_ref_ledger(
+            contract.memory_repo_path,
+            contract.memory_source_branch,
+        )
     except LedgerError as error:
         disabled = _disabled_memory_choice(args)
         if disabled:
@@ -1127,61 +1054,16 @@ def _load_memory_ledger(
         }
 
 
-def _reconcile_missing_mapping(
-    contract: WorktreeContract, ledger: MemoryLedger, args: WorktreeArgs
-) -> tuple[WorktreeContract, MemoryLedger] | None:
-    """``memory_choice="reconciliation"`` (260703-L18 finding 7 / friction F-R): record the unmapped
-    code base -> the ledger's current memory content tip, exactly the way closeout ledger syncs do,
-    then let the start proceed on the now-present mapping.
-
-    Mirrors the owner's hand precedent (memory commit ``af50a05``): the header ``lastVerifiedCodeCommit``
-    advances to the code base commit, a newest-first mapping row is prepended, and a ``Ledger sync``
-    commit lands in the memory SOURCE repo -- the memory CONTENT tip is unchanged (this is a code-only
-    catch-up, no onboarding changed). Returns the advanced ``(contract, ledger)`` so the caller bases
-    the memory branch off the recorded commit; ``None`` when reconciliation was not the chosen recovery."""
-    if args.memory_choice != "reconciliation":
-        return None
-    assert contract.memory_repo_path is not None
-    # PR #100 review (Codex P1): the mapping commit must land on the memory SOURCE branch —
-    # the worktree is created FROM that branch, so committing to whatever happens to be
-    # checked out would leave the source branch unmapped while start reports compatible.
-    # Refuse loudly instead of writing to the wrong branch.
-    current_branch = require_git(contract.memory_repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
-    if current_branch != contract.memory_source_branch:
-        raise LedgerError(
-            "reconciliation writes the ledger mapping to the memory source branch "
-            f"'{contract.memory_source_branch}', but the official memory repo is checked out "
-            f"on '{current_branch}'; checkout the source branch and re-run worktree_start"
-        )
-    code_commit = contract.code_base_commit
-    memory_commit = ledger.last_memory_content_commit
-    updated = prepend_mapping(ledger, code_commit, memory_commit)
-    if args.dry_run:
-        return contract, updated
-    write_ledger(contract.memory_repo_path / "memory.md", updated)
-    require_git(contract.memory_repo_path, ["add", "memory.md"])
-    commit_if_dirty(
-        contract.memory_repo_path,
-        args.ledger_commit_message
-        or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
-    )
-    advanced = replace(
-        contract,
-        memory_base_commit=memory_base_for_source(
-            contract.memory_repo_path, contract.memory_source_branch
-        ),
-    )
-    return advanced, updated
-
-
 def _missing_mapping_state(contract: WorktreeContract, ledger) -> dict[str, object]:
-    # Advertise ONLY executable choices (260703-L18 finding 7): both are consumed in
-    # prepare_memory_for_start's missing-mapping path (reconciliation records the mapping and proceeds;
-    # disabled-memory drops external memory). 'custom' was advertised but wired nowhere -- removed.
+    # Advertise only choices consumed by prepare_memory_for_start.
     return {
         "state": "blocked",
         "reason": "no exact ledger mapping for selected code base commit",
         "codeBaseCommit": contract.code_base_commit,
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
-        "choices": ["reconciliation", "disabled-memory"],
+        "choices": ["disabled-memory"],
+        "recovery": (
+            "repair the exact code-to-memory mapping in an ordinary task-owned conflict leaf, "
+            "then land it through the normal closeout and integration plane"
+        ),
     }

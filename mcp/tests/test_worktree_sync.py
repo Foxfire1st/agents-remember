@@ -256,7 +256,10 @@ def make_repo(path: Path) -> str:
     git(path, "config", "user.email", "agents-remember@example.invalid")
     git(path, "config", "user.name", "Agents Remember")
     commit_file(path, "README.md", "# Fixture")
-    return git(path, "rev-parse", "HEAD")
+    commit = git(path, "rev-parse", "HEAD")
+    git(path, "update-ref", "refs/remotes/origin/main", commit)
+    git(path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    return commit
 
 
 def commit_file(repo: Path, name: str, content: str) -> None:

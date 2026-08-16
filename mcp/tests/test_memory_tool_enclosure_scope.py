@@ -191,14 +191,14 @@ class RouteIndexRefreshWritesTheNamedTreeTests(EnclosureScopeTestCase):
         self.assertTrue((self.enclosure.leaf_onboarding / "pkg" / "overview.index.json").is_file())
         self.assertEqual(_tree_snapshot(self.enclosure.official_onboarding), before)
 
-    def test_the_bare_call_still_writes_the_official_repo_and_leaves_the_leaf_alone(self) -> None:
+    def test_the_bare_apply_refuses_without_writing_either_tree(self) -> None:
+        official = _tree_snapshot(self.enclosure.official_onboarding)
         before = _tree_snapshot(self.enclosure.leaf_onboarding)
 
-        payload = route_index_refresh_payload(self.config, REPO)
+        with self.assertRaisesRegex(AuthorityError, "requires a leaf contract_path"):
+            route_index_refresh_payload(self.config, REPO)
 
-        self.assertEqual(payload["onboardingRoot"], self.enclosure.official_onboarding.as_posix())
-        self.assertEqual(payload["routes"], 1)
-        self.assertTrue((self.enclosure.official_onboarding / "overview.index.json").is_file())
+        self.assertEqual(_tree_snapshot(self.enclosure.official_onboarding), official)
         self.assertEqual(_tree_snapshot(self.enclosure.leaf_onboarding), before)
 
     def test_a_contract_scoped_dry_run_writes_nothing_to_either_tree(self) -> None:
@@ -364,6 +364,27 @@ class RefusalTests(EnclosureScopeTestCase):
 
         self.assertIn("names repo 'other-repo'", str(raised.exception))
         self.assertIn(f"repo_id is {REPO!r}", str(raised.exception))
+
+    def test_a_forged_contract_cannot_redirect_a_memory_writer_to_main(self) -> None:
+        forged_path = self.enclosure.contract.contract_path.parent / "forged-contract.md"
+        forged = _replaced(
+            self.enclosure.contract,
+            memory_work_branch="main",
+            contract_path=forged_path,
+        )
+        write_contract(forged_path, forged)
+        official = _tree_snapshot(self.enclosure.official_onboarding)
+        leaf = _tree_snapshot(self.enclosure.leaf_onboarding)
+
+        with self.assertRaisesRegex(RuntimeError, "integration-branch-is-not-a-workbench"):
+            route_index_refresh_payload(
+                self.config,
+                REPO,
+                contract_path=forged_path.as_posix(),
+            )
+
+        self.assertEqual(_tree_snapshot(self.enclosure.official_onboarding), official)
+        self.assertEqual(_tree_snapshot(self.enclosure.leaf_onboarding), leaf)
 
     def test_a_contract_whose_memory_worktree_is_gone_is_refused(self) -> None:
         memory_worktree = self.enclosure.contract.memory_worktree

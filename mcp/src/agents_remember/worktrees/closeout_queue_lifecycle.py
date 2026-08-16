@@ -6,9 +6,11 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, TypeVar
+from threading import Lock, get_ident
+from typing import Any, Literal, TypeVar
 
 from pydantic import ValidationError
 
@@ -16,15 +18,26 @@ from agents_remember.controlplane.closeout_queue_store import (
     CloseoutQueueStore,
     QueueTransaction,
 )
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.models.closeout_queue import (
     CloseoutCandidateRecord,
     CloseoutQueueState,
     QueueEventAction,
 )
+from agents_remember.models.lifecycles.operation import IntegrationOperationAuthority
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.modules.terminal_validation import (
+    require_series_children_retired,
+)
+from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
+    WorktreeContract,
+    amend_contract,
+    load_contract,
+    write_contract,
+)
 
 from .closeout_queue import (
     CloseoutQueueError,
@@ -46,6 +59,42 @@ from .closeout_queue_candidate_evidence import (
 from .closeout_queue_evidence import curator_evidence
 
 T = TypeVar("T")
+AtomicSeriesTerminalOperation = Literal["worktree_cleanup", "worktree_abandon"]
+_ATOMIC_SERIES_TERMINAL_CAPABILITY = object()
+
+
+@dataclass(frozen=True)
+class AtomicSeriesTerminalPermit:
+    """Ephemeral proof that queue and repository authority are both held."""
+
+    contract_path: Path
+    operation: AtomicSeriesTerminalOperation
+    _capability: object
+
+
+_ACTIVE_ATOMIC_SERIES_TERMINAL_PERMIT: ContextVar[AtomicSeriesTerminalPermit | None] = ContextVar(
+    "active_atomic_series_terminal_permit", default=None
+)
+_ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS: dict[int, tuple[AtomicSeriesTerminalPermit, int]] = {}
+_ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS_LOCK = Lock()
+
+
+def _activate_atomic_series_terminal_permit(permit: AtomicSeriesTerminalPermit) -> None:
+    with _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS_LOCK:
+        _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS[id(permit)] = (permit, get_ident())
+
+
+def _deactivate_atomic_series_terminal_permit(permit: AtomicSeriesTerminalPermit) -> None:
+    with _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS_LOCK:
+        active = _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS.get(id(permit))
+        if active is not None and active[0] is permit:
+            del _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS[id(permit)]
+
+
+def _atomic_series_terminal_permit_is_active(permit: AtomicSeriesTerminalPermit) -> bool:
+    with _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS_LOCK:
+        active = _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMITS.get(id(permit))
+        return active is not None and active == (permit, get_ident())
 
 
 @dataclass(frozen=True)
@@ -75,6 +124,15 @@ class _LifecycleCandidateContext:
     state: CloseoutQueueState
     contract: WorktreeContract
     operation_key: str
+
+
+@dataclass(frozen=True)
+class _IntegrationBoundaryContext:
+    topology: TaskDocumentTopology
+    binding: QueueBinding
+    contract: WorktreeContract
+    owner: str
+    commits: tuple[str, str, str]
 
 
 def contract_queue_binding(contract: WorktreeContract) -> QueueBinding | None:
@@ -127,6 +185,108 @@ def contract_queue_binding(contract: WorktreeContract) -> QueueBinding | None:
     return resolved
 
 
+def require_atomic_series_terminal_release(contract: WorktreeContract) -> None:
+    """Refuse retirement while the atomic block still owns queue authority."""
+
+    _atomic_series_terminal_publication(contract, lambda: None)
+    require_series_children_retired(contract)
+
+
+def publish_atomic_series_terminal_under_authority(
+    contract: WorktreeContract,
+    operation: AtomicSeriesTerminalOperation,
+    publication: Callable[[AtomicSeriesTerminalPermit], T],
+) -> T:
+    """Hold queue then repository authority through atomic branch retirement."""
+
+    def repository_publication() -> T:
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            require_series_children_retired(contract)
+            permit = AtomicSeriesTerminalPermit(
+                contract_path=contract.contract_path.resolve(),
+                operation=operation,
+                _capability=_ATOMIC_SERIES_TERMINAL_CAPABILITY,
+            )
+            _activate_atomic_series_terminal_permit(permit)
+            token = _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMIT.set(permit)
+            try:
+                return publication(permit)
+            finally:
+                _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMIT.reset(token)
+                _deactivate_atomic_series_terminal_permit(permit)
+
+    return _atomic_series_terminal_publication(contract, repository_publication)
+
+
+def require_atomic_series_terminal_permit(
+    contract: WorktreeContract,
+    operation: AtomicSeriesTerminalOperation,
+    permit: AtomicSeriesTerminalPermit | None,
+) -> None:
+    """Refuse a series mutation outside its live queue-to-repository publication."""
+
+    if (
+        permit is None
+        or permit._capability is not _ATOMIC_SERIES_TERMINAL_CAPABILITY
+        or _ACTIVE_ATOMIC_SERIES_TERMINAL_PERMIT.get() is not permit
+        or not _atomic_series_terminal_permit_is_active(permit)
+        or permit.operation != operation
+        or permit.contract_path != contract.contract_path.resolve()
+    ):
+        raise RuntimeError(
+            "atomic series terminal mutation requires live queue-owned publication authority"
+        )
+
+
+def _atomic_series_terminal_publication(
+    contract: WorktreeContract,
+    publication: Callable[[], T],
+) -> T:
+    if contract.kind != "series":
+        raise RuntimeError("atomic terminal authority requires a series contract")
+    topology = TaskDocumentTopology(contract.coordination_root)
+    master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
+    master = topology.resolve(master_ref)
+    if master.document.executionNature != "atomic":
+        raise RuntimeError("atomic terminal authority requires executionNature='atomic'")
+    sprint_ref = topology.parent(master_ref)
+    if sprint_ref is None:
+        return publication()
+    graph = _graph_context(topology, sprint_ref)
+    initial = _initial_state(sprint_ref, graph.revision, now_iso())
+
+    def validate_and_publish(state: CloseoutQueueState) -> T:
+        current_graph = _graph_context(topology, sprint_ref)
+        if current_graph.revision != graph.revision:
+            raise CloseoutQueueError(
+                "atomic-series-terminal-graph-moved",
+                "atomic series terminal graph changed before protected retirement",
+            )
+        barrier = state.activeBarrier
+        if barrier is not None and barrier.master == master_ref:
+            raise CloseoutQueueError(
+                "atomic-series-terminal-barrier-active",
+                "atomic series terminal mutation requires its sprint landing barrier to be "
+                "released or durably aborted",
+            )
+        candidates = [
+            candidate.taskDocumentRef.key
+            for candidate in state.candidates.values()
+            if candidate.owningMaster == master_ref
+        ]
+        if candidates:
+            raise CloseoutQueueError(
+                "atomic-series-terminal-candidates-remain",
+                "atomic series terminal mutation requires every own candidate to be "
+                f"consumed or withdrawn: {candidates!r}",
+            )
+        return publication()
+
+    return CloseoutQueueStore(contract.coordination_root, sprint_ref).inspect(
+        initial, validate_and_publish
+    )
+
+
 def publish_queue_bound_task_facts(
     contract: WorktreeContract,
     publication: Callable[[], T],
@@ -135,9 +295,13 @@ def publish_queue_bound_task_facts(
 ) -> T:
     """Serialize a lifecycle-owned leaf/master task publication with its sprint queue."""
 
+    def governed_publication() -> T:
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            return publication()
+
     binding = contract_queue_binding(contract)
     if binding is None:
-        return publication()
+        return governed_publication()
     topology = TaskDocumentTopology(contract.coordination_root)
     master_ref = topology.parent(binding.candidate_ref)
     if master_ref is None:
@@ -148,7 +312,7 @@ def publish_queue_bound_task_facts(
     return CloseoutQueueStore(
         contract.coordination_root, binding.sprint_ref
     ).publish_task_facts_update(
-        publication,
+        governed_publication,
         owning_master=master_ref,
         topology_stable=topology_stable,
     )
@@ -308,46 +472,101 @@ def require_queue_candidate_for_integration(
     binding = contract_queue_binding(contract)
     if binding is None:
         return None
-    topology = TaskDocumentTopology(contract.coordination_root)
-    key = _required_operation_key(operation_key, "integration")
-    owner = _operation_owner(key)
-    initial_graph = _graph_context(topology, binding.sprint_ref)
+    context, initial = _integration_boundary_context(
+        contract,
+        binding,
+        operation_key=operation_key,
+        commits=(code_commit, memory_content_commit, ledger_commit),
+    )
 
     def inspect(state: CloseoutQueueState) -> CloseoutCandidateRecord:
-        graph = _graph_context(topology, binding.sprint_ref)
-        candidate = _candidate_or_error(state, binding.candidate_ref)
-        if (
-            candidate.state != "integration-in-flight"
-            or candidate.inFlightOwnerFingerprint != owner
-        ):
-            raise CloseoutQueueError(
-                "closeout-candidate-integration-claim-required",
-                "integration requires the exact candidate claimed by this lifecycle operation",
-            )
-        blockers = _candidate_blockers(topology, graph, candidate)
-        blockers.extend(
-            _integration_commit_blockers(
-                candidate, contract, code_commit, memory_content_commit, ledger_commit
-            )
-        )
-        blockers.extend(
-            _waiting_reasons(
-                graph,
-                candidate,
-                _active_lane_owner(state),
-                state.activeBarrier,
-            )
-        )
-        if blockers:
-            raise CloseoutQueueError(
-                "closeout-candidate-integration-blocked",
-                f"candidate is not legal at the irreversible integration boundary: {blockers!r}",
-            )
-        return candidate
+        return _require_integration_boundary_candidate(context, state)
 
     return CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).inspect(
-        _initial_state(binding.sprint_ref, initial_graph.revision, now_iso()), inspect
+        initial, inspect
     )
+
+
+def publish_queue_candidate_integration_under_authority(
+    contract: WorktreeContract,
+    publication: Callable[[], T],
+    *,
+    operation_key: str,
+    commits: tuple[str, str, str],
+) -> T:
+    """Hold queue then repository authority through one governed leaf landing."""
+
+    binding = contract_queue_binding(contract)
+    if binding is None:
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            return publication()
+    context, initial = _integration_boundary_context(
+        contract,
+        binding,
+        operation_key=operation_key,
+        commits=commits,
+    )
+
+    def validate_and_publish(state: CloseoutQueueState) -> T:
+        _require_integration_boundary_candidate(context, state)
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            return publication()
+
+    return CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).inspect(
+        initial, validate_and_publish
+    )
+
+
+def _integration_boundary_context(
+    contract: WorktreeContract,
+    binding: QueueBinding,
+    *,
+    operation_key: str,
+    commits: tuple[str, str, str],
+) -> tuple[_IntegrationBoundaryContext, CloseoutQueueState]:
+    topology = TaskDocumentTopology(contract.coordination_root)
+    key = _required_operation_key(operation_key, "integration")
+    graph = _graph_context(topology, binding.sprint_ref)
+    context = _IntegrationBoundaryContext(
+        topology=topology,
+        binding=binding,
+        contract=contract,
+        owner=_operation_owner(key),
+        commits=commits,
+    )
+    return context, _initial_state(binding.sprint_ref, graph.revision, now_iso())
+
+
+def _require_integration_boundary_candidate(
+    context: _IntegrationBoundaryContext,
+    state: CloseoutQueueState,
+) -> CloseoutCandidateRecord:
+    graph = _graph_context(context.topology, context.binding.sprint_ref)
+    candidate = _candidate_or_error(state, context.binding.candidate_ref)
+    if (
+        candidate.state != "integration-in-flight"
+        or candidate.inFlightOwnerFingerprint != context.owner
+    ):
+        raise CloseoutQueueError(
+            "closeout-candidate-integration-claim-required",
+            "integration requires the exact candidate claimed by this lifecycle operation",
+        )
+    blockers = _candidate_blockers(context.topology, graph, candidate)
+    blockers.extend(_integration_commit_blockers(candidate, context.contract, *context.commits))
+    blockers.extend(
+        _waiting_reasons(
+            graph,
+            candidate,
+            _active_lane_owner(state),
+            state.activeBarrier,
+        )
+    )
+    if blockers:
+        raise CloseoutQueueError(
+            "closeout-candidate-integration-blocked",
+            f"candidate is not legal at the irreversible integration boundary: {blockers!r}",
+        )
+    return candidate
 
 
 def complete_queue_candidate_integration(
@@ -477,6 +696,167 @@ def release_queue_candidate_after_reversible_operation(
             {"candidate": binding.candidate_ref.key, "operationKind": operation_kind},
         ),
         transform=release,
+    )
+
+
+def prepare_queue_candidate_conflict_resolution(
+    contract: WorktreeContract,
+    *,
+    operation_key: str,
+    authority: IntegrationOperationAuthority,
+) -> WorktreeContract:
+    """Retire one stale certified candidate and reopen its exact closeout edge.
+
+    Publication is deliberately queue -> repository authority. The contract reset lands
+    first while the stale certified candidate still prevents another selection. A crash in
+    that window is recoverable by retrying the same cancellation; publishing the queue
+    removal first would lose the durable identity of a still-closed candidate.
+    """
+
+    key = _required_operation_key(operation_key, "integration")
+    owner = _operation_owner(key)
+    reset = _conflict_resolution_contract(contract, authority)
+    binding = contract_queue_binding(contract)
+
+    def publish_reset() -> None:
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            current = load_contract(contract.contract_path)
+            if _conflict_reset_is_complete(current, authority):
+                return
+            if current != contract:
+                raise CloseoutQueueError(
+                    "closeout-conflict-contract-changed",
+                    "the closed contract changed before conflict resolution was prepared",
+                )
+            write_contract(reset.contract_path, reset)
+
+    if binding is None:
+        publish_reset()
+        return load_contract(contract.contract_path)
+
+    topology = TaskDocumentTopology(contract.coordination_root)
+    graph = _graph_context(topology, binding.sprint_ref)
+    initial = _initial_state(binding.sprint_ref, graph.revision, now_iso())
+
+    def retire(state: CloseoutQueueState) -> CloseoutQueueState:
+        candidate = state.candidates.get(binding.candidate_ref.key)
+        if candidate is None:
+            return state
+        if candidate.state != "certified":
+            raise CloseoutQueueError(
+                "closeout-conflict-candidate-not-certified",
+                "conflict resolution requires the stale certified candidate",
+            )
+        expected = (
+            authority.codeCandidateCommit,
+            authority.memoryContentCommit or None,
+            authority.ledgerCommit or None,
+        )
+        observed = (
+            candidate.closeoutCodeCommit,
+            candidate.closeoutMemoryContentCommit,
+            candidate.closeoutLedgerCommit,
+        )
+        if observed != expected:
+            raise CloseoutQueueError(
+                "closeout-conflict-candidate-mismatch",
+                "the certified candidate does not match this conflict transaction",
+            )
+        candidates = dict(state.candidates)
+        candidates.pop(binding.candidate_ref.key)
+        return state.model_copy(update={"candidates": candidates})
+
+    CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).transact_with_publication(
+        initial=initial,
+        event=_internal_event(
+            "prepare-conflict-resolution",
+            f"integration-conflict:{owner}",
+            {
+                "candidate": binding.candidate_ref.key,
+                "codeCommit": authority.codeCandidateCommit,
+                "memoryContentCommit": authority.memoryContentCommit,
+                "ledgerCommit": authority.ledgerCommit,
+            },
+        ),
+        transform=retire,
+        publication=publish_reset,
+    )
+    return load_contract(contract.contract_path)
+
+
+def _conflict_resolution_contract(
+    contract: WorktreeContract, authority: IntegrationOperationAuthority
+) -> WorktreeContract:
+    conflict = authority.conflictTransaction
+    if contract.kind != "leaf" or conflict is None:
+        raise CloseoutQueueError(
+            "closeout-conflict-transaction-required",
+            "only an exact leaf integration conflict transaction can reopen closeout",
+        )
+    if _conflict_reset_is_complete(contract, authority):
+        return contract
+    expected = (
+        authority.codeCandidateCommit,
+        authority.memoryContentCommit,
+        authority.ledgerCommit,
+        contract.code_worktree.resolve().as_posix(),
+        contract.memory_worktree.resolve().as_posix() if contract.memory_worktree else "",
+    )
+    observed = (
+        contract.code_commit,
+        contract.memory_content_commit,
+        contract.ledger_commit,
+        conflict.codeWorktree,
+        conflict.memoryWorktree,
+    )
+    if (
+        contract.closeout_status != "completed"
+        or not contract.approved_for_commit
+        or contract.integration_status != "not-started"
+        or observed != expected
+    ):
+        raise CloseoutQueueError(
+            "closeout-conflict-contract-mismatch",
+            "the closed contract no longer matches the accepted conflict transaction",
+        )
+    return amend_contract(
+        replace(
+            contract,
+            approved_for_commit=False,
+            commit_approval_note="",
+            code_commit="",
+            memory_content_commit="",
+            ledger_commit="",
+            integration_strategy="",
+            integrated_code_commit="",
+            integrated_memory_content_commit="",
+            integrated_ledger_commit="",
+            memory_state="",
+        ),
+        ContractCells(
+            human_review_status="pending-review",
+            closeout_status="not-started",
+            integration_status="not-started",
+        ),
+    )
+
+
+def _conflict_reset_is_complete(
+    contract: WorktreeContract, authority: IntegrationOperationAuthority
+) -> bool:
+    conflict = authority.conflictTransaction
+    return bool(
+        contract.kind == "leaf"
+        and conflict is not None
+        and contract.closeout_status == "not-started"
+        and contract.integration_status == "not-started"
+        and not contract.approved_for_commit
+        and not contract.code_commit
+        and not contract.memory_content_commit
+        and not contract.ledger_commit
+        and contract.code_worktree.resolve().as_posix() == conflict.codeWorktree
+        and (contract.memory_worktree.resolve().as_posix() if contract.memory_worktree else "")
+        == conflict.memoryWorktree
     )
 
 

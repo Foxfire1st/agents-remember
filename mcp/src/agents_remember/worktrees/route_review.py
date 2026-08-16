@@ -23,6 +23,11 @@ class RouteReviewError(ValueError):
 
 
 def code_candidate_tree(contract: WorktreeContract) -> str:
+    if contract.kind == "series":
+        return require_git(
+            contract.code_repo_path,
+            ["rev-parse", f"refs/heads/{contract.code_work_branch}^{{tree}}"],
+        )
     return worktree_candidate_tree(
         contract.code_worktree,
         contract.worktree_group / "reports" / ".route-review-candidate.index",
@@ -32,8 +37,9 @@ def code_candidate_tree(contract: WorktreeContract) -> str:
 def code_change_present(contract: WorktreeContract) -> bool:
     """Whether the full current candidate differs from the leaf's accepted base tree."""
     candidate = code_candidate_tree(contract)
+    repository = contract.code_repo_path if contract.kind == "series" else contract.code_worktree
     base_tree = require_git(
-        contract.code_worktree,
+        repository,
         ["rev-parse", f"{contract.code_base_commit}^{{tree}}"],
     )
     return candidate != base_tree

@@ -15,8 +15,16 @@ from agents_remember.models.worktree import (
     SourceLineageRelation,
     SourceLineageSide,
 )
-from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.modules.git import branch_exists, repository_identity
+from agents_remember.tasks.document_refs import (
+    ResolvedTaskDocument,
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
+from agents_remember.worktrees.modules.git import (
+    branch_exists,
+    local_branch_ref,
+    repository_identity,
+)
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -35,6 +43,8 @@ class _EdgeInput:
     source_branch: str
     descendant_branch: str
     contract_path: Path
+    descendant_commit: str | None = None
+    exact_descendant: bool = False
 
 
 def source_lineage_for_task(
@@ -53,6 +63,8 @@ def source_lineage_for_task(
     if altitude == "sprint":
         return None
     if altitude == "master":
+        if resolved.document.executionNature == "organizational":
+            return _organizational_master_projection(topology, resolved)
         contract_path = series_contract_path(resolved.path.parent)
         missing_relation: SourceLineageRelation = "super-to-master"
     else:
@@ -70,13 +82,13 @@ def parent_source_lineage(contract: WorktreeContract) -> SourceLineageProjection
     if contract.kind != "leaf":
         return None
     if contract.parent_contract_path is None:
-        return _unavailable_contract_projection(contract.contract_path, "super-to-master")
+        return _projection(_organizational_leaf_edges(contract, prestart=True))
     if not contract.parent_contract_path.exists():
         return _unavailable_contract_projection(contract.parent_contract_path, "super-to-master")
     parent = _load_required_contract(contract.parent_contract_path)
     if parent is None:
         return _unavailable_contract_projection(contract.parent_contract_path, "super-to-master")
-    return _projection(_series_edges(parent))
+    return _projection([*_series_edges(parent), *_prestart_leaf_edges(parent, contract)])
 
 
 def source_lineage_for_contract(contract: WorktreeContract) -> SourceLineageProjection | None:
@@ -87,7 +99,7 @@ def source_lineage_for_contract(contract: WorktreeContract) -> SourceLineageProj
     if contract.kind != "leaf":
         return None
     if contract.parent_contract_path is None:
-        return _unavailable_contract_projection(contract.contract_path, "super-to-master")
+        return _projection(_organizational_leaf_edges(contract, prestart=False))
     parent = _load_required_contract(contract.parent_contract_path)
     if parent is None:
         return _unavailable_contract_projection(contract.parent_contract_path, "super-to-master")
@@ -169,6 +181,145 @@ def _unavailable_contract_projection(
     return _projection([edge])
 
 
+def _organizational_master_projection(
+    topology: TaskDocumentTopology,
+    master: ResolvedTaskDocument,
+) -> SourceLineageProjection:
+    """Validate the graph-owned super without inventing a master branch edge."""
+
+    try:
+        sprint_ref = topology.parent(master.ref)
+        if sprint_ref is None:
+            raise RuntimeError("organizational master is not commanded by a sprint")
+        sprint = topology.resolve(sprint_ref)
+        commanded = topology.validate_execution_topology(sprint_ref)
+        if not any(item.ref == master.ref for item in commanded):
+            raise RuntimeError("organizational master is absent from the sprint execution graph")
+        if not sprint.document.integrationBranch:
+            raise RuntimeError("commanding sprint does not declare integrationBranch")
+    except (RuntimeError, TaskDocumentRefError) as exc:
+        return _unavailable_topology_projection(master.path, str(exc))
+    return _projection([])
+
+
+def _organizational_leaf_edges(
+    contract: WorktreeContract,
+    *,
+    prestart: bool,
+) -> list[SourceLineageEdge]:
+    """Resolve the direct sprint-super -> organizational leaf edge from task authority."""
+
+    branch, detail = _organizational_source_branch(contract)
+    if detail is not None:
+        return [
+            SourceLineageEdge(
+                relation="super-to-leaf",
+                side="code",
+                state="unavailable",
+                sourceBranch=contract.code_source_branch,
+                descendantBranch=contract.code_work_branch,
+                contractPath=contract.contract_path.as_posix(),
+                syncContractPath=contract.contract_path.as_posix(),
+                detail=detail,
+            )
+        ]
+    assert branch is not None
+    edges = [
+        _organizational_edge(
+            _EdgeInput(
+                "super-to-leaf",
+                "code",
+                contract.code_repo_path,
+                contract.code_source_branch,
+                contract.code_work_branch,
+                contract.contract_path,
+                contract.code_base_commit if prestart else None,
+                prestart,
+            ),
+            expected_source_branch=branch,
+        )
+    ]
+    if contract.memory_mode == "external":
+        edges.append(
+            _organizational_edge(
+                _EdgeInput(
+                    "super-to-leaf",
+                    "memory",
+                    contract.memory_repo_path,
+                    contract.memory_source_branch,
+                    contract.memory_work_branch,
+                    contract.contract_path,
+                    contract.memory_base_commit if prestart else None,
+                    prestart,
+                ),
+                expected_source_branch=branch,
+            )
+        )
+    return edges
+
+
+def _organizational_source_branch(
+    contract: WorktreeContract,
+) -> tuple[str | None, str | None]:
+    topology = TaskDocumentTopology(contract.coordination_root)
+    try:
+        master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
+        master = topology.resolve(master_ref)
+        if master.document.executionNature != "organizational":
+            raise RuntimeError(
+                "a leaf without a parent series must belong to an organizational master"
+            )
+        sprint_ref = topology.parent(master_ref)
+        if sprint_ref is None:
+            raise RuntimeError("organizational master is not commanded by a sprint")
+        sprint = topology.resolve(sprint_ref)
+        commanded = topology.validate_execution_topology(sprint_ref)
+        if not any(item.ref == master_ref for item in commanded):
+            raise RuntimeError("organizational master is absent from the sprint execution graph")
+        branch = sprint.document.integrationBranch
+        if not branch:
+            raise RuntimeError("commanding sprint does not declare integrationBranch")
+    except (RuntimeError, TaskDocumentRefError) as exc:
+        return None, str(exc)
+    return branch.removeprefix("refs/heads/"), None
+
+
+def _organizational_edge(
+    edge: _EdgeInput,
+    *,
+    expected_source_branch: str,
+) -> SourceLineageEdge:
+    if edge.source_branch.removeprefix("refs/heads/") != expected_source_branch:
+        return SourceLineageEdge(
+            relation=edge.relation,
+            side=edge.side,
+            state="unavailable",
+            sourceBranch=edge.source_branch,
+            descendantBranch=edge.descendant_branch,
+            contractPath=edge.contract_path.as_posix(),
+            syncContractPath=edge.contract_path.as_posix(),
+            detail="the organizational leaf source does not match its sprint integrationBranch",
+        )
+    return _edge(edge)
+
+
+def _unavailable_topology_projection(path: Path, detail: str) -> SourceLineageProjection:
+    return _projection(
+        [
+            SourceLineageEdge(
+                relation="super-to-master",
+                side="code",
+                state="unavailable",
+                sourceBranch="",
+                descendantBranch="",
+                contractPath=path.as_posix(),
+                syncContractPath=path.as_posix(),
+                detail=detail,
+            )
+        ]
+    )
+
+
 def _series_edges(contract: WorktreeContract) -> list[SourceLineageEdge]:
     edges = [
         _edge(
@@ -231,6 +382,45 @@ def _leaf_edges(parent: WorktreeContract, leaf: WorktreeContract) -> list[Source
     return edges
 
 
+def _prestart_leaf_edges(
+    parent: WorktreeContract, leaf: WorktreeContract
+) -> list[SourceLineageEdge]:
+    edges = [
+        _linked_edge(
+            _EdgeInput(
+                "master-to-leaf",
+                "code",
+                leaf.code_repo_path,
+                leaf.code_source_branch,
+                leaf.code_work_branch,
+                leaf.contract_path,
+                leaf.code_base_commit,
+                True,
+            ),
+            expected_repo=parent.code_repo_path,
+            expected_source_branch=parent.code_work_branch,
+        )
+    ]
+    if parent.memory_mode == "external" or leaf.memory_mode == "external":
+        edges.append(
+            _linked_edge(
+                _EdgeInput(
+                    "master-to-leaf",
+                    "memory",
+                    leaf.memory_repo_path,
+                    leaf.memory_source_branch,
+                    leaf.memory_work_branch,
+                    leaf.contract_path,
+                    leaf.memory_base_commit,
+                    True,
+                ),
+                expected_repo=parent.memory_repo_path,
+                expected_source_branch=parent.memory_work_branch,
+            )
+        )
+    return edges
+
+
 def _linked_edge(
     edge: _EdgeInput,
     *,
@@ -264,24 +454,25 @@ def _edge(edge: _EdgeInput) -> SourceLineageEdge:
         detail = "the repository recorded by the contract is unavailable"
     elif not edge.source_branch or not edge.descendant_branch:
         detail = "the contract does not name both branches for this lineage edge"
-    elif not branch_exists(edge.repo, edge.source_branch) or not branch_exists(
-        edge.repo, edge.descendant_branch
+    elif not branch_exists(edge.repo, edge.source_branch) or (
+        edge.descendant_commit is None and not branch_exists(edge.repo, edge.descendant_branch)
     ):
         detail = "one or both recorded branches are absent"
     else:
-        counts = ahead_behind(edge.repo, edge.descendant_branch, edge.source_branch)
+        counts = ahead_behind(
+            edge.repo,
+            edge.descendant_commit or local_branch_ref(edge.descendant_branch),
+            local_branch_ref(edge.source_branch),
+        )
         if counts is None:
             detail = "Git could not compare the recorded branches"
     ahead, behind = counts if counts is not None else (None, None)
-    state = (
-        "unavailable"
-        if counts is None
-        else "current"
-        if behind == 0
-        else "behind"
-        if ahead == 0
-        else "diverged"
-    )
+    if counts is None:
+        state = "unavailable"
+    elif edge.exact_descendant:
+        state = "current" if counts == (0, 0) else "behind" if ahead == 0 else "diverged"
+    else:
+        state = "current" if behind == 0 else "behind" if ahead == 0 else "diverged"
     return SourceLineageEdge(
         relation=edge.relation,
         side=edge.side,

@@ -34,16 +34,67 @@ from test_task_document import ApplicationTests, _doc
 
 def _route_review_contract(coord: Path):
     repo = coord / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
-    (repo / "base.txt").write_text("base\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+    if not (repo / ".git").exists():
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        (repo / "base.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
     base = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, check=True, text=True, capture_output=True
     ).stdout.strip()
+    subprocess.run(["git", "branch", "super", "main"], cwd=repo, check=True)
+    task_root = coord / "tasks" / "agents-remember" / "review-x"
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "REVIEW-MASTER",
+                "slug": "task",
+                "title": "Review master",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-08-13T00:00:00+00:00",
+                "executionNature": "organizational",
+                "subTasks": [
+                    {
+                        "number": "REVIEW-X",
+                        "name": "Review",
+                        "file": "review-x.md",
+                        "status": "planning",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root.parent / "review-sprint",
+        TaskDocument.model_validate(
+            {
+                "id": "REVIEW-SPRINT",
+                "slug": "task",
+                "title": "Review sprint",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-08-13T00:00:00+00:00",
+                "orchestrates": ["review-x"],
+                "integrationBranch": "super",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "repository": "agents-remember",
+                            "path": "review-x/task.json",
+                        }
+                    ],
+                    "edges": [],
+                },
+            }
+        ),
+    )
     contract = default_contract(
         ContractTask(
             name="review-x",
@@ -54,10 +105,119 @@ def _route_review_contract(coord: Path):
         ),
         leaf=LeafIdentity(worktree_name="review-x", leaf_id="REVIEW-X", lifecycle_id="LC-REVIEW"),
         code=RepoBranchPlan(
-            repo_path=repo, source_branch="main", work_branch="review-x", base_commit=base
+            repo_path=repo, source_branch="super", work_branch="review-x", base_commit=base
         ),
     )
     contract.code_worktree.parent.mkdir(parents=True)
+    subprocess.run(
+        [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            contract.code_work_branch,
+            contract.code_worktree.as_posix(),
+            contract.code_source_branch,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
+
+
+def _organizational_leaf_contract(
+    coord: Path,
+    *,
+    task_name: str,
+    leaf_id: str,
+    leaf_slug: str,
+    lifecycle_id: str,
+):
+    repo = coord / "repo"
+    branch = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", "refs/heads/super"],
+        cwd=repo,
+        check=False,
+    )
+    if branch.returncode != 0:
+        subprocess.run(["git", "branch", "super", "main"], cwd=repo, check=True)
+    task_root = coord / "tasks" / "agents-remember" / task_name
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": f"{leaf_id}-MASTER",
+                "slug": "task",
+                "title": f"{task_name} master",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-01-01T00:00",
+                "executionNature": "organizational",
+                "subTasks": [
+                    {
+                        "number": leaf_id,
+                        "name": leaf_id,
+                        "file": f"{leaf_slug}.md",
+                        "status": "planning",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root.parent / f"{task_name}-sprint",
+        TaskDocument.model_validate(
+            {
+                "id": f"{leaf_id}-SPRINT",
+                "slug": "task",
+                "title": f"{task_name} sprint",
+                "kind": "master",
+                "repo": "agents-remember",
+                "createdAt": "2026-01-01T00:00",
+                "orchestrates": [task_name],
+                "integrationBranch": "super",
+                "executionGraph": {
+                    "nodes": [
+                        {
+                            "repository": "agents-remember",
+                            "path": f"{task_name}/task.json",
+                        }
+                    ],
+                    "edges": [],
+                },
+            }
+        ),
+    )
+    base = subprocess.run(
+        ["git", "rev-parse", "super"],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    contract = default_contract(
+        ContractTask(
+            name=task_name,
+            repo_name="agents-remember",
+            coordination_root=coord,
+            workflow_kind="chat-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(
+            worktree_name=leaf_slug,
+            leaf_id=leaf_id,
+            lifecycle_id=lifecycle_id,
+        ),
+        code=RepoBranchPlan(
+            repo_path=repo,
+            source_branch="super",
+            work_branch=f"ar/{leaf_slug}",
+            base_commit=base,
+        ),
+    )
+    contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             "git",
@@ -645,20 +805,13 @@ class ApplicationTests2(ApplicationTests):
         self.assertEqual(before, after)
 
     def test_create_picks_up_contract_lifecycle_id(self) -> None:
-        contract = default_contract(
-            ContractTask(
-                name="3c-x",
-                repo_name="agents-remember",
-                coordination_root=self.coord,
-                workflow_kind="chat-task",
-                memory_mode="disabled",
-            ),
-            leaf=LeafIdentity(worktree_name="3c-x", lifecycle_id="LC-CONTRACT"),
-            code=RepoBranchPlan(
-                repo_path=self.coord, source_branch="main", work_branch="wb", base_commit="abc123"
-            ),
+        _organizational_leaf_contract(
+            self.coord,
+            task_name="3c-x",
+            leaf_id="3C",
+            leaf_slug="03c_x",
+            lifecycle_id="LC-CONTRACT",
         )
-        write_contract(contract.contract_path, contract)
         result = self._create()  # no lifecycleId in fields
         self.assertEqual(result["lifecycleId"], "LC-CONTRACT")
 
@@ -696,20 +849,13 @@ class ApplicationTests2(ApplicationTests):
             )
 
     def test_create_defaults_subtask_under_leaf_contract(self) -> None:
-        contract = default_contract(
-            ContractTask(
-                name="leaf-x",
-                repo_name="agents-remember",
-                coordination_root=self.coord,
-                workflow_kind="chat-task",
-                memory_mode="disabled",
-            ),
-            leaf=LeafIdentity(worktree_name="leaf-x", lifecycle_id="LC-LEAF"),
-            code=RepoBranchPlan(
-                repo_path=self.coord, source_branch="main", work_branch="wb", base_commit="abc123"
-            ),
+        _organizational_leaf_contract(
+            self.coord,
+            task_name="leaf-x",
+            leaf_id="L1",
+            leaf_slug="01_leaf",
+            lifecycle_id="LC-LEAF",
         )
-        write_contract(contract.contract_path, contract)
         # A bare create against a leaf contract is the leaf sub-task (context-aware default).
         result = task_doc_tool(
             self.cfg,

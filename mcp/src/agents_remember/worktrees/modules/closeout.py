@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, cast
 
 from agents_remember.controlplane.enforcement import (
@@ -18,6 +19,11 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.observer.events import now_iso
+from agents_remember.worktrees.closeout_preview import (
+    closeout_order,
+    closeout_summary,
+    proposed_closeout_commits,
+)
 from agents_remember.worktrees.closeout_queue_lifecycle import (
     certify_queue_candidate_closeout,
     claim_queue_candidate_for_closeout,
@@ -27,6 +33,10 @@ from agents_remember.worktrees.closeout_recovery import (
     accepted_code_commit,
     prove_closeout_recovery_commits,
     resume_external_commits,
+)
+from agents_remember.worktrees.integration_branch_authority import (
+    require_ordinary_worktree,
+    require_series_contract_authority,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.closeout_memory_quality import (
@@ -44,6 +54,7 @@ from agents_remember.worktrees.modules.code_quality_gate import (
 )
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
+    branch_commit,
     changed_worktree_paths,
     commit_date,
     commit_if_dirty,
@@ -88,10 +99,16 @@ from agents_remember.worktrees.route_review import (
     code_change_present,
     require_current_route_review,
 )
+from agents_remember.worktrees.series_closeout import (
+    exact_series_memory_closeout,
+    publish_closeout_under_authority,
+    refuse_series_workbench_commit,
+)
 from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
+    WorktreeContract,
     amend_contract,
     load_contract,
     write_contract,
@@ -105,6 +122,8 @@ def closeout_changed_paths(contract) -> dict[str, list[str]]:
     slices) that no previous closeout verified; ``working`` keeps the strict
     dirty-tree tier. A path in both tiers counts as working.
     """
+    if contract.kind == "series":
+        return {"all": [], "working": [], "committed": []}
     working = changed_worktree_paths(contract.code_worktree)
     committed = committed_changed_paths(
         contract.code_worktree, contract.code_base_commit, contract.code_commit
@@ -185,7 +204,11 @@ def _preview_integration_reopen(
 ) -> dict[str, object]:
     if contract.integration_status != "completed":
         return {"would_reopen": False, "reason": "integration is not completed"}
-    code_head = head_commit(contract.code_worktree)
+    code_head = (
+        branch_commit(contract.code_repo_path, contract.code_work_branch)
+        if contract.kind == "series"
+        else head_commit(contract.code_worktree)
+    )
     code_unlanded = code_dirty or (
         code_head != contract.code_commit
         and _commit_missing_from_source(
@@ -268,7 +291,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     changed_paths = worklist["all"]
     metadata_refresh: OnboardingRefreshPlan = (
         onboarding_refresh_plan(contract, changed_paths, working_paths=worklist["working"])
-        if contract.memory_mode == "external"
+        if contract.memory_mode == "external" and contract.kind == "leaf"
         else {
             "required": [],
             "missing": [],
@@ -278,7 +301,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
     entity_refresh: EntityFingerprintRefreshPlan = (
         entity_fingerprint_refresh_plan(contract, changed_paths)
-        if contract.memory_mode == "external"
+        if contract.memory_mode == "external" and contract.kind == "leaf"
         else {
             "required": [],
             "unsupported": [],
@@ -286,7 +309,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
     route_overview_refresh: RouteOverviewRefreshPlan = (
         route_overview_metadata_refresh_plan(contract, changed_paths)
-        if contract.memory_mode == "external"
+        if contract.memory_mode == "external" and contract.kind == "leaf"
         else {
             "required": [],
             "missing_metadata": [],
@@ -294,7 +317,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
     route_index_refresh: dict[str, Any] = (
         route_index_refresh_plan_for_context(_closeout_contract_context(contract))
-        if contract.memory_mode == "external"
+        if contract.memory_mode == "external" and contract.kind == "leaf"
         else {
             "routes": 0,
             "written": 0,
@@ -309,7 +332,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
             memory_tree=contract.memory_worktree,
             memory_verified_commit=contract_memory_verified_commit(contract),
         )
-        if contract.memory_mode == "external"
+        if contract.memory_mode == "external" and contract.kind == "leaf"
         else {
             "stale": [],
             "untraced": [],
@@ -324,7 +347,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
             memory_tree=contract.memory_worktree,
             memory_verified_commit=contract_memory_verified_commit(contract),
         )
-        if contract.memory_mode == "external"
+        if contract.memory_mode == "external" and contract.kind == "leaf"
         else {
             "stale": [],
             "untraced": [],
@@ -342,53 +365,17 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
 
 
-def _proposed_commits(
-    contract,
-    args: WorktreeArgs,
-    code_dirty: bool,
-    memory_would_commit: bool,
-    code_quality_gate: dict[str, Any],
-) -> dict[str, object]:
-    """The three commits the preview is asking approval for, and what each is gated on.
-
-    ``ledger_message`` is derived here because this is its only reader: the preview's
-    default text names the two commits the ledger will map once they exist.
-    """
-    ledger_message = (
-        args.ledger_commit_message
-        or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
-    )
-    return {
-        "code": {
-            "would_commit": code_dirty,
-            "message": args.code_commit_message,
-            "worktree": contract.code_worktree.as_posix(),
-            "strict_code_quality_before_commit": bool(code_quality_gate["required"]),
-        },
-        "memory": {
-            "would_commit": memory_would_commit,
-            "message": args.memory_commit_message,
-            "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
-            "metadata_refresh_after_code_commit": contract.memory_mode == "external",
-            "entity_fingerprint_refresh_after_code_commit": contract.memory_mode == "external",
-            "route_refresh_after_code_commit": contract.memory_mode == "external",
-            "memory_quality_check_before_commit": contract.memory_mode == "external",
-        },
-        "ledger": {
-            "would_update": contract.memory_mode == "external",
-            "message": ledger_message,
-            "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
-        },
-    }
-
-
 def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     """Answer what closeout would do, having done none of it."""
-    _refuse_series_code_commit(contract)
-    code_dirty = worktree_dirty(contract.code_worktree)
+    refuse_series_workbench_commit(contract)
+    code_dirty = contract.kind == "leaf" and worktree_dirty(contract.code_worktree)
     code_changed = code_change_present(contract)
     route_review = require_current_route_review(contract)
-    memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
+    memory_dirty = (
+        contract.kind == "leaf"
+        and contract.memory_mode == "external"
+        and worktree_dirty(contract.memory_worktree)
+    )
     worklist = closeout_changed_paths(contract)
     changed_paths = worklist["all"]
     refresh = _memory_refresh_preview(contract, worklist)
@@ -400,26 +387,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": (
-            "Closeout preview only; no commits were created. For external memory, the "
-            "working-tree memory-quality preflight runs before staging or any code-quality "
-            "subprocess, so a structurally invalid entity catalog or broken citation aborts "
-            "before Pyright or pytest. The staging "
-            "step and its two refusals belong only to the leaf change-set-scoped quality "
-            "gate: when a leaf would commit and this checkout carries the quality wrapper, closeout "
-            "refuses a non-task checkout or unresolved conflicts; otherwise it stages the "
-            "whole task worktree, runs its configured fast hook once, restages any hook edits, "
-            "and runs the leaf's targeted contract over exactly what it will commit. The code "
-            "commit bypasses hooks so nothing restarts after the wrapper's pytest-final phase. "
-            "Series/master closeout does not rerun acceptance. The full wrapper runs once "
-            "per master at the Dagger-container master "
-            "integration gate through the pinned Dagger graph. After the code commit, "
-            "external-memory closeout refreshes "
-            "onboarding and entity metadata plus route overviews and indexes, reruns memory "
-            "quality without the preflight's temporary base provenance, and only then commits "
-            "memory and ledger. A refusal commits nothing; a refused code gate may leave the "
-            "disposable task worktree staged because its retry resets and restages it."
-        ),
+        "summary": closeout_summary(contract),
         **recovery_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
@@ -433,23 +401,12 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         ),
         "commit_approval_required": True,
         "route_review": route_review,
-        "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
-        "closeout_order": [
-            "run-working-tree-memory-quality-preflight-before-code-quality",
-            "refuse-if-gate-would-run-and-code-checkout-is-not-the-tasks-own-worktree",
-            "refuse-if-gate-would-run-and-code-worktree-has-unresolved-merge-conflicts",
-            "reset-and-stage-whole-task-worktree-if-gate-would-run",
-            "run-configured-pre-commit-hook-once-and-restage-hook-edits",
-            "run-strict-code-quality-over-that-staged-content",
-            "commit-exactly-certified-code-index-without-rerunning-hooks",
-            "refresh-onboarding-metadata-and-entity-fingerprints",
-            "refresh-route-overview-metadata-and-indexes",
-            "run-post-refresh-memory-quality-check",
-            "commit-memory-content",
-            "update-ledger",
-            "commit-ledger",
-            "update-contract",
-        ],
+        "approval_question": (
+            "Approve recording the exact existing series commits in the closeout contract?"
+            if contract.kind == "series"
+            else "Approve creating the code, memory, and ledger commits with these messages?"
+        ),
+        "closeout_order": closeout_order(contract),
         "changed_code_paths": _bounded_paths(changed_paths),
         "changed_code_paths_committed": _bounded_paths(worklist["committed"]),
         "onboarding_metadata_refresh": _bounded_refresh_plan_view(refresh.metadata),
@@ -469,14 +426,14 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             contract, code_dirty=code_dirty, memory_would_commit=memory_would_commit
         ),
         "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract, args)),
-        "proposed_commits": _proposed_commits(
+        "proposed_commits": proposed_closeout_commits(
             contract, args, code_dirty, memory_would_commit, code_quality_gate
         ),
     }
 
 
 def _validate_closeout_source_heads(contract) -> None:
-    current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
+    current_code_source = branch_commit(contract.code_repo_path, contract.code_source_branch)
     expected_code_heads = _completed_integration_source_heads(
         contract, contract.code_base_commit, contract.integrated_code_commit
     )
@@ -491,7 +448,7 @@ def _validate_closeout_source_heads(contract) -> None:
         and contract.memory_repo_path is not None
         and contract.memory_base_commit
     ):
-        current_memory_source = head_commit(
+        current_memory_source = branch_commit(
             contract.memory_repo_path, contract.memory_source_branch
         )
         expected_memory_heads = _completed_integration_source_heads(
@@ -664,9 +621,13 @@ def _external_closeout_commits(
     change: VerifiedChange,
     memory_quality_before_refresh: dict[str, Any],
 ) -> MemoryCloseoutOutcome:
-    if contract.memory_worktree is None or contract.ledger_path is None:
-        raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
+    if contract.ledger_path is None:
+        raise RuntimeError("external-memory closeout requires a ledger path")
     code_commit = change.commit
+    if contract.kind == "series":
+        return exact_series_memory_closeout(contract, code_commit)
+    if contract.memory_worktree is None:
+        raise RuntimeError("external-memory leaf closeout requires a memory worktree")
     resuming = args.approval_claimed or args.recovery_commits is not None
     recovered = _resumed_external_outcome(contract, args, code_commit)
     if recovered is not None:
@@ -772,7 +733,7 @@ class _CloseoutAttestations:
 
 def _closeout_attestations(contract, worklist: dict[str, list[str]]) -> _CloseoutAttestations:
     """Validate and classify the onboarding refresh for a closeout that is about to run."""
-    if contract.memory_mode != "external":
+    if contract.memory_mode != "external" or contract.kind != "leaf":
         return _CloseoutAttestations()
     changed_paths = worklist["all"]
     sidecar_plan = validate_onboarding_refresh_plan(
@@ -841,7 +802,7 @@ def _amended_closeout_contract(
 
 def _memory_quality_before_refresh(contract) -> dict[str, Any]:
     """Run the external-memory citation preflight before the expensive code gate."""
-    if contract.memory_mode != "external":
+    if contract.memory_mode != "external" or contract.kind != "leaf":
         return {}
     before_checks, _ = worktree_services().memory_quality.check_groups()
     return run_memory_quality_phase(
@@ -869,7 +830,6 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
         and (not commits.memoryContentCommit or not commits.ledgerCommit)
     ):
         return None
-    memory = prove_closeout_recovery_commits(contract, commits)
     if contract.closeout_status == "completed":
         if (
             contract.code_commit != commits.codeCommit
@@ -884,20 +844,33 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             {"state": "already-closed", "recovered": True, **status_payload(contract)},
         )
     approval_note = _closeout_approval_note(args)
-    integration_reopen = _completed_integration_reopen(
-        contract,
-        code_commit=commits.codeCommit,
-        memory_content_commit=commits.memoryContentCommit,
-        ledger_commit=commits.ledgerCommit,
-    )
-    updated = _amended_closeout_contract(
-        contract,
-        approval_note,
-        commits.codeCommit,
-        memory,
-        bool(integration_reopen["reopened"]),
-    )
-    write_contract(contract.contract_path, updated)
+
+    def publication():
+        current = load_contract(contract.contract_path)
+        if current != contract:
+            raise RuntimeError("closeout contract changed before recovery finalization")
+        if current.kind == "series":
+            require_series_contract_authority(current, operation="worktree_closeout")
+        else:
+            require_ordinary_worktree(current, operation="worktree_closeout")
+        memory = prove_closeout_recovery_commits(current, commits)
+        integration_reopen = _completed_integration_reopen(
+            current,
+            code_commit=commits.codeCommit,
+            memory_content_commit=commits.memoryContentCommit,
+            ledger_commit=commits.ledgerCommit,
+        )
+        updated = _amended_closeout_contract(
+            current,
+            approval_note,
+            commits.codeCommit,
+            memory,
+            bool(integration_reopen["reopened"]),
+        )
+        write_contract(current.contract_path, updated)
+        return memory, integration_reopen, updated
+
+    memory, integration_reopen, updated = publish_closeout_under_authority(contract, publication)
     payload = _closed_result_payload(
         updated,
         _CloseoutResultFacts(
@@ -995,14 +968,6 @@ def _closeout_quality_gate_preview(contract, *, code_would_commit: bool) -> dict
     )
 
 
-def _refuse_series_code_commit(contract) -> None:
-    if contract.kind != "leaf" and worktree_dirty(contract.code_worktree):
-        raise RuntimeError(
-            "series/master closeout cannot create a code commit; land code through a leaf "
-            "before recertifying the series"
-        )
-
-
 def _revalidate_reviewed_candidate(
     contract, route_review: dict[str, Any], accepted_candidate_tree: str
 ) -> None:
@@ -1061,7 +1026,10 @@ def _closeout_commit_phase(
         strict_code_quality_required=strict_code_quality_required,
         resuming=resuming,
     )
-    code_commit_date = commit_date(contract.code_worktree, code_commit)
+    code_repository = (
+        contract.code_repo_path if contract.kind == "series" else contract.code_worktree
+    )
+    code_commit_date = commit_date(code_repository, code_commit)
     memory = MemoryCloseoutOutcome()
     if contract.memory_mode == "external":
         memory = _external_closeout_commits(
@@ -1084,21 +1052,35 @@ def _closeout_commit_phase(
     return _CloseoutCommitPhase(code_commit, memory, integration_reopen, gate_guard)
 
 
+def _closeout_contract(args: WorktreeArgs) -> tuple[Path, WorktreeContract]:
+    contract_path = args.contract_path
+    assert contract_path is not None
+    contract = load_contract(contract_path)
+    if contract_path.resolve() != contract.contract_path.resolve():
+        raise RuntimeError(
+            "closeout contract path does not match the path claimed by the contract document"
+        )
+    if contract.kind == "series":
+        require_series_contract_authority(contract, operation="worktree_closeout")
+    else:
+        require_ordinary_worktree(contract, operation="worktree_closeout")
+    return contract_path, contract
+
+
 def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     """Run closeout for real, in the order the preview promised.
 
     Nothing moved across the claim on line "THE CLAIM" below, and nothing may: the ordering
     it enforces is the whole point of 260731-EFA-L5 R3.
     """
-    assert args.contract_path is not None
     report_operation_progress(args, "preflight", current_command="validate closeout eligibility")
-    contract = load_contract(args.contract_path)
+    contract_path, contract = _closeout_contract(args)
     recovered = _recover_closeout_finalization(contract, args)
     if recovered is not None:
-        certify_queue_candidate_closeout(load_contract(args.contract_path), args.operation_key)
+        certify_queue_candidate_closeout(load_contract(contract_path), args.operation_key)
         return recovered
     _validate_closeout_source_state(contract)
-    _refuse_series_code_commit(contract)
+    refuse_series_workbench_commit(contract)
     if args.dry_run:
         return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     if args.operation_key and not args.candidate_tree:
@@ -1131,33 +1113,48 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             _closeout_quality_preflight(contract, args, code_would_commit=code_would_commit)
         )
     accepted_candidate_tree = cast(str, args.candidate_tree)
+    refuse_series_workbench_commit(contract)
     _revalidate_reviewed_candidate(contract, route_review, accepted_candidate_tree)
     claim_queue_candidate_for_closeout(contract, args.operation_key)
-    committed = _closeout_commit_phase(
-        contract,
-        args,
-        worklist=worklist,
-        memory_quality_before_refresh=memory_quality_before_refresh,
-        strict_code_quality_required=strict_code_quality_required,
-    )
-    updated = _amended_closeout_contract(
-        contract,
-        approval_note,
-        committed.code_commit,
-        committed.memory,
-        bool(committed.integration_reopen["reopened"]),
-    )
-    report_operation_progress(
-        args,
-        "contract-finalization",
-        current_command="finalize closeout contract edge",
-        recovery_commits={
-            "codeCommit": committed.code_commit,
-            "memoryContentCommit": committed.memory.memory_commit,
-            "ledgerCommit": committed.memory.ledger_commit,
-        },
-    )
-    write_contract(contract.contract_path, updated)
+
+    def publication() -> tuple[_CloseoutCommitPhase, Any]:
+        current = load_contract(contract.contract_path)
+        if current != contract:
+            raise RuntimeError("closeout contract changed before candidate commit")
+        if current.kind == "series":
+            require_series_contract_authority(current, operation="worktree_closeout")
+        else:
+            require_ordinary_worktree(current, operation="worktree_closeout")
+        refuse_series_workbench_commit(current)
+        _revalidate_reviewed_candidate(current, route_review, accepted_candidate_tree)
+        committed = _closeout_commit_phase(
+            current,
+            args,
+            worklist=worklist,
+            memory_quality_before_refresh=memory_quality_before_refresh,
+            strict_code_quality_required=strict_code_quality_required,
+        )
+        updated = _amended_closeout_contract(
+            current,
+            approval_note,
+            committed.code_commit,
+            committed.memory,
+            bool(committed.integration_reopen["reopened"]),
+        )
+        report_operation_progress(
+            args,
+            "contract-finalization",
+            current_command="finalize closeout contract edge",
+            recovery_commits={
+                "codeCommit": committed.code_commit,
+                "memoryContentCommit": committed.memory.memory_commit,
+                "ledgerCommit": committed.memory.ledger_commit,
+            },
+        )
+        write_contract(current.contract_path, updated)
+        return committed, updated
+
+    committed, updated = publish_closeout_under_authority(contract, publication)
     certify_queue_candidate_closeout(updated, args.operation_key)
     return WorktreeCommandResult(
         0,

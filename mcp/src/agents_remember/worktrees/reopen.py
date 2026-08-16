@@ -49,6 +49,8 @@ from agents_remember.tasks.store import (
 
 from .closeout_queue_errors import CloseoutQueueError
 from .closeout_queue_lifecycle import publish_queue_bound_task_facts
+from .integration_branch_authority import require_parent_series_accepting_leaves
+from .integration_ref_transaction import IntegratedCommits, require_integrated_ledger_mapping
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -68,6 +70,10 @@ from .worktree_contract import (
 
 class ReopenTaskDocumentError(ValueError):
     """The leaf and its parent index could not be prevalidated for one reset."""
+
+
+class _ReopenTransitionRefusal(RuntimeError):
+    """The locked reopen authority no longer matches its reviewed terminal leaf."""
 
 
 def _contract_reopen_facts(contract: WorktreeContract) -> dict[str, object]:
@@ -201,7 +207,7 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
         ),
     )
     try:
-        docs, doc_reset = _plan_leaf_doc_reset(contract, dry_run=dry_run)
+        _, doc_reset = _plan_leaf_doc_reset(contract, dry_run=dry_run)
     except ReopenTaskDocumentError as exc:
         return WorktreeCommandResult(
             2,
@@ -213,13 +219,17 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             },
         )
     try:
-        frozen_cleared = _publish_reopen_transition(
+        frozen_cleared, published_doc_reset = _publish_reopen_transition(
             contract,
             updated,
-            docs,
             dry_run=dry_run,
         )
-    except (OSError, CloseoutQueueError, CloseoutQueueStoreError) as exc:
+    except (
+        OSError,
+        CloseoutQueueError,
+        CloseoutQueueStoreError,
+        _ReopenTransitionRefusal,
+    ) as exc:
         return WorktreeCommandResult(
             2,
             {
@@ -232,6 +242,8 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
                 ),
             },
         )
+    if published_doc_reset is not None:
+        doc_reset = published_doc_reset
     summary = (
         "Reopen preview: the contract state and leaf doc would be reset as listed."
         if dry_run
@@ -284,7 +296,52 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
             },
         )
 
-    lineage = parent_source_lineage(contract)
+    try:
+        require_parent_series_accepting_leaves(contract, operation="task_reopen")
+    except RuntimeError as exc:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                **status_payload(contract),
+                "blockers": [str(exc)],
+                "summary": f"Reopen refused before resetting task state: {exc}",
+            },
+        )
+
+    if contract.memory_mode == "external":
+        try:
+            require_integrated_ledger_mapping(
+                contract,
+                IntegratedCommits(
+                    code=contract.integrated_code_commit,
+                    memory_content=contract.integrated_memory_content_commit,
+                    ledger=contract.integrated_ledger_commit,
+                ),
+            )
+        except RuntimeError as exc:
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": "blocked",
+                    **status_payload(contract),
+                    "blockers": [f"integrated-memory-landing: {exc}"],
+                    "summary": f"Reopen refused before resetting task state: {exc}",
+                },
+            )
+
+    # A terminal leaf's source already contains that leaf's exact landed commits.
+    # Pre-start lineage compares against the recorded base, which is intentionally
+    # older after a successful integration. Reopen instead proves that the current
+    # source tips are the exact durable landing recorded by this completed leaf.
+    landed = replace(
+        contract,
+        code_base_commit=contract.integrated_code_commit,
+        memory_base_commit=(
+            contract.integrated_ledger_commit if contract.memory_mode == "external" else ""
+        ),
+    )
+    lineage = parent_source_lineage(landed)
     if lineage_refusal(lineage) is not None:
         assert lineage is not None
         return WorktreeCommandResult(
@@ -383,15 +440,26 @@ def _plan_leaf_doc_reset(
 def _publish_reopen_transition(
     contract: WorktreeContract,
     updated: WorktreeContract,
-    docs: list[TaskDocument],
     *,
     dry_run: bool,
-) -> str:
+) -> tuple[str, dict | None]:
     """Publish contract, task docs, and landing deletion as one rollback-capable unit."""
     if dry_run:
-        return _clear_frozen_landing(contract, dry_run=True)
+        return _clear_frozen_landing(contract, dry_run=True), None
 
-    def publication() -> str:
+    def publication() -> tuple[str, dict | None]:
+        current = load_contract(contract.contract_path)
+        if current != contract:
+            raise _ReopenTransitionRefusal(
+                "the completed leaf contract changed after reopen preflight"
+            )
+        refusal = _reopen_preflight_refusal(current)
+        if refusal is not None:
+            raise _ReopenTransitionRefusal(str(refusal.payload["summary"]))
+        try:
+            docs, doc_reset = _plan_leaf_doc_reset(current, dry_run=False)
+        except ReopenTaskDocumentError as exc:
+            raise _ReopenTransitionRefusal(f"task-document-reset: {exc}") from exc
         final_path = contract.contract_path.parent / LANDING_FINAL_BASENAME
         paths = {contract.contract_path, final_path}
         for doc in docs:
@@ -410,7 +478,7 @@ def _publish_reopen_transition(
                     f"reopen publication and rollback both failed: {rollback_error}"
                 ) from publish_error
             raise
-        return frozen_cleared
+        return frozen_cleared, doc_reset
 
     return publish_queue_bound_task_facts(
         contract,

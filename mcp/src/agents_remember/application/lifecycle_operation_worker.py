@@ -79,10 +79,21 @@ class OperationRuntime:
 
     def start(self) -> LifecycleOperationRecord:
         stamp = _stamp()
+        worker_pid = os.getpid()
 
         def running(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
+            if record.status == "running":
+                if record.workerPid != worker_pid:
+                    raise RuntimeError(
+                        "lifecycle operation is already owned by another running worker"
+                    )
+                return record
             if record.status != "queued":
                 return record
+            if record.workerPid is not None and record.workerPid != worker_pid:
+                raise RuntimeError(
+                    "queued lifecycle operation is reserved for another worker process"
+                )
             return record.model_copy(
                 update={
                     "status": "running",
@@ -94,7 +105,7 @@ class OperationRuntime:
                     "currentCommand": "recover task state"
                     if record.irreversibleBoundaryEntered
                     else "validate lifecycle operation",
-                    "workerPid": os.getpid(),
+                    "workerPid": worker_pid,
                 }
             )
 
@@ -199,7 +210,9 @@ class OperationRuntime:
                         "workerPid": None,
                     }
                 )
-            needs_recovery = record.irreversibleBoundaryEntered
+            needs_recovery = record.irreversibleBoundaryEntered and not bool(
+                result.get("safeToReplace")
+            )
             needs_input = needs_recovery or bool(result.get("developer_decision_required"))
             return record.model_copy(
                 update={
@@ -273,9 +286,13 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
         payload = integration_completion_payload(config, operation_input, result)
     if result.returncode != 0:
         current = runtime.store.read() or record
-        release_failure = _release_reversible_queue_ownership(current)
+        release_failure = _release_reversible_queue_ownership(
+            current,
+            restored=bool(payload.get("safeToReplace")),
+        )
         if release_failure is not None:
             payload["queueReleaseFailure"] = release_failure
+            payload["safeToReplace"] = False
             payload.setdefault(
                 "reason",
                 "operation failed and its queue ownership could not be released; "
@@ -284,8 +301,12 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
     runtime.finish(payload, ok=result.returncode == 0)
 
 
-def _release_reversible_queue_ownership(record: LifecycleOperationRecord) -> str | None:
-    if record.irreversibleBoundaryEntered:
+def _release_reversible_queue_ownership(
+    record: LifecycleOperationRecord,
+    *,
+    restored: bool = False,
+) -> str | None:
+    if record.irreversibleBoundaryEntered and not restored:
         return None
     try:
         release_queue_candidate_after_reversible_operation(

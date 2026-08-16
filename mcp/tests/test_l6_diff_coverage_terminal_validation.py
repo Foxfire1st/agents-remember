@@ -39,7 +39,12 @@ class TestWorktreePreflight:
         missing = tmp_path / "missing"
         contract = cast(
             WorktreeContract,
-            SimpleNamespace(code_worktree=missing, memory_mode="internal", memory_worktree=None),
+            SimpleNamespace(
+                kind="leaf",
+                code_worktree=missing,
+                memory_mode="internal",
+                memory_worktree=None,
+            ),
         )
         previews, blockers = terminal_validation._worktree_preflight(contract, force=False)
         assert previews["code"]["reason"] == "already-absent"
@@ -49,7 +54,12 @@ class TestWorktreePreflight:
         dirty.mkdir()
         contract = cast(
             WorktreeContract,
-            SimpleNamespace(code_worktree=dirty, memory_mode="internal", memory_worktree=None),
+            SimpleNamespace(
+                kind="leaf",
+                code_worktree=dirty,
+                memory_mode="internal",
+                memory_worktree=None,
+            ),
         )
         with mock.patch.object(
             terminal_validation, "run_git", return_value=_done(0, stdout=" M x\n")

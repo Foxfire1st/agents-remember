@@ -26,12 +26,13 @@ from agents_remember.application.task_execution_topology import (
     require_commanded_masters_completed,
 )
 from agents_remember.controlplane.closeout_queue_store import queue_store_paths
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.snapshots_impl._task_documents import read_task_documents
 from agents_remember.tasks import SprintExecutionGraph, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from pydantic import ValidationError
+from test_worktree_support import git, init_repo
 
 REPOSITORY = "agents-remember"
 SPRINT = TaskDocumentRef(repository=REPOSITORY, path="sprint/task.json")
@@ -40,8 +41,15 @@ MASTER_B = TaskDocumentRef(repository=REPOSITORY, path="master-b/task.json")
 MASTER_C = TaskDocumentRef(repository=REPOSITORY, path="master-c/task.json")
 
 
-def _config(coordination_root: Path) -> McpRuntimeConfig:
-    return cast(McpRuntimeConfig, SimpleNamespace(coordination_root=coordination_root))
+def _config(coordination_root: Path, code_repository: Path) -> McpRuntimeConfig:
+    scope = RepositoryScope(REPOSITORY, code_repository)
+    return cast(
+        McpRuntimeConfig,
+        SimpleNamespace(
+            coordination_root=coordination_root,
+            repositories={REPOSITORY: scope},
+        ),
+    )
 
 
 def _master(
@@ -186,7 +194,10 @@ class ExecutionTopologyTests(unittest.TestCase):
         self.coord = Path(self.temp.name)
         self.tasks = self.coord / "tasks" / REPOSITORY
         self.tasks.mkdir(parents=True)
-        self.cfg = _config(self.coord)
+        self.code = self.coord / "code"
+        init_repo(self.code)
+        git(self.code, "branch", "super", "main")
+        self.cfg = _config(self.coord, self.code)
         self.topology = TaskDocumentTopology(self.coord)
 
     def test_queue_scope_split_has_direct_topology_test_ownership(self) -> None:
@@ -306,7 +317,9 @@ class ExecutionTopologyTests(unittest.TestCase):
     def _write_legacy(self) -> None:
         write_task_doc(
             self.tasks / "sprint",
-            _master(identity="SPRINT", orchestrates=["master-a", "master-b"]),
+            _master(identity="SPRINT", orchestrates=["master-a", "master-b"]).model_copy(
+                update={"integrationBranch": "super"}
+            ),
         )
         write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
         write_task_doc(self.tasks / "master-b", _master(identity="MASTER-B"))
@@ -443,7 +456,7 @@ class ExecutionTopologyTests(unittest.TestCase):
                 identity="SPRINT",
                 orchestrates=["Alias A", "master-b"],
                 execution_graph=_graph(),
-            ),
+            ).model_copy(update={"integrationBranch": "super"}),
         )
         created = self._task_doc(
             "master-a",
@@ -485,7 +498,7 @@ class ExecutionTopologyTests(unittest.TestCase):
                 identity="SPRINT",
                 orchestrates=["Alias A", "master-b"],
                 execution_graph=_graph(),
-            ),
+            ).model_copy(update={"integrationBranch": "super"}),
         )
         with self.assertRaisesRegex(TaskDocError, "membership-invalid"):
             self._task_doc(
@@ -526,6 +539,7 @@ class ExecutionTopologyTests(unittest.TestCase):
                 "kind": "subTask",
                 "slug": "task",
                 "orchestrates": [],
+                "integrationBranch": None,
                 "executionGraph": None,
             }
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -68,10 +69,17 @@ class LifecycleOperationStore:
         if not self.path.exists():
             return None
         try:
-            return LifecycleOperationRecord.model_validate_json(
-                self.path.read_text(encoding="utf-8")
-            )
-        except (OSError, ValidationError) as error:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and payload.get("schemaVersion") == "1.0":
+                raise RuntimeError(
+                    "legacy lifecycle operation schema 1.0 cannot be resumed: exact integration "
+                    "repository/ref authority was not recorded; cancel or archive the old record "
+                    "and start a fresh task operation"
+                )
+            return LifecycleOperationRecord.model_validate(payload)
+        except RuntimeError:
+            raise
+        except (json.JSONDecodeError, OSError, ValidationError) as error:
             raise RuntimeError(
                 f"invalid lifecycle operation record {self.path}: {error}"
             ) from error
@@ -105,14 +113,23 @@ class LifecycleOperationStore:
         *,
         expected_attempt: int,
     ) -> tuple[LifecycleOperationRecord, bool]:
-        """Requeue only a stale nonterminal operation under the same lock and identity."""
+        """Requeue only a stale or exactly restored operation under the same lock and identity."""
         with exclusive_access(self.path, _OWNERSHIP):
             current = self.read()
             if current is not None and current.attempt != expected_attempt:
                 return current, False
             if current is None or current.status == "completed":
                 raise RuntimeError("a completed lifecycle operation cannot recover in place")
-            if current.status in {"failed", "cancelled"} and current.irreversibleBoundaryEntered:
+            restored_failure = (
+                current.status == "failed"
+                and isinstance(current.result, dict)
+                and current.result.get("safeToReplace") is True
+            )
+            if (
+                current.status in {"failed", "cancelled"}
+                and current.irreversibleBoundaryEntered
+                and not restored_failure
+            ):
                 raise RuntimeError("a terminal operation past its boundary cannot restart")
             updated = LifecycleOperationRecord.model_validate(
                 transform(current).model_dump(mode="json")
@@ -159,6 +176,7 @@ class LifecycleOperationStore:
             "candidateState",
             "candidateTree",
             "fingerprint",
+            "integrationAuthority",
         )
         for field in immutable:
             if getattr(current, field) != getattr(updated, field):

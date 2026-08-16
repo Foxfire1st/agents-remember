@@ -276,9 +276,9 @@ class GuidanceWalkTests(unittest.TestCase):
                 summary = cross_the_wire(contract)
                 seen_operations.add(summary.nextOperation)
                 seen_tools.add(summary.nextTool)
-        # The gaps that were measured: the carryover route was writable and unrepresentable.
+        # Carryover now exposes a read-only plan; protected-memory apply is deliberately absent.
         self.assertIn("request_carryover_decision", seen_operations)
-        self.assertIn("memory_carryover_apply", seen_tools)
+        self.assertIn("memory_carryover_plan", seen_tools)
 
     def test_a_done_phase_omits_next_tool_rather_than_inventing_one(self) -> None:
         """`next_guidance` omits `nextTool` when nothing is to be called; so must the wire."""
@@ -695,7 +695,7 @@ class ProducedLiteralTests(unittest.TestCase):
         state machine that fills it."""
         operations, tools = guidance_next_moves()
         self.assertIn("request_carryover_decision", operations)
-        self.assertIn("memory_carryover_apply", tools)
+        self.assertIn("memory_carryover_plan", tools)
         self.assertEqual(operations, set(get_args(NextOperation)))
         self.assertEqual(tools, set(get_args(NextTool)))
         for operation in sorted(operations):

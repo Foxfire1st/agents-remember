@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import tempfile
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -32,6 +33,40 @@ from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.worktrees.worktree_contract import write_contract
 from test_memory_citation_fix import _frozen_no_discovery, document
 from test_memory_tool_enclosure_scope import REPO, _enclosure
+
+
+@contextmanager
+def _frozen_no_source_discovery():
+    """Permit task-authority enumeration while forbidding citation-source discovery."""
+
+    with (
+        mock.patch.object(
+            source_index.os,
+            "walk",
+            side_effect=AssertionError("frozen refusal walked source"),
+        ),
+        mock.patch.object(
+            source_index,
+            "_tree_state",
+            side_effect=AssertionError("frozen refusal inspected source"),
+        ),
+        mock.patch.object(
+            source_index,
+            "_reclaim_legacy_cache_roots",
+            side_effect=AssertionError("frozen refusal reclaimed cache"),
+        ),
+        mock.patch.object(
+            source_index,
+            "_build_and_publish",
+            side_effect=AssertionError("frozen refusal rebuilt/fell back"),
+        ),
+        mock.patch.object(
+            source_index_database.Database,
+            "validate_application_integrity",
+            side_effect=AssertionError("frozen refusal traversed integrity"),
+        ),
+    ):
+        yield
 
 
 class SymbolIndexTests(unittest.TestCase):
@@ -388,11 +423,6 @@ class WriteGuardTests(unittest.TestCase):
             snapshot = cast(dict[str, Any], built["sourceIndex"])["snapshotId"]
             with (
                 mock.patch.object(
-                    Path,
-                    "rglob",
-                    side_effect=AssertionError("frozen document operation scanned memory"),
-                ),
-                mock.patch.object(
                     source_index.os,
                     "walk",
                     side_effect=AssertionError("frozen document operation walked source"),
@@ -501,7 +531,7 @@ class WriteGuardTests(unittest.TestCase):
                 )
             )
             paths.readiness.unlink()
-            with _frozen_no_discovery():
+            with _frozen_no_source_discovery():
                 for tool in tools:
                     invoke(tool, cast(str, first))
 
@@ -514,7 +544,7 @@ class WriteGuardTests(unittest.TestCase):
                 )["sourceIndex"],
             )["snapshotId"]
             wrong = "f" * 64 if rebuilt != "f" * 64 else "e" * 64
-            with _frozen_no_discovery():
+            with _frozen_no_source_discovery():
                 for tool in tools:
                     invoke(tool, wrong)
 
@@ -529,7 +559,7 @@ class WriteGuardTests(unittest.TestCase):
                 )["sourceIndex"],
             )["snapshotId"]
             self.assertNotEqual(rebuilt, replaced)
-            with _frozen_no_discovery():
+            with _frozen_no_source_discovery():
                 for tool in tools:
                     invoke(tool, cast(str, rebuilt))
 

@@ -127,6 +127,8 @@ class TaskDocumentTopology:
             return "sprint"
         if len(parents) == 1:
             return "master"
+        if not parents and resolved.document.executionNature == "atomic":
+            return "master"
         if not parents:
             raise TaskDocumentRefError(
                 "task-document-parent-missing",
@@ -142,7 +144,9 @@ class TaskDocumentTopology:
         if resolved.document.kind != "master":
             return self._leaf_parent(resolved).ref
         parents = self._sprint_parents(resolved)
-        if resolved.document.orchestrates and not parents:
+        if (
+            resolved.document.orchestrates or resolved.document.executionNature == "atomic"
+        ) and not parents:
             return None
         if len(parents) == 1:
             return parents[0].ref
@@ -262,6 +266,26 @@ class TaskDocumentTopology:
             and sprint.document.orchestrates
             and aliases.intersection(sprint.document.orchestrates)
         )
+
+    def repository_masters(self, repository: str) -> tuple[ResolvedTaskDocument, ...]:
+        """Return every canonical master document in one repository task tree.
+
+        Branch authority is repository-global: an ordinary leaf under one sprint must not be
+        able to claim another sprint's super or atomic integration ref. Callers that census
+        those refs therefore need the complete canonical master set, not only the current
+        leaf's ancestry.
+        """
+
+        return self._master_documents(repository)
+
+    def resolve_candidate(
+        self,
+        ref: TaskDocumentRef,
+        overrides: Mapping[TaskDocumentRef, TaskDocument],
+    ) -> ResolvedTaskDocument:
+        """Resolve one published-or-proposed document through the canonical authority."""
+
+        return self._resolve_with_overrides(ref, overrides)
 
     def _repo_root(self, repository: str) -> Path:
         return (self.coordination_root / "tasks" / repository).resolve(strict=False)

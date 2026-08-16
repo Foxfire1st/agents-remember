@@ -22,7 +22,14 @@ from agents_remember.memory_quality.style.citations.source_index_cache import (
 from agents_remember.worktrees.modules import abandon
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    WorktreeContract,
+    default_contract,
+    write_contract,
+)
 
 
 def _done(returncode: int, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -47,6 +54,41 @@ def _contract(**over: object) -> WorktreeContract:
     }
     base.update(over)
     return cast(WorktreeContract, SimpleNamespace(**base))
+
+
+def _abandon_authority(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "terminal-tests@example.invalid"),
+        ("config", "user.name", "Terminal Tests"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "seed.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=repo, check=True, capture_output=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "branch", "b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", head], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+        cwd=repo,
+        check=True,
+    )
+    contract = default_contract(
+        ContractTask("terminal", "repo", tmp_path / "coordination", "light-task", "disabled"),
+        leaf=LeafIdentity("terminal", leaf_id="T"),
+        code=RepoBranchPlan(repo, "main", "b", head),
+    )
+    write_contract(contract.contract_path, contract)
+    return (
+        repo,
+        abandon._terminal_mutation_authority(contract, operation="worktree_abandon"),
+        contract,
+    )
 
 
 class TestAbandonReserved:
@@ -79,7 +121,8 @@ class TestAbandonReserved:
 
 
 class TestAbandonWithGuard:
-    def test_helper_failure(self) -> None:
+    def test_helper_failure(self, tmp_path: Path) -> None:
+        _, _, contract = _abandon_authority(tmp_path)
         guard = cast(TerminalNamespaceGuard, SimpleNamespace(preview=lambda: {"removed": False}))
         with (
             mock.patch.object(
@@ -88,12 +131,16 @@ class TestAbandonWithGuard:
             mock.patch.object(abandon, "status_payload", return_value={}),
         ):
             result = abandon._abandon_with_guard(
-                _args(), _contract(), TerminalPreflight({}, {}, ()), guard
+                _args(contract_path=contract.contract_path),
+                contract,
+                TerminalPreflight({}, {}, ()),
+                guard,
             )
         assert result.returncode == 2
         assert "boom" in str(result.payload["blockers"])
 
-    def test_mutation_blocked(self) -> None:
+    def test_mutation_blocked(self, tmp_path: Path) -> None:
+        _, _, contract = _abandon_authority(tmp_path)
         guard = cast(TerminalNamespaceGuard, SimpleNamespace(preview=lambda: {"removed": False}))
         outputs = ({}, {}, {}, {})
         with (
@@ -104,11 +151,15 @@ class TestAbandonWithGuard:
             mock.patch.object(abandon, "status_payload", return_value={}),
         ):
             result = abandon._abandon_with_guard(
-                _args(), _contract(), TerminalPreflight({}, {}, ()), guard
+                _args(contract_path=contract.contract_path),
+                contract,
+                TerminalPreflight({}, {}, ()),
+                guard,
             )
         assert result.returncode == 2 and result.payload["state"] == "abandon-blocked"
 
-    def test_dry_run(self) -> None:
+    def test_dry_run(self, tmp_path: Path) -> None:
+        _, _, contract = _abandon_authority(tmp_path)
         guard = cast(
             TerminalNamespaceGuard,
             SimpleNamespace(preview=lambda: {"removed": False, "reason": "live"}),
@@ -121,11 +172,15 @@ class TestAbandonWithGuard:
             mock.patch.object(abandon, "_abandon_summary", return_value="summary"),
         ):
             result = abandon._abandon_with_guard(
-                _args(dry_run=True), _contract(), TerminalPreflight({}, {}, ()), guard
+                _args(contract_path=contract.contract_path, dry_run=True),
+                contract,
+                TerminalPreflight({}, {}, ()),
+                guard,
             )
         assert result.returncode == 0 and result.payload["state"] == "would-abandon"
 
-    def test_publish(self) -> None:
+    def test_publish(self, tmp_path: Path) -> None:
+        _, _, contract = _abandon_authority(tmp_path)
         guard = cast(TerminalNamespaceGuard, SimpleNamespace(preview=lambda: {"removed": True}))
         outputs = ({}, {}, {}, {})
         with (
@@ -136,22 +191,27 @@ class TestAbandonWithGuard:
             ) as publish,
         ):
             result = abandon._abandon_with_guard(
-                _args(), _contract(), TerminalPreflight({}, {}, ()), guard
+                _args(contract_path=contract.contract_path),
+                contract,
+                TerminalPreflight({}, {}, ()),
+                guard,
             )
         assert result.returncode == 0 and publish.called
 
 
 class TestAbandonBranch:
-    def test_branch_refusals_and_unmerged(self) -> None:
+    def test_branch_refusals_and_unmerged(self, tmp_path: Path) -> None:
+        repo, authority, _ = _abandon_authority(tmp_path)
+        target = abandon._AbandonBranchTarget(repo, "b", "main")
         with mock.patch.object(
             abandon,
             "local_branch_presence",
             return_value=SimpleNamespace(state="absent", reason=""),
         ):
             result = abandon._abandon_branch(
-                Path("/r"), "ar/leaf", "ar/base", dry_run=False, force=False
+                target, dry_run=False, force=False, authority=authority
             )
-            assert result["reason"] == "base branch is missing: ar/base"
+            assert result["reason"] == "base branch is missing: main"
         with mock.patch.object(
             abandon,
             "local_branch_presence",
@@ -161,7 +221,7 @@ class TestAbandonBranch:
             ],
         ):
             result = abandon._abandon_branch(
-                Path("/r"), "ar/leaf", "ar/base", dry_run=False, force=False
+                target, dry_run=False, force=False, authority=authority
             )
             assert result["reason"] == "already-absent"
         with (
@@ -172,9 +232,7 @@ class TestAbandonBranch:
             ),
             mock.patch.object(abandon, "delete_branch_force", return_value={"deleted": True}),
         ):
-            result = abandon._abandon_branch(
-                Path("/r"), "ar/leaf", "ar/base", dry_run=False, force=True
-            )
+            result = abandon._abandon_branch(target, dry_run=False, force=True, authority=authority)
             assert result["deleted"] is True
         with (
             mock.patch.object(
@@ -185,7 +243,7 @@ class TestAbandonBranch:
             mock.patch.object(abandon, "_unmerged_commits", side_effect=RuntimeError("boom")),
         ):
             result = abandon._abandon_branch(
-                Path("/r"), "ar/leaf", "ar/base", dry_run=False, force=False
+                target, dry_run=False, force=False, authority=authority
             )
             assert result["reason"] == "boom"
         with (
@@ -197,7 +255,7 @@ class TestAbandonBranch:
             mock.patch.object(abandon, "_unmerged_commits", return_value=["abc"]),
         ):
             result = abandon._abandon_branch(
-                Path("/r"), "ar/leaf", "ar/base", dry_run=False, force=False
+                target, dry_run=False, force=False, authority=authority
             )
             assert result["reason"] == "unmerged"
         with (
@@ -210,7 +268,7 @@ class TestAbandonBranch:
             mock.patch.object(abandon, "delete_branch_if_merged", return_value={"deleted": True}),
         ):
             result = abandon._abandon_branch(
-                Path("/r"), "ar/leaf", "ar/base", dry_run=False, force=False
+                target, dry_run=False, force=False, authority=authority
             )
             assert result["deleted"] is True
 
@@ -269,10 +327,10 @@ class TestAbandonBranch:
 
 
 class TestAbandonBranches:
-    def test_external_memory_branches(self) -> None:
-        with (
-            mock.patch.object(abandon, "_abandon_branch", return_value={"deleted": True}),
-            mock.patch.object(abandon, "integration_branch", return_value="ar/integration"),
-        ):
-            result = abandon._abandon_branches(_contract(), dry_run=True, force=False)
-        assert set(result) == {"code", "memory", "memory_integration"}
+    def test_external_memory_branches(self, tmp_path: Path) -> None:
+        _, authority, _ = _abandon_authority(tmp_path)
+        with mock.patch.object(abandon, "_abandon_branch", return_value={"deleted": True}):
+            result = abandon._abandon_branches(
+                _contract(), dry_run=True, force=False, authority=authority
+            )
+        assert set(result) == {"code", "memory"}

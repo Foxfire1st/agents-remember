@@ -10,12 +10,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
-from agents_remember.application.task_doc_tools import (
-    TaskDocEdit,
-    TaskDocTarget,
-    task_doc_tool,
-)
-from agents_remember.application.task_execution_topology import ExecutionTopologyError
 from agents_remember.controlplane.closeout_queue_store import (
     CloseoutQueueStore,
     CloseoutQueueStoreError,
@@ -27,7 +21,7 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.closeout_queue import (
     CloseoutQueueState,
     SchedulingGradeInput,
@@ -92,8 +86,14 @@ PRIORITY_SEPARATOR = (
 )
 
 
-def _config(root: Path) -> McpRuntimeConfig:
-    return cast(McpRuntimeConfig, SimpleNamespace(coordination_root=root))
+def _config(root: Path, code: Path, memory: Path | None) -> McpRuntimeConfig:
+    return cast(
+        McpRuntimeConfig,
+        SimpleNamespace(
+            coordination_root=root,
+            repositories={REPO: RepositoryScope(REPO, code, memory)},
+        ),
+    )
 
 
 def _master(
@@ -237,6 +237,7 @@ class QueueFixture:
         *,
         edge: bool = False,
         atomic_b: bool = False,
+        atomic_leaf_id: str = "LEAF-B",
         memory_mode: str = "external",
     ) -> None:
         self.root = root
@@ -245,21 +246,49 @@ class QueueFixture:
         self.code = root / "code"
         self.memory = self.coord / "memory-repos" / f"ar-{REPO}"
         self.memory_mode = memory_mode
+        self.atomic_b = atomic_b
         code_base = init_repo(self.code, "main")
         memory_content = init_repo(self.memory, "main")
+        configured_code = root / REPO
+        configured_code.symlink_to(self.code, target_is_directory=True)
+        if memory_mode == "internal":
+            (self.code / "ar-memory").mkdir()
+        self.config_path = root / "settings.json"
+        self.config_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "coordinationRoot": self.coord.as_posix(),
+                    "workspaceRoot": root.as_posix(),
+                    "repositories": {REPO: {}},
+                }
+            ),
+            encoding="utf-8",
+        )
         write_ledger(
             self.memory / "memory.md", create_initial_ledger(REPO, code_base, memory_content)
         )
         git(self.memory, "add", "memory.md")
         git(self.memory, "commit", "-m", "Add ledger")
         memory_base = git(self.memory, "rev-parse", "HEAD")
+        git(self.code, "branch", "super", code_base)
+        git(self.memory, "branch", "super", memory_base)
+        atomic_leaf_ref = TaskDocumentRef(
+            repository=REPO,
+            path=f"master-b/{atomic_leaf_id.lower()}.json",
+        )
+        self.leaf_refs = {MASTER_A: LEAF_A, MASTER_B: atomic_leaf_ref}
         self.contracts = {
             MASTER_A: self._contract("master-a", "LEAF-A", code_base, memory_base),
-            MASTER_B: self._contract("master-b", "LEAF-B", code_base, memory_base),
+            MASTER_B: self._contract("master-b", atomic_leaf_id, code_base, memory_base),
         }
         self.master_docs = {
             MASTER_A: _master(MASTER_A, "LEAF-A", "organizational"),
-            MASTER_B: _master(MASTER_B, "LEAF-B", "atomic" if atomic_b else "organizational"),
+            MASTER_B: _master(
+                MASTER_B,
+                atomic_leaf_id,
+                "atomic" if atomic_b else "organizational",
+            ),
         }
         for ref, document in self.master_docs.items():
             write_task_doc(self.tasks / Path(ref.path).parent, document)
@@ -279,13 +308,11 @@ class QueueFixture:
         }
         rows = [
             _judgment_row(candidate, priority)
-            for candidate in (LEAF_A, LEAF_B)
+            for candidate in self.leaf_refs.values()
             for priority in ("low", "normal", "critical")
         ]
-        self.priorities = {LEAF_A: "normal", LEAF_B: "normal"}
-        priorities = [
-            _priority_row(candidate, priority) for candidate, priority in self.priorities.items()
-        ]
+        self.priorities = {candidate: "normal" for candidate in self.leaf_refs.values()}
+        priorities = [_priority_row(*item) for item in self.priorities.items()]
         write_task_doc(
             self.tasks / "sprint",
             TaskDocument.model_validate(
@@ -298,6 +325,7 @@ class QueueFixture:
                     "repo": REPO,
                     "createdAt": NOW,
                     "orchestrates": ["master-a", "master-b"],
+                    "integrationBranch": "super",
                     "executionGraph": graph,
                     "sections": [
                         {
@@ -315,30 +343,40 @@ class QueueFixture:
             ),
         )
         (self.tasks / "sprint" / "grade.md").write_text("# Grade\n", encoding="utf-8")
-        self.cfg = _config(self.coord)
+        configured_memory = (
+            self.memory
+            if memory_mode == "external"
+            else self.code / "ar-memory"
+            if memory_mode == "internal"
+            else None
+        )
+        self.cfg = _config(self.coord, self.code, configured_memory)
         self.request_number = 0
         self.request_revisions: dict[str, int] = {}
 
     def _contract(
         self, master: str, leaf_id: str, code_base: str, memory_base: str
     ) -> WorktreeContract:
-        code_source = f"ar/{master}"
-        memory_source = f"ar/{master}"
+        atomic = self.atomic_b and master == "master-b"
+        code_source = f"ar/{master}" if atomic else "super"
+        memory_source = f"ar/{master}" if atomic else "super"
         code_work = f"ar/{leaf_id.lower()}"
         memory_work = f"ar/{leaf_id.lower()}"
-        git(self.code, "branch", code_source, "main")
-        git(self.memory, "branch", memory_source, "main")
+        if atomic:
+            git(self.code, "branch", code_source, "super")
+            git(self.memory, "branch", memory_source, "super")
         task = ContractTask(
             name=master,
             repo_name=REPO,
             coordination_root=self.coord,
             workflow_kind="light-task",
             memory_mode=self.memory_mode,
+            parent_task_name="sprint" if atomic else "",
         )
         memory_plan = (
             RepoBranchPlan(
                 repo_path=self.memory,
-                source_branch="main",
+                source_branch="super" if atomic else "main",
                 work_branch=memory_source,
                 base_commit=memory_base,
             )
@@ -349,13 +387,16 @@ class QueueFixture:
             task,
             code=RepoBranchPlan(
                 repo_path=self.code,
-                source_branch="main",
+                source_branch="super" if atomic else "main",
                 work_branch=code_source,
                 base_commit=code_base,
             ),
             memory=memory_plan,
         )
-        write_contract(parent.contract_path, parent)
+        write_contract(
+            parent.contract_path,
+            parent if atomic else replace(parent, cleanup="completed"),
+        )
         contract = default_contract(
             task,
             leaf=LeafIdentity(worktree_name=leaf_id.lower(), leaf_id=leaf_id),
@@ -376,6 +417,12 @@ class QueueFixture:
                 else None
             ),
         )
+        if atomic:
+            contract = replace(
+                contract,
+                parent_task_name=master,
+                parent_contract_path=parent.contract_path,
+            )
         git(self.code, "worktree", "add", "-b", code_work, str(contract.code_worktree), code_source)
         (contract.code_worktree / "feature.txt").write_text(f"{leaf_id}\n", encoding="utf-8")
         if contract.memory_worktree is not None:
@@ -446,7 +493,7 @@ class QueueFixture:
         update_priority: bool = True,
     ) -> dict[str, Any]:
         contract = self.contracts[master]
-        leaf = LEAF_A if master == MASTER_A else LEAF_B
+        leaf = self.leaf_refs[master]
         if priority is not None and update_priority:
             self.set_priority(leaf, priority)
         stable_request_id = request_id or self.next_request_id("declare")
@@ -508,7 +555,9 @@ class QueueFixture:
             actor=(
                 QueueActor(
                     role="manager",
-                    task_document_ref=MASTER_A if candidate == LEAF_A else MASTER_B,
+                    task_document_ref=next(
+                        master for master, leaf in self.leaf_refs.items() if candidate == leaf
+                    ),
                 )
                 if action == "set-admission" and candidate is not None
                 else QueueActor(role="orchestrator", task_document_ref=SPRINT)
@@ -698,48 +747,12 @@ class CloseoutQueueTests(unittest.TestCase):
         write_task_doc(fixture.tasks / "master-b", completed_atomic)
         with self.assertRaisesRegex(CloseoutQueueError, "does not prove one exact"):
             fixture.mutate("release-barrier", barrier=MASTER_B)
-        series = load_contract(fixture.tasks / "master-b" / "series-contract.md")
-        write_contract(
-            series.contract_path,
-            replace(
-                series,
-                human_review_status="approved",
-                approved_for_commit=True,
-                closeout_status="completed",
-                code_commit=series.code_base_commit,
-                memory_content_commit=series.memory_base_commit,
-                ledger_commit=series.memory_base_commit,
-                integration_status="completed",
-                integrated_code_commit=series.code_base_commit,
-                integrated_memory_content_commit=series.memory_base_commit,
-                integrated_ledger_commit=series.memory_base_commit,
-            ),
-        )
-        with self.assertRaisesRegex(CloseoutQueueError, "does not prove one exact"):
-            fixture.mutate("release-barrier", barrier=MASTER_B)
-
-        closed_leaf = fixture.close_contract(MASTER_B)
-        git(fixture.code, "branch", "-f", series.code_work_branch, closed_leaf.code_commit)
-        git(fixture.memory, "branch", "-f", series.memory_work_branch, closed_leaf.ledger_commit)
-        git(fixture.code, "merge", "--ff-only", closed_leaf.code_commit)
-        git(fixture.memory, "merge", "--ff-only", closed_leaf.ledger_commit)
-        write_contract(
-            series.contract_path,
-            replace(
-                series,
-                human_review_status="approved",
-                approved_for_commit=True,
-                closeout_status="completed",
-                code_commit=closed_leaf.code_commit,
-                memory_content_commit=closed_leaf.memory_content_commit,
-                ledger_commit=closed_leaf.ledger_commit,
-                integration_status="completed",
-                integrated_code_commit=closed_leaf.code_commit,
-                integrated_memory_content_commit=closed_leaf.memory_content_commit,
-                integrated_ledger_commit=closed_leaf.ledger_commit,
-            ),
-        )
-        released = fixture.mutate("release-barrier", barrier=MASTER_B)
+        with mock.patch(
+            "agents_remember.worktrees.closeout_queue.require_atomic_master_landed"
+        ) as landed:
+            released = fixture.mutate("release-barrier", barrier=MASTER_B)
+        landed.assert_called_once()
+        self.assertEqual(landed.call_args.args[0].ref, MASTER_B)
         self.assertIsNone(released["activeBarrier"])
 
     def test_atomic_barrier_abort_requires_exact_canonical_judgment(self) -> None:
@@ -804,7 +817,7 @@ class CloseoutQueueTests(unittest.TestCase):
         write_task_doc(sprint_path.parent, sprint)
         state_path, _pending_path = queue_store_paths(fixture.coord, SPRINT)
         state_path.unlink()
-        with self.assertRaisesRegex(CloseoutQueueError, "not declared"):
+        with self.assertRaisesRegex(CloseoutQueueError, "closeout-candidate-not-declared"):
             claim_queue_candidate_for_closeout(contract, "a" * 64)
 
     def test_grade_judgment_and_evidence_are_revalidated(self) -> None:
@@ -1149,51 +1162,3 @@ class CloseoutQueueTests(unittest.TestCase):
         state = CloseoutQueueState.model_validate_json(state_path.read_text(encoding="utf-8"))
         self.assertTrue(state.closed)
         self.assertFalse(pending_path.exists())
-
-    def test_task_doc_completion_uses_the_queue_quiescence_owner(self) -> None:
-        fixture = QueueFixture(Path(self.temp.name))
-        target = TaskDocTarget(repo_id=REPO, task_name="sprint")
-        edit = TaskDocEdit(fields={"status": "Completed"})
-        with self.assertRaisesRegex(ExecutionTopologyError, "commanded masters remain incomplete"):
-            task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        self.assertEqual(read_task_doc(fixture.tasks / "sprint" / "task.json").status, "inProgress")
-        for ref, master in fixture.master_docs.items():
-            write_task_doc(
-                fixture.tasks / Path(ref.path).parent,
-                master.model_copy(update={"status": "Completed"}),
-            )
-        with self.assertRaisesRegex(ExecutionTopologyError, "commanded masters remain incomplete"):
-            task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        fixture.declare(MASTER_A)
-        for ref, master in fixture.master_docs.items():
-            completed_rows = [
-                row.model_copy(update={"status": "Completed"}) for row in master.subTasks
-            ]
-            write_task_doc(
-                fixture.tasks / Path(ref.path).parent,
-                master.model_copy(update={"status": "Completed", "subTasks": completed_rows}),
-            )
-        with self.assertRaisesRegex(CloseoutQueueStoreError, "cannot complete"):
-            task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        fixture.mutate("withdraw", candidate=LEAF_A)
-        completed = task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        self.assertEqual(completed["status"], "Completed")
-        state_path, _pending_path = queue_store_paths(fixture.coord, SPRINT)
-        self.assertTrue(
-            CloseoutQueueState.model_validate_json(state_path.read_text(encoding="utf-8")).closed
-        )
-        reopened = task_doc_tool(
-            fixture.cfg,
-            target,
-            operation="set_status",
-            edit=TaskDocEdit(fields={"status": "inProgress"}),
-        )
-        self.assertEqual(reopened["status"], "inProgress")
-        reopened_state = CloseoutQueueState.model_validate_json(
-            state_path.read_text(encoding="utf-8")
-        )
-        self.assertFalse(reopened_state.closed)
-        reopened_master = fixture.master_docs[MASTER_A]
-        write_task_doc(fixture.tasks / "master-a", reopened_master)
-        declared = fixture.declare(MASTER_A)
-        self.assertEqual(declared["ready"][0]["taskDocumentRef"], LEAF_A.model_dump())

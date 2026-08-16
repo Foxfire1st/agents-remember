@@ -53,6 +53,7 @@ from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
 )
+from agents_remember.worktrees.integration_branch_authority import repository_default_branch
 from agents_remember.worktrees.modules.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
@@ -421,18 +422,28 @@ def _manager_series_bootstrap_refusal(
         topology = TaskDocumentTopology(config.coordination_root)
         if topology.altitude(resolved.ref) != "master":
             raise ValueError("manager dispatch requires a canonical master task document")
-        parent_ref = cast(TaskDocumentRef, topology.parent(resolved.ref))
-        parent = topology.resolve(parent_ref)
-        if not parent.document.integrationBranch:
-            raise ValueError(
-                f"commanding sprint {parent.ref.path} does not declare integrationBranch; "
-                "the orchestrator must preview and apply "
-                "task_doc(operation='set_field', "
-                f"repo_id='{parent.ref.repository}', task_name='{parent.path.parent.name}', "
-                "fields={'integrationBranch': '<exact existing super branch>'}) before "
-                "manager dispatch"
-            )
+        if resolved.document.executionNature == "organizational":
+            return None
+        if resolved.document.executionNature != "atomic":
+            raise ValueError("manager dispatch requires executionNature organizational or atomic")
         repo = require_repo(config, resolved.ref.repository)
+        parent_ref = topology.parent(resolved.ref)
+        if parent_ref is None:
+            parent_task_name = ""
+            protected_branch = repository_default_branch(repo.path)
+        else:
+            parent = topology.resolve(parent_ref)
+            if not parent.document.integrationBranch:
+                raise ValueError(
+                    f"commanding sprint {parent.ref.path} does not declare integrationBranch; "
+                    "the orchestrator must preview and apply "
+                    "task_doc(operation='set_field', "
+                    f"repo_id='{parent.ref.repository}', task_name='{parent.path.parent.name}', "
+                    "fields={'integrationBranch': '<exact existing super branch>'}) before "
+                    "manager dispatch"
+                )
+            parent_task_name = parent.path.parent.name
+            protected_branch = parent.document.integrationBranch
         ensure_master_series_contract(
             MasterSeriesContractSpec(
                 coordination_root=config.coordination_root,
@@ -441,8 +452,8 @@ def _manager_series_bootstrap_refusal(
                 memory_root=repo.memory_root,
                 task_root=resolved.path.parent,
                 task_name=resolved.path.parent.name,
-                parent_task_name=parent.path.parent.name,
-                protected_branch=parent.document.integrationBranch,
+                parent_task_name=parent_task_name,
+                protected_branch=protected_branch,
             )
         )
     except (AuthorityError, OSError, RuntimeError, TaskDocumentRefError, ValueError) as exc:

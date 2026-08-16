@@ -72,7 +72,7 @@ class StaleBasePreflightTests(unittest.TestCase):
                 )
             )
 
-    def test_fast_forward_recovers_non_checked_out_branch(self) -> None:
+    def test_fast_forward_choice_refuses_non_checked_out_protected_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_repo, other = make_clone_pair(root)
@@ -80,32 +80,36 @@ class StaleBasePreflightTests(unittest.TestCase):
             git(code_repo, "checkout", "-b", "parked")
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
-            remote_head = git(other, "rev-parse", "HEAD")
+            local_head = git(code_repo, "rev-parse", branch)
             contract = make_contract(root, RepoSide(code_repo), source_branch=branch)
 
             block = _stale_base_preflight(
                 CONTEXT, contract, WorktreeArgs(stale_base_choice="fast-forward")
             )
 
-            self.assertIsNone(block)
-            self.assertEqual(git(code_repo, "rev-parse", branch), remote_head)
+            assert block is not None
+            self.assertEqual(git(code_repo, "rev-parse", branch), local_head)
+            self.assertEqual(
+                block["retiredChoices"],
+                ["fast-forward moves protected sources outside their landing plane"],
+            )
 
-    def test_fast_forward_recovers_checked_out_branch(self) -> None:
+    def test_fast_forward_choice_refuses_checked_out_protected_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_repo, other = make_clone_pair(root)
             branch = git(code_repo, "branch", "--show-current")
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
-            remote_head = git(other, "rev-parse", "HEAD")
+            local_head = git(code_repo, "rev-parse", branch)
             contract = make_contract(root, RepoSide(code_repo), source_branch=branch)
 
             block = _stale_base_preflight(
                 CONTEXT, contract, WorktreeArgs(stale_base_choice="fast-forward")
             )
 
-            self.assertIsNone(block)
-            self.assertEqual(git(code_repo, "rev-parse", branch), remote_head)
+            assert block is not None
+            self.assertEqual(git(code_repo, "rev-parse", branch), local_head)
 
     def test_fast_forward_cannot_recover_diverged_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,7 +128,10 @@ class StaleBasePreflightTests(unittest.TestCase):
             self.assertEqual(block["state"], "blocked")
             stale: list[dict[str, Any]] = block["staleBases"]  # type: ignore[assignment]
             self.assertEqual(stale[0]["state"], "diverged")
-            self.assertIn("fast-forwarded", stale[0]["recovery_error"])
+            self.assertEqual(
+                block["retiredChoices"],
+                ["fast-forward moves protected sources outside their landing plane"],
+            )
 
     def test_offline_fetch_reports_unknown_and_does_not_block(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -153,7 +160,7 @@ class StaleBasePreflightTests(unittest.TestCase):
 
 
 class MemorySourceBranchTemplateTests(unittest.TestCase):
-    def test_missing_memory_source_branch_is_created_from_official_tip(self) -> None:
+    def test_missing_memory_source_branch_refuses_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_repo = make_repo(root / "repo-a")
@@ -175,15 +182,11 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
                 source_branch="fix/new-task",
             )
 
-            result = prepare_memory_for_start(contract, WorktreeArgs(dry_run=False))
+            with self.assertRaisesRegex(RuntimeError, "landing plane"):
+                prepare_memory_for_start(contract, WorktreeArgs(dry_run=False))
+            self.assertEqual(git(memory_repo, "branch", "--list", "fix/new-task"), "")
 
-            self.assertEqual(result["state"], "compatible")
-            created: dict[str, Any] = result["memorySourceBranch"]  # type: ignore[assignment]
-            self.assertEqual(created["state"], "created-from-official-tip")
-            self.assertEqual(created["base"], memory_base)
-            self.assertEqual(git(memory_repo, "rev-parse", "fix/new-task"), memory_base)
-
-    def test_dry_run_reports_would_create_without_mutating(self) -> None:
+    def test_direct_missing_source_refusal_is_identical_for_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = make_repo(root / "mem-repo")
@@ -195,9 +198,8 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
                 source_branch="fix/new-task",
             )
 
-            state = _ensure_memory_source_branch(contract, dry_run=True)
-
-            self.assertEqual(state["state"], "would-create-from-official-tip")
+            with self.assertRaisesRegex(RuntimeError, "landing plane"):
+                _ensure_memory_source_branch(contract)
             branches = git(memory_repo, "branch", "--list", "fix/new-task")
             self.assertEqual(branches, "")
 
@@ -213,7 +215,7 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
                 source_branch=branch,
             )
 
-            state = _ensure_memory_source_branch(contract, dry_run=False)
+            state = _ensure_memory_source_branch(contract)
 
             self.assertEqual(state, {"state": "existing", "branch": branch})
 

@@ -302,6 +302,7 @@ const VOCABULARIES: Record<
   "projection.analytics.engineProcesses[].sourceLineage.edges[].relation": [
     "super-to-master",
     "master-to-leaf",
+    "super-to-leaf",
   ],
   "projection.analytics.engineProcesses[].sourceLineage.recoveries[].tool": ["worktree_sync"],
   "projection.analytics.taskDocuments[].steps[].disposition.kind": ["intentionalSkip"],

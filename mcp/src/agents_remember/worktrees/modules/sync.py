@@ -16,11 +16,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
 
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import fetch_remote, upstream_ref
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, parse_ledger_text
+from agents_remember.worktrees.integration_branch_authority import require_sync_worktree
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
+    branch_commit,
     head_commit,
     is_ancestor,
 )
@@ -35,6 +38,7 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract, write_
 
 def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    require_sync_worktree(contract)
     if not contract.code_worktree.exists():
         return WorktreeCommandResult(
             2,
@@ -44,7 +48,22 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
     fetch = _fetch_source_upstreams(contract)
-    code_tip = head_commit(contract.code_repo_path, contract.code_source_branch)
+    if args.dry_run:
+        return _sync_under_authority(contract, args, fetch)
+    with integration_authority_lock(contract.coordination_root, contract.repo_name):
+        current = load_contract_from_args(args)
+        if current != contract:
+            raise RuntimeError("worktree_sync contract changed before branch mutation")
+        require_sync_worktree(current)
+        return _sync_under_authority(current, args, fetch)
+
+
+def _sync_under_authority(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult:
+    code_tip = branch_commit(contract.code_repo_path, contract.code_source_branch)
     memory_repo = contract.memory_repo_path
     external = (
         contract.memory_mode == "external"
@@ -52,7 +71,7 @@ def sync_result(args: WorktreeArgs) -> WorktreeCommandResult:
         and contract.memory_worktree is not None
     )
     memory_tip = (
-        head_commit(memory_repo, contract.memory_source_branch)
+        branch_commit(memory_repo, contract.memory_source_branch)
         if external and memory_repo is not None
         else ""
     )
@@ -250,7 +269,7 @@ def _sync_code(contract: WorktreeContract, dry_run: bool) -> dict[str, object]:
     half-merged.
     """
     worktree = contract.code_worktree
-    if head_commit(worktree) == head_commit(contract.code_repo_path, contract.code_source_branch):
+    if head_commit(worktree) == branch_commit(contract.code_repo_path, contract.code_source_branch):
         return {"state": "already-current"}
     if dry_run:
         return {"state": "would-merge", "source": contract.code_source_branch}
@@ -284,7 +303,7 @@ def _sync_memory(contract: WorktreeContract, args: WorktreeArgs) -> dict[str, ob
     worktree = contract.memory_worktree
     if args.memory_sync_choice == "skip-memory":
         return {"state": "skipped-by-choice"}
-    tip = head_commit(contract.memory_repo_path, contract.memory_source_branch)
+    tip = branch_commit(contract.memory_repo_path, contract.memory_source_branch)
     worktree_head = head_commit(worktree)
     if worktree_head == tip:
         return {"state": "already-current"}

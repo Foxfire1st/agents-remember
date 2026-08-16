@@ -422,10 +422,12 @@ class SpawnAgentSessionTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        git(self.repo, "switch", "super")
         marker = self.repo / "super-moved.txt"
         marker.write_text("new super\n", encoding="utf-8")
         git(self.repo, "add", marker.name)
         git(self.repo, "commit", "-m", "move super")
+        git(self.repo, "switch", "main")
 
         for role in ("worker", "reviewer", "curator"):
             with self.subTest(role=role):

@@ -32,6 +32,7 @@ class TerminalPreflightFailureTests(unittest.TestCase):
         git(code, "add", "change.txt")
         git(code, "commit", "-m", "unmerged")
         git(memory, "branch", "ar/task")
+        git(memory, "checkout", "ar/task")
         contract = _contract(
             self.tmp,
             task_name=name,

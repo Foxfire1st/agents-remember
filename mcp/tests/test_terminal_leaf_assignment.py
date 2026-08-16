@@ -163,10 +163,12 @@ class TerminalTaskAssignmentTests(unittest.TestCase):
             root = Path(tmp)
             _sprint, _master, leaf = _write_topology(root)
             repo = root / "fixture-repositories" / "repo"
+            git(repo, "switch", "super")
             marker = repo / "super-moved.txt"
             marker.write_text("new super\n", encoding="utf-8")
             git(repo, "add", marker.name)
             git(repo, "commit", "-m", "move super")
+            git(repo, "switch", "main")
             catalog = TerminalCatalog(terminal_catalog_path(root))
             catalog.upsert(_entry("worker", spawn_role="worker"))
 

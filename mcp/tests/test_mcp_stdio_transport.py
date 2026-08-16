@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -21,6 +22,13 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 from test_config import write_json
@@ -66,11 +74,46 @@ def build_carryover_fixture(root: Path) -> dict:
     coordination = root / "ar-coordination"
     official_memory = coordination / "memory-repos" / "ar-repo-a"
     initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
+    git(official_memory, "checkout", "-b", "carryover-recovery")
+    git(code_repo, "checkout", "feat/branch")
+    contract = default_contract(
+        ContractTask(
+            name="carryover-recovery",
+            repo_name="repo-a",
+            coordination_root=coordination,
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(
+            worktree_name="carryover-recovery",
+            leaf_id="CARRYOVER-RECOVERY",
+        ),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="feat/branch",
+            base_commit=source_head,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=official_memory,
+            source_branch="main",
+            work_branch="carryover-recovery",
+            base_commit=git(official_memory, "rev-parse", "HEAD"),
+        ),
+    )
+    contract = replace(
+        contract,
+        code_worktree=code_repo,
+        memory_worktree=official_memory,
+        ledger_path=official_memory / "memory.md",
+    )
+    write_contract(contract.contract_path, contract)
 
     source_memory = coordination / "worktrees" / "repo-a" / "task-ar" / "memory-task"
     write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
 
     return {
+        "contract_path": contract.contract_path.as_posix(),
         "source_memory": source_memory.as_posix(),
         "official_code_ref": "main",
         "source_code_ref": "feat/branch",

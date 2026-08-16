@@ -110,9 +110,8 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         contract_path: str | None = None,
     ) -> dict[str, Any]:
         """Regenerate the overview.index.json route indexes so they match the current onboarding
-        tree. WRITES index files under the memory root it resolves: without `contract_path` that
-        is the official memory repo, so from inside a leaf pass the leaf's enclosure contract
-        path and it writes into that leaf's memory worktree instead. Preview with dry_run=true."""
+        tree. Apply requires a leaf enclosure contract and writes only that leaf's memory
+        worktree. An unscoped call is read-only and therefore requires dry_run=true."""
         return route_index_refresh_payload(
             config, repo_id, dry_run=dry_run, contract_path=contract_path
         )
@@ -164,24 +163,26 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
 
 
 def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """Plan and apply carrying branch onboarding into official memory once code has landed."""
+    """Plan and apply landed onboarding into an ordinary recovery leaf."""
 
     @server.tool()
     def memory_carryover_plan(
         repo_id: str,
+        *,
+        contract_path: str,
         source_memory: str,
         official_code_ref: str,
         source_code_ref: str,
         old_base: str,
-        *,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
-        """Plan (non-mutating) carrying richer onboarding from a source/feature branch into official
-        memory once code has landed. Returns a plan to review; apply with memory_carryover_apply."""
+        """Plan (non-mutating) carrying richer onboarding from a source branch into the exact open
+        external-memory leaf. Review it, then apply before normal leaf closeout/integration."""
         return memory_carryover_plan_payload(
             config,
             CarryoverSelection(
                 repo_id=repo_id,
+                contract_path=contract_path,
                 source_memory=source_memory,
                 official_code_ref=official_code_ref,
                 source_code_ref=source_code_ref,
@@ -193,24 +194,26 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
     @server.tool()
     def memory_carryover_apply(
         repo_id: str,
+        *,
+        contract_path: str,
         source_memory: str,
         official_code_ref: str,
         source_code_ref: str,
         old_base: str,
-        *,
         intent_note: str,
         replace_existing: bool = False,
         include_review_required: list[str] | None = None,
         memory_commit_message: str = "Carry over landed branch memory",
         ledger_commit_message: str = "Record branch memory carryover",
     ) -> dict[str, Any]:
-        """Apply an approved carryover plan: writes onboarding and commits memory + ledger. Mutating
-        and approval-gated — run memory_carryover_plan first and only apply after the code has landed
-        officially. Requires intent_note."""
+        """Apply an approved plan inside the exact ordinary recovery leaf, committing its memory and
+        ledger work branches. Mutating and approval-gated; requires intent_note. Close and integrate
+        the leaf normally afterward."""
         return memory_carryover_apply_payload(
             config,
             CarryoverSelection(
                 repo_id=repo_id,
+                contract_path=contract_path,
                 source_memory=source_memory,
                 official_code_ref=official_code_ref,
                 source_code_ref=source_code_ref,

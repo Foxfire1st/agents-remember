@@ -4,21 +4,87 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout_queue import EvidenceFact, RouteReviewFact
+from agents_remember.models.lifecycles.operation import (
+    IntegrateOperationInput,
+    IntegrationOperationAuthority,
+    LifecycleOperationRecoveryCommits,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
-from agents_remember.worktrees.modules.git import head_commit, is_ancestor, worktree_candidate_tree
+from agents_remember.worktrees.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    is_ancestor,
+    repository_identity,
+    worktree_candidate_tree,
+)
+from agents_remember.worktrees.modules.start_contract import memory_mode_for_repository
+from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
 from agents_remember.worktrees.source_lineage import require_current_source_lineage
+from agents_remember.worktrees.task_resolver import series_contract_path, slugify
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 from .closeout_queue_errors import CloseoutQueueError
+
+
+@dataclass(frozen=True)
+class AtomicMasterLandingAuthority:
+    """Configured task/ref authority required to release one atomic sprint barrier."""
+
+    coordination_root: Path
+    repo_name: str
+    sprint_ref: TaskDocumentRef
+    source_branch: str
+    code_repository: Path
+    memory_mode: str
+    memory_repository: Path | None
+
+
+def atomic_master_landing_authority(
+    config: McpRuntimeConfig, sprint: ResolvedTaskDocument
+) -> AtomicMasterLandingAuthority:
+    """Resolve configured repositories and the canonical sprint-super edge fail closed."""
+
+    configured = config.repositories.get(sprint.ref.repository)
+    source_branch = sprint.document.integrationBranch
+    if configured is None or not source_branch:
+        raise CloseoutQueueError(
+            "atomic-barrier-authority-unavailable",
+            "atomic barrier release requires a configured repository and sprint super",
+        )
+    code_repository = repository_identity(configured.path)
+    memory_mode = memory_mode_for_repository(configured.path, configured.memory_root)
+    memory_repository = (
+        repository_identity(configured.memory_root) if memory_mode == "external" else None
+    )
+    if code_repository is None or (memory_mode == "external" and memory_repository is None):
+        raise CloseoutQueueError(
+            "atomic-barrier-authority-unavailable",
+            "atomic barrier release cannot resolve configured Git repository identity",
+        )
+    return AtomicMasterLandingAuthority(
+        coordination_root=config.coordination_root.resolve(),
+        repo_name=sprint.ref.repository,
+        sprint_ref=sprint.ref,
+        source_branch=source_branch,
+        code_repository=code_repository,
+        memory_mode=memory_mode,
+        memory_repository=memory_repository,
+    )
 
 
 def route_review_fact(contract: WorktreeContract) -> RouteReviewFact:
@@ -71,7 +137,7 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
     except RuntimeError as exc:
         raise CloseoutQueueError("closeout-candidate-source-lineage-stale", str(exc)) from exc
     if (
-        head_commit(contract.code_repo_path, contract.code_source_branch)
+        branch_commit(contract.code_repo_path, contract.code_source_branch)
         != contract.code_base_commit
     ):
         raise CloseoutQueueError(
@@ -83,7 +149,7 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
                 "closeout-candidate-memory-source-missing", "external memory base is incomplete"
             )
         if (
-            head_commit(contract.memory_repo_path, contract.memory_source_branch)
+            branch_commit(contract.memory_repo_path, contract.memory_source_branch)
             != contract.memory_base_commit
         ):
             raise CloseoutQueueError(
@@ -138,13 +204,28 @@ def operation_owner_fingerprint(operation_key: str) -> str:
     return hashlib.sha256(f"closeout-queue-owner:{operation_key}".encode()).hexdigest()
 
 
-def require_atomic_master_landed(master: ResolvedTaskDocument) -> None:
+def require_atomic_master_landed(
+    master: ResolvedTaskDocument,
+    authority: AtomicMasterLandingAuthority,
+) -> None:
     """Prove the completed atomic series contract has landed on both super source refs."""
 
     try:
-        contract = load_contract(master.path.parent / "series-contract.md")
+        contract = load_contract(series_contract_path(master.path.parent))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise CloseoutQueueError(
+            "atomic-barrier-master-landing-unproven",
+            f"atomic master has no valid exact landing contract: {exc}",
+        ) from exc
+    if not _atomic_contract_matches_master(contract, master, authority):
+        raise CloseoutQueueError(
+            "atomic-barrier-master-landing-unproven",
+            "atomic master completion does not prove one exact code-and-memory landing onto super",
+        )
+    try:
         code_landed = _atomic_code_landed(contract)
         memory_landed = _atomic_memory_landed(contract)
+        operation_landed = _atomic_operation_landed(contract, authority)
     except (OSError, RuntimeError, ValueError) as exc:
         raise CloseoutQueueError(
             "atomic-barrier-master-landing-unproven",
@@ -152,11 +233,11 @@ def require_atomic_master_landed(master: ResolvedTaskDocument) -> None:
         ) from exc
     if not all(
         (
-            _atomic_contract_matches_master(contract, master),
             _atomic_finalization_is_exact(contract),
             _atomic_landing_changes_content(contract),
             code_landed,
             memory_landed,
+            operation_landed,
         )
     ):
         raise CloseoutQueueError(
@@ -166,10 +247,9 @@ def require_atomic_master_landed(master: ResolvedTaskDocument) -> None:
 
 
 def _atomic_code_landed(contract: WorktreeContract) -> bool:
-    return bool(contract.integrated_code_commit) and is_ancestor(
-        contract.code_repo_path,
-        contract.integrated_code_commit,
-        head_commit(contract.code_repo_path, contract.code_source_branch),
+    return bool(contract.integrated_code_commit) and (
+        branch_commit(contract.code_repo_path, contract.code_source_branch)
+        == contract.integrated_code_commit
     )
 
 
@@ -179,7 +259,10 @@ def _atomic_memory_landed(contract: WorktreeContract) -> bool:
     if contract.memory_repo_path is None:
         raise ValueError("external atomic series has no memory repository")
     mapping = find_mapping(
-        load_ledger(contract.memory_repo_path / "memory.md"),
+        load_named_ref_ledger(
+            contract.memory_repo_path,
+            contract.memory_source_branch,
+        ),
         contract.integrated_code_commit,
     )
     return (
@@ -189,23 +272,181 @@ def _atomic_memory_landed(contract: WorktreeContract) -> bool:
             contract.integrated_memory_content_commit,
             contract.integrated_ledger_commit,
         )
-        and is_ancestor(
-            contract.memory_repo_path,
-            contract.integrated_ledger_commit,
-            head_commit(contract.memory_repo_path, contract.memory_source_branch),
-        )
+        and branch_commit(contract.memory_repo_path, contract.memory_source_branch)
+        == contract.integrated_ledger_commit
         and mapping is not None
         and mapping.memory_commit == contract.integrated_memory_content_commit
     )
 
 
 def _atomic_contract_matches_master(
-    contract: WorktreeContract, master: ResolvedTaskDocument
+    contract: WorktreeContract,
+    master: ResolvedTaskDocument,
+    authority: AtomicMasterLandingAuthority,
 ) -> bool:
+    expected_root = master.path.parent.resolve()
+    expected_work_branch = f"ar/{slugify(master.path.parent.name)}"
+    expected_sprint_name = Path(authority.sprint_ref.path).parent.name
+    code_identity = repository_identity(contract.code_repo_path)
+    memory_identity = repository_identity(contract.memory_repo_path)
     return (
         contract.kind == "series"
-        and contract.task_root.resolve() == master.path.parent.resolve()
+        and authority.sprint_ref.repository == authority.repo_name
+        and contract.repo_name == authority.repo_name
+        and contract.coordination_root.resolve() == authority.coordination_root
+        and contract.task_root.resolve() == expected_root
+        and contract.contract_path.resolve() == series_contract_path(expected_root).resolve()
+        and contract.worktree_group.resolve() == (expected_root / "enclosures").resolve()
+        and contract.code_source_branch == authority.source_branch
+        and contract.code_work_branch == expected_work_branch
+        and contract.parent_task_name == expected_sprint_name
+        and code_identity == authority.code_repository
+        and contract.memory_mode == authority.memory_mode
+        and _atomic_memory_authority_matches(
+            contract,
+            authority,
+            expected_work_branch=expected_work_branch,
+            memory_identity=memory_identity,
+        )
         and contract.integration_status == "completed"
+    )
+
+
+def _atomic_memory_authority_matches(
+    contract: WorktreeContract,
+    authority: AtomicMasterLandingAuthority,
+    *,
+    expected_work_branch: str,
+    memory_identity: Path | None,
+) -> bool:
+    if authority.memory_mode != "external":
+        return (
+            contract.memory_repo_path is None
+            and not contract.memory_source_branch
+            and not contract.memory_work_branch
+            and authority.memory_repository is None
+        )
+    return (
+        memory_identity is not None
+        and memory_identity == authority.memory_repository
+        and contract.memory_source_branch == authority.source_branch
+        and contract.memory_work_branch == expected_work_branch
+    )
+
+
+def _atomic_operation_landed(
+    contract: WorktreeContract,
+    authority: AtomicMasterLandingAuthority,
+) -> bool:
+    record = LifecycleOperationStore(
+        operation_record_path(contract.worktree_group, "integrate")
+    ).read()
+    if record is None or not isinstance(record.input, IntegrateOperationInput):
+        return False
+    journal = record.integrationAuthority
+    recovery = record.recoveryCommits
+    if journal is None or recovery is None or not isinstance(record.result, dict):
+        return False
+    record_facts = (
+        record.operationKind,
+        record.status,
+        record.phase,
+        record.irreversibleBoundaryEntered,
+        record.contractPath,
+        record.input.contractPath,
+    )
+    expected_record_facts = (
+        "integrate",
+        "completed",
+        "completed",
+        True,
+        contract.contract_path.as_posix(),
+        contract.contract_path.as_posix(),
+    )
+    return (
+        record_facts == expected_record_facts
+        and _atomic_operation_authority_matches(journal, contract, authority)
+        and _atomic_recovery_matches(recovery, contract)
+        and _atomic_result_matches(record.result, contract)
+    )
+
+
+def _atomic_operation_authority_matches(
+    journal: IntegrationOperationAuthority,
+    contract: WorktreeContract,
+    authority: AtomicMasterLandingAuthority,
+) -> bool:
+    external = authority.memory_mode == "external"
+    memory_repository = (
+        authority.memory_repository.as_posix()
+        if external and authority.memory_repository is not None
+        else ""
+    )
+    memory_branch = authority.source_branch if external else ""
+    memory_ref = f"refs/heads/{memory_branch}" if external else ""
+    found = (
+        journal.conflictTransaction,
+        journal.targetKind,
+        journal.codeRepository,
+        journal.codeSourceBranch,
+        journal.codeSourceRef,
+        journal.codeSourceCommit,
+        journal.codeCandidateCommit,
+        journal.memoryRepository,
+        journal.memorySourceBranch,
+        journal.memorySourceRef,
+        journal.memorySourceCommit,
+        journal.memoryContentCommit,
+        journal.ledgerCommit,
+    )
+    expected = (
+        None,
+        "sprint-super",
+        authority.code_repository.as_posix(),
+        authority.source_branch,
+        f"refs/heads/{authority.source_branch}",
+        contract.code_base_commit,
+        contract.integrated_code_commit,
+        memory_repository,
+        memory_branch,
+        memory_ref,
+        contract.memory_base_commit if external else "",
+        contract.integrated_memory_content_commit,
+        contract.integrated_ledger_commit,
+    )
+    return found == expected
+
+
+def _atomic_recovery_matches(
+    recovery: LifecycleOperationRecoveryCommits,
+    contract: WorktreeContract,
+) -> bool:
+    return (
+        recovery.codeCommit,
+        recovery.memoryContentCommit,
+        recovery.ledgerCommit,
+    ) == (
+        contract.integrated_code_commit,
+        contract.integrated_memory_content_commit,
+        contract.integrated_ledger_commit,
+    )
+
+
+def _atomic_result_matches(result: dict[str, object], contract: WorktreeContract) -> bool:
+    if result.get("state") not in {"integrated", "already-integrated"}:
+        return False
+    return (
+        result.get("ok"),
+        result.get("operation"),
+        result.get("integrated_code_commit"),
+        result.get("integrated_memory_content_commit"),
+        result.get("integrated_ledger_commit"),
+    ) == (
+        True,
+        "worktree_integrate",
+        contract.integrated_code_commit,
+        contract.integrated_memory_content_commit,
+        contract.integrated_ledger_commit,
     )
 
 

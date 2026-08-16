@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import AgentsRememberError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
@@ -25,6 +26,9 @@ from agents_remember.tasks import (
     write_task_doc_batch,
 )
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.worktrees.integration_branch_authority import (
+    require_topology_migration_authority,
+)
 
 
 class ExecutionTopologyError(AgentsRememberError):
@@ -58,6 +62,8 @@ class _ExecutionTopologyMigration(BaseModel):
 class ExecutionTopologyMigrationRequest:
     coordination_root: Path
     repo_id: str
+    code_repository: Path
+    memory_repository: Path | None
     task_root: Path
     slug: str | None
     fields: dict[str, Any]
@@ -134,6 +140,8 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
         ],
     }
     if request.dry_run:
+        with integration_authority_lock(request.coordination_root, request.repo_id):
+            _require_migration_publication_authority(request, overrides)
         result["dryRun"] = True
         result["documents"] = [
             _migration_preview(ref, root, document) for ref, root, document in documents
@@ -141,7 +149,9 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
         return result
 
     def publication() -> list[tuple[Path, Path]]:
-        return write_task_doc_batch([(root, document) for _ref, root, document in documents])
+        with integration_authority_lock(request.coordination_root, request.repo_id):
+            _require_migration_publication_authority(request, overrides)
+            return write_task_doc_batch([(root, document) for _ref, root, document in documents])
 
     queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
     written = queue.publish_sprint_update(
@@ -165,6 +175,22 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
         )
     ]
     return result
+
+
+def _require_migration_publication_authority(
+    request: ExecutionTopologyMigrationRequest,
+    overrides: dict[TaskDocumentRef, TaskDocument],
+) -> None:
+    try:
+        require_topology_migration_authority(
+            request.coordination_root,
+            request.repo_id,
+            request.code_repository,
+            request.memory_repository,
+            overrides,
+        )
+    except RuntimeError as exc:
+        raise ExecutionTopologyError(str(exc)) from exc
 
 
 def require_commanded_masters_completed(

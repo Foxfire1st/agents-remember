@@ -48,6 +48,7 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.worktrees.git_worktree_manager import contract_context
+from agents_remember.worktrees.integration_branch_authority import require_ordinary_worktree
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import load_contract
 
@@ -151,6 +152,10 @@ def _leaf_memory_scope(
     """
     path = require_within_coordination(config, contract_path, "contract_path")
     contract = load_contract(path)
+    if contract.kind != "leaf":
+        raise AuthorityError(
+            f"contract_path must name a leaf worktree contract, not {contract.kind!r}"
+        )
     if contract.repo_name != repo.repo_id:
         raise AuthorityError(
             f"contract_path names repo {contract.repo_name!r} but repo_id is {repo.repo_id!r}; "
@@ -310,11 +315,26 @@ def _refuse_official_memory(repo: RepositoryScope, scope: MemoryScope) -> None:
     target = scope.onboarding_root.resolve()
     if official is not None and (official == target or official in target.parents):
         raise AuthorityError(
-            f"citation_fix refuses to write into the OFFICIAL memory repo "
+            f"memory-tree mutation refuses to write into the OFFICIAL memory repo "
             f"({official.as_posix()}); it writes only into a leaf's memory worktree, "
             f"resolved from that leaf's enclosure contract. Start or attach a worktree and "
             f"pass its contract path"
         )
+
+
+def _leaf_memory_writer_scope(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    contract_path: str,
+    operation: str,
+) -> MemoryScope:
+    path = require_within_coordination(config, contract_path, "contract_path")
+    contract = load_contract(path)
+    scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    _refuse_official_memory(require_repo(config, repo_id), scope)
+    require_ordinary_worktree(contract, operation=operation)
+    return scope
 
 
 def citation_check_tool(
@@ -382,13 +402,17 @@ def citation_fix_tool(
 ) -> dict[str, Any]:
     """Regenerate ranges in one leaf, optionally against an explicit frozen generation."""
     operation_scope.validate()
-    scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    scope = _leaf_memory_writer_scope(
+        config,
+        repo_id=repo_id,
+        contract_path=contract_path,
+        operation="citation_fix",
+    )
     trees = Trees(
         code_root=scope.code_root,
         memory_root=scope.onboarding_root.parent,
         cache_authority=scope.cache_authority,
     )
-    _refuse_official_memory(require_repo(config, repo_id), scope)
     return {
         "repoId": scope.repo_id,
         **fixer.fix_onboarding_root(
@@ -416,13 +440,17 @@ def citation_migrate_tool(
     landed in a repository the session does not own.
     """
     operation_scope.validate()
-    scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    scope = _leaf_memory_writer_scope(
+        config,
+        repo_id=repo_id,
+        contract_path=contract_path,
+        operation="citation_migrate",
+    )
     trees = Trees(
         code_root=scope.code_root,
         memory_root=scope.onboarding_root.parent,
         cache_authority=scope.cache_authority,
     )
-    _refuse_official_memory(require_repo(config, repo_id), scope)
     return {
         "repoId": scope.repo_id,
         **migration.migrate_onboarding_root(
@@ -442,7 +470,21 @@ def route_index_refresh_tool(
     dry_run: bool = False,
     contract_path: str | None = None,
 ) -> dict[str, Any]:
-    scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    if not dry_run and contract_path is None:
+        raise AuthorityError(
+            "route_index_refresh apply requires a leaf contract_path; the configured "
+            "official memory checkout is read-only outside a journaled landing"
+        )
+    scope = (
+        _leaf_memory_writer_scope(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            operation="route_index_refresh",
+        )
+        if not dry_run and contract_path is not None
+        else _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    )
     result = build_route_indexes(
         code_root=scope.code_root,
         onboarding_root=scope.onboarding_root,
@@ -493,13 +535,14 @@ class CarryoverSelection:
     """Which branch memory is carried onto which landed code.
 
     ``source_memory`` is the branch's memory repo; the three refs bound the landed
-    range the carryover is allowed to trust -- the official code tip memory already
-    describes, the source branch tip its memory describes, and the base the branch was
-    cut from. ``replace_existing`` decides whether landed entries may overwrite
-    official ones already present.
+    range the carryover is allowed to trust -- the landed code tip, the source branch tip
+    its memory describes, and the base the branch was cut from. ``contract_path`` names the
+    open recovery leaf that owns the target memory worktree. ``replace_existing`` decides
+    whether landed entries may overwrite different recovery-leaf entries.
     """
 
     repo_id: str
+    contract_path: str
     source_memory: str
     official_code_ref: str
     source_code_ref: str
@@ -509,8 +552,7 @@ class CarryoverSelection:
 
 @dataclass(frozen=True)
 class CarryoverCommitMessages:
-    """The two commits an applied carryover writes: one in the official memory repo for the
-    carried onboarding, one in the ledger that records the carryover itself."""
+    """The recovery-leaf onboarding commit and its code-to-memory ledger commit."""
 
     memory: str = "Carry over landed branch memory"
     ledger: str = "Record branch memory carryover"
@@ -553,7 +595,9 @@ def memory_carryover_plan_tool(
     config: McpRuntimeConfig,
     selection: CarryoverSelection,
 ) -> dict[str, Any]:
-    payload = carryover.build_plan_for_request(_carryover_request(config, selection))
+    request = _carryover_request(config, selection)
+    carryover._require_carryover_authority(request, config)
+    payload = carryover.build_plan_for_request(request)
     return {"ok": True, "operation": "memory_carryover_plan", **payload}
 
 
@@ -565,12 +609,15 @@ def memory_carryover_apply_tool(
     include_review_required: list[str] | None = None,
     messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
-    payload = carryover.apply_carryover_for_request(
+    payload = carryover._apply_carryover_for_request(
         _carryover_request(config, selection),
-        intent_note=intent_note,
-        include_review_required=include_review_required,
-        memory_commit_message=messages.memory,
-        ledger_commit_message=messages.ledger,
+        authority=config,
+        options=carryover.CarryoverApplyOptions(
+            intent_note=intent_note,
+            include_review_required=include_review_required,
+            memory_commit_message=messages.memory,
+            ledger_commit_message=messages.ledger,
+        ),
     )
     return {"ok": True, "operation": "memory_carryover_apply", **payload}
 
@@ -595,12 +642,30 @@ def _carryover_request(
     source_memory_path = require_within_coordination(
         config, selection.source_memory, "source_memory"
     )
+    contract_path = require_within_coordination(config, selection.contract_path, "contract_path")
+    contract = load_contract(contract_path)
+    if (
+        contract.kind != "leaf"
+        or contract.repo_name != repo.repo_id
+        or contract.memory_mode != "external"
+        or contract.memory_worktree is None
+    ):
+        raise AuthorityError(
+            "memory carryover requires an external-memory leaf contract owned by repo_id"
+        )
+    if contract.closeout_status != "not-started" or contract.integration_status != "not-started":
+        raise AuthorityError(
+            "memory carryover target leaf must be open before closeout and integration"
+        )
+    require_ordinary_worktree(contract, operation="memory_carryover_apply")
     return carryover.CarryoverRequest(
+        config_path=config.config_path,
+        target_contract_path=contract.contract_path,
         code_repository_root=repo.path,
         official_code_ref=selection.official_code_ref,
         source_code_ref=selection.source_code_ref,
         old_base=selection.old_base,
-        official_memory=repo.memory_root,
+        target_memory=contract.memory_worktree,
         source_memory=source_memory_path,
         code_repository_name=repo.repo_id,
         replace_existing=selection.replace_existing,

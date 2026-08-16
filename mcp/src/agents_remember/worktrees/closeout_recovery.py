@@ -7,12 +7,14 @@ from dataclasses import dataclass, field
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     load_ledger,
+    parse_ledger_text,
     prepend_mapping,
     write_ledger,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
+    branch_commit,
     commit_if_dirty,
     commit_verified_staged,
     head_commit,
@@ -21,6 +23,7 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     worktree_dirty,
 )
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True)
@@ -37,16 +40,11 @@ class MemoryCloseoutOutcome:
 
 
 def prove_closeout_recovery_commits(
-    contract, commits: LifecycleOperationRecoveryCommits
+    contract: WorktreeContract, commits: LifecycleOperationRecoveryCommits
 ) -> MemoryCloseoutOutcome:
     """Prove the exact post-commit state without replaying any closeout mutation."""
-    require_clean(contract.code_worktree, "recovering closeout code worktree")
-    code_head = head_commit(contract.code_worktree)
-    if code_head != commits.codeCommit:
-        raise RuntimeError(
-            "closeout contract-finalization recovery requires manual reconciliation: "
-            f"recorded code commit {commits.codeCommit}, found task HEAD {code_head}"
-        )
+
+    _prove_recovered_code_commit(contract, commits.codeCommit)
     if contract.memory_mode != "external":
         if commits.memoryContentCommit or commits.ledgerCommit:
             raise RuntimeError(
@@ -54,6 +52,63 @@ def prove_closeout_recovery_commits(
                 "for an internal-memory contract"
             )
         return MemoryCloseoutOutcome()
+    if contract.kind == "series":
+        return _prove_recovered_series_memory(contract, commits)
+    return _prove_recovered_leaf_memory(contract, commits)
+
+
+def _prove_recovered_code_commit(contract: WorktreeContract, expected: str) -> None:
+    if contract.kind == "series":
+        code_head = branch_commit(contract.code_repo_path, contract.code_work_branch)
+    else:
+        require_clean(contract.code_worktree, "recovering closeout code worktree")
+        code_head = head_commit(contract.code_worktree)
+    if code_head != expected:
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            f"recorded code commit {expected}, found task HEAD {code_head}"
+        )
+
+
+def _prove_recovered_series_memory(
+    contract: WorktreeContract, commits: LifecycleOperationRecoveryCommits
+) -> MemoryCloseoutOutcome:
+    if contract.memory_repo_path is None:
+        raise RuntimeError("external-memory series recovery requires a memory repository")
+    memory_head = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
+    if memory_head != commits.ledgerCommit:
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            f"recorded ledger commit {commits.ledgerCommit}, found series memory ref "
+            f"{memory_head}"
+        )
+    ledger_blob = require_git(
+        contract.memory_repo_path,
+        ["show", f"{memory_head}:memory.md"],
+    )
+    _require_recovered_mapping(
+        parse_ledger_text(ledger_blob),
+        code_commit=commits.codeCommit,
+        memory_commit=commits.memoryContentCommit,
+    )
+    if not is_ancestor(
+        contract.memory_repo_path,
+        commits.memoryContentCommit,
+        commits.ledgerCommit,
+    ):
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            "recorded series memory content is not reachable from the recorded ledger commit"
+        )
+    return MemoryCloseoutOutcome(
+        memory_commit=commits.memoryContentCommit,
+        ledger_commit=commits.ledgerCommit,
+    )
+
+
+def _prove_recovered_leaf_memory(
+    contract: WorktreeContract, commits: LifecycleOperationRecoveryCommits
+) -> MemoryCloseoutOutcome:
     if contract.memory_worktree is None or contract.ledger_path is None:
         raise RuntimeError("external-memory closeout recovery requires memory worktree and ledger")
     require_clean(contract.memory_worktree, "recovering closeout memory worktree")
@@ -63,14 +118,11 @@ def prove_closeout_recovery_commits(
             "closeout contract-finalization recovery requires manual reconciliation: "
             f"recorded ledger commit {commits.ledgerCommit}, found memory HEAD {memory_head}"
         )
-    mapping = find_mapping(load_ledger(contract.ledger_path), commits.codeCommit)
-    if mapping is None or mapping.memory_commit != commits.memoryContentCommit:
-        found = "missing" if mapping is None else mapping.memory_commit
-        raise RuntimeError(
-            "closeout contract-finalization recovery requires manual reconciliation: "
-            f"ledger mapping for {commits.codeCommit} is {found}, expected "
-            f"{commits.memoryContentCommit}"
-        )
+    _require_recovered_mapping(
+        load_ledger(contract.ledger_path),
+        code_commit=commits.codeCommit,
+        memory_commit=commits.memoryContentCommit,
+    )
     if not is_ancestor(
         contract.memory_worktree,
         commits.memoryContentCommit,
@@ -86,6 +138,16 @@ def prove_closeout_recovery_commits(
     )
 
 
+def _require_recovered_mapping(ledger, *, code_commit: str, memory_commit: str) -> None:
+    mapping = find_mapping(ledger, code_commit)
+    if mapping is None or mapping.memory_commit != memory_commit:
+        found = "missing" if mapping is None else mapping.memory_commit
+        raise RuntimeError(
+            "closeout contract-finalization recovery requires manual reconciliation: "
+            f"ledger mapping for {code_commit} is {found}, expected {memory_commit}"
+        )
+
+
 def accepted_code_commit(
     contract,
     args: WorktreeArgs,
@@ -95,14 +157,15 @@ def accepted_code_commit(
 ) -> str:
     """Commit or prove the accepted code tree, then journal its exact commit."""
     commits = args.recovery_commits
-    if commits is not None:
+    if contract.kind == "series":
+        code_commit = branch_commit(contract.code_repo_path, contract.code_work_branch)
+        if commits is not None and code_commit != commits.codeCommit:
+            raise RuntimeError("closeout recovery code commit does not match exact series ref")
+    elif commits is not None:
         require_clean(contract.code_worktree, "resuming closeout code commit")
         code_commit = head_commit(contract.code_worktree)
         if code_commit != commits.codeCommit:
             raise RuntimeError("closeout recovery code commit does not match task HEAD")
-    elif contract.kind != "leaf":
-        require_clean(contract.code_worktree, "recording series/master closeout code")
-        code_commit = head_commit(contract.code_worktree)
     elif resuming and not worktree_dirty(contract.code_worktree):
         code_commit = head_commit(contract.code_worktree)
     else:
@@ -111,7 +174,8 @@ def accepted_code_commit(
             if strict_code_quality_required
             else commit_if_dirty(contract.code_worktree, args.code_commit_message)
         )
-    committed_tree = require_git(contract.code_worktree, ["rev-parse", f"{code_commit}^{{tree}}"])
+    repository = contract.code_repo_path if contract.kind == "series" else contract.code_worktree
+    committed_tree = require_git(repository, ["rev-parse", f"{code_commit}^{{tree}}"])
     if args.candidate_tree and committed_tree != args.candidate_tree:
         raise RuntimeError("closeout committed tree does not match the accepted candidate tree")
     report_operation_progress(

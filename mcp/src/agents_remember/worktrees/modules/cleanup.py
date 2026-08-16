@@ -6,16 +6,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeAlias
 
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
 from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
+from agents_remember.worktrees.closeout_queue_lifecycle import (
+    AtomicSeriesTerminalPermit,
+    publish_atomic_series_terminal_under_authority,
+    require_atomic_series_terminal_permit,
+    require_atomic_series_terminal_release,
+)
+from agents_remember.worktrees.integration_branch_authority import (
+    memory_repository_default_branch,
+    repository_default_branch,
+    require_terminal_worktree,
+)
+from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import is_ancestor
+from agents_remember.worktrees.modules.git import is_ancestor, repository_identity
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
-from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
+    series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
 )
@@ -37,11 +50,133 @@ CleanupOutputs: TypeAlias = tuple[
     TerminalItems,
     TerminalItems,
 ]
+_TERMINAL_MUTATION_CAPABILITY = object()
+
+
+@dataclass(frozen=True)
+class _TerminalMutationAuthority:
+    """Exact contract-derived terminal targets accepted by the destructive primitives."""
+
+    operation: Literal["worktree_cleanup", "worktree_abandon"]
+    worktrees: frozenset[tuple[Path, Path]]
+    branches: frozenset[tuple[Path, str, str]]
+    remote_branches: frozenset[tuple[Path, str]]
+    _capability: object
+
+
+def _normalized_branch(branch: str) -> str:
+    return branch.strip().removeprefix("refs/heads/")
+
+
+def _terminal_mutation_authority(
+    contract: WorktreeContract,
+    *,
+    operation: Literal["worktree_cleanup", "worktree_abandon"],
+    series_permit: AtomicSeriesTerminalPermit | None = None,
+) -> _TerminalMutationAuthority:
+    if contract.kind == "series":
+        require_atomic_series_terminal_permit(contract, operation, series_permit)
+    require_terminal_worktree(contract, operation=operation)
+    worktrees: set[tuple[Path, Path]] = set()
+    branches: set[tuple[Path, str, str]] = set()
+    remote_branches: set[tuple[Path, str]] = set()
+
+    code_repository = _required_repository_identity(contract.code_repo_path, "code")
+    if contract.kind == "leaf":
+        worktrees.add((code_repository, contract.code_worktree.resolve()))
+    code_branch = _normalized_branch(contract.code_work_branch)
+    branches.add((code_repository, code_branch, _normalized_branch(contract.code_source_branch)))
+    if operation == "worktree_cleanup":
+        remote_branches.add((code_repository, code_branch))
+
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        memory_repository = _required_repository_identity(contract.memory_repo_path, "memory")
+        if contract.kind == "leaf" and contract.memory_worktree is not None:
+            worktrees.add((memory_repository, contract.memory_worktree.resolve()))
+        branches.add(
+            (
+                memory_repository,
+                _normalized_branch(contract.memory_work_branch),
+                _normalized_branch(contract.memory_source_branch),
+            )
+        )
+    return _TerminalMutationAuthority(
+        operation=operation,
+        worktrees=frozenset(worktrees),
+        branches=frozenset(branches),
+        remote_branches=frozenset(remote_branches),
+        _capability=_TERMINAL_MUTATION_CAPABILITY,
+    )
+
+
+def _require_terminal_capability(authority: _TerminalMutationAuthority | None) -> None:
+    if authority is None or authority._capability is not _TERMINAL_MUTATION_CAPABILITY:
+        raise RuntimeError("terminal Git mutation requires contract-derived authority")
+
+
+def _repository_key(repo: Path) -> Path:
+    return _required_repository_identity(repo, "terminal")
+
+
+def _required_repository_identity(repo: Path, side: str) -> Path:
+    identity = repository_identity(repo)
+    if identity is None:
+        raise RuntimeError(f"cannot resolve {side} terminal repository identity: {repo}")
+    return identity
+
+
+def _require_worktree_target(
+    authority: _TerminalMutationAuthority | None, repo: Path, worktree: Path
+) -> None:
+    _require_terminal_capability(authority)
+    assert authority is not None
+    if (_repository_key(repo), worktree.resolve()) not in authority.worktrees:
+        raise RuntimeError("terminal worktree removal target is outside contract authority")
+
+
+def _require_local_branch_target(
+    authority: _TerminalMutationAuthority | None,
+    repo: Path,
+    branch: str,
+    *,
+    source_branch: str | None = None,
+) -> None:
+    _require_terminal_capability(authority)
+    assert authority is not None
+    repository = _repository_key(repo)
+    normalized = _normalized_branch(branch)
+    matches = {
+        item for item in authority.branches if item[0] == repository and item[1] == normalized
+    }
+    if not matches:
+        raise RuntimeError("local branch deletion target is outside contract authority")
+    if source_branch is not None and all(
+        item[2] != _normalized_branch(source_branch) for item in matches
+    ):
+        raise RuntimeError("branch deletion source is outside contract authority")
+
+
+def _require_remote_branch_target(
+    authority: _TerminalMutationAuthority | None,
+    repo: Path,
+    branch: str,
+) -> None:
+    _require_terminal_capability(authority)
+    assert authority is not None
+    target = (_repository_key(repo), _normalized_branch(branch))
+    if target not in authority.remote_branches:
+        raise RuntimeError("remote branch deletion target is outside cleanup authority")
 
 
 def remove_registered_worktree(
-    repo: Path, worktree: Path, dry_run: bool, *, force: bool = False
+    repo: Path,
+    worktree: Path,
+    dry_run: bool,
+    *,
+    force: bool = False,
+    authority: _TerminalMutationAuthority | None = None,
 ) -> dict[str, object]:
+    _require_worktree_target(authority, repo, worktree)
     if not worktree.exists():
         return {"path": worktree.as_posix(), "removed": False, "reason": "already-absent"}
     if dry_run:
@@ -57,7 +192,14 @@ def remove_registered_worktree(
     return {"path": worktree.as_posix(), "removed": True}
 
 
-def delete_branch_if_merged(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
+def delete_branch_if_merged(
+    repo: Path,
+    branch: str,
+    dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority | None = None,
+) -> dict[str, object]:
+    _require_local_branch_target(authority, repo, branch)
     presence = local_branch_presence(repo, branch)
     if presence.state == "error":
         return {"branch": branch, "deleted": False, "reason": presence.reason}
@@ -76,8 +218,14 @@ def delete_branch_if_merged(repo: Path, branch: str, dry_run: bool) -> dict[str,
 
 
 def delete_branch_if_merged_into(
-    repo: Path, branch: str, target_ref: str, dry_run: bool
+    repo: Path,
+    branch: str,
+    target_ref: str,
+    dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority | None = None,
 ) -> dict[str, object]:
+    _require_local_branch_target(authority, repo, branch, source_branch=target_ref)
     presence = local_branch_presence(repo, branch)
     if presence.state == "error":
         return {"branch": branch, "deleted": False, "reason": presence.reason}
@@ -108,8 +256,18 @@ def delete_branch_if_merged_into(
     return {"branch": branch, "deleted": True, "target": target_ref}
 
 
-def delete_branch_force(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
+def delete_branch_force(
+    repo: Path,
+    branch: str,
+    dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority | None = None,
+) -> dict[str, object]:
     """Discard a branch even if unmerged (`git branch -D`). Used by abandon force."""
+    _require_local_branch_target(authority, repo, branch)
+    assert authority is not None
+    if authority.operation != "worktree_abandon":
+        raise RuntimeError("forced branch deletion requires abandon authority")
     presence = local_branch_presence(repo, branch)
     if presence.state == "error":
         return {"branch": branch, "deleted": False, "reason": presence.reason}
@@ -144,15 +302,6 @@ def local_branch_presence(repo: Path, branch: str) -> LocalBranchPresence:
     return LocalBranchPresence("error", result.stderr.strip() or "git ref query failed")
 
 
-def _repo_default_branch(repo: Path) -> str:
-    """The repo's default branch (e.g. ``main``) from the local ``origin/HEAD`` symref; ``"main"`` on
-    failure. Used only to refuse ever deleting the default branch during work-branch cleanup."""
-    res = run_git(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-    if res.returncode == 0 and res.stdout.strip():
-        return res.stdout.strip().split("/", 1)[-1]
-    return "main"
-
-
 def _remote_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str] | None:
     """Run a remote-talking git command under the remote bound; ``None`` when it stalled.
 
@@ -167,8 +316,15 @@ def _remote_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]
         return None
 
 
-def delete_remote_branch_if_present(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
+def delete_remote_branch_if_present(
+    repo: Path,
+    branch: str,
+    dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority | None = None,
+) -> dict[str, object]:
     """Delete ``origin/<branch>`` if it still exists -- a PR branch survives a non-deleting merge (05m)."""
+    _require_remote_branch_target(authority, repo, branch)
     if not branch:
         return {"remote_deleted": False, "reason": "empty"}
     probe = _remote_git(repo, ["ls-remote", "--heads", "origin", branch])
@@ -183,7 +339,7 @@ def delete_remote_branch_if_present(repo: Path, branch: str, dry_run: bool) -> d
         return {"remote_deleted": False, "reason": "already-absent"}
     if dry_run:
         return {"remote_deleted": False, "would_delete": True}
-    return _push_branch_deletion(repo, branch)
+    return _push_branch_deletion(repo, branch, authority=authority)
 
 
 def _origin_refusal(repo: Path) -> dict[str, object] | None:
@@ -198,7 +354,13 @@ def _origin_refusal(repo: Path) -> dict[str, object] | None:
     return None
 
 
-def _push_branch_deletion(repo: Path, branch: str) -> dict[str, object]:
+def _push_branch_deletion(
+    repo: Path,
+    branch: str,
+    *,
+    authority: _TerminalMutationAuthority | None = None,
+) -> dict[str, object]:
+    _require_remote_branch_target(authority, repo, branch)
     res = _remote_git(repo, ["push", "origin", "--delete", branch])
     if res is None:
         return {"remote_deleted": False, "reason": "remote-unreachable"}
@@ -228,6 +390,7 @@ def _retire_work_branch(
     dry_run: bool,
     *,
     remote: bool,
+    authority: _TerminalMutationAuthority,
 ) -> dict[str, object]:
     repo = target.repo
     branch = target.branch
@@ -237,7 +400,15 @@ def _retire_work_branch(
         return out
     if not dry_run and run_git(repo, ["branch", "--show-current"]).stdout.strip() == branch:
         run_git(repo, ["checkout", target.default_branch])
-    out.update(delete_branch_if_merged_into(repo, branch, target.source_branch, dry_run))
+    out.update(
+        delete_branch_if_merged_into(
+            repo,
+            branch,
+            target.source_branch,
+            dry_run,
+            authority=authority,
+        )
+    )
     if remote and (
         out.get("deleted") or out.get("would_delete") or out.get("reason") == "already-absent"
     ):
@@ -245,6 +416,7 @@ def _retire_work_branch(
             repo,
             branch,
             dry_run,
+            authority=authority,
         )
     return out
 
@@ -253,11 +425,13 @@ def _retire_remote_branch(
     repo: Path,
     branch: str,
     dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority,
 ) -> dict[str, object]:
     origin_refusal = _origin_refusal(repo)
     if origin_refusal is not None:
         return origin_refusal
-    return delete_remote_branch_if_present(repo, branch, dry_run)
+    return delete_remote_branch_if_present(repo, branch, dry_run, authority=authority)
 
 
 def remove_empty_dir(
@@ -278,10 +452,20 @@ def remove_empty_dir(
     return {"path": path.as_posix(), "removed": True}
 
 
-def _removed_worktrees(contract, dry_run: bool) -> dict[str, dict[str, object]]:
+def _removed_worktrees(
+    contract: WorktreeContract,
+    dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority,
+) -> dict[str, dict[str, object]]:
+    if contract.kind == "series":
+        return {}
     removed_worktrees = {
         "code": remove_registered_worktree(
-            contract.code_repo_path, contract.code_worktree, dry_run
+            contract.code_repo_path,
+            contract.code_worktree,
+            dry_run,
+            authority=authority,
         ),
     }
     if (
@@ -290,16 +474,24 @@ def _removed_worktrees(contract, dry_run: bool) -> dict[str, dict[str, object]]:
         and contract.memory_worktree is not None
     ):
         removed_worktrees["memory"] = remove_registered_worktree(
-            contract.memory_repo_path, contract.memory_worktree, dry_run
+            contract.memory_repo_path,
+            contract.memory_worktree,
+            dry_run,
+            authority=authority,
         )
     return removed_worktrees
 
 
-def _deleted_branches(contract, dry_run: bool) -> dict[str, dict[str, object]]:
+def _deleted_branches(
+    contract: WorktreeContract,
+    dry_run: bool,
+    *,
+    authority: _TerminalMutationAuthority,
+) -> dict[str, dict[str, object]]:
     # Cleanup operates on the just-finalized child edge only: remove the task work branches
     # after they are proven reachable from their parent/source branches. Parent/source branches
     # are the next node up the task tree and are finalized/cleaned by their own lifecycle edge.
-    code_default = _repo_default_branch(contract.code_repo_path)
+    code_default = repository_default_branch(contract.code_repo_path)
     branches: dict[str, dict[str, object]] = {
         "code": _retire_work_branch(
             RetiringBranch(
@@ -310,10 +502,11 @@ def _deleted_branches(contract, dry_run: bool) -> dict[str, dict[str, object]]:
             ),
             dry_run,
             remote=True,
+            authority=authority,
         )
     }
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
-        mem_default = _repo_default_branch(contract.memory_repo_path)
+        mem_default = memory_repository_default_branch(contract.memory_repo_path)
         branches["memory"] = _retire_work_branch(
             RetiringBranch(
                 repo=contract.memory_repo_path,
@@ -323,17 +516,7 @@ def _deleted_branches(contract, dry_run: bool) -> dict[str, dict[str, object]]:
             ),
             dry_run,
             remote=False,
-        )
-        integration_work_branch = integration_branch(contract)
-        branches["memory_integration"] = _retire_work_branch(
-            RetiringBranch(
-                repo=contract.memory_repo_path,
-                branch=integration_work_branch,
-                source_branch=contract.memory_source_branch,
-                default_branch=mem_default,
-            ),
-            dry_run,
-            remote=False,
+            authority=authority,
         )
     return branches
 
@@ -357,7 +540,18 @@ def _removed_directories(
     contract, dry_run: bool, planned_removed: set[Path] | None = None
 ) -> dict[str, dict[str, object]]:
     reports_path = contract.worktree_group / ENCLOSURE_REPORTS_DIRECTORY
-    reports = worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
+    reports = (
+        {
+            "path": reports_path.as_posix(),
+            "removed": False,
+            "preserved": True,
+            "reason": "child-enclosure",
+        }
+        if contract.kind == "series" and series_reports_is_child_enclosure(contract)
+        else worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
+    )
+    if contract.kind == "series":
+        return {"reports": reports}
     planned = set(planned_removed or ())
     if reports.get("removed") or reports.get("would_remove"):
         planned.add(reports_path.resolve())
@@ -426,6 +620,9 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("cleanup requires --approved after successful integration")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    if contract.kind == "series":
+        require_atomic_series_terminal_release(contract)
+    require_terminal_worktree(contract, operation="worktree_cleanup")
     if contract.integration_status != "completed":
         raise RuntimeError("cleanup requires integration.status completed")
     # 05m: carryover must have run first -- it reads the parked memory branch this step deletes.
@@ -434,8 +631,9 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
     carried, _carried_at = carryover_done(contract)
     if not carried:
         raise RuntimeError(
-            "cleanup requires carryover completed (run memory_carryover_apply first); cleaning up "
-            "now would discard the parked memory branch"
+            "cleanup requires the exact landed memory mapping; create an open carryover "
+            "recovery leaf, close and integrate it, then retry cleanup before discarding the "
+            "parked memory branch"
         )
     if not args.dry_run and worktree_services().provider_lifecycle.setup_running(contract):
         # Teardown must not race the live background setup thread (GitHub #53);
@@ -509,7 +707,30 @@ def _cleanup_with_guard(
 ) -> WorktreeCommandResult:
     # The exact leaf fence remains held through every terminal output and publication.
     try:
-        outputs = _cleanup_terminal_outputs(args, contract, preflight)
+        with contract_lifecycle_lease(contract, operation_kind=None):
+
+            def publish(
+                series_permit: AtomicSeriesTerminalPermit | None = None,
+            ) -> WorktreeCommandResult:
+                current = load_contract(contract.contract_path)
+                if current != contract:
+                    raise RuntimeError("cleanup contract changed before terminal mutation")
+                outputs = _cleanup_terminal_outputs(
+                    args,
+                    current,
+                    preflight,
+                    series_permit=series_permit,
+                )
+                return _cleanup_outputs_result(args, current, preflight, guard, outputs)
+
+            if contract.kind == "series":
+                return publish_atomic_series_terminal_under_authority(
+                    contract,
+                    "worktree_cleanup",
+                    publish,
+                )
+            with integration_authority_lock(contract.coordination_root, contract.repo_name):
+                return publish()
     except Exception as error:
         return WorktreeCommandResult(
             2,
@@ -523,6 +744,15 @@ def _cleanup_with_guard(
                 "blockers": [{"terminal": "helper", "reason": str(error)}],
             },
         )
+
+
+def _cleanup_outputs_result(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    preflight: TerminalPreflight,
+    guard: TerminalGuard,
+    outputs: CleanupOutputs,
+) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, drift_snapshots, directories = outputs
     blockers = terminal_result_blockers(
         providers=providers,
@@ -618,7 +848,14 @@ def _cleanup_terminal_outputs(
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
+    *,
+    series_permit: AtomicSeriesTerminalPermit | None = None,
 ) -> CleanupOutputs:
+    authority = _terminal_mutation_authority(
+        contract,
+        operation="worktree_cleanup",
+        series_permit=series_permit,
+    )
     providers: dict[str, object] = (
         worktree_services().provider_lifecycle.teardown(contract, dry_run=args.dry_run)
         if args.teardown_providers
@@ -632,9 +869,9 @@ def _cleanup_terminal_outputs(
     ):
         return providers, {}, {}, {}, {}
     removed_worktrees = (
-        _removed_worktrees(contract, dry_run=True)
+        _removed_worktrees(contract, dry_run=True, authority=authority)
         if args.dry_run
-        else _removed_worktrees(contract, dry_run=False)
+        else _removed_worktrees(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
         providers=providers,
@@ -643,7 +880,11 @@ def _cleanup_terminal_outputs(
         directories={},
     ):
         return providers, removed_worktrees, {}, {}, {}
-    branches = preflight.branches if args.dry_run else _deleted_branches(contract, dry_run=False)
+    branches = (
+        preflight.branches
+        if args.dry_run
+        else _deleted_branches(contract, dry_run=False, authority=authority)
+    )
     if not args.dry_run and terminal_result_blockers(
         providers=providers,
         worktrees=removed_worktrees,

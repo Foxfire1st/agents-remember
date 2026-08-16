@@ -398,8 +398,9 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                 malformed_path = malformed_root / "malformed.sock"
 
                 async def malformed(
-                    _reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+                    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                 ) -> None:
+                    await reader.readline()
                     writer.write(b"not-json\n")
                     await writer.drain()
                     writer.close()

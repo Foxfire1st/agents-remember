@@ -18,6 +18,7 @@ import agents_remember.providers.provider_setup as provider_setup_api
 from agents_remember.application import provider_runtime as provider_async
 from agents_remember.application.worktree_tools import _settings_owned_by_background
 from agents_remember.providers.setup_progress import read_setup_progress
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.modules import abandon as worktree_abandon
 from agents_remember.worktrees.modules import cleanup as worktree_cleanup
 from agents_remember.worktrees.modules import start as worktree_start
@@ -31,10 +32,72 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )
+from test_worktree_support import git, init_repo
 
 
 def make_contract(root: Path):
     coordination_root = root / "ar-coordination"
+    repo = root / "repo-a"
+    base = init_repo(repo, "main")
+    git(repo, "update-ref", "refs/remotes/origin/main", base)
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(repo, "branch", "super", "main")
+    task_root = coordination_root / "tasks" / "repo-a" / "async-task"
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "ASYNC-MASTER",
+                "slug": "task",
+                "title": "Async master",
+                "kind": "master",
+                "repo": "repo-a",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "executionNature": "organizational",
+                "subTasks": [
+                    {
+                        "number": "ASYNC-LEAF",
+                        "name": "Async leaf",
+                        "file": "async-task.md",
+                        "status": "planning",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root.parent / "sprint",
+        TaskDocument.model_validate(
+            {
+                "id": "ASYNC-SPRINT",
+                "slug": "task",
+                "title": "Async sprint",
+                "kind": "master",
+                "repo": "repo-a",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "orchestrates": ["async-task"],
+                "integrationBranch": "super",
+                "executionGraph": {
+                    "nodes": [{"repository": "repo-a", "path": "async-task/task.json"}],
+                    "edges": [],
+                },
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "ASYNC-LEAF",
+                "slug": "async-task",
+                "title": "Async leaf",
+                "kind": "subTask",
+                "repo": "repo-a",
+                "createdAt": "2026-08-15T00:01:00+00:00",
+                "master": "task.md",
+            }
+        ),
+    )
     contract = default_contract(
         ContractTask(
             name="async-task",
@@ -43,12 +106,12 @@ def make_contract(root: Path):
             workflow_kind="light-task",
             memory_mode="disabled",
         ),
-        leaf=LeafIdentity(worktree_name="async-task"),
+        leaf=LeafIdentity(worktree_name="async-task", leaf_id="ASYNC-LEAF"),
         code=RepoBranchPlan(
-            repo_path=root / "repo-a",
-            source_branch="main",
+            repo_path=repo,
+            source_branch="super",
             work_branch="ar/async-task",
-            base_commit="abc123",
+            base_commit=base,
         ),
         memory=RepoBranchPlan(repo_path=None, source_branch="", work_branch="", base_commit=""),  # type: ignore[arg-type]
     )

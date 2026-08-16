@@ -14,26 +14,41 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.git_command import git_environment
 from agents_remember.kernel.platform_subprocess import (
     native_command,
     native_subprocess_environment,
 )
+from agents_remember.kernel.primitives.runtime_config import RepositoryScope, load_config
 from agents_remember.models.lifecycles.operation import (
+    IntegrateOperationInput,
+    IntegrationConflictTransaction,
+    IntegrationOperationAuthority,
     LifecycleOperationInput,
     LifecycleOperationKind,
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
 from agents_remember.worktrees.closeout_queue_lifecycle import (
+    prepare_queue_candidate_conflict_resolution,
     release_queue_candidate_after_reversible_operation,
 )
+from agents_remember.worktrees.integration_branch_authority import integration_targets
+from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
     operation_report_path,
 )
-from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    is_ancestor,
+    repository_identity,
+)
+from agents_remember.worktrees.modules.start_contract import memory_mode_for_repository
+from agents_remember.worktrees.route_review import code_candidate_tree
+from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 STALE_HEARTBEAT_SECONDS = 30.0
@@ -60,6 +75,8 @@ def operation_state_fingerprint(contract: WorktreeContract) -> str:
     """Hash lifecycle cells that change only when a sequential operation advanced the task."""
     return _fingerprint_payload(
         {
+            "codeBaseCommit": contract.code_base_commit,
+            "memoryBaseCommit": contract.memory_base_commit,
             "closeoutStatus": contract.closeout_status,
             "codeCommit": contract.code_commit,
             "memoryContentCommit": contract.memory_content_commit,
@@ -91,21 +108,47 @@ def start_or_observe_operation(
 ) -> LifecycleOperationProjection:
     contract = load_contract(Path(operation_input.contractPath))
     _validate_input_identity(contract, operation_input)
-    candidate_state = operation_state_fingerprint(contract)
-    candidate_tree = _candidate_tree(contract, operation_input.kind)
-    fingerprint = _fingerprint_payload(
-        {
-            "input": operation_input.model_dump(mode="json"),
-            "candidateState": candidate_state,
-            "candidateTree": candidate_tree,
-        }
-    )
+    require_configured_contract_repositories(contract, operation_input.configPath)
+    with contract_lifecycle_lease(contract, operation_kind=operation_input.kind):
+        return _start_or_observe_operation(contract, operation_input, launcher=launcher, now=now)
+
+
+def _start_or_observe_operation(
+    contract: WorktreeContract,
+    operation_input: LifecycleOperationInput,
+    *,
+    launcher: OperationLauncher | None,
+    now: datetime | None,
+) -> LifecycleOperationProjection:
     store = _store(contract, operation_input.kind)
     timestamp = (now or datetime.now(UTC)).replace(microsecond=0)
+    recovering = _irreversible_recovery_record(store.read(), operation_input)
+    if recovering is None:
+        candidate_state = operation_state_fingerprint(contract)
+        candidate_tree = _candidate_tree(contract, operation_input.kind)
+        integration_authority = _integration_authority(contract, operation_input)
+        fingerprint = _fingerprint_payload(
+            {
+                "input": operation_input.model_dump(mode="json"),
+                "candidateState": candidate_state,
+                "candidateTree": candidate_tree,
+                "integrationAuthority": (
+                    integration_authority.model_dump(mode="json")
+                    if integration_authority is not None
+                    else None
+                ),
+            }
+        )
+    else:
+        candidate_state = recovering.candidateState
+        candidate_tree = recovering.candidateTree
+        integration_authority = recovering.integrationAuthority
+        fingerprint = recovering.fingerprint
     candidate = _queued_record(
         contract,
         operation_input,
         _CandidateIdentity(candidate_state, candidate_tree, fingerprint),
+        integration_authority,
         timestamp,
     )
     current, created = store.create(candidate)
@@ -132,6 +175,23 @@ def start_or_observe_operation(
         _launch_or_fail(contract, current, launcher or launch_detached_worker, store)
         current = store.read() or current
     return operation_projection(current, now=timestamp)
+
+
+def _irreversible_recovery_record(
+    current: LifecycleOperationRecord | None,
+    operation_input: LifecycleOperationInput,
+) -> LifecycleOperationRecord | None:
+    """Keep one accepted identity after its own protected-ref movement changed Git facts."""
+
+    if (
+        current is None
+        or not current.irreversibleBoundaryEntered
+        or current.input != operation_input
+    ):
+        return None
+    if current.status in {"queued", "running", "input-required"}:
+        return current
+    return None
 
 
 def observe_operation(
@@ -162,6 +222,13 @@ def cancel_operation(
     contract_path: Path, kind: LifecycleOperationKind
 ) -> LifecycleOperationProjection:
     contract = load_contract(contract_path)
+    with contract_lifecycle_lease(contract, operation_kind=kind):
+        return _cancel_operation(contract, kind)
+
+
+def _cancel_operation(
+    contract: WorktreeContract, kind: LifecycleOperationKind
+) -> LifecycleOperationProjection:
     store = _store(contract, kind)
     worker_pid: int | None = None
 
@@ -175,13 +242,31 @@ def cancel_operation(
                 "recovery must reconcile or complete the same task-bound operation"
             )
         worker_pid = record.workerPid
+        conflict = (
+            record.integrationAuthority.conflictTransaction
+            if record.integrationAuthority is not None
+            else None
+        )
+        guidance = "The task-bound operation was cancelled before approval claim."
+        result = record.result
+        if conflict is not None:
+            guidance = (
+                "The stale certified candidate was retired and closeout was reset. Absorb "
+                "the recorded source delta in this leaf, then declare and close it again."
+            )
+            result = {
+                "state": "conflict-resolution-prepared",
+                "conflictTransaction": conflict.model_dump(mode="json"),
+                "nextOperation": "resolve_leaf_then_redeclare",
+            }
         return record.model_copy(
             update={
                 "status": "cancelled",
                 "phase": "cancelled",
                 "cancelRequested": True,
                 "finishedAt": now_iso(),
-                "guidance": "The task-bound operation was cancelled before approval claim.",
+                "result": result,
+                "guidance": guidance,
                 "workerPid": None,
             }
         )
@@ -189,11 +274,19 @@ def cancel_operation(
     current = store.update(request)
     try:
         if current.status == "cancelled" and not current.irreversibleBoundaryEntered:
-            release_queue_candidate_after_reversible_operation(
-                contract,
-                operation_key=current.operationKey,
-                operation_kind=kind,
-            )
+            authority = current.integrationAuthority
+            if authority is not None and authority.conflictTransaction is not None:
+                prepare_queue_candidate_conflict_resolution(
+                    contract,
+                    operation_key=current.operationKey,
+                    authority=authority,
+                )
+            else:
+                release_queue_candidate_after_reversible_operation(
+                    contract,
+                    operation_key=current.operationKey,
+                    operation_kind=kind,
+                )
     finally:
         # The store has already cleared workerPid. Always signal the captured
         # process group before surfacing a queue-release failure, or a retry can
@@ -272,6 +365,7 @@ def _queued_record(
     contract: WorktreeContract,
     operation_input: LifecycleOperationInput,
     candidate: _CandidateIdentity,
+    integration_authority: IntegrationOperationAuthority | None,
     timestamp: datetime,
 ) -> LifecycleOperationRecord:
     stamp = timestamp.isoformat()
@@ -286,6 +380,7 @@ def _queued_record(
         operationKey=operation_key(
             contract.contract_path, operation_input.kind, candidate.fingerprint
         ),
+        integrationAuthority=integration_authority,
         input=operation_input,
         status="queued",
         phase="queued",
@@ -304,10 +399,165 @@ def _candidate_tree(contract: WorktreeContract, kind: LifecycleOperationKind) ->
     """
     if kind != "closeout":
         return None
-    return worktree_candidate_tree(
-        contract.code_worktree,
-        contract.worktree_group / "reports" / ".closeout-candidate.index",
+    return code_candidate_tree(contract)
+
+
+def _integration_authority(
+    contract: WorktreeContract, operation_input: LifecycleOperationInput
+) -> IntegrationOperationAuthority | None:
+    if operation_input.kind != "integrate":
+        return None
+    if not isinstance(operation_input, IntegrateOperationInput):
+        raise RuntimeError("integrate operation authority requires integrate input")
+    if contract.closeout_status != "completed" or not contract.code_commit:
+        raise RuntimeError("integration authority requires a completed closeout code commit")
+    targets = {target.side: target for target in integration_targets(contract)}
+    code_target = targets["code"]
+    code_source_commit = branch_commit(contract.code_repo_path, code_target.branch)
+    code_replay_required = not is_ancestor(
+        contract.code_repo_path, code_source_commit, contract.code_commit
     )
+    memory_source_commit = ""
+    memory_replay_required = False
+    if contract.memory_mode == "external":
+        if (
+            contract.memory_repo_path is None
+            or not contract.memory_content_commit
+            or not contract.ledger_commit
+        ):
+            raise RuntimeError(
+                "external-memory integration authority requires repo and closeout commits"
+            )
+        memory_target = targets["memory"]
+        memory_source_commit = branch_commit(contract.memory_repo_path, memory_target.branch)
+        memory_replay_required = not is_ancestor(
+            contract.memory_repo_path, memory_source_commit, contract.ledger_commit
+        )
+    else:
+        memory_target = None
+    conflict = None
+    if operation_input.strategy == "replay" and (code_replay_required or memory_replay_required):
+        if contract.kind == "series":
+            raise RuntimeError(
+                "atomic series integration cannot open a leaf conflict worktree; source drift "
+                "requires orchestrator-owned block recovery or graph reshape"
+            )
+        conflict = IntegrationConflictTransaction(
+            codeReplayRequired=code_replay_required,
+            memoryReplayRequired=memory_replay_required,
+            codeSourceRef=f"refs/heads/{code_target.branch}",
+            codeSourceCommit=code_source_commit,
+            codeCandidateCommit=contract.code_commit,
+            memorySourceRef=(
+                f"refs/heads/{memory_target.branch}" if memory_target is not None else ""
+            ),
+            memorySourceCommit=memory_source_commit,
+            memoryContentCommit=contract.memory_content_commit,
+            ledgerCommit=contract.ledger_commit,
+            codeWorktree=contract.code_worktree.resolve().as_posix(),
+            memoryWorktree=(
+                contract.memory_worktree.resolve().as_posix()
+                if contract.memory_worktree is not None
+                else ""
+            ),
+        )
+    return IntegrationOperationAuthority(
+        targetKind=code_target.kind,
+        codeRepository=code_target.repository.as_posix(),
+        codeSourceBranch=code_target.branch,
+        codeSourceRef=f"refs/heads/{code_target.branch}",
+        codeSourceCommit=code_source_commit,
+        codeCandidateCommit=contract.code_commit,
+        memoryRepository=(memory_target.repository.as_posix() if memory_target is not None else ""),
+        memorySourceBranch=(memory_target.branch if memory_target is not None else ""),
+        memorySourceRef=(f"refs/heads/{memory_target.branch}" if memory_target is not None else ""),
+        memorySourceCommit=memory_source_commit,
+        memoryContentCommit=contract.memory_content_commit,
+        ledgerCommit=contract.ledger_commit,
+        conflictTransaction=conflict,
+    )
+
+
+def require_configured_contract_repositories(
+    contract: WorktreeContract,
+    config_path: str,
+) -> None:
+    """Bind a task contract to the repository identities selected by MCP authority."""
+
+    config = load_config(config_path)
+    configured = require_repo(config, contract.repo_name)
+    _require_configured_task_identity(contract, config.coordination_root)
+    code_identity = repository_identity(configured.path)
+    contract_code_identity = repository_identity(contract.code_repo_path)
+    if code_identity is None or contract_code_identity != code_identity:
+        raise RuntimeError("task contract code repository does not match configured authority")
+    candidate_code_identity = repository_identity(contract.code_worktree)
+    if candidate_code_identity != code_identity:
+        raise RuntimeError("task contract code candidate belongs to another repository")
+    expected_memory_mode = memory_mode_for_repository(configured.path, configured.memory_root)
+    if contract.memory_mode != expected_memory_mode:
+        raise RuntimeError(
+            "task contract memory mode does not match configured repository authority"
+        )
+    if contract.memory_mode != "external":
+        return
+    _require_external_memory_authority(contract, configured, code_identity)
+
+
+def _require_external_memory_authority(
+    contract: WorktreeContract,
+    configured: RepositoryScope,
+    code_identity: Path,
+) -> None:
+    if configured.memory_root is None or contract.memory_repo_path is None:
+        raise RuntimeError("external-memory task contract does not match configured authority")
+    memory_identity = repository_identity(configured.memory_root)
+    contract_memory_identity = repository_identity(contract.memory_repo_path)
+    if memory_identity is None or contract_memory_identity != memory_identity:
+        raise RuntimeError("task contract memory repository does not match configured authority")
+    if memory_identity == code_identity:
+        raise RuntimeError("external memory must not share the code repository Git common-dir")
+    if contract.kind == "leaf":
+        if contract.memory_worktree is None:
+            raise RuntimeError("external-memory leaf contract is missing its candidate worktree")
+        if repository_identity(contract.memory_worktree) != memory_identity:
+            raise RuntimeError("task contract memory candidate belongs to another repository")
+
+
+def _require_configured_task_identity(
+    contract: WorktreeContract,
+    configured_coordination_root: Path,
+) -> None:
+    coordination_root = configured_coordination_root.resolve()
+    if contract.coordination_root.resolve() != coordination_root:
+        raise RuntimeError("task contract coordination root does not match configured authority")
+    repository_task_root = (coordination_root / "tasks" / contract.repo_name).resolve()
+    task_root = contract.task_root.resolve()
+    if not task_root.is_relative_to(repository_task_root):
+        raise RuntimeError("task contract task root is outside the configured repository task tree")
+    if contract.task_artifact.resolve() != (task_root / "task.md").resolve():
+        raise RuntimeError("task contract task artifact is not canonical for its task root")
+    expected_contract = (
+        leaf_enclosure_path(task_root, contract.leaf_id)
+        if contract.kind == "leaf"
+        else series_contract_path(task_root)
+    )
+    if contract.contract_path.resolve() != expected_contract.resolve():
+        raise RuntimeError("task contract path is not canonical for its task identity")
+    if contract.kind == "series":
+        if contract.worktree_group.resolve() != (task_root / "enclosures").resolve():
+            raise RuntimeError("series contract worktree group is not its task enclosure root")
+        return
+    worktree_root = (coordination_root / "worktrees" / contract.repo_name).resolve()
+    group = contract.worktree_group.resolve()
+    if not group.is_relative_to(worktree_root):
+        raise RuntimeError("leaf contract worktree group is outside configured authority")
+    if contract.code_worktree.resolve().parent != group:
+        raise RuntimeError("leaf contract code worktree is not owned by its worktree group")
+    if contract.memory_mode == "external" and (
+        contract.memory_worktree is None or contract.memory_worktree.resolve().parent != group
+    ):
+        raise RuntimeError("leaf contract memory worktree is not owned by its worktree group")
 
 
 def _requeued(record: LifecycleOperationRecord, timestamp: datetime) -> LifecycleOperationRecord:
@@ -332,14 +582,36 @@ def _recoverable_stale(record: LifecycleOperationRecord, now: datetime) -> bool:
     if record.status not in {"queued", "running"}:
         return False
     stamp = _parse_stamp(record.heartbeatAt or record.queuedAt)
-    return (now - stamp).total_seconds() > STALE_HEARTBEAT_SECONDS
+    stale = (now - stamp).total_seconds() > STALE_HEARTBEAT_SECONDS
+    if not stale or record.workerPid is None:
+        return stale
+    return not _worker_process_group_alive(record.workerPid)
+
+
+def _worker_process_group_alive(pid: int) -> bool:
+    """Treat a reused/live process group as owned until a human resolves the stale record."""
+
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _should_recover(record: LifecycleOperationRecord, now: datetime) -> bool:
+    restored_ref_failure = (
+        record.status == "failed"
+        and record.irreversibleBoundaryEntered
+        and isinstance(record.result, dict)
+        and record.result.get("safeToReplace") is True
+    )
     return (
         _recoverable_stale(record, now)
         or (record.status == "input-required" and record.irreversibleBoundaryEntered)
         or (record.status in {"failed", "cancelled"} and not record.irreversibleBoundaryEntered)
+        or restored_ref_failure
     )
 
 

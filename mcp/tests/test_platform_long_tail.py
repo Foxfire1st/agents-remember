@@ -114,6 +114,7 @@ class CarryoverRequestTests(unittest.TestCase):
         config = cast(Any, SimpleNamespace(coordination_root=Path("/tmp/coord")))
         selection = CarryoverSelection(
             repo_id="repo-a",
+            contract_path="/tmp/coord/tasks/repo-a/carryover/series-contract.md",
             source_memory="/tmp/coord/source",
             official_code_ref="main",
             source_code_ref="task",

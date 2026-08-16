@@ -26,9 +26,17 @@ from agents_remember.worktrees.modules.abandon import (
     _abandon_blockers,
     _abandon_branch,
     _abandon_directories,
+    _AbandonBranchTarget,
 )
+from agents_remember.worktrees.modules.cleanup import _terminal_mutation_authority
 from agents_remember.worktrees.modules.guidance import lifecycle_guidance
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    WorktreeContract,
+    default_contract,
+)
 from test_worktree_support import git, init_repo
 
 
@@ -171,12 +179,32 @@ class AbandonBranchSafetyTests(unittest.TestCase):
         git(self.repo, "add", "x.txt")
         git(self.repo, "commit", "-m", "unmerged work")
         git(self.repo, "checkout", "main")
+        head = git(self.repo, "rev-parse", "main")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", head)
+        git(self.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        contract = default_contract(
+            ContractTask(
+                "abandon-safety",
+                "repo",
+                Path(self._tmp.name) / "coordination",
+                "light-task",
+                "disabled",
+            ),
+            leaf=LeafIdentity("abandon-safety", leaf_id="ABANDON"),
+            code=RepoBranchPlan(self.repo, "main", "ar/work", head),
+        )
+        self.authority = _terminal_mutation_authority(contract, operation="worktree_abandon")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
     def test_no_force_refuses_unmerged_and_reports_commits(self) -> None:
-        result = _abandon_branch(self.repo, "ar/work", "main", dry_run=False, force=False)
+        result = _abandon_branch(
+            _AbandonBranchTarget(self.repo, "ar/work", "main"),
+            dry_run=False,
+            force=False,
+            authority=self.authority,
+        )
         self.assertFalse(result["deleted"])
         self.assertEqual(result["reason"], "unmerged")
         self.assertTrue(result["unmergedCommits"])
@@ -184,7 +212,12 @@ class AbandonBranchSafetyTests(unittest.TestCase):
         self.assertIn("ar/work", git(self.repo, "branch", "--list", "ar/work"))
 
     def test_force_discards_unmerged_branch(self) -> None:
-        result = _abandon_branch(self.repo, "ar/work", "main", dry_run=False, force=True)
+        result = _abandon_branch(
+            _AbandonBranchTarget(self.repo, "ar/work", "main"),
+            dry_run=False,
+            force=True,
+            authority=self.authority,
+        )
         self.assertTrue(result["deleted"])
         self.assertEqual(git(self.repo, "branch", "--list", "ar/work").strip(), "")
 
@@ -215,7 +248,10 @@ class AbandonReportCleanupTests(unittest.TestCase):
             report = group / "reports" / "curator-memory-quality.md"
             report.parent.mkdir(parents=True)
             report.write_text("temporary\n", encoding="utf-8")
-            contract = cast(WorktreeContract, SimpleNamespace(worktree_group=group))
+            contract = cast(
+                WorktreeContract,
+                SimpleNamespace(kind="leaf", worktree_group=group),
+            )
 
             result = _abandon_directories(contract, dry_run=False, force=False)
 

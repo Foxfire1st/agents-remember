@@ -298,10 +298,14 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 (series.code_worktree / "changed-during-quality.py").write_text(
                     "VALUE = 2\n", encoding="utf-8"
                 )
+                git(series.code_worktree, "add", "-A")
+                git(series.code_worktree, "commit", "-m", "move exact atomic candidate")
                 return {"required": True, "passed": True}, {}, False
 
             with (
                 mock.patch.object(closeout_module, "load_contract", return_value=series),
+                mock.patch.object(closeout_module, "require_series_contract_authority"),
+                mock.patch.object(closeout_module, "refuse_series_workbench_commit"),
                 mock.patch.object(closeout_module, "_validate_closeout_source_state"),
                 mock.patch.object(closeout_module, "_refuse_unsatisfied_closeout_gate"),
                 mock.patch.object(
@@ -317,6 +321,40 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             claim.assert_not_called()
             commit.assert_not_called()
+
+    def test_series_workbench_is_rechecked_after_quality_before_approval_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = dirty_open_external_contract_fixture(Path(tmp))
+            git(contract.code_worktree, "add", "-A")
+            git(contract.code_worktree, "commit", "-m", "land leaf before master closeout")
+            series = replace(contract, kind="series", leaf_id="")
+            args = replace(
+                WorktreeArgs.from_namespace(closeout_args(series)),
+                candidate_tree=closeout_module.code_candidate_tree(series),
+            )
+
+            def dirty_during_quality(*_args, **_kwargs):
+                (series.code_worktree / "dirty-during-quality.py").write_text(
+                    "VALUE = 2\n", encoding="utf-8"
+                )
+                return {"required": True, "passed": True}, {}, False
+
+            with (
+                mock.patch.object(closeout_module, "load_contract", return_value=series),
+                mock.patch.object(closeout_module, "require_series_contract_authority"),
+                mock.patch.object(closeout_module, "_validate_closeout_source_state"),
+                mock.patch.object(closeout_module, "_refuse_unsatisfied_closeout_gate"),
+                mock.patch.object(
+                    closeout_module,
+                    "_closeout_quality_preflight",
+                    side_effect=dirty_during_quality,
+                ),
+                mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
+                self.assertRaisesRegex(RuntimeError, "cannot create code, memory, or ledger"),
+            ):
+                closeout_module.closeout_result(args)
+
+            claim.assert_not_called()
 
     def test_series_closeout_does_not_rerun_acceptance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -355,10 +393,11 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             with (
                 mock.patch.object(closeout_module, "load_contract", return_value=contract),
+                mock.patch.object(closeout_module, "require_series_contract_authority"),
                 mock.patch.object(closeout_module, "_validate_closeout_source_state"),
                 mock.patch.object(closeout_module, "_closeout_quality_preflight") as quality,
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
-                self.assertRaisesRegex(RuntimeError, "cannot create a code commit"),
+                self.assertRaisesRegex(RuntimeError, "cannot create code, memory, or ledger"),
             ):
                 closeout_module.closeout_result(args)
 

@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--source-branch")
     start.add_argument("--work-branch")
     start.add_argument("--memory-mode", choices=("internal", "external", "disabled"))
-    start.add_argument("--memory-choice", choices=("reconciliation", "disabled-memory", "custom"))
+    start.add_argument("--memory-choice", choices=("disabled-memory",))
     start.add_argument("--custom-instruction")
     start.add_argument("--skip-provider-setup", action="store_true")
     start.add_argument("--provider-timeout", type=int, default=1800)

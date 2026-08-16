@@ -26,7 +26,13 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
@@ -86,7 +92,10 @@ def init_repo(repo: Path, branch: str = "main") -> str:  # pragma: no cover
     (repo / "README.md").write_text("# Test Repo\n", encoding="utf-8")
     git(repo, "add", "README.md")
     git(repo, "commit", "-m", "Initial commit")
-    return git(repo, "rev-parse", "HEAD")
+    commit = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", f"refs/remotes/origin/{branch}", commit)
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}")
+    return commit
 
 
 def write_current_task_lineage(
@@ -96,13 +105,46 @@ def write_current_task_lineage(
     master_name: str,
     leaf_id: str,
 ) -> Path:
-    """Create a current super -> master -> leaf contract chain for structural tests."""
+    """Create a current organizational sprint-super -> leaf lineage."""
     repo = coordination_root / "fixture-repositories" / repo_name
     base = init_repo(repo, "main")
-    master_branch = f"ar/{master_name}"
+    super_branch = "super"
     leaf_branch = f"ar/{leaf_id}"
-    git(repo, "branch", master_branch, "main")
-    git(repo, "branch", leaf_branch, master_branch)
+    git(repo, "branch", super_branch, "main")
+    git(repo, "branch", leaf_branch, super_branch)
+    task_root = coordination_root / "tasks" / repo_name
+    master_path = task_root / master_name / "task.json"
+    master = read_task_doc(master_path)
+    write_task_doc(
+        master_path.parent,
+        master.model_copy(update={"executionNature": "organizational"}),
+    )
+    master_ref = TaskDocumentRef(repository=repo_name, path=f"{master_name}/task.json")
+    sprint_path = task_root / "sprint" / "task.json"
+    if sprint_path.exists():
+        sprint = read_task_doc(sprint_path)
+        sprint = sprint.model_copy(
+            update={
+                "orchestrates": [master_name],
+                "integrationBranch": super_branch,
+                "executionGraph": SprintExecutionGraph(nodes=[master_ref], edges=[]),
+            }
+        )
+    else:
+        sprint = TaskDocument.model_validate(
+            {
+                "id": "SPRINT",
+                "slug": "sprint",
+                "title": "Sprint",
+                "kind": "master",
+                "repo": repo_name,
+                "createdAt": "2026-07-07T10:00",
+                "orchestrates": [master_name],
+                "integrationBranch": super_branch,
+                "executionGraph": {"nodes": [master_ref.model_dump()], "edges": []},
+            }
+        )
+    write_task_doc(sprint_path.parent, sprint)
     task = ContractTask(
         name=master_name,
         repo_name=repo_name,
@@ -110,22 +152,12 @@ def write_current_task_lineage(
         workflow_kind="light-task",
         memory_mode="disabled",
     )
-    master = default_series_contract(
-        task,
-        code=RepoBranchPlan(
-            repo_path=repo,
-            source_branch="main",
-            work_branch=master_branch,
-            base_commit=base,
-        ),
-    )
-    write_contract(master.contract_path, master)
     leaf = default_contract(
         task,
         leaf=LeafIdentity(worktree_name=leaf_id, leaf_id=leaf_id),
         code=RepoBranchPlan(
             repo_path=repo,
-            source_branch=master_branch,
+            source_branch=super_branch,
             work_branch=leaf_branch,
             base_commit=base,
         ),
@@ -707,9 +739,29 @@ def integrated_external_contract_fixture(root: Path):
     with redirect_stdout(io.StringIO()):
         assert worktree_manager.command_closeout(closeout_args(contract)) == 0
     closed = load_contract(contract.contract_path)
-    with redirect_stdout(io.StringIO()):
-        assert worktree_manager.command_integrate(integrate_args(closed)) == 0
-    return load_contract(contract.contract_path)
+    assert closed.memory_repo_path is not None
+    git(
+        closed.code_repo_path,
+        "update-ref",
+        f"refs/heads/{closed.code_source_branch}",
+        closed.code_commit,
+    )
+    git(
+        closed.memory_repo_path,
+        "update-ref",
+        f"refs/heads/{closed.memory_source_branch}",
+        closed.ledger_commit,
+    )
+    integrated = replace(
+        closed,
+        integration_status="completed",
+        integration_strategy="ff-only",
+        integrated_code_commit=closed.code_commit,
+        integrated_memory_content_commit=closed.memory_content_commit,
+        integrated_ledger_commit=closed.ledger_commit,
+    )
+    write_contract(integrated.contract_path, integrated)
+    return integrated
 
 
 class WorktreeSupportTests(unittest.TestCase):

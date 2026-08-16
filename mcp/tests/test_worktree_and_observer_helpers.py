@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
@@ -32,7 +33,10 @@ from agents_remember.serving.projections.snapshots import (
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.cleanup import delete_branch_if_merged
+from agents_remember.worktrees.modules.cleanup import (
+    _terminal_mutation_authority,
+    delete_branch_if_merged,
+)
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
     classify_route_overview_updates,
@@ -360,12 +364,33 @@ class DeleteBranchIfMergedTests(unittest.TestCase):
         listed = git(repo, "branch", "--format=%(refname:short)")
         return [line.strip() for line in listed.splitlines() if line.strip()]
 
+    @staticmethod
+    def _authority(root: Path, repo: Path, branch: str):
+        contract = default_contract(
+            ContractTask(
+                "terminal-helper",
+                "repo-a",
+                root / "coordination",
+                "light-task",
+                "disabled",
+            ),
+            leaf=LeafIdentity("terminal-helper", leaf_id="TERMINAL"),
+            code=RepoBranchPlan(
+                repo,
+                "main",
+                branch,
+                git(repo, "rev-parse", "main"),
+            ),
+        )
+        return _terminal_mutation_authority(contract, operation="worktree_cleanup")
+
     def test_absent_branch_is_reported_as_already_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             init_repo(repo)
+            authority = self._authority(Path(tmp), repo, "ar/never-existed")
 
-            result = delete_branch_if_merged(repo, "ar/never-existed", False)
+            result = delete_branch_if_merged(repo, "ar/never-existed", False, authority=authority)
 
             self.assertEqual(
                 result, {"branch": "ar/never-existed", "deleted": False, "reason": "already-absent"}
@@ -376,8 +401,9 @@ class DeleteBranchIfMergedTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             init_repo(repo)
             git(repo, "branch", "ar/merged")
+            authority = self._authority(Path(tmp), repo, "ar/merged")
 
-            result = delete_branch_if_merged(repo, "ar/merged", True)
+            result = delete_branch_if_merged(repo, "ar/merged", True, authority=authority)
 
             self.assertEqual(
                 result, {"branch": "ar/merged", "deleted": False, "would_delete": True}
@@ -389,8 +415,9 @@ class DeleteBranchIfMergedTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             init_repo(repo)
             git(repo, "branch", "ar/merged")
+            authority = self._authority(Path(tmp), repo, "ar/merged")
 
-            result = delete_branch_if_merged(repo, "ar/merged", False)
+            result = delete_branch_if_merged(repo, "ar/merged", False, authority=authority)
 
             self.assertEqual(result, {"branch": "ar/merged", "deleted": True})
             self.assertNotIn("ar/merged", self._branches(repo))
@@ -404,8 +431,9 @@ class DeleteBranchIfMergedTests(unittest.TestCase):
             git(repo, "add", "work.txt")
             git(repo, "commit", "-m", "Unmerged work")
             git(repo, "checkout", "-q", "main")
+            authority = self._authority(Path(tmp), repo, "ar/unmerged")
 
-            result = delete_branch_if_merged(repo, "ar/unmerged", False)
+            result = delete_branch_if_merged(repo, "ar/unmerged", False, authority=authority)
 
             self.assertEqual(result["branch"], "ar/unmerged")
             self.assertIs(result["deleted"], False)
@@ -829,6 +857,12 @@ class ParentSeriesContractTests(unittest.TestCase):
         return root / "tasks" / self.REPO / self.TASK
 
     def _write_sprint_topology(self, root: Path) -> None:
+        code_repo = root / "repo"
+        if code_repo.is_dir():
+            git(code_repo, "branch", "super", "main")
+        memory_repo = root / "memory-repos" / f"ar-{self.REPO}"
+        if memory_repo.is_dir():
+            git(memory_repo, "branch", "super", "main")
         write_task_doc(
             root / "tasks" / self.REPO / "demo-sprint",
             TaskDocument.model_validate(
@@ -841,7 +875,16 @@ class ParentSeriesContractTests(unittest.TestCase):
                     "repo": self.REPO,
                     "createdAt": "2026-08-01T09:00",
                     "orchestrates": [self.TASK],
-                    "integrationBranch": "main",
+                    "integrationBranch": "super",
+                    "executionGraph": {
+                        "nodes": [
+                            {
+                                "repository": self.REPO,
+                                "path": f"{self.TASK}/task.json",
+                            }
+                        ],
+                        "edges": [],
+                    },
                 }
             ),
         )
@@ -861,6 +904,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                         "status": "inProgress",
                         "repo": self.REPO,
                         "createdAt": "2026-08-01T10:00",
+                        "executionNature": "atomic",
                     }
                 ),
             )
@@ -911,7 +955,7 @@ class ParentSeriesContractTests(unittest.TestCase):
             assert contract is not None
             self.assertEqual(contract.kind, "series")
             self.assertEqual(contract.task_name, self.TASK)
-            self.assertEqual(contract.code_source_branch, "main")
+            self.assertEqual(contract.code_source_branch, "super")
             self.assertEqual(contract.code_work_branch, f"ar/{self.TASK}")
             self.assertEqual(contract.code_base_commit, head)
             self.assertEqual(contract.memory_mode, "internal")
@@ -971,7 +1015,7 @@ class ParentSeriesContractTests(unittest.TestCase):
 
             assert contract is not None
             self.assertEqual(contract.memory_repo_path, memory_repo)
-            self.assertEqual(contract.memory_source_branch, "main")
+            self.assertEqual(contract.memory_source_branch, "super")
             self.assertEqual(contract.memory_work_branch, f"ar/{self.TASK}")
             self.assertEqual(contract.memory_base_commit, memory_head)
             self.assertIn(f"ar/{self.TASK}", self._branches(memory_repo))
@@ -992,7 +1036,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                 ),
                 code=RepoBranchPlan(
                     repo_path=code_repo,
-                    source_branch="main",
+                    source_branch="super",
                     work_branch=f"ar/{self.TASK}",
                     base_commit=head,
                 ),
@@ -1008,6 +1052,38 @@ class ParentSeriesContractTests(unittest.TestCase):
             self.assertEqual(contract.kind, "series")
             self.assertEqual(contract.code_work_branch, f"ar/{self.TASK}")
             # Adoption must not touch the repo: the recorded branch is not invented.
+            self.assertNotIn(f"ar/{self.TASK}", self._branches(code_repo))
+
+    def test_a_sealed_existing_series_refuses_a_new_leaf_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code_repo = root / "repo"
+            head = init_repo(code_repo)
+            task_root = self._write_task_artifact(root, "# Demo\n\n**Type:** Master\n")
+            existing = default_series_contract(
+                ContractTask(
+                    name=self.TASK,
+                    repo_name=self.REPO,
+                    coordination_root=root,
+                    workflow_kind="light-task",
+                    memory_mode="internal",
+                ),
+                code=RepoBranchPlan(
+                    repo_path=code_repo,
+                    source_branch="super",
+                    work_branch=f"ar/{self.TASK}",
+                    base_commit=head,
+                ),
+                task_root=task_root,
+            )
+            write_contract(
+                series_contract_path(task_root),
+                replace(existing, closeout_status="completed"),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "sealed against new or reopened leaves"):
+                _parent_series_contract(self._context(root, code_repo), self._args(), "internal")
+
             self.assertNotIn(f"ar/{self.TASK}", self._branches(code_repo))
 
     def test_an_unreadable_parent_contract_is_reported_as_such(self) -> None:

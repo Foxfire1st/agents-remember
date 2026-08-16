@@ -10,10 +10,7 @@ from agents_remember.worktrees.modules.abandon import abandon_result
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     cleanup_result,
-    delete_branch_force,
-    delete_branch_if_merged,
     remove_empty_dir,
-    remove_registered_worktree,
 )
 from agents_remember.worktrees.modules.cli import (
     add_common,
@@ -39,19 +36,15 @@ from agents_remember.worktrees.modules.git import (
     branch_exists,
     changed_worktree_paths,
     commit_date,
-    commit_if_dirty,
     commit_text_or_none,
     committed_changed_paths,
     contract_has_worktree_changes,
     current_branch,
     ensure_git_identity,
-    ensure_worktree,
     has_changes,
     head_commit,
     is_ancestor,
     require_clean,
-    require_git,
-    run_git,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -64,9 +57,6 @@ from agents_remember.worktrees.modules.guidance import (
 from agents_remember.worktrees.modules.integrate import (
     blocked_integration_payload,
     integrate_result,
-    integration_branch,
-    replay_code_if_needed,
-    replay_memory_content,
     validate_integrate_contract,
 )
 from agents_remember.worktrees.modules.models import (
@@ -128,7 +118,6 @@ __all__ = [
     "command_start",
     "command_status",
     "commit_date",
-    "commit_if_dirty",
     "commit_text_or_none",
     "committed_changed_paths",
     "compute_git_blob_set_fingerprint",
@@ -138,10 +127,7 @@ __all__ = [
     "contract_next_args",
     "contract_payload",
     "current_branch",
-    "delete_branch_force",
-    "delete_branch_if_merged",
     "ensure_git_identity",
-    "ensure_worktree",
     "entity_fingerprint_refresh_plan",
     "entity_fingerprint_refresh_plan_for_context",
     "finalize_result",
@@ -149,7 +135,6 @@ __all__ = [
     "head_commit",
     "heal_contract_leaf_ids",
     "integrate_result",
-    "integration_branch",
     "is_ancestor",
     "lifecycle_guidance",
     "load_contract_from_args",
@@ -168,13 +153,8 @@ __all__ = [
     "refresh_onboarding_metadata",
     "refresh_onboarding_metadata_for_context",
     "remove_empty_dir",
-    "remove_registered_worktree",
-    "replay_code_if_needed",
-    "replay_memory_content",
     "require_clean",
-    "require_git",
     "resolve_context",
-    "run_git",
     "sidecar_onboarding_path",
     "start_result",
     "status_payload",

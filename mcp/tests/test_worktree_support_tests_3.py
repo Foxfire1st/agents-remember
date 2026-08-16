@@ -6,11 +6,19 @@ import tempfile
 from argparse import Namespace
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
+from agents_remember.application.memory_tools import (
+    CarryoverCommitMessages,
+    CarryoverSelection,
+    memory_carryover_apply_tool,
+)
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
+from agents_remember.kernel.memory_init import initialize_memory
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     find_mapping,
@@ -18,15 +26,22 @@ from agents_remember.kernel.memory_ledger import (
     parse_ledger_text,
     write_ledger,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
+from agents_remember.worktrees.integration_ref_transaction import (
+    IntegratedCommits,
+    prepare_integration_ref_move,
+)
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.modules.integrate import IntegratedCommits, _merge_integrated_commits
+from agents_remember.worktrees.modules.integrate import IntegrationSources
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
     default_contract,
+    write_contract,
 )
 from test_worktree_support import (
     WorktreeSupportTests,
@@ -40,6 +55,97 @@ from test_worktree_support import (
     write_file_onboarding,
     write_route_overview,
 )
+
+
+def _carryover_config(workspace: Path) -> McpRuntimeConfig:
+    config_path = workspace / "settings.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "coordinationRoot": (workspace / "ar-coordination").as_posix(),
+                "workspaceRoot": workspace.as_posix(),
+                "repositories": {"repo-a": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return load_config(config_path)
+
+
+def _apply_memory_carryover(
+    config: McpRuntimeConfig,
+    args: Namespace,
+) -> dict[str, Any]:
+    return memory_carryover_apply_tool(
+        config,
+        CarryoverSelection(
+            repo_id=args.code_repository_name,
+            contract_path=args.contract_path.as_posix(),
+            source_memory=args.source_memory.as_posix(),
+            official_code_ref=args.official_code_ref,
+            source_code_ref=args.source_code_ref,
+            old_base=args.old_base,
+            replace_existing=args.replace_existing,
+        ),
+        intent_note=args.approval_note,
+        include_review_required=args.include_review_required,
+        messages=CarryoverCommitMessages(
+            memory=args.memory_commit_message,
+            ledger=args.ledger_commit_message,
+        ),
+    )
+
+
+def _carryover_target(
+    workspace: Path,
+    code_repo: Path,
+    memory_repo: Path,
+    code_tip: str,
+):
+    contract = default_contract(
+        ContractTask(
+            name="carryover-recovery",
+            repo_name="repo-a",
+            coordination_root=workspace / "ar-coordination",
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="carryover-recovery", leaf_id="CARRYOVER-RECOVERY"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="carryover-recovery",
+            base_commit=code_tip,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="carryover-recovery",
+            base_commit=git(memory_repo, "rev-parse", "main"),
+        ),
+    )
+    git(
+        code_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.code_work_branch,
+        str(contract.code_worktree),
+        "main",
+    )
+    assert contract.memory_worktree is not None
+    git(
+        memory_repo,
+        "worktree",
+        "add",
+        "-b",
+        contract.memory_work_branch,
+        str(contract.memory_worktree),
+        "main",
+    )
+    write_contract(contract.contract_path, contract)
+    return contract
 
 
 class WorktreeSupport3(WorktreeSupportTests):
@@ -493,6 +599,105 @@ class WorktreeSupport3(WorktreeSupportTests):
             self.assertNotIn("memoryBranch", ledger_text)
             self.assertTrue((memory_root / "docs" / ".gitkeep").exists())
 
+    def test_memory_init_unborn_default_adopts_the_first_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_head = init_repo(workspace / "repo-a", "main")
+            config = _carryover_config(workspace)
+            initialized = initialize_memory(config, repo_id="repo-a")
+            self.assertTrue(initialized["ok"])
+            memory_root = config.repositories["repo-a"].memory_root
+            assert memory_root is not None
+            write_file_onboarding(
+                memory_root / "onboarding",
+                "repo-a",
+                "README.md",
+                code_head,
+            )
+            context = adopt_baseline.resolve_request_context(
+                adopt_baseline.BaselineRequest(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    coordination_root=config.coordination_root,
+                )
+            )
+
+            result = adopt_baseline.adopt_initial_baseline(context, "main", "main")
+
+            self.assertEqual(result["state"], "adopted-baseline")
+            ledger = parse_ledger_text((memory_root / "memory.md").read_text(encoding="utf-8"))
+            self.assertEqual(ledger.last_verified_code_commit, code_head)
+            self.assertEqual(git(memory_root, "branch", "--show-current"), "main")
+
+    def test_unborn_baseline_refuses_missing_or_mismatched_init_authority(self) -> None:
+        for mode in ("missing", "mismatched"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                workspace = Path(tmp)
+                code_head = init_repo(workspace / "repo-a", "main")
+                config = _carryover_config(workspace)
+                initialized = initialize_memory(config, repo_id="repo-a")
+                self.assertTrue(initialized["ok"])
+                memory_root = config.repositories["repo-a"].memory_root
+                assert memory_root is not None
+                write_file_onboarding(
+                    memory_root / "onboarding",
+                    "repo-a",
+                    "README.md",
+                    code_head,
+                )
+                if mode == "missing":
+                    git(memory_root, "config", "--unset", "agents-remember.defaultBranch")
+                else:
+                    git(memory_root, "config", "agents-remember.defaultBranch", "trunk")
+                before = {
+                    path.relative_to(memory_root).as_posix(): path.read_bytes()
+                    for path in sorted(memory_root.rglob("*"))
+                    if path.is_file() and ".git" not in path.parts
+                }
+                context = adopt_baseline.resolve_request_context(
+                    adopt_baseline.BaselineRequest(
+                        code_repository_name="repo-a",
+                        workspace_root=workspace,
+                        coordination_root=config.coordination_root,
+                    )
+                )
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "explicit default-branch authority|exact unborn default branch",
+                ):
+                    adopt_baseline.adopt_initial_baseline(context, "main", "main")
+
+                after = {
+                    path.relative_to(memory_root).as_posix(): path.read_bytes()
+                    for path in sorted(memory_root.rglob("*"))
+                    if path.is_file() and ".git" not in path.parts
+                }
+                self.assertEqual(after, before)
+                self.assertFalse((memory_root / "memory.md").exists())
+
+    def test_adopt_memory_baseline_cannot_commit_an_integration_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            init_repo(workspace / "repo-a", "main")
+            memory_root = workspace / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            init_repo(memory_root, "main")
+            (memory_root / "docs").mkdir()
+            (memory_root / "docs" / ".gitkeep").write_text("", encoding="utf-8")
+            git(memory_root, "checkout", "-b", "super")
+            request = adopt_baseline.BaselineRequest(
+                code_repository_name="repo-a",
+                workspace_root=workspace,
+                coordination_root=workspace / "ar-coordination",
+            )
+            context = adopt_baseline.resolve_request_context(request)
+
+            with self.assertRaisesRegex(RuntimeError, "bootstrap-only exception"):
+                adopt_baseline.adopt_initial_baseline(context, "main", "super")
+
+            self.assertFalse((memory_root / "memory.md").exists())
+            self.assertEqual(git(memory_root, "branch", "--show-current"), "super")
+
     def test_memory_carryover_applies_landed_branch_onboarding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -516,15 +721,21 @@ class WorktreeSupport3(WorktreeSupportTests):
                 onboarding_file.read_text(encoding="utf-8") + "Branch-learned behavior.\n",
                 encoding="utf-8",
             )
+            config = _carryover_config(workspace)
+            target = _carryover_target(workspace, code_repo, official_memory, official_head)
+            assert target.memory_worktree is not None
+            official_memory = target.memory_worktree
 
             args = Namespace(
+                config_path=config.config_path,
                 code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
-                official_memory=official_memory,
+                target_memory=official_memory,
                 source_memory=source_memory,
                 code_repository_name="repo-a",
+                contract_path=target.contract_path,
                 replace_existing=False,
                 approved=True,
                 approval_note="developer approved c-11-memory-carryover-from-branch carryover",
@@ -535,7 +746,7 @@ class WorktreeSupport3(WorktreeSupportTests):
             plan: dict[str, Any] = memory_carryover.build_plan(args)
             self.assertEqual(plan["counts"], {"auto-carry": 1})
 
-            payload: dict[str, Any] = memory_carryover.apply_carryover(args)
+            payload = _apply_memory_carryover(config, args)
             official_onboarding = official_memory / "onboarding" / "feature.py.md"
             ledger = parse_ledger_text((official_memory / "memory.md").read_text(encoding="utf-8"))
             self.assertEqual(payload["state"], "carried-over")
@@ -571,15 +782,26 @@ class WorktreeSupport3(WorktreeSupportTests):
             initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
             source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
+            config = _carryover_config(workspace)
+            target = _carryover_target(
+                workspace,
+                code_repo,
+                official_memory,
+                git(code_repo, "rev-parse", "main"),
+            )
+            assert target.memory_worktree is not None
+            official_memory = target.memory_worktree
 
             args = Namespace(
+                config_path=config.config_path,
                 code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
-                official_memory=official_memory,
+                target_memory=official_memory,
                 source_memory=source_memory,
                 code_repository_name="repo-a",
+                contract_path=target.contract_path,
                 replace_existing=False,
                 approved=True,
                 approval_note="developer approved c-11-memory-carryover-from-branch carryover",
@@ -590,7 +812,7 @@ class WorktreeSupport3(WorktreeSupportTests):
             plan: dict[str, Any] = memory_carryover.build_plan(args)
             self.assertEqual(plan["candidates"][0]["decision"], "review-required")
             self.assertEqual(plan["candidates"][0]["evidence"], "same-path-changed")
-            payload: dict[str, Any] = memory_carryover.apply_carryover(args)
+            payload = _apply_memory_carryover(config, args)
             self.assertEqual(payload["state"], "nothing-to-carryover")
             self.assertFalse((official_memory / "onboarding" / "feature.py.md").exists())
 
@@ -617,18 +839,24 @@ class WorktreeSupport3(WorktreeSupportTests):
             initialized_memory_repo(official_memory, "repo-a", "main", "main", old_base)
             source_memory = workspace / "ar-coordination" / "memory-source-branch" / "ar-repo-a"
             (source_memory / "onboarding").mkdir(parents=True, exist_ok=True)
+            config = _carryover_config(workspace)
+            target = _carryover_target(workspace, code_repo, official_memory, official_head)
+            assert target.memory_worktree is not None
+            official_memory = target.memory_worktree
 
             ledger_before = load_ledger(official_memory / "memory.md")
             self.assertIsNone(find_mapping(ledger_before, official_head))
 
             args = Namespace(
+                config_path=config.config_path,
                 code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1",
                 old_base=old_base,
-                official_memory=official_memory,
+                target_memory=official_memory,
                 source_memory=source_memory,
                 code_repository_name="repo-a",
+                contract_path=target.contract_path,
                 replace_existing=False,
                 approved=True,
                 approval_note="developer approved c-11-memory-carryover-from-branch carryover",
@@ -636,7 +864,7 @@ class WorktreeSupport3(WorktreeSupportTests):
                 memory_commit_message="Carry over landed memory",
                 ledger_commit_message="Record carryover ledger",
             )
-            payload: dict[str, Any] = memory_carryover.apply_carryover(args)
+            payload = _apply_memory_carryover(config, args)
             self.assertEqual(payload["state"], "ledger-mapped-head")
 
             ledger_after = load_ledger(official_memory / "memory.md")
@@ -671,11 +899,13 @@ class WorktreeSupport3(WorktreeSupportTests):
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
 
             args = Namespace(
+                config_path=workspace / "settings.json",
+                contract_path=workspace / "series-contract.md",
                 code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
-                official_memory=official_memory,
+                target_memory=official_memory,
                 source_memory=source_memory,
                 code_repository_name="repo-a",
                 replace_existing=False,
@@ -707,11 +937,13 @@ class WorktreeSupport3(WorktreeSupportTests):
             write_file_onboarding(source_memory / "onboarding", "repo-a", "feature.py", source_head)
 
             args = Namespace(
+                config_path=workspace / "settings.json",
+                contract_path=workspace / "series-contract.md",
                 code_repository_root=code_repo,
                 official_code_ref="main",
                 source_code_ref="workbench/reado/v1.2",
                 old_base=old_base,
-                official_memory=official_memory,
+                target_memory=official_memory,
                 source_memory=source_memory,
                 code_repository_name="repo-a",
                 replace_existing=False,
@@ -750,9 +982,26 @@ class WorktreeSupport3(WorktreeSupportTests):
                     base_commit=base,
                 ),
             )
-            with self.assertRaisesRegex(RuntimeError, "not a fast-forward"):
-                _merge_integrated_commits(
+            with (
+                mock.patch(
+                    "agents_remember.worktrees.integration_ref_transaction."
+                    "require_authorized_integration_commits"
+                ),
+                mock.patch(
+                    "agents_remember.worktrees.integration_ref_transaction.integration_targets",
+                    return_value=(SimpleNamespace(side="code", branch="main"),),
+                ),
+                self.assertRaisesRegex(RuntimeError, "not a fast-forward"),
+            ):
+                prepare_integration_ref_move(
                     contract,
                     IntegratedCommits(code=divergent, memory_content="", ledger=""),
+                    WorktreeArgs(),
+                    IntegrationSources(
+                        current_code_source=head_before,
+                        current_memory_source="",
+                        code_replay_required=True,
+                        memory_replay_required=False,
+                    ),
                 )
             self.assertEqual(git(code_repo, "rev-parse", "HEAD"), head_before)

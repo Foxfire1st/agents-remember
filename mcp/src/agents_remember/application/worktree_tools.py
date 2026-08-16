@@ -34,8 +34,10 @@ from agents_remember.worktrees.lifecycle_operations import (
     cancel_operation,
     latest_operation_projection,
     observe_operation,
+    require_configured_contract_repositories,
     start_or_observe_operation,
 )
+from agents_remember.worktrees.worktree_contract import load_contract
 
 
 @dataclass(frozen=True)
@@ -61,8 +63,9 @@ class TaskBases:
 
     A start cuts a code work branch from a source branch and opens memory alongside
     it under ``memory_mode``. When a preflight refuses -- a source branch behind or
-    diverged from its remote, or an undecided memory setup -- the caller re-runs with
-    ``stale_base_choice`` / ``memory_choice`` to declare how to proceed.
+    diverged from its remote, or an undecided memory setup -- the caller may explicitly
+    choose ``proceed-stale`` or ``disabled-memory``. Protected source repair belongs to a
+    separate landing/recovery operation.
     """
 
     source_branch: str | None = None
@@ -298,8 +301,9 @@ def worktree_sync_tool(
     memory_sync_choice: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    confined_contract = _configured_contract_path(config, contract_path)
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        contract_path=confined_contract,
         memory_sync_choice=memory_sync_choice,
         dry_run=dry_run,
     )
@@ -392,6 +396,8 @@ def worktree_integrate_tool(
     """
 
     confined_contract = require_within_coordination(config, contract_path, "contract_path")
+    if dry_run:
+        _configured_contract_path(config, contract_path)
     if not dry_run:
         operation = start_or_observe_operation(
             IntegrateOperationInput(
@@ -440,7 +446,7 @@ def worktree_operation_cancel_tool(
         raise ValueError("operation_kind must be 'closeout' or 'integrate'")
     if not intent_note.replace("\n", " ").strip():
         raise ValueError("operation cancellation requires a non-empty intent_note")
-    confined = require_within_coordination(config, contract_path, "contract_path")
+    confined = _configured_contract_path(config, contract_path)
     kind = cast(LifecycleOperationKind, operation_kind)
     projection = observe_operation(confined, kind) if dry_run else cancel_operation(confined, kind)
     if projection is None:
@@ -483,8 +489,9 @@ def worktree_cleanup_tool(
     dry_run: bool = False,
     teardown_providers: bool = True,
 ) -> dict[str, Any]:
+    confined_contract = _configured_contract_path(config, contract_path)
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        contract_path=confined_contract,
         approved=not dry_run,
         dry_run=dry_run,
         teardown_providers=teardown_providers,
@@ -499,8 +506,9 @@ def worktree_abandon_tool(
     dry_run: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
+    confined_contract = _configured_contract_path(config, contract_path)
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        contract_path=confined_contract,
         approved=not dry_run,
         dry_run=dry_run,
         force=force,
@@ -599,6 +607,17 @@ def _worktree_result(
     return {**result.payload, "ok": result.returncode == 0, "operation": operation}
 
 
+def _configured_contract_path(config: McpRuntimeConfig, contract_path: str) -> Path:
+    """Confine a task contract and bind its Git identities to configured authority."""
+
+    confined = require_within_coordination(config, contract_path, "contract_path")
+    require_configured_contract_repositories(
+        load_contract(confined),
+        config.config_path.as_posix(),
+    )
+    return confined
+
+
 def _worktree_closeout(
     config: McpRuntimeConfig,
     *,
@@ -607,8 +626,9 @@ def _worktree_closeout(
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
+    confined_contract = _configured_contract_path(config, contract_path)
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        contract_path=confined_contract,
         code_commit_message=messages.code,
         memory_commit_message=messages.memory,
         ledger_commit_message=messages.ledger,

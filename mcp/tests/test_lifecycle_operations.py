@@ -28,7 +28,9 @@ from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import lifecycle_operations
+from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -49,63 +51,182 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )
+from integration_branch_authority_test_support import (
+    _authority_fixture,
+    _closed_external_leaf_worktrees,
+)
 from pydantic import ValidationError
 
 
 def _contract(tmp_path: Path):
     coordination = tmp_path / "ar-coordination"
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "lifecycle-tests@agents-remember.invalid"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Lifecycle Tests"], cwd=repo, check=True)
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    base_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", base_commit],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+        cwd=repo,
+        check=True,
+    )
+    (repo / "ar-memory").mkdir()
     contract = default_contract(
         ContractTask(
             name="durable-lifecycle",
             repo_name="repo",
             coordination_root=coordination,
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="internal",
         ),
         leaf=LeafIdentity(worktree_name="durable-lifecycle", leaf_id="L23"),
         code=RepoBranchPlan(
-            repo_path=tmp_path / "repo",
+            repo_path=repo,
             source_branch="main",
             work_branch="feature/l23",
-            base_commit="a" * 40,
+            base_commit=base_commit,
         ),
     )
+    contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            contract.code_work_branch,
+            contract.code_worktree,
+            contract.code_source_branch,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
     write_contract(contract.contract_path, contract)
-    contract.code_worktree.mkdir(parents=True)
-    subprocess.run(
-        ["git", "init", "-b", "main"],
-        cwd=contract.code_worktree,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.email", "lifecycle-tests@agents-remember.invalid"],
-        cwd=contract.code_worktree,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Lifecycle Tests"],
-        cwd=contract.code_worktree,
-        check=True,
-    )
-    (contract.code_worktree / "seed.txt").write_text("seed\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=contract.code_worktree, check=True)
-    subprocess.run(
-        ["git", "commit", "-m", "seed"],
-        cwd=contract.code_worktree,
-        check=True,
-        capture_output=True,
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "coordinationRoot": coordination.as_posix(),
+                "workspaceRoot": tmp_path.as_posix(),
+                "repositories": {"repo": {}},
+            }
+        ),
+        encoding="utf-8",
     )
     return contract
 
 
 def _input(contract, *, message: str = "close L23") -> CloseoutOperationInput:
     return CloseoutOperationInput(
-        configPath=(contract.coordination_root / "settings.json").as_posix(),
+        configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
         codeCommitMessage=message,
         approvalNote="developer approved this exact candidate",
     )
+
+
+def _integration_ready(contract):
+    repo = contract.code_repo_path
+    commit = subprocess.run(
+        ["git", "rev-parse", "refs/heads/main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "branch", "super", commit], cwd=repo, check=True)
+    write_task_doc(
+        contract.task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "DURABLE-LIFECYCLE",
+                "slug": "durable-lifecycle",
+                "title": "Durable lifecycle",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "repo",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "executionNature": "organizational",
+            }
+        ),
+    )
+    write_task_doc(
+        contract.task_root.parent / "sprint",
+        TaskDocument.model_validate(
+            {
+                "id": "SPRINT",
+                "slug": "sprint",
+                "title": "Sprint",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "repo",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "orchestrates": ["durable-lifecycle"],
+                "integrationBranch": "super",
+                "executionGraph": {
+                    "nodes": [{"repository": "repo", "path": "durable-lifecycle/task.json"}],
+                    "edges": [],
+                },
+            }
+        ),
+    )
+    closed = replace(
+        contract,
+        code_source_branch="super",
+        closeout_status="completed",
+        code_commit=commit,
+    )
+    write_contract(closed.contract_path, closed)
+    return closed
+
+
+def test_integration_authority_refuses_incomplete_closeout_edges(tmp_path: Path) -> None:
+    closed = _integration_ready(_contract(tmp_path / "internal"))
+    operation_input = IntegrateOperationInput(
+        configPath=(closed.code_repo_path.parent / "settings.json").as_posix(),
+        contractPath=closed.contract_path.as_posix(),
+    )
+    with pytest.raises(RuntimeError, match="completed closeout code commit"):
+        lifecycle_operations._integration_authority(
+            replace(closed, code_commit=""),
+            operation_input,
+        )
+
+    fixture = _authority_fixture(tmp_path / "external", external_memory=True)
+    external = _closed_external_leaf_worktrees(fixture, tmp_path / "external")
+    with pytest.raises(RuntimeError, match="external-memory integration authority"):
+        lifecycle_operations._integration_authority(
+            replace(external, memory_content_commit=""),
+            IntegrateOperationInput(
+                configPath=fixture.config_path.as_posix(),
+                contractPath=external.contract_path.as_posix(),
+            ),
+        )
 
 
 def test_start_returns_immediately_and_duplicate_observes_one_launch(tmp_path: Path) -> None:
@@ -136,6 +257,26 @@ def test_conflicting_commit_message_refuses_while_task_operation_exists(
         start_or_observe_operation(
             _input(contract, message="different mutation"), launcher=lambda *_: None
         )
+
+
+def test_contract_lifecycle_lease_excludes_cross_kind_and_terminal_mutation(
+    tmp_path: Path,
+) -> None:
+    contract = _contract(tmp_path)
+    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+
+    with (
+        pytest.raises(RuntimeError, match=r"integrate cannot proceed.*closeout"),
+        contract_lifecycle_lease(contract, operation_kind="integrate"),
+    ):
+        raise AssertionError("cross-kind lease unexpectedly opened")
+    with (
+        pytest.raises(RuntimeError, match=r"terminal mutation cannot proceed.*closeout"),
+        contract_lifecycle_lease(contract, operation_kind=None),
+    ):
+        raise AssertionError("terminal lease unexpectedly opened")
+    with contract_lifecycle_lease(contract, operation_kind="closeout"):
+        pass
 
 
 def test_changed_worktree_is_a_different_closeout_candidate(tmp_path: Path) -> None:
@@ -214,7 +355,7 @@ def test_closeout_preview_path_and_cancel_validation_are_task_addressed() -> Non
             intent_note=" \n ",
         )
     with (
-        patch.object(worktree_tools, "require_within_coordination", return_value=Path("/tmp/c")),
+        patch.object(worktree_tools, "_configured_contract_path", return_value=Path("/tmp/c")),
         patch.object(worktree_tools, "observe_operation", return_value=None),
         pytest.raises(RuntimeError, match="no closeout operation"),
     ):
@@ -470,6 +611,7 @@ def test_store_recovery_and_terminal_replacement_guards_every_identity_edge(
                     tree="c" * 40,
                     fingerprint="b" * 64,
                 ),
+                None,
                 datetime(2026, 8, 12, tzinfo=UTC),
             )
         )
@@ -548,8 +690,9 @@ def test_observe_latest_terminal_cancel_and_launch_failure_are_task_addressed(
     assert failed is not None and failed.status == "failed"
     assert cancel_operation(contract.contract_path, "closeout").status == "failed"
 
+    contract = _integration_ready(contract)
     integration = IntegrateOperationInput(
-        configPath=(contract.coordination_root / "settings.json").as_posix(),
+        configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
     )
     start_or_observe_operation(integration, launcher=lambda *_: None)
@@ -757,9 +900,10 @@ def test_execute_operation_dispatches_closeout_and_integration_payloads(tmp_path
     config = SimpleNamespace()
     with patch.object(lifecycle_operation_worker, "load_config", return_value=config):
         start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-        closeout = LifecycleOperationStore(
+        closeout_store = LifecycleOperationStore(
             operation_record_path(contract.worktree_group, "closeout")
-        ).read()
+        )
+        closeout = closeout_store.read()
         assert closeout is not None
         with patch.object(
             lifecycle_operation_worker,
@@ -770,9 +914,16 @@ def test_execute_operation_dispatches_closeout_and_integration_payloads(tmp_path
         runtime.finish.assert_called_with(
             {"state": "closed", "ok": True, "operation": "worktree_closeout_apply"}, ok=True
         )
+        closeout_runtime = lifecycle_operation_worker.OperationRuntime(closeout_store)
+        closeout_runtime.start()
+        closeout_runtime.finish(
+            {"state": "closed", "ok": True, "operation": "worktree_closeout_apply"},
+            ok=True,
+        )
 
+        contract = _integration_ready(contract)
         integration_input = IntegrateOperationInput(
-            configPath="settings.json",
+            configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
             contractPath=contract.contract_path.as_posix(),
             autoCompleteSeats=False,
         )

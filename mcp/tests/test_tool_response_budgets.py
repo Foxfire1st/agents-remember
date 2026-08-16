@@ -39,11 +39,11 @@ def fat_candidate(index: int, decision: str) -> dict:
     return {
         "source_path": path,
         "branch_onboarding": f"C:/ew/ar-coordination/worktrees/repo/task-ar/memory-task/onboarding/{path}.md",
-        "official_onboarding": f"C:/ew/ar-coordination/memory-repos/ar-repo/onboarding/{path}.md",
+        "target_onboarding": f"C:/ew/ar-coordination/memory-repos/ar-repo/onboarding/{path}.md",
         "evidence": "exact-landed-commit",
         "decision": decision,
         "reason": "all 1 source branch commit(s) touching this path are ancestors of official code ref",
-        "official_exists": True,
+        "target_exists": True,
     }
 
 
@@ -171,7 +171,7 @@ class CompactPayloadBudgetTests(unittest.TestCase):
             "source_code_ref": "feature",
             "source_code_head": "b" * 40,
             "old_base": "c" * 40,
-            "official_memory": "C:/ew/ar-coordination/memory-repos/ar-repo",
+            "target_memory": "C:/ew/ar-coordination/memory-repos/ar-repo",
             "source_memory": "C:/ew/ar-coordination/worktrees/repo/task-ar/memory-task",
             "counts": {"auto-carry": 80, "review-required": 12, "reject": 8},
             "candidates": candidates,

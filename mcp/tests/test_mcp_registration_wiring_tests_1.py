@@ -405,6 +405,7 @@ class RegistrationWiringTests1(RegistrationWiringTests):
             "agents_remember.mcp.registration.memory.memory_carryover_plan_payload",
             {
                 "repo_id": "agents-remember",
+                "contract_path": "tasks/recovery/series-contract.md",
                 "source_memory": "memory/task",
                 "official_code_ref": "main",
                 "source_code_ref": "task/260731",
@@ -416,6 +417,7 @@ class RegistrationWiringTests1(RegistrationWiringTests):
         config, selection = recorder.args
         self.assertIs(config, self.config)
         self.assertEqual(selection.repo_id, "agents-remember")
+        self.assertEqual(selection.contract_path, "tasks/recovery/series-contract.md")
         self.assertEqual(selection.source_memory, "memory/task")
         self.assertEqual(selection.official_code_ref, "main")
         self.assertEqual(selection.source_code_ref, "task/260731")
@@ -429,6 +431,7 @@ class RegistrationWiringTests1(RegistrationWiringTests):
             "agents_remember.mcp.registration.memory.memory_carryover_apply_payload",
             {
                 "repo_id": "agents-remember",
+                "contract_path": "tasks/recovery/series-contract.md",
                 "source_memory": "memory/task",
                 "official_code_ref": "main",
                 "source_code_ref": "task/260731",
@@ -452,6 +455,7 @@ class RegistrationWiringTests1(RegistrationWiringTests):
             "agents_remember.mcp.registration.memory.memory_carryover_apply_payload",
             {
                 "repo_id": "agents-remember",
+                "contract_path": "tasks/recovery/series-contract.md",
                 "source_memory": "memory/task",
                 "official_code_ref": "main",
                 "source_code_ref": "task/260731",
@@ -621,8 +625,8 @@ class RegistrationWiringTests1(RegistrationWiringTests):
                 "source_branch": "main",
                 "work_branch": "task/260731",
                 "memory_mode": "internal",
-                "memory_choice": "reuse",
-                "stale_base_choice": "rebase",
+                "memory_choice": "disabled-memory",
+                "stale_base_choice": "proceed-stale",
                 "dry_run": True,
                 "skip_provider_setup": True,
                 "retry_provider_setup": True,
@@ -642,8 +646,8 @@ class RegistrationWiringTests1(RegistrationWiringTests):
         self.assertEqual(bases.source_branch, "main")
         self.assertEqual(bases.work_branch, "task/260731")
         self.assertEqual(bases.memory_mode, "internal")
-        self.assertEqual(bases.memory_choice, "reuse")
-        self.assertEqual(bases.stale_base_choice, "rebase")
+        self.assertEqual(bases.memory_choice, "disabled-memory")
+        self.assertEqual(bases.stale_base_choice, "proceed-stale")
 
         execution = recorder.kwargs["execution"]
         self.assertIs(execution.dry_run, True)

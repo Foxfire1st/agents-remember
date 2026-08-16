@@ -31,6 +31,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.onboarding import _refresh_regenerated_documents
@@ -176,6 +177,7 @@ class WorktreeSupport1(WorktreeSupportTests):
             workspace = Path(tmp)
             code_repo = workspace / "repo-a"
             init_repo(code_repo, "main")
+            git(code_repo, "branch", "super", "main")
             coordination_root = workspace / "ar-coordination"
             (coordination_root / "memory-repos" / "ar-repo-a" / "system").mkdir(parents=True)
             (coordination_root / "memory-repos" / "ar-repo-a" / "onboarding").mkdir()
@@ -192,7 +194,16 @@ class WorktreeSupport1(WorktreeSupportTests):
                         "repo": "repo-a",
                         "createdAt": "2026-06-24T01:00",
                         "orchestrates": ["260624_master"],
-                        "integrationBranch": "main",
+                        "integrationBranch": "super",
+                        "executionGraph": {
+                            "nodes": [
+                                {
+                                    "repository": "repo-a",
+                                    "path": "260624_master/task.json",
+                                }
+                            ],
+                            "edges": [],
+                        },
                     }
                 ),
             )
@@ -207,6 +218,7 @@ class WorktreeSupport1(WorktreeSupportTests):
                         "status": "inProgress",
                         "repo": "repo-a",
                         "createdAt": "2026-06-24T02:00",
+                        "executionNature": "atomic",
                         "subTasks": [
                             {
                                 "number": "15",
@@ -240,7 +252,7 @@ class WorktreeSupport1(WorktreeSupportTests):
             root_contract = load_contract(series_contract_path(task_root))
             leaf_contract = load_contract(leaf_enclosure_path(task_root, "15"))
             self.assertEqual(
-                (root_contract.kind, root_contract.code_source_branch), ("series", "main")
+                (root_contract.kind, root_contract.code_source_branch), ("series", "super")
             )
             self.assertEqual(root_contract.code_work_branch, "ar/260624_master")
             self.assertEqual(root_contract.code_worktree, code_repo)
@@ -648,7 +660,7 @@ class WorktreeSupport1(WorktreeSupportTests):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
-            memory_repo.mkdir(parents=True)
+            memory_base = init_repo(memory_repo, "main")
             (memory_repo / "memory.md").write_text(
                 "\n".join(
                     [
@@ -677,6 +689,8 @@ class WorktreeSupport1(WorktreeSupportTests):
                 ),
                 encoding="utf-8",
             )
+            git(memory_repo, "add", "memory.md")
+            git(memory_repo, "commit", "-m", "ledger")
             contract = default_contract(
                 ContractTask(
                     name="Fix Thing",
@@ -696,12 +710,13 @@ class WorktreeSupport1(WorktreeSupportTests):
                     repo_path=memory_repo,
                     source_branch="main",
                     work_branch="ar/fix-thing",
-                    base_commit="m1",
+                    base_commit=memory_base,
                 ),
             )
-            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
-            )
+            with mock.patch.object(start_module, "ensure_worktree", return_value="would-create"):
+                result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
+                    contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
+                )
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
 
@@ -739,19 +754,24 @@ class WorktreeSupport1(WorktreeSupportTests):
                     base_commit=memory_seed,
                 ),
             )
-            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
-            )
-            self.assertEqual(result["state"], "blocked")
-            self.assertIn("commit refreshed onboarding and ledger", result["reason"])
-            self.assertIn("commit-memory-and-ledger-first", result["choices"])
+            with mock.patch.object(start_module, "ensure_worktree", return_value="would-create"):
+                result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
+                    contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
+                )
+            self.assertEqual(result["state"], "compatible")
+            self.assertTrue((memory_repo / "onboarding" / "fresh.md").is_file())
 
     def test_start_reports_compatible_external_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
-            memory_repo.mkdir(parents=True)
-            write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", "m1"))
+            memory_base = init_repo(memory_repo, "main")
+            write_ledger(
+                memory_repo / "memory.md",
+                create_initial_ledger("repo-a", "c1", memory_base),
+            )
+            git(memory_repo, "add", "memory.md")
+            git(memory_repo, "commit", "-m", "ledger")
             contract = default_contract(
                 ContractTask(
                     name="Fix Thing",
@@ -771,12 +791,13 @@ class WorktreeSupport1(WorktreeSupportTests):
                     repo_path=memory_repo,
                     source_branch="main",
                     work_branch="ar/fix-thing",
-                    base_commit="m1",
+                    base_commit=memory_base,
                 ),
             )
-            result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
-                contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
-            )
+            with mock.patch.object(start_module, "ensure_worktree", return_value="would-create"):
+                result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
+                    contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
+                )
             self.assertEqual(result["state"], "compatible")
             self.assertEqual(result["worktree"], "would-create")
 
@@ -816,7 +837,7 @@ class WorktreeSupport1(WorktreeSupportTests):
                 contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
             )
             self.assertEqual(blocked["state"], "blocked")
-            self.assertEqual(blocked["choices"], ["reconciliation", "disabled-memory"])
+            self.assertEqual(blocked["choices"], ["disabled-memory"])
             self.assertNotIn("custom", blocked["choices"])
             for choice in blocked["choices"]:
                 consumed: dict[str, Any] = worktree_manager.prepare_memory_for_start(
@@ -833,52 +854,72 @@ class WorktreeSupport1(WorktreeSupportTests):
                 "disabled",
             )
 
-    def test_reconciliation_records_the_mapping_and_starts_the_worktree(self) -> None:
-        # FINDING 7: reconciliation maps the unmapped code base -> the ledger's memory content tip,
-        # records it in the official memory repo exactly the way closeout ledger syncs do (header
-        # advance + newest-first row + a "Ledger sync" commit in the memory SOURCE repo -- the owner's
-        # hand precedent af50a05), then proceeds to a real started worktree.
+    def test_retired_reconciliation_choice_does_not_write_the_protected_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            contract, memory_repo, unmapped, content = self._unmapped_external_contract(Path(tmp))
+            contract, memory_repo, unmapped, _content = self._unmapped_external_contract(Path(tmp))
+            before = git(memory_repo, "rev-parse", "HEAD")
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract,
                 worktree_manager.WorktreeArgs(memory_choice="reconciliation", dry_run=False),
             )
-            self.assertEqual(result["state"], "compatible")
-            # The official ledger now maps the code base commit to the (unchanged) memory content tip.
+            self.assertEqual(result["state"], "blocked")
+            self.assertEqual(result["choices"], ["disabled-memory"])
             ledger = load_ledger(memory_repo / "memory.md")
-            row = find_mapping(ledger, unmapped)
-            assert row is not None
-            self.assertEqual(row.memory_commit, content)
-            self.assertEqual(ledger.last_verified_code_commit, unmapped)
-            self.assertEqual(ledger.last_memory_content_commit, content)  # content unchanged
-            # A "Ledger sync" commit landed in the memory SOURCE repo (durable, task-tagged).
-            subject = git(memory_repo, "log", "-1", "--format=%s")
-            self.assertIn("Ledger sync", subject)
-            self.assertIn(unmapped, subject)
-            # And the memory worktree was actually created (a started worktree, not a preview).
-            assert contract.memory_worktree is not None
-            self.assertTrue(contract.memory_worktree.exists())
-            self.assertNotEqual(result["worktree"], "would-create")
+            self.assertIsNone(find_mapping(ledger, unmapped))
+            self.assertEqual(git(memory_repo, "rev-parse", "HEAD"), before)
 
-    def test_reconciliation_refuses_when_memory_repo_is_on_another_branch(self) -> None:
-        # PR #100 review (Codex P1): the mapping commit must land on the memory SOURCE branch —
-        # the worktree is created FROM that branch. With the official memory repo checked out
-        # elsewhere, reconciliation refuses loudly (naming both branches) instead of committing
-        # the mapping to the wrong branch, which would leave the source branch unmapped while
-        # start reports compatible.
+    def test_retired_reconciliation_choice_is_non_mutating_on_another_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract, memory_repo, _unmapped, _content = self._unmapped_external_contract(Path(tmp))
             git(memory_repo, "checkout", "-b", "some-other-branch")
-            with self.assertRaises(LedgerError) as raised:
-                worktree_manager.prepare_memory_for_start(
-                    contract,
-                    worktree_manager.WorktreeArgs(memory_choice="reconciliation", dry_run=False),
-                )
-            self.assertIn("'main'", str(raised.exception))
-            self.assertIn("'some-other-branch'", str(raised.exception))
-            # Nothing was committed to the wrong branch.
+            result = worktree_manager.prepare_memory_for_start(
+                contract,
+                worktree_manager.WorktreeArgs(memory_choice="reconciliation", dry_run=False),
+            )
+            self.assertEqual(result["state"], "blocked")
             self.assertNotIn("Ledger sync", git(memory_repo, "log", "-1", "--format=%s"))
+
+    def test_start_reads_the_exact_named_memory_source_ledger_not_ambient_head(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, memory_repo, unmapped, content = self._unmapped_external_contract(Path(tmp))
+            git(memory_repo, "checkout", "-b", "source-with-map")
+            write_ledger(
+                memory_repo / "memory.md",
+                prepend_mapping(load_ledger(memory_repo / "memory.md"), unmapped, content),
+            )
+            git(memory_repo, "add", "memory.md")
+            git(memory_repo, "commit", "-m", "map exact source")
+            source_head = git(memory_repo, "rev-parse", "HEAD")
+            git(memory_repo, "checkout", "main")
+            exact = replace(
+                contract,
+                memory_source_branch="source-with-map",
+                memory_base_commit=source_head,
+            )
+
+            compatible = worktree_manager.prepare_memory_for_start(
+                exact, worktree_manager.WorktreeArgs(dry_run=True)
+            )
+            self.assertEqual(compatible["state"], "compatible")
+
+            git(memory_repo, "branch", "source-without-map", "main")
+            write_ledger(
+                memory_repo / "memory.md",
+                prepend_mapping(load_ledger(memory_repo / "memory.md"), unmapped, content),
+            )
+            git(memory_repo, "add", "memory.md")
+            git(memory_repo, "commit", "-m", "ambient mapping only")
+            source_without = replace(
+                contract,
+                memory_source_branch="source-without-map",
+                memory_base_commit=git(memory_repo, "rev-parse", "source-without-map"),
+            )
+
+            blocked = worktree_manager.prepare_memory_for_start(
+                source_without, worktree_manager.WorktreeArgs(dry_run=True)
+            )
+            self.assertEqual(blocked["state"], "blocked")
+            self.assertEqual(blocked["choices"], ["disabled-memory"])
 
     def test_worktree_contract_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

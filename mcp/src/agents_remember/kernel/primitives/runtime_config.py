@@ -19,6 +19,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     parse_gate_delegation,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.kernel.primitives.identity import (
@@ -267,6 +268,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         coordination_root,
         workspace_root,
     )
+    _require_unique_repository_git_identities(repositories)
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
@@ -345,6 +347,53 @@ def parse_repositories(
             repo_id, value, coordination_root, workspace_root
         )
     return repositories
+
+
+def _require_unique_repository_git_identities(
+    repositories: dict[str, RepositoryScope],
+) -> None:
+    """Refuse two configured repository ids that own one physical Git repository."""
+
+    owners: dict[Path, tuple[str, str]] = {}
+    for repo_id, repository in repositories.items():
+        code_identity = _configured_git_identity(repository.path)
+        if code_identity is not None:
+            _claim_configured_git_identity(owners, code_identity, repo_id, "code")
+        memory_identity = (
+            _configured_git_identity(repository.memory_root)
+            if repository.memory_root is not None
+            else None
+        )
+        # An internal memory directory is intentionally part of the code repository, not
+        # a second external-memory authority edge.
+        if memory_identity is not None and memory_identity != code_identity:
+            _claim_configured_git_identity(owners, memory_identity, repo_id, "memory")
+
+
+def _configured_git_identity(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    result = run_git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return Path(value).resolve() if value else None
+
+
+def _claim_configured_git_identity(
+    owners: dict[Path, tuple[str, str]],
+    identity: Path,
+    repo_id: str,
+    side: str,
+) -> None:
+    previous = owners.get(identity)
+    if previous is not None and previous[0] != repo_id:
+        raise ConfigError(
+            f"repository ids {previous[0]!r} ({previous[1]}) and {repo_id!r} ({side}) "
+            f"share Git common-dir {identity.as_posix()}; one physical repository must "
+            "have exactly one configured owner"
+        )
+    owners[identity] = (repo_id, side)
 
 
 def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) -> Path:

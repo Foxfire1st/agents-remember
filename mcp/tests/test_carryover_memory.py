@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.memory.carryover import (
@@ -10,14 +11,15 @@ from agents_remember.memory.carryover import (
     ENTITY_CATALOG_KIND,
     FILE_SIDECAR_KIND,
     MEMORY_ONLY_DOC_KIND,
-    apply_carryover_for_request,
     build_plan_for_request,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
     compute_git_blob_set_fingerprint,
 )
+from agents_remember.worktrees.worktree_contract import write_contract
 from test_carryover import (
     CarryoverFixture,
+    _apply_carryover_for_request,
     commit_file,
     git,
     read_onboarding_field,
@@ -67,88 +69,33 @@ def candidates_of_kind(plan: dict[str, object], kind: str) -> list[dict[str, obj
     return [candidate for candidate in candidates if candidate["kind"] == kind]
 
 
-class MemoryMainAdvanceTests(unittest.TestCase):
-    """Issue #54: carryover fast-forwards memory main after code landed officially."""
-
-    def test_apply_fast_forwards_memory_main_from_non_main_checkout(self) -> None:
+class CarryoverRefOwnershipTests(unittest.TestCase):
+    def test_apply_commits_selected_checkout_without_force_moving_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
-            git(fixture.official_memory, "checkout", "-b", "cycle/source")
-            payload = apply_carryover_for_request(
+            main_before = git(fixture.target_memory, "rev-parse", "main")
+            git(fixture.target_memory, "checkout", "-b", "cycle/source")
+            fixture.target_contract = replace(
+                fixture.target_contract,
+                memory_work_branch="cycle/source",
+            )
+            write_contract(
+                fixture.target_contract.contract_path,
+                fixture.target_contract,
+            )
+
+            payload = _apply_carryover_for_request(
                 fixture.request(),
                 intent_note="developer approved sidecar carryover",
             )
+
             self.assertEqual(payload["state"], "carried-over")
-            advance = payload["memory_main_advance"]
-            assert isinstance(advance, dict)
-            self.assertEqual(advance["state"], "fast-forwarded")
-            self.assertEqual(
-                git(fixture.official_memory, "rev-parse", "main"),
-                git(fixture.official_memory, "rev-parse", "cycle/source"),
+            self.assertNotIn("memory_main_advance", payload)
+            self.assertEqual(git(fixture.target_memory, "rev-parse", "main"), main_before)
+            self.assertNotEqual(
+                git(fixture.target_memory, "rev-parse", "cycle/source"),
+                main_before,
             )
-
-    def test_nothing_to_carry_still_advances_memory_main(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = CarryoverFixture(Path(tmp))
-            (fixture.source_memory / "onboarding" / "src" / "app" / "feature.py.md").unlink()
-            git(fixture.official_memory, "checkout", "-b", "cycle/source")
-            payload = apply_carryover_for_request(
-                fixture.request(),
-                intent_note="developer approved carryover check",
-            )
-            self.assertEqual(payload["state"], "ledger-mapped-head")
-            advance = payload["memory_main_advance"]
-            assert isinstance(advance, dict)
-            self.assertEqual(advance["state"], "fast-forwarded")
-            self.assertEqual(
-                git(fixture.official_memory, "rev-parse", "main"),
-                git(fixture.official_memory, "rev-parse", "cycle/source"),
-            )
-
-    def test_apply_on_main_checkout_reports_already_current(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = CarryoverFixture(Path(tmp))
-            payload = apply_carryover_for_request(
-                fixture.request(),
-                intent_note="developer approved sidecar carryover",
-            )
-            advance = payload["memory_main_advance"]
-            assert isinstance(advance, dict)
-            self.assertEqual(advance["state"], "already-current")
-
-    def test_diverged_memory_main_is_reported_and_left_alone(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = CarryoverFixture(Path(tmp))
-            git(fixture.official_memory, "checkout", "-b", "cycle/source")
-            git(fixture.official_memory, "checkout", "main")
-            commit_file(
-                fixture.official_memory,
-                "onboarding/other.md",
-                "# independent official change\n",
-                "Independent change on main",
-            )
-            main_before = git(fixture.official_memory, "rev-parse", "main")
-            git(fixture.official_memory, "checkout", "cycle/source")
-            payload = apply_carryover_for_request(
-                fixture.request(),
-                intent_note="developer approved sidecar carryover",
-            )
-            advance = payload["memory_main_advance"]
-            assert isinstance(advance, dict)
-            self.assertEqual(advance["state"], "diverged")
-            self.assertEqual(git(fixture.official_memory, "rev-parse", "main"), main_before)
-
-    def test_missing_main_branch_is_skipped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = CarryoverFixture(Path(tmp))
-            git(fixture.official_memory, "branch", "-m", "main", "trunk")
-            payload = apply_carryover_for_request(
-                fixture.request(),
-                intent_note="developer approved sidecar carryover",
-            )
-            advance = payload["memory_main_advance"]
-            assert isinstance(advance, dict)
-            self.assertEqual(advance["state"], "skipped")
 
 
 class EntityCatalogCarryoverTests(unittest.TestCase):
@@ -158,9 +105,9 @@ class EntityCatalogCarryoverTests(unittest.TestCase):
             fingerprint = compute_git_blob_set_fingerprint(
                 fixture.code_repo, ["README.md"], ref="main"
             )
-            write_entity_catalog(fixture.official_memory / "onboarding", fingerprint)
+            write_entity_catalog(fixture.target_memory / "onboarding", fingerprint)
             write_entity_catalog(fixture.source_memory / "onboarding", fingerprint)
-            fixture.commit_official()
+            fixture.commit_target()
             plan = build_plan_for_request(fixture.request())
             self.assertEqual(candidates_of_kind(plan, ENTITY_CATALOG_KIND), [])
 
@@ -171,9 +118,9 @@ class EntityCatalogCarryoverTests(unittest.TestCase):
                 fixture.code_repo, ["README.md"], ref="main"
             )
             write_entity_catalog(
-                fixture.official_memory / "onboarding", fingerprint, note="Old body."
+                fixture.target_memory / "onboarding", fingerprint, note="Old body."
             )
-            fixture.commit_official()
+            fixture.commit_target()
             branch_catalog = write_entity_catalog(
                 fixture.source_memory / "onboarding", fingerprint, note="Refreshed body."
             )
@@ -183,15 +130,15 @@ class EntityCatalogCarryoverTests(unittest.TestCase):
             self.assertEqual(catalogs[0]["source_path"], ENTITY_CATALOG_KEY)
             self.assertEqual(catalogs[0]["decision"], "review-required")
 
-            result = apply_carryover_for_request(
+            result = _apply_carryover_for_request(
                 fixture.request(),
                 intent_note="carry the reviewed entity catalog",
                 include_review_required=[ENTITY_CATALOG_KEY],
             )
             self.assertEqual(result["state"], "carried-over")
-            official_catalog = fixture.official_memory / "onboarding" / "entities.md"
+            target_catalog = fixture.target_memory / "onboarding" / "entities.md"
             self.assertEqual(
-                official_catalog.read_text(encoding="utf-8"),
+                target_catalog.read_text(encoding="utf-8"),
                 branch_catalog.read_text(encoding="utf-8"),
             )
             validation = result["entity_fingerprint_validation"]
@@ -204,13 +151,13 @@ class EntityCatalogCarryoverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CarryoverFixture(Path(tmp))
             write_entity_catalog(
-                fixture.official_memory / "onboarding", "sha256:" + "0" * 64, note="Old."
+                fixture.target_memory / "onboarding", "sha256:" + "0" * 64, note="Old."
             )
-            fixture.commit_official()
+            fixture.commit_target()
             write_entity_catalog(
                 fixture.source_memory / "onboarding", "sha256:" + "f" * 64, note="New."
             )
-            result = apply_carryover_for_request(
+            result = _apply_carryover_for_request(
                 fixture.request(),
                 intent_note="carry catalog with stale fingerprint",
                 include_review_required=[ENTITY_CATALOG_KEY],
@@ -229,11 +176,11 @@ class MemoryOnlyDocCarryoverTests(unittest.TestCase):
         """Fixture whose source memory is a clone of official (real worktree shape)."""
         fixture = CarryoverFixture(tmp)
         write_file_onboarding(
-            fixture.official_memory / "onboarding", "repo-a", "README.md", fixture.old_base
+            fixture.target_memory / "onboarding", "repo-a", "README.md", fixture.old_base
         )
-        fixture.commit_official()
+        fixture.commit_target()
         clone = tmp / "memory-branch-git"
-        clone_memory(fixture.official_memory, clone)
+        clone_memory(fixture.target_memory, clone)
         # Keep the diff-derived sidecar the original plain-dir fixture provides.
         write_file_onboarding(
             clone / "onboarding", "repo-a", "src/app/feature.py", fixture.source_head
@@ -256,14 +203,14 @@ class MemoryOnlyDocCarryoverTests(unittest.TestCase):
             self.assertEqual(docs[0]["decision"], "auto-carry")
             self.assertEqual(docs[0]["evidence"], "memory-only-reverification-valid")
 
-            result = apply_carryover_for_request(
+            result = _apply_carryover_for_request(
                 fixture.request(), intent_note="carry memory-only re-verification"
             )
             self.assertEqual(result["state"], "carried-over")
-            official_doc = fixture.official_memory / "onboarding" / "README.md.md"
-            self.assertIn("Richer branch insight.", official_doc.read_text(encoding="utf-8"))
+            target_doc = fixture.target_memory / "onboarding" / "README.md.md"
+            self.assertIn("Richer branch insight.", target_doc.read_text(encoding="utf-8"))
             self.assertEqual(
-                read_onboarding_field(official_doc, "lastVerifiedCommitHash"),
+                read_onboarding_field(target_doc, "lastVerifiedCommitHash"),
                 fixture.official_head,
             )
             validation = result["entity_fingerprint_validation"]
@@ -273,6 +220,7 @@ class MemoryOnlyDocCarryoverTests(unittest.TestCase):
     def test_source_diverged_doc_is_review_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = self._git_backed_fixture(Path(tmp))
+            git(fixture.code_repo, "checkout", "main")
             commit_file(fixture.code_repo, "README.md", "# Test Repo (edited)\n", "Edit readme")
             branch_doc = fixture.source_memory / "onboarding" / "README.md.md"
             branch_doc.write_text(
@@ -285,15 +233,15 @@ class MemoryOnlyDocCarryoverTests(unittest.TestCase):
             self.assertEqual(docs[0]["decision"], "review-required")
             self.assertEqual(docs[0]["evidence"], "source-diverged")
 
-    def test_official_memory_moved_doc_is_review_required(self) -> None:
+    def test_target_memory_moved_doc_is_review_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = self._git_backed_fixture(Path(tmp))
-            official_doc = fixture.official_memory / "onboarding" / "README.md.md"
-            official_doc.write_text(
-                official_doc.read_text(encoding="utf-8") + "\nParallel official change.\n",
+            target_doc = fixture.target_memory / "onboarding" / "README.md.md"
+            target_doc.write_text(
+                target_doc.read_text(encoding="utf-8") + "\nParallel target change.\n",
                 encoding="utf-8",
             )
-            fixture.commit_official("Independent official doc change")
+            fixture.commit_target("Independent target doc change")
             branch_doc = fixture.source_memory / "onboarding" / "README.md.md"
             branch_doc.write_text(
                 branch_doc.read_text(encoding="utf-8") + "\nBranch change.\n",
@@ -303,7 +251,7 @@ class MemoryOnlyDocCarryoverTests(unittest.TestCase):
             docs = candidates_of_kind(plan, MEMORY_ONLY_DOC_KIND)
             self.assertEqual(len(docs), 1)
             self.assertEqual(docs[0]["decision"], "review-required")
-            self.assertEqual(docs[0]["evidence"], "official-memory-moved")
+            self.assertEqual(docs[0]["evidence"], "target-memory-moved")
 
     def test_plain_dir_source_memory_doc_is_review_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -315,7 +263,7 @@ class MemoryOnlyDocCarryoverTests(unittest.TestCase):
             docs = candidates_of_kind(plan, MEMORY_ONLY_DOC_KIND)
             self.assertEqual(len(docs), 1)
             self.assertEqual(docs[0]["decision"], "review-required")
-            self.assertEqual(docs[0]["evidence"], "official-memory-moved")
+            self.assertEqual(docs[0]["evidence"], "target-memory-moved")
 
     def test_diff_covered_doc_is_not_duplicated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

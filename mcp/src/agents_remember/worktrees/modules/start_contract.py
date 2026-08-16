@@ -2,24 +2,37 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
+from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.tasks import read_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampPlan,
     plan_leaf_doc_lifecycle_restamp,
 )
+from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
+from agents_remember.worktrees.integration_branch_authority import (
+    ProposedWorkBranches,
+    integration_surfaces,
+    repository_default_branch,
+    require_proposed_work_branches,
+)
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
+    branch_commit,
     branch_exists,
     current_branch,
     head_commit,
     repository_identity,
-    require_git,
     run_git,
 )
 from agents_remember.worktrees.modules.leaf_ref_start import (
@@ -54,6 +67,35 @@ MASTER_SERIES_BOOTSTRAP_OWNERSHIP = StoreOwnership(
 )
 
 
+class _SeriesBootstrapRecord(BaseModel):
+    """Crash-recoverable intent for the code+memory atomic branch bootstrap."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal["1.0"] = "1.0"
+    contractPath: str = Field(min_length=1, max_length=4096)
+    codeRepository: str = Field(min_length=1, max_length=4096)
+    codeSourceBranch: str = Field(min_length=1, max_length=4096)
+    codeWorkBranch: str = Field(min_length=1, max_length=4096)
+    codeBaseCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    memoryRepository: str = Field(default="", max_length=4096)
+    memorySourceBranch: str = Field(default="", max_length=4096)
+    memoryWorkBranch: str = Field(default="", max_length=4096)
+    memoryBaseCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+
+
+@dataclass(frozen=True)
+class _BootstrapRef:
+    repository: Path
+    branch: str
+    commit: str
+    source_branch: str
+    source_commit: str
+
+
+_BOOTSTRAP_REF_AUTHORITY = object()
+
+
 def _start_memory_repo(context, memory_mode: str):
     if memory_mode != "external":
         return None
@@ -76,7 +118,7 @@ def memory_base_for_source(memory_repo, memory_source_branch: str) -> str:
     if not memory_repo.exists() or not (memory_repo / ".git").exists():
         return ""
     if branch_exists(memory_repo, memory_source_branch):
-        return head_commit(memory_repo, memory_source_branch)
+        return branch_commit(memory_repo, memory_source_branch)
     return _memory_base_commit(memory_repo)
 
 
@@ -120,21 +162,18 @@ def _task_root_has_master_artifact(task_root: Path) -> bool:
     return "**Type:** Master" in head
 
 
-def _create_series_branch(repo: Path, branch: str, source: str, *, dry_run: bool) -> bool:
-    """Create one new series branch from its declared source, never adopt an orphan."""
-
-    if not branch_exists(repo, source):
-        raise RuntimeError(f"declared series source branch does not exist: {source}")
-    if branch_exists(repo, branch):
-        raise RuntimeError(f"series branch exists without its task-bound contract: {branch}")
-    if dry_run:
-        return False
-    require_git(repo, ["branch", branch, source])
-    return True
-
-
-def _remove_created_branch(repo: Path, branch: str) -> None:
-    require_git(repo, ["branch", "-D", branch])
+def _master_execution_nature(task_root: Path) -> str | None:
+    task_path = task_root / "task.json"
+    if not task_path.is_file():
+        return None
+    document = read_task_doc(task_path)
+    if document.kind != "master":
+        return None
+    if document.executionNature not in ("organizational", "atomic"):
+        raise RuntimeError(
+            "master leaf start requires executionNature='organizational' or 'atomic'"
+        )
+    return document.executionNature
 
 
 def memory_mode_for_repository(code_repo: Path, memory_root: Path | None) -> str:
@@ -175,6 +214,8 @@ def ensure_master_series_contract(
     entry points remain one operation rather than competing bootstrap implementations.
     """
 
+    _require_commanded_atomic_master(spec)
+
     if dry_run:
         existing = _existing_master_series_contract(spec)
         return existing if existing is not None else _new_master_series_contract(spec)
@@ -183,15 +224,56 @@ def ensure_master_series_contract(
     # same host-local/process-local lock across the second existence check, both branch creations,
     # and contract publication.  A concurrent loser therefore adopts the winner's completed edge;
     # it can never enter rollback and delete the winner's contract.
-    with exclusive_access(
-        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
+    with (
+        integration_authority_lock(spec.coordination_root, spec.repo_name),
+        exclusive_access(
+            _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
+        ),
     ):
+        _require_commanded_atomic_master(spec)
+        recovering = _recover_master_series_bootstrap(spec)
+        if recovering is not None:
+            return recovering
         existing = _existing_master_series_contract(spec)
         if existing is not None:
             return existing
         contract = _new_master_series_contract(spec)
+        integration_surfaces(contract)
         _publish_master_series_contract(spec, contract)
         return contract
+
+
+def _require_commanded_atomic_master(spec: MasterSeriesContractSpec) -> None:
+    topology = TaskDocumentTopology(spec.coordination_root)
+    try:
+        master_ref = topology.canonical_ref(spec.repo_name, spec.task_root / "task.json")
+        master = topology.resolve(master_ref)
+        if master.document.executionNature != "atomic":
+            raise RuntimeError(
+                f"series bootstrap requires executionNature='atomic', got "
+                f"{master.document.executionNature!r}"
+            )
+        sprint_ref = topology.parent(master_ref)
+        if sprint_ref is None:
+            default_branch = repository_default_branch(spec.code_repo)
+            if spec.protected_branch.removeprefix("refs/heads/") != default_branch:
+                raise RuntimeError(
+                    "standalone atomic series bootstrap must derive from the repository-default "
+                    "branch"
+                )
+            return
+        sprint = topology.resolve(sprint_ref)
+        commanded = topology.validate_execution_topology(sprint_ref)
+    except TaskDocumentRefError as exc:
+        raise RuntimeError(
+            f"cannot resolve atomic series bootstrap authority: {exc.status}: {exc}"
+        ) from exc
+    if not any(item.ref == master_ref for item in commanded):
+        raise RuntimeError("atomic series bootstrap task is not commanded by the sprint graph")
+    if sprint.document.integrationBranch != spec.protected_branch:
+        raise RuntimeError(
+            "atomic series bootstrap source does not match the sprint integrationBranch"
+        )
 
 
 def _master_series_bootstrap_lock_target(spec: MasterSeriesContractSpec) -> Path:
@@ -357,7 +439,7 @@ def _new_master_series_contract(spec: MasterSeriesContractSpec) -> WorktreeContr
             repo_path=spec.code_repo,
             source_branch=source_branch,
             work_branch=integration_branch,
-            base_commit=head_commit(spec.code_repo, source_branch),
+            base_commit=branch_commit(spec.code_repo, source_branch),
         ),
         memory=_memory_plan(
             external_memory,
@@ -393,42 +475,291 @@ def _validate_new_memory_series_branch(repo: Path | None, source: str, target: s
 def _publish_master_series_contract(
     spec: MasterSeriesContractSpec, contract: WorktreeContract
 ) -> None:
-    external_memory = spec.memory_root if contract.memory_mode == "external" else None
-    code_created = False
-    memory_created = False
+    record = _bootstrap_record(spec, contract)
+    path = _master_series_bootstrap_record_path(spec)
+    atomic_write_text(path, record.model_dump_json(indent=2) + "\n")
+    _finish_master_series_bootstrap(spec, record)
+
+
+def _master_series_bootstrap_record_path(spec: MasterSeriesContractSpec) -> Path:
+    return _master_series_bootstrap_lock_target(spec).with_suffix(".json")
+
+
+def _bootstrap_record(
+    spec: MasterSeriesContractSpec,
+    contract: WorktreeContract,
+) -> _SeriesBootstrapRecord:
+    code_identity = repository_identity(spec.code_repo)
+    if code_identity is None:
+        raise RuntimeError("cannot resolve code repository identity for series bootstrap")
+    memory_repo = spec.memory_root if contract.memory_mode == "external" else None
+    memory_identity = repository_identity(memory_repo)
+    if memory_repo is not None and memory_identity is None:
+        raise RuntimeError("cannot resolve memory repository identity for series bootstrap")
+    return _SeriesBootstrapRecord(
+        contractPath=contract.contract_path.resolve().as_posix(),
+        codeRepository=code_identity.as_posix(),
+        codeSourceBranch=contract.code_source_branch,
+        codeWorkBranch=contract.code_work_branch,
+        codeBaseCommit=contract.code_base_commit,
+        memoryRepository=(memory_identity.as_posix() if memory_identity is not None else ""),
+        memorySourceBranch=contract.memory_source_branch,
+        memoryWorkBranch=contract.memory_work_branch,
+        memoryBaseCommit=contract.memory_base_commit,
+    )
+
+
+def _recover_master_series_bootstrap(
+    spec: MasterSeriesContractSpec,
+) -> WorktreeContract | None:
+    path = _master_series_bootstrap_record_path(spec)
+    if not path.is_file():
+        return None
     try:
-        code_created = _create_series_branch(
-            spec.code_repo,
-            contract.code_work_branch,
-            contract.code_source_branch,
-            dry_run=False,
-        )
-        if external_memory is not None:
-            memory_created = _create_series_branch(
-                external_memory,
-                contract.memory_work_branch,
-                contract.memory_source_branch,
-                dry_run=False,
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        record = _SeriesBootstrapRecord.model_validate(payload)
+    except (json.JSONDecodeError, OSError, ValidationError) as exc:
+        raise RuntimeError(f"invalid master-series bootstrap record {path}: {exc}") from exc
+    contract = _contract_from_bootstrap_record(spec, record)
+    if contract.contract_path.is_file():
+        existing = load_contract(contract.contract_path)
+        if existing != contract:
+            raise RuntimeError(
+                "series bootstrap contract was published with different task or repository facts"
             )
+        path.unlink(missing_ok=True)
+        return existing
+    if _bootstrap_ref_creation_started(spec, record):
+        try:
+            _require_commanded_atomic_master(spec)
+            _require_current_bootstrap_sources(spec, record)
+        except RuntimeError:
+            _rollback_partial_bootstrap_refs(
+                spec,
+                record,
+                authority=_BOOTSTRAP_REF_AUTHORITY,
+            )
+            path.unlink(missing_ok=True)
+            return None
+    return _finish_master_series_bootstrap(spec, record)
+
+
+def _rollback_partial_bootstrap_refs(
+    spec: MasterSeriesContractSpec,
+    record: _SeriesBootstrapRecord,
+    *,
+    authority: object | None = None,
+) -> None:
+    if authority is not _BOOTSTRAP_REF_AUTHORITY:
+        raise RuntimeError("series ref rollback requires the journaled bootstrap capability")
+    targets = [(spec.code_repo, record.codeWorkBranch, record.codeBaseCommit)]
+    if record.memoryRepository:
+        if spec.memory_root is None:
+            raise RuntimeError("series bootstrap record requires the external memory repository")
+        targets.append((spec.memory_root, record.memoryWorkBranch, record.memoryBaseCommit))
+    for repository, branch, expected in targets:
+        if not branch_exists(repository, branch):
+            continue
+        result = run_git(
+            repository,
+            ["update-ref", "-d", f"refs/heads/{branch}", expected],
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"could not retire stale partial series ref {branch!r}: "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+
+
+def _finish_master_series_bootstrap(
+    spec: MasterSeriesContractSpec,
+    record: _SeriesBootstrapRecord,
+) -> WorktreeContract:
+    contract = _contract_from_bootstrap_record(spec, record)
+    if not _bootstrap_ref_creation_started(spec, record):
+        try:
+            _require_commanded_atomic_master(spec)
+            _require_current_bootstrap_sources(spec, record)
+        except RuntimeError:
+            _master_series_bootstrap_record_path(spec).unlink(missing_ok=True)
+            raise
+    _require_bootstrap_ref(
+        _BootstrapRef(
+            repository=spec.code_repo,
+            branch=record.codeWorkBranch,
+            commit=record.codeBaseCommit,
+            source_branch=record.codeSourceBranch,
+            source_commit=record.codeBaseCommit,
+        ),
+        authority=_BOOTSTRAP_REF_AUTHORITY,
+    )
+    if record.memoryRepository:
+        if spec.memory_root is None:
+            raise RuntimeError("series bootstrap record requires the external memory repository")
+        _require_bootstrap_ref(
+            _BootstrapRef(
+                repository=spec.memory_root,
+                branch=record.memoryWorkBranch,
+                commit=record.memoryBaseCommit,
+                source_branch=record.memorySourceBranch,
+                source_commit=record.memoryBaseCommit,
+            ),
+            authority=_BOOTSTRAP_REF_AUTHORITY,
+        )
+    if contract.contract_path.is_file():
+        existing = load_contract(contract.contract_path)
+        if existing != contract:
+            raise RuntimeError(
+                "series bootstrap contract was published with different task or repository facts"
+            )
+    else:
         write_contract(contract.contract_path, contract)
-    except Exception:
-        contract.contract_path.unlink(missing_ok=True)
-        if memory_created and external_memory is not None:
-            _remove_created_branch(external_memory, contract.memory_work_branch)
-        if code_created:
-            _remove_created_branch(spec.code_repo, contract.code_work_branch)
-        raise
+    _master_series_bootstrap_record_path(spec).unlink(missing_ok=True)
+    return contract
 
 
-def _declared_super_branch(context, task_root: Path) -> str:
-    """Resolve the master parent sprint's exact integration branch from task identity."""
+def _bootstrap_ref_creation_started(
+    spec: MasterSeriesContractSpec,
+    record: _SeriesBootstrapRecord,
+) -> bool:
+    if branch_exists(spec.code_repo, record.codeWorkBranch):
+        return True
+    return bool(
+        record.memoryRepository
+        and spec.memory_root is not None
+        and branch_exists(spec.memory_root, record.memoryWorkBranch)
+    )
+
+
+def _require_current_bootstrap_sources(
+    spec: MasterSeriesContractSpec,
+    record: _SeriesBootstrapRecord,
+) -> None:
+    code_source = branch_commit(spec.code_repo, record.codeSourceBranch)
+    if code_source != record.codeBaseCommit:
+        raise RuntimeError(
+            "series bootstrap code source moved before protected-ref creation; retry from "
+            "fresh task authority"
+        )
+    if record.memoryRepository:
+        if spec.memory_root is None:
+            raise RuntimeError("series bootstrap record requires the external memory repository")
+        memory_source = branch_commit(spec.memory_root, record.memorySourceBranch)
+        if memory_source != record.memoryBaseCommit:
+            raise RuntimeError(
+                "series bootstrap memory source moved before protected-ref creation; retry "
+                "from fresh task authority"
+            )
+
+
+def _require_bootstrap_ref(
+    ref: _BootstrapRef,
+    *,
+    authority: object | None = None,
+) -> None:
+    if authority is not _BOOTSTRAP_REF_AUTHORITY:
+        raise RuntimeError("series ref creation requires the journaled bootstrap capability")
+    if branch_exists(ref.repository, ref.branch):
+        found = branch_commit(ref.repository, ref.branch)
+        if found != ref.commit:
+            raise RuntimeError(
+                f"series bootstrap ref {ref.branch!r} is {found}, expected journaled {ref.commit}"
+            )
+        return
+    if not ref.source_branch or not ref.source_commit:
+        raise RuntimeError("series ref creation requires the exact journaled source authority")
+    result = run_git(
+        ref.repository,
+        ["update-ref", "--stdin"],
+        input_text="\n".join(
+            [
+                "start",
+                f"verify refs/heads/{ref.source_branch} {ref.source_commit}",
+                f"create refs/heads/{ref.branch} {ref.commit}",
+                "prepare",
+                "commit",
+                "",
+            ]
+        ),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"could not create journaled series ref {ref.branch!r}: "
+            f"{(result.stderr or result.stdout).strip()}"
+        )
+
+
+def _contract_from_bootstrap_record(
+    spec: MasterSeriesContractSpec,
+    record: _SeriesBootstrapRecord,
+) -> WorktreeContract:
+    code_identity = repository_identity(spec.code_repo)
+    memory_identity = repository_identity(spec.memory_root)
+    if code_identity is None or code_identity.as_posix() != record.codeRepository:
+        raise RuntimeError("series bootstrap code repository identity changed")
+    if record.contractPath != series_contract_path(spec.task_root).resolve().as_posix():
+        raise RuntimeError("series bootstrap contract path changed")
+    expected_work_branch = f"ar/{slugify(spec.task_name)}"
+    if (
+        record.codeSourceBranch != spec.protected_branch
+        or record.codeWorkBranch != expected_work_branch
+    ):
+        raise RuntimeError("series bootstrap branch authority changed after journal publication")
+    expected_memory_mode = memory_mode_for_repository(spec.code_repo, spec.memory_root)
+    expected_external = expected_memory_mode == "external"
+    if bool(record.memoryRepository) != expected_external:
+        raise RuntimeError("series bootstrap memory edge changed after journal publication")
+    if record.memoryRepository:
+        if memory_identity is None or memory_identity.as_posix() != record.memoryRepository:
+            raise RuntimeError("series bootstrap memory repository identity changed")
+        if (
+            record.memorySourceBranch != spec.protected_branch
+            or record.memoryWorkBranch != expected_work_branch
+        ):
+            raise RuntimeError(
+                "series bootstrap memory branch authority changed after journal publication"
+            )
+    elif record.memorySourceBranch or record.memoryWorkBranch or record.memoryBaseCommit:
+        raise RuntimeError("disabled-memory series bootstrap journal carries a memory edge")
+    return default_series_contract(
+        ContractTask(
+            name=spec.task_name,
+            repo_name=spec.repo_name,
+            coordination_root=spec.coordination_root,
+            workflow_kind=spec.workflow_kind,
+            memory_mode=expected_memory_mode,
+            parent_task_name=spec.parent_task_name,
+        ),
+        code=RepoBranchPlan(
+            repo_path=spec.code_repo,
+            source_branch=record.codeSourceBranch,
+            work_branch=record.codeWorkBranch,
+            base_commit=record.codeBaseCommit,
+        ),
+        memory=_memory_plan(
+            spec.memory_root if record.memoryRepository else None,
+            source_branch=record.memorySourceBranch,
+            work_branch=record.memoryWorkBranch,
+            base_commit=record.memoryBaseCommit,
+        ),
+        task_root=spec.task_root,
+    )
+
+
+def _declared_integration_source_branch(context, task_root: Path) -> str:
+    """Resolve a sprint super, or the PR-gated root for a standalone atomic master."""
 
     topology = TaskDocumentTopology(context.coordination_root)
     try:
         master_ref = topology.canonical_ref(context.code_repository_name, task_root / "task.json")
+        master = topology.resolve(master_ref)
         parent_ref = topology.parent(master_ref)
         if parent_ref is None:
-            raise RuntimeError("master task has no commanding sprint document")
+            if master.document.executionNature != "atomic":
+                raise RuntimeError(
+                    "only an explicit atomic master may exist outside a sprint graph"
+                )
+            return repository_default_branch(context.code_repository_root)
         parent = topology.resolve(parent_ref)
     except TaskDocumentRefError as exc:
         raise RuntimeError(f"cannot resolve the commanding sprint document: {exc}") from exc
@@ -452,10 +783,15 @@ def _parent_series_contract(
         args.task_name,
         parent_task=args.parent_task,
     )
-    if not series_contract_path(task_root).exists() and not _task_root_has_master_artifact(
-        task_root
-    ):
+    nature = _master_execution_nature(task_root)
+    if nature == "organizational":
+        if series_contract_path(task_root).exists():
+            raise RuntimeError("organizational master must not carry an atomic series contract")
         return None
+    if nature is None and not series_contract_path(task_root).exists():
+        return None
+    if nature != "atomic":
+        raise RuntimeError("series contract requires an explicit atomic master task")
     repo = context.code_repository_root
     integration_branch = f"ar/{slugify(args.task_name)}"
     leaf_branch = args.work_branch or f"ar/{args.worktree_name}"
@@ -469,7 +805,7 @@ def _parent_series_contract(
         if memory_mode == "external"
         else (repo / "ar-memory" if memory_mode == "internal" else None)
     )
-    return ensure_master_series_contract(
+    series = ensure_master_series_contract(
         MasterSeriesContractSpec(
             coordination_root=context.coordination_root,
             repo_name=context.code_repository_name,
@@ -479,10 +815,12 @@ def _parent_series_contract(
             task_name=args.task_name,
             parent_task_name=args.parent_task or "",
             workflow_kind=args.workflow_kind,
-            protected_branch=_declared_super_branch(context, task_root),
+            protected_branch=_declared_integration_source_branch(context, task_root),
         ),
         dry_run=args.dry_run,
     )
+    require_series_accepting_leaves(series, operation="atomic leaf start")
+    return series
 
 
 def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
@@ -545,6 +883,56 @@ def _start_restamp_preflight(
     return _start_restamp_block(restamp, dry_run=args.dry_run)
 
 
+def _start_source_branch(
+    context,
+    args: WorktreeArgs,
+    task_root: Path,
+    parent_series: WorktreeContract | None,
+    repo: Path,
+) -> str:
+    master_nature = _master_execution_nature(task_root)
+    expected_source = (
+        parent_series.code_work_branch
+        if parent_series is not None
+        else _declared_integration_source_branch(context, task_root)
+        if master_nature == "organizational"
+        else current_branch(repo)
+    )
+    if args.source_branch and args.source_branch.removeprefix("refs/heads/") != expected_source:
+        raise RuntimeError(
+            "leaf source branch does not match its task-derived organizational or atomic parent"
+        )
+    return expected_source
+
+
+def _start_code_base(
+    repo: Path,
+    source_branch: str,
+    args: WorktreeArgs,
+    parent_series: WorktreeContract | None,
+) -> str:
+    if args.dry_run and parent_series is not None and not branch_exists(repo, source_branch):
+        return parent_series.code_base_commit
+    return branch_commit(repo, source_branch)
+
+
+def _start_memory_base(
+    memory_repo: Path | None,
+    memory_source_branch: str,
+    args: WorktreeArgs,
+    parent_series: WorktreeContract | None,
+) -> str:
+    if (
+        args.dry_run
+        and parent_series is not None
+        and memory_repo is not None
+        and memory_source_branch
+        and not branch_exists(memory_repo, memory_source_branch)
+    ):
+        return parent_series.memory_base_commit
+    return memory_base_for_source(memory_repo, memory_source_branch)
+
+
 def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
     assert args.task_name is not None
     assert args.worktree_name is not None
@@ -560,27 +948,29 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
         return restamp_block
     repo = context.code_repository_root
     memory_mode = args.memory_mode or context.memory_mode
-    parent_series = _parent_series_contract(context, args, memory_mode)
-    source_branch = args.source_branch or (
-        parent_series.code_work_branch if parent_series is not None else current_branch(repo)
-    )
-    work_branch = args.work_branch or f"ar/{args.worktree_name}"
-    if args.dry_run and parent_series is not None and not branch_exists(repo, source_branch):
-        base_commit = parent_series.code_base_commit
-    else:
-        base_commit = head_commit(repo, source_branch)
     memory_repo = _start_memory_repo(context, memory_mode)
+    work_branch = args.work_branch or f"ar/{args.worktree_name}"
+    require_proposed_work_branches(
+        ProposedWorkBranches(
+            coordination_root=context.coordination_root,
+            repo_name=context.code_repository_name,
+            task_root=task_root,
+            code_repository=repo,
+            code_work_branch=work_branch,
+            memory_repository=memory_repo if memory_mode == "external" else None,
+            memory_work_branch=_external_memory_value(memory_mode, work_branch),
+        )
+    )
+    parent_series = _parent_series_contract(context, args, memory_mode)
+    source_branch = _start_source_branch(context, args, task_root, parent_series, repo)
+    base_commit = _start_code_base(repo, source_branch, args, parent_series)
     memory_source_branch = _external_memory_value(memory_mode, source_branch)
-    if (
-        args.dry_run
-        and parent_series is not None
-        and memory_repo is not None
-        and memory_source_branch
-        and not branch_exists(memory_repo, memory_source_branch)
-    ):
-        memory_base = parent_series.memory_base_commit
-    else:
-        memory_base = memory_base_for_source(memory_repo, memory_source_branch)
+    memory_base = _start_memory_base(
+        memory_repo,
+        memory_source_branch,
+        args,
+        parent_series,
+    )
     return default_contract(
         ContractTask(
             name=args.task_name,

@@ -6,12 +6,14 @@ from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees import closeout_recovery as closeout_recovery_journal
 from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from test_worktree_support import git, open_external_contract_fixture
 
 
@@ -52,6 +54,36 @@ def _patch_external_refresh(stack: ExitStack) -> None:
 
 
 class CloseoutRecoveryTests(unittest.TestCase):
+    def test_recovery_refuses_a_copy_that_claims_another_contract_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = open_external_contract_fixture(Path(tmp))
+            requested_path = Path(tmp) / "copied-contract.md"
+            write_contract(requested_path, contract)
+
+            with (
+                mock.patch.object(closeout_module, "report_operation_progress"),
+                mock.patch.object(
+                    closeout_module,
+                    "require_ordinary_worktree",
+                ) as authority,
+                mock.patch.object(
+                    closeout_module,
+                    "_recover_closeout_finalization",
+                ) as recover,
+                mock.patch.object(
+                    closeout_module,
+                    "certify_queue_candidate_closeout",
+                ) as certify,
+                self.assertRaisesRegex(RuntimeError, "contract path does not match"),
+            ):
+                closeout_module.closeout_result(
+                    WorktreeArgs(contract_path=requested_path, operation_key="a" * 64)
+                )
+
+            authority.assert_not_called()
+            recover.assert_not_called()
+            certify.assert_not_called()
+
     def test_code_commit_recovery_proves_head_and_candidate_tree(self) -> None:
         contract = SimpleNamespace(kind="leaf", code_worktree=Path("/code"))
         args = WorktreeArgs(
@@ -112,11 +144,18 @@ class CloseoutRecoveryTests(unittest.TestCase):
         )
 
     def test_series_closeout_reuses_the_clean_accepted_head_without_committing(self) -> None:
-        contract = SimpleNamespace(kind="series", code_worktree=Path("/code"))
+        contract = SimpleNamespace(
+            kind="series",
+            code_repo_path=Path("/repo"),
+            code_worktree=Path("/ambient"),
+            code_work_branch="ar/master",
+        )
         args = WorktreeArgs(candidate_tree="b" * 40)
         with (
             mock.patch.object(closeout_recovery_journal, "require_clean") as require_clean,
-            mock.patch.object(closeout_recovery_journal, "head_commit", return_value="a" * 40),
+            mock.patch.object(
+                closeout_recovery_journal, "branch_commit", return_value="a" * 40
+            ) as branch_commit,
             mock.patch.object(closeout_recovery_journal, "require_git", return_value="b" * 40),
             mock.patch.object(
                 closeout_recovery_journal, "commit_verified_staged"
@@ -131,9 +170,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
             )
 
         self.assertEqual(found, "a" * 40)
-        require_clean.assert_called_once_with(
-            contract.code_worktree, "recording series/master closeout code"
-        )
+        require_clean.assert_not_called()
+        branch_commit.assert_called_once_with(contract.code_repo_path, contract.code_work_branch)
         commit_verified.assert_not_called()
         commit_dirty.assert_not_called()
 
@@ -278,6 +316,60 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "not reachable"),
             ):
                 closeout_recovery_journal.prove_closeout_recovery_commits(contract, proven)
+
+    def test_series_recovery_requires_memory_content_reachable_from_ledger(self) -> None:
+        contract = cast(
+            "WorktreeContract",
+            SimpleNamespace(
+                kind="series",
+                memory_mode="external",
+                code_repo_path=Path("/code"),
+                code_work_branch="ar/master",
+                memory_repo_path=Path("/memory"),
+                memory_work_branch="ar/master",
+            ),
+        )
+        commits = LifecycleOperationRecoveryCommits(
+            codeCommit="a" * 40,
+            memoryContentCommit="b" * 40,
+            ledgerCommit="c" * 40,
+        )
+        with (
+            mock.patch.object(
+                closeout_recovery_journal,
+                "branch_commit",
+                side_effect=[commits.codeCommit, commits.ledgerCommit],
+            ),
+            mock.patch.object(closeout_recovery_journal, "require_git", return_value="ledger"),
+            mock.patch.object(closeout_recovery_journal, "parse_ledger_text", return_value=[]),
+            mock.patch.object(closeout_recovery_journal, "_require_recovered_mapping"),
+            mock.patch.object(closeout_recovery_journal, "is_ancestor", return_value=False),
+            self.assertRaisesRegex(RuntimeError, "not reachable"),
+        ):
+            closeout_recovery_journal.prove_closeout_recovery_commits(contract, commits)
+
+        with (
+            mock.patch.object(
+                closeout_recovery_journal,
+                "branch_commit",
+                side_effect=[commits.codeCommit, commits.ledgerCommit],
+            ),
+            mock.patch.object(closeout_recovery_journal, "require_git", return_value="ledger"),
+            mock.patch.object(closeout_recovery_journal, "parse_ledger_text", return_value=[]),
+            mock.patch.object(closeout_recovery_journal, "_require_recovered_mapping"),
+            mock.patch.object(closeout_recovery_journal, "is_ancestor", return_value=True),
+        ):
+            outcome = closeout_recovery_journal.prove_closeout_recovery_commits(
+                contract,
+                commits,
+            )
+        self.assertEqual(
+            outcome,
+            closeout_recovery_journal.MemoryCloseoutOutcome(
+                memory_commit=commits.memoryContentCommit,
+                ledger_commit=commits.ledgerCommit,
+            ),
+        )
 
     def test_completed_recovery_must_match_exactly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

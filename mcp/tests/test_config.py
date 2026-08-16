@@ -21,6 +21,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.providers.cgc.context.core import cgc_runner_image
 from agents_remember.providers.settings import lifecycle_settings_from_config
+from test_worktree_support import init_repo
 
 
 def write_json(path: Path, data: dict) -> None:
@@ -73,6 +74,39 @@ class LifecycleSettingsDerivationTests(unittest.TestCase):
 
 
 class McpConfigTests(unittest.TestCase):
+    def test_two_repository_ids_cannot_share_one_git_common_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            workspace = root / "workspace"
+            physical = workspace / "repo-a"
+            init_repo(physical, "main")
+            (workspace / "repo-b").symlink_to(physical, target_is_directory=True)
+            payload = settings_payload(root)
+            payload["repositories"] = {"repo-a": {}, "repo-b": {}}
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            with self.assertRaisesRegex(ConfigError, "share Git common-dir"):
+                load_config(path)
+
+    def test_external_memory_cannot_alias_another_configured_code_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            workspace = root / "workspace"
+            init_repo(workspace / "repo-a", "main")
+            other = workspace / "repo-b"
+            init_repo(other, "main")
+            memory = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
+            memory.parent.mkdir(parents=True)
+            memory.symlink_to(other, target_is_directory=True)
+            payload = settings_payload(root)
+            payload["repositories"] = {"repo-a": {}, "repo-b": {}}
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+
+            with self.assertRaisesRegex(ConfigError, "share Git common-dir"):
+                load_config(path)
+
     def test_config_path_must_be_absolute(self) -> None:
         with self.assertRaisesRegex(ConfigError, "absolute"):
             require_config_path(Path("relative-settings.json"))

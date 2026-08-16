@@ -446,7 +446,7 @@ export interface SourceLineageEdge {
   contractPath: string;
   descendantBranch: string;
   detail?: string;
-  relation: "super-to-master" | "master-to-leaf";
+  relation: "super-to-master" | "master-to-leaf" | "super-to-leaf";
   side: "code" | "memory";
   sourceBranch: string;
   state: "current" | "behind" | "diverged" | "unavailable";

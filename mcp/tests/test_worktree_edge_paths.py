@@ -3,8 +3,8 @@
 The happy path through start / sync / integrate / cleanup is covered elsewhere. What is
 not is the other side of each guard: the contract that refuses an unknown memory mode,
 the start that must hand a blocked preflight straight back instead of creating worktrees,
-the fast-forward recovery that has to rebuild the contract because the branch tips moved
-under it, the sync that aborts a conflicting memory merge, the retirement that has to
+the retired source fast-forward choice that must never rebuild or move protected refs,
+the sync that aborts a conflicting memory merge, the retirement that has to
 step off the branch it is about to delete.
 
 Each of those is the case where getting it wrong is expensive -- worktrees created on a
@@ -20,6 +20,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
@@ -29,7 +30,7 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.models.worktree import SourceLineageProjection
-from agents_remember.worktrees import leaf_refs
+from agents_remember.worktrees import integration_ref_transaction, leaf_refs
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import guidance as guidance_module
 from agents_remember.worktrees.modules import integrate as integrate_module
@@ -217,6 +218,10 @@ class RetireWorkBranchTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             repo.mkdir()
             init_repo(repo, "main")
+            authority = cleanup_module._terminal_mutation_authority(
+                contract_for(Path(tmp), code_repo=repo),
+                operation="worktree_cleanup",
+            )
 
             out = cleanup_module._retire_work_branch(
                 cleanup_module.RetiringBranch(
@@ -224,6 +229,7 @@ class RetireWorkBranchTests(unittest.TestCase):
                 ),
                 dry_run=False,
                 remote=False,
+                authority=authority,
             )
 
             self.assertEqual(
@@ -235,6 +241,10 @@ class RetireWorkBranchTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             repo.mkdir()
             init_repo(repo, "main")
+            authority = cleanup_module._terminal_mutation_authority(
+                contract_for(Path(tmp), code_repo=repo),
+                operation="worktree_cleanup",
+            )
 
             out = cleanup_module._retire_work_branch(
                 cleanup_module.RetiringBranch(
@@ -242,6 +252,7 @@ class RetireWorkBranchTests(unittest.TestCase):
                 ),
                 dry_run=False,
                 remote=False,
+                authority=authority,
             )
 
             self.assertEqual(out["reason"], "default-or-empty")
@@ -254,6 +265,10 @@ class RetireWorkBranchTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo, "main")
             run_git(repo, "checkout", "-b", "ar/edge-task")
+            authority = cleanup_module._terminal_mutation_authority(
+                contract_for(Path(tmp), code_repo=repo),
+                operation="worktree_cleanup",
+            )
 
             out = cleanup_module._retire_work_branch(
                 cleanup_module.RetiringBranch(
@@ -264,6 +279,7 @@ class RetireWorkBranchTests(unittest.TestCase):
                 ),
                 dry_run=False,
                 remote=False,
+                authority=authority,
             )
 
             self.assertIs(out["deleted"], True)
@@ -325,13 +341,7 @@ class StartPipelineTests(unittest.TestCase):
                 protected_branch="ar/master",
             )
 
-            with self.assertRaisesRegex(RuntimeError, "master task document is missing"):
-                start_contract_module.ensure_master_series_contract(spec)
-
-            task_root.mkdir(parents=True)
-            (task_root / "task.md").write_text("# Master\n\n**Type:** Master\n", encoding="utf-8")
-            git(repo, "checkout", "-b", "ar/master")
-            with self.assertRaisesRegex(RuntimeError, "protected branch equals"):
+            with self.assertRaisesRegex(RuntimeError, "task-document-not-found"):
                 start_contract_module.ensure_master_series_contract(spec)
 
 
@@ -424,6 +434,7 @@ class ExistingContractStartTests(unittest.TestCase):
             retried = WorktreeCommandResult(0, {"state": "provider-setup-retried"})
 
             with (
+                mock.patch.object(start_module, "require_ordinary_worktree"),
                 mock.patch.object(
                     start_module, "_retry_provider_setup_result", return_value=retried
                 ) as retry,
@@ -441,6 +452,7 @@ class ExistingContractStartTests(unittest.TestCase):
             contract = self._written_contract(Path(tmp))
 
             with (
+                mock.patch.object(start_module, "require_ordinary_worktree"),
                 mock.patch.object(start_module, "_retry_provider_setup_result") as retry,
                 mock.patch.object(start_module, "source_lineage_for_contract", return_value=None),
             ):
@@ -507,8 +519,11 @@ class ExistingContractStartTests(unittest.TestCase):
             contract = self._written_contract(Path(tmp))
             lineage = stale_source_lineage(contract.contract_path)
 
-            with mock.patch.object(
-                start_module, "source_lineage_for_contract", return_value=lineage
+            with (
+                mock.patch.object(start_module, "require_ordinary_worktree"),
+                mock.patch.object(
+                    start_module, "source_lineage_for_contract", return_value=lineage
+                ),
             ):
                 result = start_module._existing_contract_result(
                     Namespace(), contract, WorktreeArgs()
@@ -523,8 +538,11 @@ class ExistingContractStartTests(unittest.TestCase):
             contract = self._written_contract(Path(tmp))
             lineage = stale_source_lineage(contract.contract_path)
 
-            with mock.patch.object(
-                start_module, "source_lineage_for_contract", return_value=lineage
+            with (
+                mock.patch.object(start_module, "require_ordinary_worktree"),
+                mock.patch.object(
+                    start_module, "source_lineage_for_contract", return_value=lineage
+                ),
             ):
                 result = start_module.attach_result(
                     WorktreeArgs(contract_path=contract.contract_path)
@@ -561,44 +579,28 @@ class ExistingContractStartTests(unittest.TestCase):
 class PreflightedContractTests(unittest.TestCase):
     """``_preflighted_contract`` returns the contract the rest of start must use."""
 
-    def test_a_fast_forward_recovery_rebuilds_the_contract_before_continuing(self) -> None:
-        """The recovery moves the source branch, so the contract built before it records
-        the pre-recovery base commit. The rebuilt one is what start goes on with."""
+    def test_retired_fast_forward_choice_never_rebuilds_the_contract(self) -> None:
         original = cast(Any, object())
-        rebuilt = cast(Any, object())
         with (
             mock.patch.object(start_module, "parent_source_lineage", return_value=None),
             mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
-            mock.patch.object(start_module, "build_start_contract", return_value=rebuilt) as build,
+            mock.patch.object(start_module, "require_ordinary_worktree"),
+            mock.patch.object(start_module, "build_start_contract") as build,
             mock.patch.object(start_module, "_long_path_preflight", return_value=None),
         ):
             result = start_module._preflighted_contract(
                 Namespace(), original, WorktreeArgs(stale_base_choice="fast-forward")
             )
 
-        self.assertIs(result, rebuilt)
-        self.assertEqual(build.call_count, 1)
-
-    def test_a_rebuild_that_fails_is_returned_instead_of_the_contract(self) -> None:
-        failure = WorktreeCommandResult(2, {"state": "blocked", "summary": "rebuild failed"})
-        with (
-            mock.patch.object(start_module, "parent_source_lineage", return_value=None),
-            mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
-            mock.patch.object(start_module, "build_start_contract", return_value=failure),
-            mock.patch.object(start_module, "_long_path_preflight") as long_path,
-        ):
-            result = start_module._preflighted_contract(
-                Namespace(), cast(Any, object()), WorktreeArgs(stale_base_choice="fast-forward")
-            )
-
-        self.assertIs(result, failure)
-        long_path.assert_not_called()
+        self.assertIs(result, original)
+        build.assert_not_called()
 
     def test_without_a_fast_forward_choice_the_contract_is_not_rebuilt(self) -> None:
         original = cast(Any, object())
         with (
             mock.patch.object(start_module, "parent_source_lineage", return_value=None),
             mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
+            mock.patch.object(start_module, "require_ordinary_worktree"),
             mock.patch.object(start_module, "build_start_contract") as build,
             mock.patch.object(start_module, "_long_path_preflight", return_value=None),
         ):
@@ -606,22 +608,6 @@ class PreflightedContractTests(unittest.TestCase):
 
         self.assertIs(result, original)
         build.assert_not_called()
-
-    def test_the_long_path_preflight_sees_the_rebuilt_contract(self) -> None:
-        """A rebuilt contract can point at a different worktree path, so the path-budget
-        check must run against the contract start will actually use."""
-        rebuilt = cast(Any, object())
-        with (
-            mock.patch.object(start_module, "parent_source_lineage", return_value=None),
-            mock.patch.object(start_module, "_stale_base_preflight", return_value=None),
-            mock.patch.object(start_module, "build_start_contract", return_value=rebuilt),
-            mock.patch.object(start_module, "_long_path_preflight", return_value=None) as long_path,
-        ):
-            start_module._preflighted_contract(
-                Namespace(), cast(Any, object()), WorktreeArgs(stale_base_choice="fast-forward")
-            )
-
-        self.assertIs(long_path.call_args.args[0], rebuilt)
 
 
 class MemorySyncBlockTests(unittest.TestCase):
@@ -810,8 +796,8 @@ class OverviewRevisionTests(unittest.TestCase):
 class IntegrationRefusalTests(unittest.TestCase):
     """Integration refuses before it moves any branch."""
 
-    def test_integration_refuses_once_the_master_source_moves_past_the_closeout(self) -> None:
-        """A leaf cannot integrate after its master source advances; it must sync first."""
+    def test_integration_refuses_without_a_plane_owned_operation(self) -> None:
+        """A direct caller cannot reach source-lineage or ref movement without authority."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
@@ -819,18 +805,20 @@ class IntegrationRefusalTests(unittest.TestCase):
             commit(contract.code_repo_path, "parallel.txt", "parallel\n", "parallel work")
             moved_source = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
 
-            result = integrate_module.integrate_result(
-                WorktreeArgs(
-                    contract_path=contract.contract_path,
-                    approved=True,
-                    strategy="ff-only",
-                    dry_run=False,
+            with (
+                mock.patch.object(integrate_module, "require_ordinary_worktree"),
+                mock.patch.object(integrate_module, "integration_targets"),
+                self.assertRaisesRegex(RuntimeError, "plane-owned journaled integration operation"),
+            ):
+                integrate_module.integrate_result(
+                    WorktreeArgs(
+                        contract_path=contract.contract_path,
+                        approved=True,
+                        strategy="ff-only",
+                        dry_run=False,
+                    )
                 )
-            )
 
-            self.assertEqual(result.returncode, 2)
-            self.assertEqual(result.payload["state"], "source-lineage-stale")
-            self.assertEqual(result.payload["nextOperation"], "sync_source_lineage")
             self.assertNotEqual(moved_source, source_before)
             self.assertEqual(
                 git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
@@ -857,13 +845,34 @@ class IntegrationRefusalTests(unittest.TestCase):
                 contract.memory_repo_path, "rev-parse", contract.memory_source_branch
             )
 
-            with self.assertRaises(RuntimeError) as raised:
-                integrate_module._merge_integrated_commits(
+            with (
+                mock.patch.object(
+                    integration_ref_transaction,
+                    "require_authorized_integration_commits",
+                ),
+                mock.patch.object(
+                    integration_ref_transaction,
+                    "integration_targets",
+                    return_value=(
+                        SimpleNamespace(side="code", branch=contract.code_source_branch),
+                        SimpleNamespace(side="memory", branch=contract.memory_source_branch),
+                    ),
+                ),
+                self.assertRaises(RuntimeError) as raised,
+            ):
+                integration_ref_transaction.prepare_integration_ref_move(
                     contract,
                     integrate_module.IntegratedCommits(
                         code=contract.code_commit,
                         memory_content=contract.memory_content_commit,
                         ledger=contract.ledger_commit,
+                    ),
+                    WorktreeArgs(),
+                    integrate_module.IntegrationSources(
+                        current_code_source=code_source_before,
+                        current_memory_source=memory_source_before,
+                        code_replay_required=False,
+                        memory_replay_required=True,
                     ),
                 )
 

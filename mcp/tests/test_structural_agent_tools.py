@@ -39,6 +39,7 @@ from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_c
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.modules import start_contract as start_contract_mod
+from agents_remember.worktrees.modules.git import branch_commit, branch_exists
 from agents_remember.worktrees.modules.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
@@ -60,6 +61,7 @@ def _config(root: Path) -> McpRuntimeConfig:
         coordination_root=root,
         workspace_root=root,
         transcript_root=root / "logs" / "mcp",
+        repositories={"repo": RepositoryScope("repo", root / "workspace" / "repo")},
     )
 
 
@@ -88,6 +90,12 @@ def _write_topology(root: Path) -> tuple[TaskDocumentRef, TaskDocumentRef, TaskD
             kind="master",
             orchestrates=["master"],
             integrationBranch="ar/super",
+            executionGraph={
+                "nodes": [
+                    {"repository": "repo", "path": "master/task.json"},
+                ],
+                "edges": [],
+            },
         ),
     )
     write_task_doc(
@@ -97,6 +105,7 @@ def _write_topology(root: Path) -> tuple[TaskDocumentRef, TaskDocumentRef, TaskD
             slug="master",
             title="Master",
             kind="master",
+            executionNature="atomic",
             subTasks=[
                 {
                     "number": "leaf-1",
@@ -264,6 +273,21 @@ class StructuralAgentToolTests(unittest.TestCase):
                 ["git", "commit", "-m", "super"], cwd=repo, check=True, capture_output=True
             )
             subprocess.run(["git", "checkout", "main"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "symbolic-ref",
+                    "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/main",
+                ],
+                cwd=repo,
+                check=True,
+            )
         self.config = McpRuntimeConfig(
             config_path=self.root / "settings.json",
             coordination_root=self.root,
@@ -374,6 +398,47 @@ class StructuralAgentToolTests(unittest.TestCase):
         self.assertEqual(replacement["status"], "dispatched")
         replacement_spawn.assert_called_once()
 
+    def test_organizational_manager_dispatch_does_not_bootstrap_a_series(self) -> None:
+        master_path = self.root / "tasks" / "repo" / "master" / "task.json"
+        master = read_task_doc(master_path)
+        write_task_doc(
+            master_path.parent,
+            master.model_copy(update={"executionNature": "organizational"}),
+        )
+        self.catalog.upsert(_seat("orchestrator", self.sprint, "orchestrator"))
+        with (
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
+                return_value={"status": "spawned-unbriefed", "session": "manager-private"},
+            ) as spawn,
+            mock.patch(
+                "agents_remember.application.structural.agent_tools._post_initial_dispatch_brief",
+                return_value={
+                    "ok": True,
+                    "deliveryState": "delivered",
+                    "adapterDeliveryState": "accepted",
+                },
+            ),
+        ):
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.master,
+                    role="manager",
+                    brief="Manage the organizational master.",
+                ),
+                StructuralAgentRuntime(
+                    environ={
+                        "AR_HOSTED_SESSION_ID": "orchestrator",
+                        "AR_SPAWN_ROLE": "orchestrator",
+                    }
+                ),
+            )
+
+        self.assertEqual(result["status"], "dispatched")
+        spawn.assert_called_once()
+        self.assertFalse(series_contract_path(self.root / "tasks" / "repo" / "master").exists())
+
     def _series_bootstrap_repositories(self) -> tuple[Path, Path]:
         code_repo = self.root / "workspace" / "repo"
         memory_repo = self.root / "memory-repos" / "ar-repo"
@@ -389,6 +454,22 @@ class StructuralAgentToolTests(unittest.TestCase):
             (repo / "base.txt").write_text("base\n", encoding="utf-8")
             subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True)
+            subprocess.run(["git", "branch", "main", "HEAD"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "symbolic-ref",
+                    "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/main",
+                ],
+                cwd=repo,
+                check=True,
+            )
         return code_repo, memory_repo
 
     def _series_bootstrap_spec(
@@ -405,7 +486,7 @@ class StructuralAgentToolTests(unittest.TestCase):
             protected_branch="ar/super",
         )
 
-    def test_series_bootstrap_rolls_back_both_branches_when_contract_publish_fails(self) -> None:
+    def test_series_bootstrap_recovers_both_branches_when_contract_publish_fails(self) -> None:
         code_repo, memory_repo = self._series_bootstrap_repositories()
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
         contract_path = series_contract_path(spec.task_root)
@@ -426,25 +507,35 @@ class StructuralAgentToolTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             ).stdout.splitlines()
-            self.assertNotIn("ar/master", branches)
+            self.assertIn("ar/master", branches)
         self.assertFalse(contract_path.exists())
+        self.assertTrue(start_contract_mod._master_series_bootstrap_record_path(spec).is_file())
 
         contract = ensure_master_series_contract(spec)
         self.assertEqual(contract.code_source_branch, "ar/super")
         self.assertTrue(contract_path.is_file())
+        self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
 
-    def test_series_bootstrap_rolls_back_code_when_memory_branch_create_fails(self) -> None:
+    def test_series_bootstrap_recovers_code_when_memory_branch_create_fails(self) -> None:
         code_repo, memory_repo = self._series_bootstrap_repositories()
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
-        create = start_contract_mod._create_series_branch
+        require_ref = start_contract_mod._require_bootstrap_ref
 
-        def fail_memory(repo: Path, branch: str, source: str, *, dry_run: bool) -> bool:
-            if repo == memory_repo:
+        def fail_memory(
+            ref,
+            *,
+            authority: object | None = None,
+        ) -> None:
+            if ref.repository == memory_repo:
                 raise OSError("memory branch red")
-            return create(repo, branch, source, dry_run=dry_run)
+            require_ref(ref, authority=authority)
 
         with (
-            mock.patch.object(start_contract_mod, "_create_series_branch", side_effect=fail_memory),
+            mock.patch.object(
+                start_contract_mod,
+                "_require_bootstrap_ref",
+                side_effect=fail_memory,
+            ),
             self.assertRaisesRegex(OSError, "memory branch red"),
         ):
             ensure_master_series_contract(spec)
@@ -456,23 +547,62 @@ class StructuralAgentToolTests(unittest.TestCase):
             text=True,
             capture_output=True,
         ).stdout.splitlines()
-        self.assertNotIn("ar/master", branches)
+        self.assertIn("ar/master", branches)
+        self.assertFalse(branch_exists(memory_repo, "ar/master"))
+        self.assertTrue(start_contract_mod._master_series_bootstrap_record_path(spec).is_file())
+
+        contract = ensure_master_series_contract(spec)
+        self.assertTrue(branch_exists(memory_repo, "ar/master"))
+        self.assertTrue(contract.contract_path.is_file())
+        self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
+
+    def test_partial_series_bootstrap_restarts_from_fresh_paired_source_tips(self) -> None:
+        code_repo, memory_repo = self._series_bootstrap_repositories()
+        spec = self._series_bootstrap_spec(code_repo, memory_repo)
+        require_ref = start_contract_mod._require_bootstrap_ref
+        old_code = branch_commit(code_repo, "ar/super")
+
+        def fail_memory(ref, *, authority: object | None = None) -> None:
+            if ref.repository == memory_repo:
+                raise OSError("memory branch red")
+            require_ref(ref, authority=authority)
+
+        with (
+            mock.patch.object(
+                start_contract_mod,
+                "_require_bootstrap_ref",
+                side_effect=fail_memory,
+            ),
+            self.assertRaisesRegex(OSError, "memory branch red"),
+        ):
+            ensure_master_series_contract(spec)
+
+        self.assertEqual(branch_commit(code_repo, "ar/master"), old_code)
+        for repository, filename in (
+            (code_repo, "fresh-code.txt"),
+            (memory_repo, "fresh-memory.txt"),
+        ):
+            (repository / filename).write_text("fresh\n", encoding="utf-8")
+            subprocess.run(["git", "add", filename], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"Advance {filename}"],
+                cwd=repository,
+                check=True,
+            )
+        fresh_code = branch_commit(code_repo, "ar/super")
+        fresh_memory = branch_commit(memory_repo, "ar/super")
+
+        contract = ensure_master_series_contract(spec)
+
+        self.assertEqual(branch_commit(code_repo, "ar/master"), fresh_code)
+        self.assertEqual(branch_commit(memory_repo, "ar/master"), fresh_memory)
+        self.assertEqual(contract.code_base_commit, fresh_code)
+        self.assertEqual(contract.memory_base_commit, fresh_memory)
+        self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
 
     def test_series_branch_creation_and_preflight_guards_fail_closed(self) -> None:
         code_repo, memory_repo = self._series_bootstrap_repositories()
-        with self.assertRaisesRegex(RuntimeError, "source branch does not exist"):
-            start_contract_mod._create_series_branch(code_repo, "ar/new", "missing", dry_run=False)
-
         subprocess.run(["git", "branch", "ar/orphan", "ar/super"], cwd=code_repo, check=True)
-        with self.assertRaisesRegex(RuntimeError, "without its task-bound contract"):
-            start_contract_mod._create_series_branch(
-                code_repo, "ar/orphan", "ar/super", dry_run=False
-            )
-        self.assertFalse(
-            start_contract_mod._create_series_branch(
-                code_repo, "ar/preview", "ar/super", dry_run=True
-            )
-        )
 
         with self.assertRaisesRegex(RuntimeError, "source branch does not exist"):
             start_contract_mod._validate_new_code_series_branch(code_repo, "missing", "ar/new")
@@ -485,29 +615,55 @@ class StructuralAgentToolTests(unittest.TestCase):
             start_contract_mod._validate_new_memory_series_branch(
                 memory_repo, "ar/super", "ar/orphan"
             )
+        wrong = "f" * 40
+        with self.assertRaisesRegex(RuntimeError, "journaled bootstrap capability"):
+            start_contract_mod._require_bootstrap_ref(
+                start_contract_mod._BootstrapRef(
+                    repository=code_repo,
+                    branch="ar/orphan",
+                    commit=wrong,
+                    source_branch="ar/super",
+                    source_commit=wrong,
+                )
+            )
 
-    def test_series_publish_failure_before_branch_creation_needs_no_rollback(self) -> None:
+    def test_series_bootstrap_dry_run_does_not_create_refs_or_journal(self) -> None:
         code_repo, memory_repo = self._series_bootstrap_repositories()
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
-        contract = start_contract_mod._new_master_series_contract(spec)
+
+        contract = ensure_master_series_contract(spec, dry_run=True)
+
+        self.assertEqual(contract.code_work_branch, "ar/master")
+        self.assertFalse(branch_exists(code_repo, "ar/master"))
+        self.assertFalse(branch_exists(memory_repo, "ar/master"))
+        self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
+
+    def test_series_publish_failure_before_branch_creation_is_retryable(self) -> None:
+        code_repo, memory_repo = self._series_bootstrap_repositories()
+        spec = self._series_bootstrap_spec(code_repo, memory_repo)
         with (
             mock.patch.object(
                 start_contract_mod,
-                "_create_series_branch",
+                "_require_bootstrap_ref",
                 side_effect=OSError("code branch red"),
             ),
-            mock.patch.object(start_contract_mod, "_remove_created_branch") as remove_branch,
             self.assertRaisesRegex(OSError, "code branch red"),
         ):
-            start_contract_mod._publish_master_series_contract(spec, contract)
-        remove_branch.assert_not_called()
+            ensure_master_series_contract(spec)
+        self.assertFalse(branch_exists(code_repo, "ar/master"))
+        self.assertFalse(branch_exists(memory_repo, "ar/master"))
+        self.assertTrue(start_contract_mod._master_series_bootstrap_record_path(spec).is_file())
+
+        contract = ensure_master_series_contract(spec)
+        self.assertTrue(contract.contract_path.is_file())
+        self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
 
     def test_existing_series_contract_must_match_the_declared_super(self) -> None:
         code_repo, memory_repo = self._series_bootstrap_repositories()
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
         contract = ensure_master_series_contract(spec)
 
-        with self.assertRaisesRegex(RuntimeError, "does not match the commanding sprint"):
+        with self.assertRaisesRegex(RuntimeError, "does not match the sprint integrationBranch"):
             ensure_master_series_contract(replace(spec, protected_branch="main"))
 
         start_contract_mod.write_contract(
@@ -651,10 +807,14 @@ class StructuralAgentToolTests(unittest.TestCase):
             ).stdout.splitlines()
             self.assertEqual(branches.count("ar/master"), 1)
 
-    def test_declared_super_resolution_refuses_incomplete_task_topology(self) -> None:
-        context = SimpleNamespace(coordination_root=self.root, code_repository_name="repo")
+    def test_declared_integration_source_refuses_incomplete_task_topology(self) -> None:
+        context = SimpleNamespace(
+            coordination_root=self.root,
+            code_repository_name="repo",
+            code_repository_root=self.root,
+        )
         with self.assertRaisesRegex(RuntimeError, "cannot resolve the commanding sprint"):
-            start_contract_mod._declared_super_branch(
+            start_contract_mod._declared_integration_source_branch(
                 context, self.root / "tasks" / "repo" / "missing-master"
             )
 
@@ -666,11 +826,11 @@ class StructuralAgentToolTests(unittest.TestCase):
                 slug="task",
                 title="Orphan Master",
                 kind="master",
-                orchestrates=["leaf-that-does-not-exist"],
+                executionNature="organizational",
             ),
         )
-        with self.assertRaisesRegex(RuntimeError, "no commanding sprint"):
-            start_contract_mod._declared_super_branch(context, orphan_root)
+        with self.assertRaisesRegex(RuntimeError, "cannot resolve the commanding sprint"):
+            start_contract_mod._declared_integration_source_branch(context, orphan_root)
 
         write_task_doc(
             self.root / "tasks" / "repo" / "blank-sprint",
@@ -693,7 +853,7 @@ class StructuralAgentToolTests(unittest.TestCase):
             ),
         )
         with self.assertRaisesRegex(RuntimeError, "must declare integrationBranch"):
-            start_contract_mod._declared_super_branch(context, blank_master_root)
+            start_contract_mod._declared_integration_source_branch(context, blank_master_root)
 
     def test_manager_dispatch_names_the_missing_sprint_field_recovery_before_spawn(self) -> None:
         sprint_root = self.root / "tasks" / "repo" / "sprint"

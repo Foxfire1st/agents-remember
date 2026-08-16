@@ -393,7 +393,7 @@ def default_contract(
         lifecycle_id=leaf.lifecycle_id,
         leaf_id=persisted_leaf,
         parent_task_name=task.parent_task_name,
-        parent_contract_path=task.parent_contract_path or series_contract_path(task_root),
+        parent_contract_path=task.parent_contract_path,
     )
 
 

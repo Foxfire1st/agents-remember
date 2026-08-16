@@ -40,12 +40,12 @@ NextTool = Literal[
     "worktree_status",
     "worktree_closeout_apply",
     "worktree_integrate",
-    "memory_carryover_apply",
+    "memory_carryover_plan",
     "worktree_cleanup",
 ]
 SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
-SourceLineageRelation = Literal["super-to-master", "master-to-leaf"]
+SourceLineageRelation = Literal["super-to-master", "master-to-leaf", "super-to-leaf"]
 SourceLineageSide = Literal["code", "memory"]
 
 

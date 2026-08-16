@@ -32,6 +32,8 @@ from agents_remember.application.provider_tools import (
 )
 from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.errors import AuthorityError
+from agents_remember.kernel import memory_init as memory_init_module
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
@@ -510,6 +512,13 @@ class McpToolTests(unittest.TestCase):
                     return_value={"state": "would-carryover"},
                 ),
                 patch(
+                    "agents_remember.application.memory_tools._carryover_request",
+                    return_value=object(),
+                ),
+                patch(
+                    "agents_remember.application.memory_tools.carryover._require_carryover_authority"
+                ),
+                patch(
                     "agents_remember.application.benchmark_tools.benchmark_runner.prepare_benchmarks",
                     return_value={
                         "ok": True,
@@ -524,6 +533,10 @@ class McpToolTests(unittest.TestCase):
                         config,
                         CarryoverSelection(
                             repo_id="agents-remember",
+                            contract_path=(
+                                root
+                                / "ar-coordination/tasks/agents-remember/carryover/series-contract.md"
+                            ).as_posix(),
                             source_memory=(
                                 root / "ar-coordination" / "memory-repos" / "branch-memory"
                             ).as_posix(),
@@ -643,8 +656,104 @@ class McpToolTests(unittest.TestCase):
                 payload["memoryRoot"],
                 (root / "ar-coordination" / "memory-repos" / "ar-agents-remember").as_posix(),
             )
+            memory_root = Path(payload["memoryRoot"])
+            configured = subprocess.run(
+                ["git", "config", "--get", "agents-remember.defaultBranch"],
+                cwd=memory_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            symbolic = subprocess.run(
+                ["git", "symbolic-ref", "--quiet", "HEAD"],
+                cwd=memory_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual((configured, symbolic), ("main", "refs/heads/main"))
 
-    def test_route_index_refresh_payload_applies_by_default(self) -> None:
+    def test_memory_init_repairs_authority_after_config_write_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+            real_run_git = memory_init_module.run_git
+
+            def fail_authority(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+                if args == [
+                    "config",
+                    "--local",
+                    "agents-remember.defaultBranch",
+                    "main",
+                ]:
+                    return subprocess.CompletedProcess(args, 1, "", "config locked")
+                return real_run_git(repo, args)
+
+            with patch.object(memory_init_module, "run_git", side_effect=fail_authority):
+                failed = memory_init_payload(config, "agents-remember")
+            self.assertFalse(failed["ok"])
+            memory_root = Path(str(failed["memoryRoot"]))
+            self.assertTrue((memory_root / ".git").exists())
+
+            repaired = memory_init_payload(config, "agents-remember")
+
+            self.assertTrue(repaired["ok"])
+            self.assertTrue(repaired["git"]["repairAttempted"])
+            configured = subprocess.run(
+                ["git", "config", "--get", "agents-remember.defaultBranch"],
+                cwd=memory_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(configured, "main")
+
+    def test_memory_init_refuses_an_existing_unborn_nondefault_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+            memory_root = root / "ar-coordination" / "memory-repos" / "ar-agents-remember"
+            memory_root.mkdir(parents=True)
+            (memory_root / "user-owned.txt").write_text("preserve me\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "init", "-b", "trunk"],
+                cwd=memory_root,
+                check=True,
+                capture_output=True,
+            )
+
+            def user_tree() -> dict[str, bytes | None]:
+                return {
+                    item.relative_to(memory_root).as_posix(): (
+                        None if item.is_dir() else item.read_bytes()
+                    )
+                    for item in memory_root.rglob("*")
+                    if ".git" not in item.relative_to(memory_root).parts
+                }
+
+            before = user_tree()
+
+            payload = memory_init_payload(config, "agents-remember")
+
+            self.assertFalse(payload["ok"])
+            self.assertIn("refs/heads/main", str(payload["git"]["stderr"]))
+            self.assertEqual(payload["createdDirs"], [])
+            self.assertEqual(payload["createdFiles"], [])
+            self.assertEqual(user_tree(), before)
+            configured = subprocess.run(
+                ["git", "config", "--get", "agents-remember.defaultBranch"],
+                cwd=memory_root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(configured.returncode, 0)
+
+    def test_route_index_refresh_payload_refuses_unscoped_apply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
@@ -652,12 +761,8 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = route_index_refresh_payload(config, "agents-remember")
-
-            self.assertTrue(payload["ok"])
-            self.assertEqual(payload["operation"], "route_index_refresh")
-            self.assertFalse(payload["dryRun"])
-            self.assertEqual(payload["routes"], 0)
+            with self.assertRaisesRegex(AuthorityError, "requires a leaf contract_path"):
+                route_index_refresh_payload(config, "agents-remember")
 
     def test_typed_cgc_payloads_build_fixed_native_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

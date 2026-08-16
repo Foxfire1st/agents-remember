@@ -14,6 +14,8 @@ from agents_remember.kernel.coordination_context.models import CoordinationReque
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.memory_ledger import parse_ledger_text
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.modules import closeout as closeout_module
+from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
@@ -265,7 +267,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             self.assertEqual(payload["changed_code_paths"], {"count": 1, "sample": ["second.txt"]})
             self.assertEqual(payload["sidecar_body_gate"]["stale"], {"count": 0, "sample": []})
 
-    def test_recloseout_after_integration_reopens_and_reintegrates(self) -> None:
+    def test_recloseout_requires_plane_owned_reintegration(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = integrated_external_contract_fixture(root)
@@ -281,7 +283,10 @@ class WorktreeSupport2(WorktreeSupportTests):
             write_passing_route_review(contract)
 
             output = io.StringIO()
-            with redirect_stdout(output):
+            with (
+                mock.patch.object(closeout_module, "require_ordinary_worktree"),
+                redirect_stdout(output),
+            ):
                 self.assertEqual(
                     worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
                 )
@@ -289,7 +294,10 @@ class WorktreeSupport2(WorktreeSupportTests):
             self.assertTrue(preview["integration_reopen"]["would_reopen"])
 
             output = io.StringIO()
-            with redirect_stdout(output):
+            with (
+                mock.patch.object(closeout_module, "require_ordinary_worktree"),
+                redirect_stdout(output),
+            ):
                 self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
             closeout_payload = json.loads(output.getvalue())
             self.assertTrue(closeout_payload["integration_reopen"]["reopened"])
@@ -304,23 +312,24 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
 
             output = io.StringIO()
-            with redirect_stdout(output):
+            with (
+                mock.patch.object(integrate_module, "require_ordinary_worktree"),
+                mock.patch.object(integrate_module, "integration_targets", return_value=()),
+                redirect_stdout(output),
+            ):
                 self.assertEqual(
                     worktree_manager.command_integrate(integrate_args(reopened, dry_run=True)), 0
                 )
             self.assertEqual(json.loads(output.getvalue())["state"], "would-integrate")
 
-            with redirect_stdout(io.StringIO()):
-                self.assertEqual(worktree_manager.command_integrate(integrate_args(reopened)), 0)
-            reintegrated = load_contract(contract.contract_path)
-            self.assertEqual(reintegrated.integration_status, "completed")
+            with (
+                mock.patch.object(integrate_module, "require_ordinary_worktree"),
+                mock.patch.object(integrate_module, "integration_targets"),
+                self.assertRaisesRegex(RuntimeError, "plane-owned journaled integration operation"),
+            ):
+                worktree_manager.command_integrate(integrate_args(reopened))
             self.assertEqual(
-                git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
-                reintegrated.code_commit,
-            )
-            self.assertEqual(
-                git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-                reintegrated.ledger_commit,
+                load_contract(contract.contract_path).integration_status, "not-started"
             )
 
     def test_noop_recloseout_after_integration_keeps_completed_state(self) -> None:
@@ -612,7 +621,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             self.assertEqual(payload.get("nextTool"), "worktree_integrate")
             self.assertNotIn("next_command", payload)
 
-    def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
+    def test_direct_integrate_cannot_fast_forward_code_or_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
@@ -625,51 +634,29 @@ class WorktreeSupport2(WorktreeSupportTests):
                 ledger_commit_message="",
                 dry_run=False,
             )
-            with redirect_stdout(io.StringIO()):
-                self.assertEqual(worktree_manager.command_integrate(args), 0)
+            code_source = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
+            memory_source = git(
+                contract.memory_repo_path, "rev-parse", contract.memory_source_branch
+            )
+            with (
+                mock.patch.object(integrate_module, "require_ordinary_worktree"),
+                mock.patch.object(integrate_module, "integration_targets"),
+                self.assertRaisesRegex(RuntimeError, "plane-owned journaled integration operation"),
+            ):
+                worktree_manager.command_integrate(args)
             self.assertEqual(
                 git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
-                contract.code_commit,
+                code_source,
             )
             self.assertEqual(
                 git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-                contract.ledger_commit,
+                memory_source,
             )
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.integration_status, "completed")
-            self.assertEqual(loaded.integrated_code_commit, contract.code_commit)
+            self.assertEqual(loaded.integration_status, "not-started")
             self.assertEqual(
-                loaded.integrated_memory_content_commit, contract.memory_content_commit
+                worktree_manager.status_payload(loaded)["phase"], "integration-pending"
             )
-            self.assertEqual(loaded.integrated_ledger_commit, contract.ledger_commit)
-            self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "cleanup-pending")
-
-            cleanup_args = Namespace(
-                contract_path=contract.contract_path, approved=True, dry_run=False
-            )
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_cleanup(cleanup_args), 0)
-            cleanup_payload = json.loads(output.getvalue())
-            self.assertEqual(cleanup_payload["state"], "cleanup-completed")
-            self.assertEqual(cleanup_payload["nextOperation"], "done")
-            self.assertNotIn("next_command", cleanup_payload)
-            self.assertFalse(contract.code_worktree.exists())
-            self.assertFalse(contract.memory_worktree.exists())
-            self.assertFalse(
-                git(contract.code_repo_path, "branch", "--list", contract.code_work_branch)
-            )
-            self.assertFalse(
-                git(contract.memory_repo_path, "branch", "--list", contract.memory_work_branch)
-            )
-            loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.cleanup, "completed")
-            self.assertEqual(worktree_manager.status_payload(loaded)["phase"], "cleanup-completed")
-
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_cleanup(cleanup_args), 0)
-            self.assertEqual(json.loads(output.getvalue())["state"], "already-clean")
 
     def test_cleanup_blocks_before_integration_completed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -679,7 +666,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             with self.assertRaises(RuntimeError):
                 worktree_manager.command_cleanup(args)
 
-    def test_integrate_refuses_parallel_non_overlapping_source_changes_until_sync(self) -> None:
+    def test_direct_integrate_cannot_classify_parallel_non_overlapping_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(root)
@@ -706,14 +693,14 @@ class WorktreeSupport2(WorktreeSupportTests):
                 ledger_commit_message="Replay integration ledger",
                 dry_run=False,
             )
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_integrate(args), 2)
-            payload = json.loads(output.getvalue())
-            self.assertEqual(payload["state"], "source-lineage-stale")
-            self.assertEqual(payload["nextOperation"], "sync_source_lineage")
+            with (
+                mock.patch.object(integrate_module, "require_ordinary_worktree"),
+                mock.patch.object(integrate_module, "integration_targets"),
+                self.assertRaisesRegex(RuntimeError, "plane-owned journaled integration operation"),
+            ):
+                worktree_manager.command_integrate(args)
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.integration_status, "blocked")
+            self.assertEqual(loaded.integration_status, "not-started")
             self.assertEqual(
                 git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
                 parallel_code,
@@ -724,7 +711,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             self.assertTrue((contract.code_repo_path / "parallel.txt").exists())
 
-    def test_integrate_refuses_parallel_conflicting_source_changes_until_sync(self) -> None:
+    def test_direct_integrate_cannot_classify_parallel_conflicting_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = closed_external_contract_fixture(
@@ -741,13 +728,12 @@ class WorktreeSupport2(WorktreeSupportTests):
                 ledger_commit_message="Replay integration ledger",
                 dry_run=False,
             )
-            output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_integrate(args), 2)
-            payload = json.loads(output.getvalue())
-            self.assertEqual(payload["state"], "source-lineage-stale")
-            self.assertEqual(payload["nextOperation"], "sync_source_lineage")
-            self.assertFalse(payload["developer_decision_required"])
+            with (
+                mock.patch.object(integrate_module, "require_ordinary_worktree"),
+                mock.patch.object(integrate_module, "integration_targets"),
+                self.assertRaisesRegex(RuntimeError, "plane-owned journaled integration operation"),
+            ):
+                worktree_manager.command_integrate(args)
             self.assertEqual(
                 git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
                 parallel_code,
@@ -757,9 +743,9 @@ class WorktreeSupport2(WorktreeSupportTests):
                 contract.memory_base_commit,
             )
             loaded = load_contract(contract.contract_path)
-            self.assertEqual(loaded.integration_status, "blocked")
+            self.assertEqual(loaded.integration_status, "not-started")
             self.assertEqual(
-                worktree_manager.status_payload(loaded)["phase"], "integration-blocked"
+                worktree_manager.status_payload(loaded)["phase"], "integration-pending"
             )
 
     def test_resolver_explicit_internal_uses_existing_ar_memory(self) -> None:

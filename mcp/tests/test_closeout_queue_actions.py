@@ -241,7 +241,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             expected_revision=0,
             candidate_task_document_ref=LEAF_A,
         )
-        with self.assertRaisesRegex(CloseoutQueueError, "not declared"):
+        with self.assertRaisesRegex(CloseoutQueueError, "closeout-candidate-not-declared"):
             _apply_candidate_action(
                 state,
                 _ActionContext(fixture.cfg, topology, graph, select, "select", NOW),
@@ -445,15 +445,15 @@ class CloseoutQueueActionTests(unittest.TestCase):
             rationale=RATIONALE,
         )
         with self.assertRaisesRegex(CloseoutQueueError, "no atomic barrier"):
-            _release_barrier(graph, state, valid)
+            _release_barrier(graph, state, valid, fixture.cfg)
         with self.assertRaisesRegex(CloseoutQueueError, "no atomic barrier"):
             _abort_barrier(graph, state, valid)
         held = _acquire_barrier(graph, state, valid, NOW, "orchestrator")
         with self.assertRaisesRegex(CloseoutQueueError, "master-incomplete"):
-            _release_barrier(graph, held, valid)
+            _release_barrier(graph, held, valid, fixture.cfg)
         wrong = valid.model_copy(update={"barrier_master_ref": MASTER_A})
         with self.assertRaisesRegex(CloseoutQueueError, "belongs to"):
-            _release_barrier(graph, held, wrong)
+            _release_barrier(graph, held, wrong, fixture.cfg)
         with self.assertRaisesRegex(CloseoutQueueError, "belongs to"):
             _abort_barrier(graph, held, wrong)
 
@@ -461,7 +461,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
         _, graph, candidates = self._context(fixture)
         blocked = candidates.model_copy(update={"activeBarrier": held.activeBarrier})
         with self.assertRaisesRegex(CloseoutQueueError, "candidates"):
-            _release_barrier(graph, blocked, valid)
+            _release_barrier(graph, blocked, valid, fixture.cfg)
         with self.assertRaisesRegex(CloseoutQueueError, "candidates"):
             _abort_barrier(graph, blocked, valid)
 
@@ -479,12 +479,15 @@ class CloseoutQueueActionTests(unittest.TestCase):
             mock.patch("agents_remember.worktrees.closeout_queue.require_atomic_master_landed"),
             self.assertRaisesRegex(CloseoutQueueError, "rationale-required"),
         ):
-            _release_barrier(completed_graph, held, blank_release)
+            _release_barrier(completed_graph, held, blank_release, fixture.cfg)
         with mock.patch(
             "agents_remember.worktrees.closeout_queue.require_atomic_master_landed"
         ) as landing_check:
-            self.assertIsNone(_release_barrier(completed_graph, held, release).activeBarrier)
-        landing_check.assert_called_once_with(completed_master)
+            self.assertIsNone(
+                _release_barrier(completed_graph, held, release, fixture.cfg).activeBarrier
+            )
+        landing_check.assert_called_once()
+        self.assertEqual(landing_check.call_args.args[0], completed_master)
         abort = CloseoutQueueRequest(
             action="abort-barrier",
             sprint_task_document_ref=SPRINT,
@@ -647,7 +650,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             _required_candidate_ref(
                 CloseoutQueueRequest.model_construct(candidate_task_document_ref=None)
             )
-        with self.assertRaisesRegex(CloseoutQueueError, "not declared"):
+        with self.assertRaisesRegex(CloseoutQueueError, "closeout-candidate-not-declared"):
             _candidate_or_error(
                 _initial_state(SPRINT, "a" * 64, NOW),
                 LEAF_A,

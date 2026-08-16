@@ -7,29 +7,102 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from agents_remember.models.lifecycles.operation import (
+    IntegrateOperationInput,
+    IntegrationOperationAuthority,
+    LifecycleOperationRecord,
+    LifecycleOperationRecoveryCommits,
+)
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees import closeout_queue_candidate_evidence as evidence
 from agents_remember.worktrees.closeout_queue import _graph_context
 from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
+from agents_remember.worktrees.modules.git import repository_identity
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from test_closeout_queue import MASTER_A, SPRINT, QueueFixture
+from test_closeout_queue import MASTER_A, MASTER_B, SPRINT, QueueFixture
 
 
 class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
-        self.fixture = QueueFixture(Path(self.temp.name))
+        self.fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
         self.contract = self.fixture.contracts[MASTER_A]
+        self.atomic_contract = self.fixture.contracts[MASTER_B]
         self.graph = _graph_context(TaskDocumentTopology(self.fixture.coord), SPRINT)
-        self.master = self.graph.masters[MASTER_A]
+        self.master = self.graph.masters[MASTER_B]
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
     def _series_contract(self) -> WorktreeContract:
-        path = self.contract.parent_contract_path
+        path = self.atomic_contract.parent_contract_path
         assert path is not None
         return load_contract(path)
+
+    def _landing_authority(self) -> evidence.AtomicMasterLandingAuthority:
+        return evidence.atomic_master_landing_authority(self.fixture.cfg, self.graph.sprint)
+
+    def _completed_operation(
+        self,
+        contract: WorktreeContract,
+        authority: evidence.AtomicMasterLandingAuthority,
+    ) -> LifecycleOperationRecord:
+        code_repository = repository_identity(contract.code_repo_path)
+        memory_repository = repository_identity(contract.memory_repo_path)
+        assert code_repository is not None
+        assert memory_repository is not None
+        integration_authority = IntegrationOperationAuthority(
+            targetKind="sprint-super",
+            codeRepository=code_repository.as_posix(),
+            codeSourceBranch=authority.source_branch,
+            codeSourceRef=f"refs/heads/{authority.source_branch}",
+            codeSourceCommit=contract.code_base_commit,
+            codeCandidateCommit=contract.integrated_code_commit,
+            memoryRepository=memory_repository.as_posix(),
+            memorySourceBranch=authority.source_branch,
+            memorySourceRef=f"refs/heads/{authority.source_branch}",
+            memorySourceCommit=contract.memory_base_commit,
+            memoryContentCommit=contract.integrated_memory_content_commit,
+            ledgerCommit=contract.integrated_ledger_commit,
+        )
+        return LifecycleOperationRecord(
+            taskId=contract.task_id,
+            taskName=contract.task_name,
+            contractPath=contract.contract_path.as_posix(),
+            operationKind="integrate",
+            candidateState="a" * 64,
+            fingerprint="b" * 64,
+            operationKey="c" * 64,
+            integrationAuthority=integration_authority,
+            input=IntegrateOperationInput(
+                configPath="/config.json",
+                contractPath=contract.contract_path.as_posix(),
+            ),
+            status="completed",
+            phase="completed",
+            queuedAt="2026-08-15T00:00:00+00:00",
+            startedAt="2026-08-15T00:00:01+00:00",
+            finishedAt="2026-08-15T00:00:02+00:00",
+            reportPath=(contract.worktree_group / "reports" / "integrate.log").as_posix(),
+            result={
+                "ok": True,
+                "state": "integrated",
+                "operation": "worktree_integrate",
+                "integrated_code_commit": contract.integrated_code_commit,
+                "integrated_memory_content_commit": contract.integrated_memory_content_commit,
+                "integrated_ledger_commit": contract.integrated_ledger_commit,
+            },
+            irreversibleBoundaryEntered=True,
+            recoveryCommits=LifecycleOperationRecoveryCommits(
+                codeCommit=contract.integrated_code_commit,
+                memoryContentCommit=contract.integrated_memory_content_commit,
+                ledgerCommit=contract.integrated_ledger_commit,
+            ),
+        )
 
     def test_route_review_fact_requires_full_record_when_summary_requires_it(self) -> None:
         with (
@@ -82,7 +155,7 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             evidence.require_source_bases_current(self.contract)
         with (
             mock.patch.object(evidence, "require_current_source_lineage"),
-            mock.patch.object(evidence, "head_commit", return_value="f" * 40),
+            mock.patch.object(evidence, "branch_commit", return_value="f" * 40),
             self.assertRaisesRegex(CloseoutQueueError, "code-source-moved"),
         ):
             evidence.require_source_bases_current(self.contract)
@@ -90,14 +163,16 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
         heads = [self.contract.code_base_commit, "f" * 40]
         with (
             mock.patch.object(evidence, "require_current_source_lineage"),
-            mock.patch.object(evidence, "head_commit", side_effect=heads),
+            mock.patch.object(evidence, "branch_commit", side_effect=heads),
             self.assertRaisesRegex(CloseoutQueueError, "memory-source-moved"),
         ):
             evidence.require_source_bases_current(self.contract)
         incomplete = replace(self.contract, memory_repo_path=None)
         with (
             mock.patch.object(evidence, "require_current_source_lineage"),
-            mock.patch.object(evidence, "head_commit", return_value=self.contract.code_base_commit),
+            mock.patch.object(
+                evidence, "branch_commit", return_value=self.contract.code_base_commit
+            ),
             self.assertRaisesRegex(CloseoutQueueError, "memory-source-missing"),
         ):
             evidence.require_source_bases_current(incomplete)
@@ -140,6 +215,7 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
 
     def test_atomic_contract_predicates_require_exact_final_series_landing(self) -> None:
         series = self._series_contract()
+        authority = self._landing_authority()
         exact = replace(
             series,
             integration_status="completed",
@@ -153,22 +229,42 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             integrated_memory_content_commit="b" * 40,
             integrated_ledger_commit="c" * 40,
         )
-        self.assertTrue(evidence._atomic_contract_matches_master(exact, self.master))
+        self.assertTrue(evidence._atomic_contract_matches_master(exact, self.master, authority))
         self.assertTrue(evidence._atomic_finalization_is_exact(exact))
         self.assertTrue(evidence._atomic_landing_changes_content(exact))
         self.assertFalse(
             evidence._atomic_contract_matches_master(
-                replace(exact, integration_status="not-started"), self.master
+                replace(exact, integration_status="not-started"), self.master, authority
             )
-        )
-        self.assertFalse(
-            evidence._atomic_contract_matches_master(replace(exact, kind="leaf"), self.master)
         )
         self.assertFalse(
             evidence._atomic_contract_matches_master(
-                replace(exact, task_root=exact.task_root.parent), self.master
+                replace(exact, kind="leaf"), self.master, authority
             )
         )
+        self.assertFalse(
+            evidence._atomic_contract_matches_master(
+                replace(exact, task_root=exact.task_root.parent), self.master, authority
+            )
+        )
+        for update in (
+            {"coordination_root": exact.coordination_root.parent},
+            {"repo_name": "foreign"},
+            {"contract_path": exact.contract_path.parent / "foreign.md"},
+            {"worktree_group": exact.worktree_group.parent},
+            {"code_source_branch": "foreign-super"},
+            {"code_work_branch": "ar/foreign"},
+            {"parent_task_name": "foreign-sprint"},
+            {"memory_source_branch": "foreign-super"},
+            {"memory_work_branch": "ar/foreign"},
+            {"memory_mode": "disabled", "memory_repo_path": None},
+        ):
+            with self.subTest(authority_update=update):
+                self.assertFalse(
+                    evidence._atomic_contract_matches_master(
+                        replace(exact, **update), self.master, authority
+                    )
+                )
         self.assertFalse(
             evidence._atomic_finalization_is_exact(replace(exact, integrated_code_commit="d" * 40))
         )
@@ -216,17 +312,13 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             )
         )
 
-    def test_atomic_code_and_memory_ancestry_are_both_required(self) -> None:
+    def test_atomic_code_and_memory_tips_are_exact(self) -> None:
         series = self._series_contract()
-        with mock.patch.object(evidence, "is_ancestor", return_value=True):
-            self.assertFalse(evidence._atomic_code_landed(series))
+        self.assertFalse(evidence._atomic_code_landed(series))
         landed = replace(series, integrated_code_commit="a" * 40)
-        with (
-            mock.patch.object(evidence, "is_ancestor", return_value=True),
-            mock.patch.object(evidence, "head_commit", return_value="b" * 40),
-        ):
+        with mock.patch.object(evidence, "branch_commit", return_value="a" * 40):
             self.assertTrue(evidence._atomic_code_landed(landed))
-        with mock.patch.object(evidence, "is_ancestor", return_value=False):
+        with mock.patch.object(evidence, "branch_commit", return_value="b" * 40):
             self.assertFalse(evidence._atomic_code_landed(landed))
 
         self.assertTrue(evidence._atomic_memory_landed(replace(series, memory_mode="disabled")))
@@ -240,51 +332,171 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
         )
         mapping = SimpleNamespace(memory_commit="b" * 40)
         with (
-            mock.patch.object(evidence, "load_ledger", return_value=[]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
             mock.patch.object(evidence, "find_mapping", return_value=mapping),
             mock.patch.object(evidence, "is_ancestor", return_value=True),
-            mock.patch.object(evidence, "head_commit", return_value="d" * 40),
+            mock.patch.object(evidence, "branch_commit", return_value="c" * 40),
         ):
             self.assertTrue(evidence._atomic_memory_landed(memory_landed))
         with (
-            mock.patch.object(evidence, "load_ledger", return_value=[]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
             mock.patch.object(evidence, "find_mapping", return_value=None),
             mock.patch.object(evidence, "is_ancestor", return_value=True),
-            mock.patch.object(evidence, "head_commit", return_value="d" * 40),
+            mock.patch.object(evidence, "branch_commit", return_value="c" * 40),
         ):
             self.assertFalse(evidence._atomic_memory_landed(memory_landed))
-        for ancestry in ((False,), (True, False)):
-            with (
-                self.subTest(ancestry=ancestry),
-                mock.patch.object(evidence, "load_ledger", return_value=[]),
-                mock.patch.object(evidence, "find_mapping", return_value=mapping),
-                mock.patch.object(evidence, "is_ancestor", side_effect=ancestry),
-                mock.patch.object(evidence, "head_commit", return_value="d" * 40),
-            ):
-                self.assertFalse(evidence._atomic_memory_landed(memory_landed))
         with (
-            mock.patch.object(evidence, "load_ledger", return_value=[]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+            mock.patch.object(evidence, "find_mapping", return_value=mapping),
+            mock.patch.object(evidence, "is_ancestor", return_value=False),
+            mock.patch.object(evidence, "branch_commit", return_value="c" * 40),
+        ):
+            self.assertFalse(evidence._atomic_memory_landed(memory_landed))
+        with (
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+            mock.patch.object(evidence, "find_mapping", return_value=mapping),
+            mock.patch.object(evidence, "is_ancestor", return_value=True),
+            mock.patch.object(evidence, "branch_commit", return_value="d" * 40),
+        ):
+            self.assertFalse(evidence._atomic_memory_landed(memory_landed))
+        with (
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
             mock.patch.object(
                 evidence,
                 "find_mapping",
                 return_value=SimpleNamespace(memory_commit="e" * 40),
             ),
             mock.patch.object(evidence, "is_ancestor", return_value=True),
-            mock.patch.object(evidence, "head_commit", return_value="d" * 40),
+            mock.patch.object(evidence, "branch_commit", return_value="c" * 40),
         ):
             self.assertFalse(evidence._atomic_memory_landed(memory_landed))
-        self.assertFalse(
-            evidence._atomic_memory_landed(
-                replace(memory_landed, integrated_memory_content_commit="")
-            )
+        for field in ("integrated_memory_content_commit", "integrated_ledger_commit"):
+            with self.subTest(field=field):
+                self.assertFalse(
+                    evidence._atomic_memory_landed(replace(memory_landed, **{field: ""}))
+                )
+
+    def test_atomic_landing_requires_exact_completed_plane_operation(self) -> None:
+        series = self._series_contract()
+        authority = self._landing_authority()
+        completed = replace(
+            series,
+            human_review_status="approved",
+            approved_for_commit=True,
+            closeout_status="completed",
+            code_commit="a" * 40,
+            memory_content_commit="b" * 40,
+            ledger_commit="c" * 40,
+            integration_status="completed",
+            integrated_code_commit="a" * 40,
+            integrated_memory_content_commit="b" * 40,
+            integrated_ledger_commit="c" * 40,
         )
+        self.assertFalse(evidence._atomic_operation_landed(completed, authority))
+        with (
+            mock.patch.object(evidence, "load_contract", return_value=completed),
+            mock.patch.object(evidence, "branch_commit", side_effect=["a" * 40, "c" * 40]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+            mock.patch.object(
+                evidence,
+                "find_mapping",
+                return_value=SimpleNamespace(memory_commit="b" * 40),
+            ),
+            mock.patch.object(evidence, "is_ancestor", return_value=True),
+            self.assertRaisesRegex(CloseoutQueueError, "does not prove"),
+        ):
+            evidence.require_atomic_master_landed(self.master, authority)
+        record = self._completed_operation(completed, authority)
+        store = LifecycleOperationStore(
+            operation_record_path(completed.worktree_group, "integrate")
+        )
+        store.create(record)
+        self.assertTrue(evidence._atomic_operation_landed(completed, authority))
+        with (
+            mock.patch.object(evidence, "load_contract", return_value=completed),
+            mock.patch.object(evidence, "branch_commit", side_effect=["a" * 40, "c" * 40]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+            mock.patch.object(
+                evidence,
+                "find_mapping",
+                return_value=SimpleNamespace(memory_commit="b" * 40),
+            ),
+            mock.patch.object(evidence, "is_ancestor", return_value=True),
+        ):
+            evidence.require_atomic_master_landed(self.master, authority)
+
+        for tips in (("d" * 40, "c" * 40), ("a" * 40, "d" * 40)):
+            with (
+                self.subTest(tips=tips),
+                mock.patch.object(evidence, "load_contract", return_value=completed),
+                mock.patch.object(evidence, "branch_commit", side_effect=tips),
+                mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+                mock.patch.object(
+                    evidence,
+                    "find_mapping",
+                    return_value=SimpleNamespace(memory_commit="b" * 40),
+                ),
+                mock.patch.object(evidence, "is_ancestor", return_value=True),
+                self.assertRaisesRegex(CloseoutQueueError, "does not prove"),
+            ):
+                evidence.require_atomic_master_landed(self.master, authority)
+
+        foreign = replace(completed, code_repo_path=self.fixture.memory)
+        with (
+            mock.patch.object(evidence, "load_contract", return_value=foreign),
+            mock.patch.object(evidence, "branch_commit", side_effect=["a" * 40, "c" * 40]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+            mock.patch.object(
+                evidence,
+                "find_mapping",
+                return_value=SimpleNamespace(memory_commit="b" * 40),
+            ),
+            mock.patch.object(evidence, "is_ancestor", return_value=True),
+            self.assertRaisesRegex(CloseoutQueueError, "does not prove"),
+        ):
+            evidence.require_atomic_master_landed(self.master, authority)
+
+        assert record.integrationAuthority is not None
+        assert record.recoveryCommits is not None
+        assert record.result is not None
+        recovered = record.model_copy(
+            update={"result": {**record.result, "state": "already-integrated"}}
+        )
+        with mock.patch.object(LifecycleOperationStore, "read", return_value=recovered):
+            self.assertTrue(evidence._atomic_operation_landed(completed, authority))
+        variants = (
+            record.model_copy(update={"status": "running", "phase": "source-merge"}),
+            record.model_copy(update={"irreversibleBoundaryEntered": False}),
+            record.model_copy(update={"result": {"ok": False}}),
+            record.model_copy(
+                update={
+                    "integrationAuthority": record.integrationAuthority.model_copy(
+                        update={"codeRepository": "/foreign/.git"}
+                    )
+                }
+            ),
+            record.model_copy(
+                update={
+                    "recoveryCommits": record.recoveryCommits.model_copy(
+                        update={"codeCommit": "d" * 40}
+                    )
+                }
+            ),
+        )
+        for changed in variants:
+            with (
+                self.subTest(changed=changed),
+                mock.patch.object(LifecycleOperationStore, "read", return_value=changed),
+            ):
+                self.assertFalse(evidence._atomic_operation_landed(completed, authority))
 
     def test_public_atomic_landing_proof_translates_invalid_and_false_predicates(self) -> None:
+        authority = self._landing_authority()
         with (
             mock.patch.object(evidence, "load_contract", side_effect=OSError("missing")),
             self.assertRaisesRegex(CloseoutQueueError, "no valid exact landing"),
         ):
-            evidence.require_atomic_master_landed(self.master)
+            evidence.require_atomic_master_landed(self.master, authority)
         series = self._series_contract()
         predicates = (
             "_atomic_contract_matches_master",
@@ -292,6 +504,7 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             "_atomic_landing_changes_content",
             "_atomic_code_landed",
             "_atomic_memory_landed",
+            "_atomic_operation_landed",
         )
 
         def patches(false_name: str | None = None) -> dict[str, mock.Mock]:
@@ -301,7 +514,7 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             mock.patch.object(evidence, "load_contract", return_value=series),
             mock.patch.multiple(evidence, **patches()),
         ):
-            evidence.require_atomic_master_landed(self.master)
+            evidence.require_atomic_master_landed(self.master, authority)
         for false_name in predicates:
             with (
                 self.subTest(false_name=false_name),
@@ -309,7 +522,7 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
                 mock.patch.multiple(evidence, **patches(false_name)),
                 self.assertRaisesRegex(CloseoutQueueError, "does not prove"),
             ):
-                evidence.require_atomic_master_landed(self.master)
+                evidence.require_atomic_master_landed(self.master, authority)
 
     def test_task_evidence_is_confined_existing_and_readable(self) -> None:
         task_root = self.contract.task_root

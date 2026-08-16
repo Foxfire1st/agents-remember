@@ -9,8 +9,12 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
-from agents_remember.worktrees.modules.integrate import integration_branch
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.modules.git import local_branch_ref, repository_identity
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
 
 TerminalMode = Literal["cleanup", "abandon"]
 
@@ -30,6 +34,121 @@ class TerminalPreflight:
     worktrees: dict[str, dict[str, object]]
     branches: dict[str, dict[str, object]]
     blockers: tuple[dict[str, object], ...]
+
+
+def require_series_children_retired(series: WorktreeContract) -> None:
+    """Refuse atomic-series retirement while any child still owns live resources."""
+
+    if series.kind != "series":
+        raise RuntimeError("atomic child terminal census requires a series contract")
+    enclosure_root = series.task_root / "enclosures"
+    if series.worktree_group.resolve() != enclosure_root.resolve():
+        raise RuntimeError("atomic series enclosure root does not match its task authority")
+    if not enclosure_root.exists():
+        return
+    blockers: list[str] = []
+    for enclosure in sorted(enclosure_root.iterdir()):
+        if enclosure.name == "reports" and not series_reports_is_child_enclosure(series):
+            continue
+        blocker = _child_terminal_blocker(series, enclosure)
+        if blocker is not None:
+            blockers.append(blocker)
+    if blockers:
+        raise RuntimeError(
+            "atomic series terminal mutation requires every child leaf to finish its own "
+            "cleanup or abandon before series refs can retire: " + "; ".join(blockers)
+        )
+
+
+def series_reports_is_child_enclosure(series: WorktreeContract) -> bool:
+    """Distinguish a leaf named ``reports`` from the series-owned reports directory."""
+
+    return (series.task_root / "enclosures" / "reports" / "series-contract.md").is_file()
+
+
+def _child_terminal_blocker(series: WorktreeContract, enclosure: Path) -> str | None:
+    path = enclosure / "series-contract.md"
+    if not enclosure.is_dir() or not path.is_file():
+        return f"invalid child enclosure {enclosure}"
+    try:
+        child = load_contract(path)
+    except (ContractError, OSError) as exc:
+        return f"invalid child contract {path}: {exc}"
+    if not _child_contract_matches_series(series, child, path):
+        return f"foreign child contract {path}"
+    if child.cleanup not in {"completed", "abandoned"}:
+        return f"child {child.leaf_id!r} cleanup is {child.cleanup!r}"
+    live = _live_child_resources(child)
+    if live:
+        return f"child {child.leaf_id!r} retains {', '.join(live)}"
+    return None
+
+
+def _child_contract_matches_series(
+    series: WorktreeContract,
+    child: WorktreeContract,
+    path: Path,
+) -> bool:
+    return (
+        child.kind == "leaf"
+        and child.coordination_root.resolve() == series.coordination_root.resolve()
+        and child.repo_name == series.repo_name
+        and child.task_root.resolve() == series.task_root.resolve()
+        and child.contract_path.resolve() == path.resolve()
+        and child.parent_contract_path is not None
+        and child.parent_contract_path.resolve() == series.contract_path.resolve()
+        and repository_identity(child.code_repo_path) == repository_identity(series.code_repo_path)
+        and child.code_source_branch == series.code_work_branch
+        and child.memory_mode == series.memory_mode
+        and _child_memory_edge_matches_series(series, child)
+    )
+
+
+def _child_memory_edge_matches_series(
+    series: WorktreeContract,
+    child: WorktreeContract,
+) -> bool:
+    if series.memory_mode != "external":
+        return True
+    return (
+        series.memory_repo_path is not None
+        and child.memory_repo_path is not None
+        and repository_identity(child.memory_repo_path)
+        == repository_identity(series.memory_repo_path)
+        and child.memory_source_branch == series.memory_work_branch
+    )
+
+
+def _live_child_resources(child: WorktreeContract) -> list[str]:
+    resources: list[str] = []
+    if child.code_worktree.exists():
+        resources.append("code worktree")
+    _append_live_branch(resources, child.code_repo_path, child.code_work_branch, "code branch")
+    if child.memory_mode == "external":
+        if child.memory_repo_path is None or child.memory_worktree is None:
+            resources.append("invalid external-memory edge")
+            return resources
+        if child.memory_worktree.exists():
+            resources.append("memory worktree")
+        _append_live_branch(
+            resources,
+            child.memory_repo_path,
+            child.memory_work_branch,
+            "memory branch",
+        )
+    return resources
+
+
+def _append_live_branch(resources: list[str], repo: Path, branch: str, label: str) -> None:
+    result = run_git(repo, ["show-ref", "--verify", "--quiet", local_branch_ref(branch)])
+    if result.returncode == 0:
+        resources.append(label)
+        return
+    if result.returncode != 1 or result.stderr.strip():
+        raise RuntimeError(
+            f"atomic child terminal census cannot resolve {label} {branch!r}: "
+            f"{result.stderr.strip() or 'git ref query failed'}"
+        )
 
 
 def terminal_preflight(
@@ -91,7 +210,10 @@ def terminal_result_blockers(
             "directory",
             directories,
             done_key="removed",
-            benign={"repo_worktree_group": frozenset({"not-empty"})},
+            benign={
+                "repo_worktree_group": frozenset({"not-empty"}),
+                "reports": frozenset({"child-enclosure"}),
+            },
         )
     )
     if drift_snapshots is not None:
@@ -104,6 +226,8 @@ def _worktree_preflight(
     *,
     force: bool,
 ) -> tuple[dict[str, dict[str, object]], list[dict[str, object]]]:
+    if contract.kind == "series":
+        return {}, []
     candidates = {"code": contract.code_worktree}
     if contract.memory_mode == "external" and contract.memory_worktree is not None:
         candidates["memory"] = contract.memory_worktree
@@ -160,15 +284,6 @@ def _branch_targets(
                 contract.memory_repo_path,
                 contract.memory_work_branch,
                 contract.memory_source_branch,
-            )
-        )
-        targets.append(
-            BranchTarget(
-                "memory_integration",
-                contract.memory_repo_path,
-                integration_branch(contract),
-                contract.memory_source_branch,
-                optional=True,
             )
         )
     return tuple(targets)

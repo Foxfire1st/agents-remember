@@ -904,6 +904,11 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
                 "integrate_result",
                 return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
             ),
+            mock.patch.object(
+                worktree_tools,
+                "_configured_contract_path",
+                return_value=self.contract_path,
+            ),
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
         ):
             result = worktree_tools.worktree_integrate_tool(
