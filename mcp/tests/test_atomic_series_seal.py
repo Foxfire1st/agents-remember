@@ -342,8 +342,8 @@ class AtomicSeriesSealTests(unittest.TestCase):
 
     def test_production_series_closeout_publication_requires_complete_landing_set(self) -> None:
         self.fixture.mutate(
-            "acquire-barrier",
-            barrier=MASTER_B,
+            "acquire-blocker",
+            blocker=MASTER_B,
             rationale="Seal the completed atomic block.",
         )
         master = read_task_doc(self.series.task_root / "task.json")
@@ -369,7 +369,7 @@ class AtomicSeriesSealTests(unittest.TestCase):
         )
         publication.assert_called_once_with()
 
-    def test_closed_series_refuses_new_candidate_and_barrier_admission(self) -> None:
+    def test_closed_series_refuses_new_candidate_and_blocker_admission(self) -> None:
         sealed = replace(self.series, closeout_status="completed")
         write_contract(sealed.contract_path, sealed)
 
@@ -379,8 +379,8 @@ class AtomicSeriesSealTests(unittest.TestCase):
             self.fixture.declare(MASTER_B)
         with self.assertRaisesRegex(CloseoutQueueError, "sealed against new or reopened leaves"):
             self.fixture.mutate(
-                "acquire-barrier",
-                barrier=MASTER_B,
+                "acquire-blocker",
+                blocker=MASTER_B,
                 rationale="Attempt to reopen a landed atomic block.",
             )
 

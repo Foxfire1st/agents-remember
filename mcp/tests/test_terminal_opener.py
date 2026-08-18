@@ -662,12 +662,12 @@ class KnobApplicationTests(unittest.TestCase):
         )
         start = threading.Barrier(2)
 
-        def open_after_barrier(selection: ResolvedLaunch):
+        def open_after_blocker(selection: ResolvedLaunch):
             start.wait(timeout=2)
             return self._open(resolved_launch=selection)
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(open_after_barrier, selection) for selection in selections]
+            futures = [executor.submit(open_after_blocker, selection) for selection in selections]
             results = [future.result(timeout=3) for future in futures]
 
         self.assertEqual({result.status for result in results}, {"opened", "launch-conflict"})

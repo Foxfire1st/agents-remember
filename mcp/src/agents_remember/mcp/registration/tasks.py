@@ -22,18 +22,18 @@ def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) ->
     def closeout_queue(request: CloseoutQueueRequest) -> dict[str, Any]:
         """Declare reviewed/curated leaf candidates before closeout, withdraw or update
         their explicit scheduling inputs, select/release the ready candidate, transition atomic
-        barriers, or read the recomputed sprint frontier. Mutations require a caller-stable
+        blockers, or read the recomputed sprint frontier. Mutations require a caller-stable
         request_id plus the revision returned by status; retries keep both values, while stale
         mutations read status and use a new request id. Declaration requires the exact structured
         curator attestation and binds its checklist and structured source-change disposition
         evidence. Manager declaration cannot carry priority; the sprint orchestrator applies the
         separate set-grade action as a small assertion resolved against exact canonical Priority
         and Judgment Register rows; ordering
-        is critical/high/normal/low, graph-node order, then leaf identity. Atomic barrier release
+        is critical/high/normal/low, graph-node order, then leaf identity. Atomic blocker release
         requires canonical master completion; abort requires an exact strategist/orchestrator
         judgment. The caller is derived from the plane-owned hosted seat, never request data. The
         bounded canonical sprint artifact validates Git, full route-review records and evidence,
-        memory mode/readiness, ledger, transitive lineage, graph, predecessor, barrier,
+        memory mode/readiness, ledger, transitive lineage, graph, predecessor, blocker,
         task-completion, and admission facts without inventing judgment. Public responses and
         artifacts never expose lifecycle operation keys; task-addressed closeout/integration
         cancellation and recovery own later transitions and the irreversible integration seam

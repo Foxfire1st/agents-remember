@@ -29,7 +29,7 @@ JUDGMENT_REGISTER_SECTION = "judgment register (canonical judgment authority)"
 PRIORITY_REGISTER_SECTION = "priority register (explicit judgment)"
 JUDGMENT_REGISTER_HEADER = (
     "Judgment id",
-    "Kind (dependency meaning, execution nature, blast radius, priority, barrier placement, "
+    "Kind (dependency meaning, execution nature, blast radius, priority, blocker placement, "
     "reprioritization, or leaf move)",
     "Subject",
     "Decision",
@@ -347,7 +347,7 @@ def canonical_grade(
     return grade, digest, evidence
 
 
-def canonical_barrier_abort(
+def canonical_blocker_abort(
     judgment_id: str | None,
     *,
     authority: GradeAuthority,
@@ -360,17 +360,17 @@ def canonical_barrier_abort(
     judgment = authority.judgments.get(key)
     if (
         judgment is None
-        or judgment.kind != "atomic-barrier-abort"
+        or judgment.kind != "atomic-blocker-abort"
         or judgment.subject != master_ref.key
         or judgment.author not in {"strategist", "orchestrator"}
-        or judgment.decision != {"barrier": "abort", "graphRevision": graph_revision}
+        or judgment.decision != {"blocker": "abort", "graphRevision": graph_revision}
     ):
         raise CloseoutQueueError(
-            "atomic-barrier-abort-judgment-invalid",
-            "barrier abort requires an exact canonical strategist/orchestrator judgment for this master and graph revision",
+            "atomic-blocker-abort-judgment-invalid",
+            "blocker abort requires an exact canonical strategist/orchestrator judgment for this master and graph revision",
         )
     for ref in judgment.evidence_refs:
-        _task_relative_evidence(authority.sprint.path.parent, ref, "barrier abort evidence")
+        _task_relative_evidence(authority.sprint.path.parent, ref, "blocker abort evidence")
 
 
 def _require_matching_judgment(

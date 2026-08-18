@@ -68,7 +68,7 @@ JUDGMENT_HEADING = "Judgment Register (canonical judgment authority)"
 PRIORITY_HEADING = "Priority Register (explicit judgment)"
 JUDGMENT_HEADER = (
     "| Judgment id | Kind (dependency meaning, execution nature, blast radius, priority, "
-    "barrier placement, reprioritization, or leaf move) | Subject | Decision | Rationale | "
+    "blocker placement, reprioritization, or leaf move) | Subject | Decision | Rationale | "
     "Evidence/fact refs | Author | Confidence | Supersedes |"
 )
 JUDGMENT_SEPARATOR = (
@@ -525,7 +525,7 @@ class QueueFixture:
 
     def mutate(self, action: str, **values: Any) -> dict[str, Any]:
         candidate = cast(TaskDocumentRef | None, values.get("candidate"))
-        barrier = cast(TaskDocumentRef | None, values.get("barrier"))
+        blocker = cast(TaskDocumentRef | None, values.get("blocker"))
         if action == "set-grade" and candidate is not None and values.get("update_priority", True):
             grade = cast(dict[str, Any], values["grade"])
             self.set_priority(candidate, cast(str, grade["priority"]))
@@ -541,13 +541,13 @@ class QueueFixture:
                     "request_id": stable_request_id,
                     "expected_revision": self.request_revision(stable_request_id),
                     "candidate_task_document_ref": (candidate.model_dump() if candidate else None),
-                    "barrier_master_ref": barrier.model_dump() if barrier else None,
+                    "blocker_master_ref": blocker.model_dump() if blocker else None,
                     "grade": cast(dict[str, Any] | None, values.get("grade")),
                     "admission": cast(dict[str, Any] | None, values.get("admission")),
-                    "barrier_judgment_id": cast(str | None, values.get("barrier_judgment_id")),
+                    "blocker_judgment_id": cast(str | None, values.get("blocker_judgment_id")),
                     "rationale": (
                         cast(str, values.get("rationale", "reason"))
-                        if action in {"acquire-barrier", "release-barrier"}
+                        if action in {"acquire-blocker", "release-blocker"}
                         else ""
                     ),
                 }
@@ -686,11 +686,11 @@ class CloseoutQueueTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValidationError, "8192"):
             CloseoutQueueRequest(
-                action="acquire-barrier",
+                action="acquire-blocker",
                 sprint_task_document_ref=SPRINT,
-                request_id="barrier-1",
+                request_id="blocker-1",
                 expected_revision=0,
-                barrier_master_ref=MASTER_B,
+                blocker_master_ref=MASTER_B,
                 rationale="x" * 8193,
             )
 
@@ -711,30 +711,30 @@ class CloseoutQueueTests(unittest.TestCase):
                 with self.assertRaisesRegex(CloseoutQueueError, "strategist/orchestrator"):
                     fixture.declare(MASTER_A)
 
-    def test_predecessors_and_atomic_barrier_control_logistics_not_judgment(self) -> None:
+    def test_predecessors_and_atomic_blocker_control_logistics_not_judgment(self) -> None:
         fixture = QueueFixture(Path(self.temp.name), edge=True, atomic_b=True)
         fixture.declare(MASTER_A)
         queued = fixture.declare(MASTER_B)
         self.assertEqual(
             queued["waiting"][0]["reasons"],
-            [f"predecessor-incomplete: {MASTER_A.key}", "atomic-barrier-required"],
+            [f"predecessor-incomplete: {MASTER_A.key}", "atomic-blocker-required"],
         )
         completed = fixture.master_docs[MASTER_A].model_copy(update={"status": "Completed"})
         write_task_doc(fixture.tasks / "master-a", completed)
         acquired = fixture.mutate(
-            "acquire-barrier", barrier=MASTER_B, rationale="Sequential framework block."
+            "acquire-blocker", blocker=MASTER_B, rationale="Sequential framework block."
         )
         self.assertEqual(acquired["ready"][0]["taskDocumentRef"], LEAF_B.model_dump())
         selected = fixture.mutate("select", candidate=LEAF_B)
         self.assertEqual(selected["inFlight"][0]["candidateState"], "selected")
         with self.assertRaisesRegex(CloseoutQueueError, "candidates"):
-            fixture.mutate("release-barrier", barrier=MASTER_B)
+            fixture.mutate("release-blocker", blocker=MASTER_B)
         fixture.mutate("release-selection", candidate=LEAF_B)
         with self.assertRaisesRegex(CloseoutQueueError, "candidates"):
-            fixture.mutate("release-barrier", barrier=MASTER_B)
+            fixture.mutate("release-blocker", blocker=MASTER_B)
         fixture.mutate("withdraw", candidate=LEAF_B)
         with self.assertRaisesRegex(CloseoutQueueError, "completion edge"):
-            fixture.mutate("release-barrier", barrier=MASTER_B)
+            fixture.mutate("release-blocker", blocker=MASTER_B)
         completed_atomic = fixture.master_docs[MASTER_B].model_copy(
             update={
                 "status": "Completed",
@@ -746,27 +746,27 @@ class CloseoutQueueTests(unittest.TestCase):
         )
         write_task_doc(fixture.tasks / "master-b", completed_atomic)
         with self.assertRaisesRegex(CloseoutQueueError, "does not prove one exact"):
-            fixture.mutate("release-barrier", barrier=MASTER_B)
+            fixture.mutate("release-blocker", blocker=MASTER_B)
         with mock.patch(
             "agents_remember.worktrees.closeout_queue.require_atomic_master_landed"
         ) as landed:
-            released = fixture.mutate("release-barrier", barrier=MASTER_B)
+            released = fixture.mutate("release-blocker", blocker=MASTER_B)
         landed.assert_called_once()
         self.assertEqual(landed.call_args.args[0].ref, MASTER_B)
-        self.assertIsNone(released["activeBarrier"])
+        self.assertIsNone(released["activeBlocker"])
 
-    def test_atomic_barrier_abort_requires_exact_canonical_judgment(self) -> None:
+    def test_atomic_blocker_abort_requires_exact_canonical_judgment(self) -> None:
         fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
         fixture.mutate(
-            "acquire-barrier", barrier=MASTER_B, rationale="Isolate the framework block."
+            "acquire-blocker", blocker=MASTER_B, rationale="Isolate the framework block."
         )
-        with self.assertRaisesRegex(ValidationError, "barrier_judgment_id"):
+        with self.assertRaisesRegex(ValidationError, "blocker_judgment_id"):
             CloseoutQueueRequest(
-                action="abort-barrier",
+                action="abort-blocker",
                 sprint_task_document_ref=SPRINT,
                 request_id="abort-1",
                 expected_revision=fixture.status()["revision"],
-                barrier_master_ref=MASTER_B,
+                blocker_master_ref=MASTER_B,
             )
         sprint_path = fixture.tasks / "sprint" / "task.json"
         sprint = read_task_doc(sprint_path)
@@ -779,17 +779,17 @@ class CloseoutQueueTests(unittest.TestCase):
             judgment.body
             + "\n"
             + (
-                f"| J-abort-master-b | atomic-barrier-abort | {MASTER_B.key} | "
-                f"barrier=abort; graphRevision={graph_revision} | Experiment failed safely. | "
+                f"| J-abort-master-b | atomic-blocker-abort | {MASTER_B.key} | "
+                f"blocker=abort; graphRevision={graph_revision} | Experiment failed safely. | "
                 "grade.md | strategist | high | |"
             ),
         )
         aborted = fixture.mutate(
-            "abort-barrier",
-            barrier=MASTER_B,
-            barrier_judgment_id="J-abort-master-b",
+            "abort-blocker",
+            blocker=MASTER_B,
+            blocker_judgment_id="J-abort-master-b",
         )
-        self.assertIsNone(aborted["activeBarrier"])
+        self.assertIsNone(aborted["activeBlocker"])
 
     def test_candidate_and_evidence_drift_fail_closed(self) -> None:
         fixture = QueueFixture(Path(self.temp.name))

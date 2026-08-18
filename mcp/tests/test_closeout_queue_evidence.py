@@ -30,7 +30,7 @@ from agents_remember.worktrees.closeout_queue_evidence import (
     _split_markdown_row,
     _table_rows,
     _task_relative_evidence,
-    canonical_barrier_abort,
+    canonical_blocker_abort,
     canonical_grade,
     curator_evidence,
     curator_evidence_blockers,
@@ -269,7 +269,7 @@ class CloseoutQueueEvidenceTests(unittest.TestCase):
         judgment_id = _grade("normal", LEAF_A)["judgmentId"]
         judgment = authority.judgments[str(judgment_id)]
         cases = (
-            (replace(judgment, kind="barrier"), "wrong canonical kind"),
+            (replace(judgment, kind="blocker"), "wrong canonical kind"),
             (replace(judgment, author="manager"), "author-refused"),
             (replace(judgment, subject=LEAF_A.key + "-other"), "subject-mismatch"),
             (replace(judgment, decision={"priority": "low"}), "values-mismatch"),
@@ -325,14 +325,14 @@ class CloseoutQueueEvidenceTests(unittest.TestCase):
                 owning_master=MASTER_A,
             )
 
-    def test_barrier_abort_requires_exact_authority_and_existing_evidence(self) -> None:
+    def test_blocker_abort_requires_exact_authority_and_existing_evidence(self) -> None:
         evidence = self.graph.sprint.path.parent / "abort.md"
         evidence.write_text("proof\n", encoding="utf-8")
         judgment = JudgmentAuthority(
             judgment_id="ABORT-1",
-            kind="atomic-barrier-abort",
+            kind="atomic-blocker-abort",
             subject=MASTER_A.key,
-            decision={"barrier": "abort", "graphRevision": self.graph.revision},
+            decision={"blocker": "abort", "graphRevision": self.graph.revision},
             rationale=RATIONALE,
             evidence_refs=("abort.md",),
             author="orchestrator",
@@ -345,7 +345,7 @@ class CloseoutQueueEvidenceTests(unittest.TestCase):
             judgments={"ABORT-1": judgment},
             priorities={},
         )
-        canonical_barrier_abort(
+        canonical_blocker_abort(
             "ABORT-1",
             authority=authority,
             master_ref=MASTER_A,
@@ -355,10 +355,10 @@ class CloseoutQueueEvidenceTests(unittest.TestCase):
             replace(judgment, kind="priority"),
             replace(judgment, subject=LEAF_A.key),
             replace(judgment, author="manager"),
-            replace(judgment, decision={"barrier": "abort"}),
+            replace(judgment, decision={"blocker": "abort"}),
         ):
             with self.assertRaisesRegex(CloseoutQueueError, "judgment-invalid"):
-                canonical_barrier_abort(
+                canonical_blocker_abort(
                     "ABORT-1",
                     authority=replace(authority, judgments={"ABORT-1": changed}),
                     master_ref=MASTER_A,
@@ -366,7 +366,7 @@ class CloseoutQueueEvidenceTests(unittest.TestCase):
                 )
         evidence.unlink()
         with self.assertRaisesRegex(CloseoutQueueError, "does not exist"):
-            canonical_barrier_abort(
+            canonical_blocker_abort(
                 "ABORT-1",
                 authority=authority,
                 master_ref=MASTER_A,

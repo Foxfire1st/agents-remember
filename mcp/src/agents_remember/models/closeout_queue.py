@@ -25,9 +25,9 @@ QueueAction = Literal[
     "set-admission",
     "select",
     "release-selection",
-    "acquire-barrier",
-    "release-barrier",
-    "abort-barrier",
+    "acquire-blocker",
+    "release-blocker",
+    "abort-blocker",
 ]
 QueueEventAction = Literal[
     "declare",
@@ -36,9 +36,9 @@ QueueEventAction = Literal[
     "set-admission",
     "select",
     "release-selection",
-    "acquire-barrier",
-    "release-barrier",
-    "abort-barrier",
+    "acquire-blocker",
+    "release-blocker",
+    "abort-blocker",
     "claim-closeout",
     "certify-closeout",
     "claim-integration",
@@ -73,10 +73,10 @@ class CloseoutQueueRequest(BaseModel):
     expected_revision: int | None = Field(default=None, ge=0)
     contract_path: str | None = Field(default=None, max_length=MAX_QUEUE_TEXT)
     candidate_task_document_ref: TaskDocumentRef | None = None
-    barrier_master_ref: TaskDocumentRef | None = None
+    blocker_master_ref: TaskDocumentRef | None = None
     admission: CandidateAdmissionFacts | None = None
     grade: SchedulingGradeInput | None = None
-    barrier_judgment_id: str | None = Field(default=None, max_length=MAX_QUEUE_SHORT_TEXT)
+    blocker_judgment_id: str | None = Field(default=None, max_length=MAX_QUEUE_SHORT_TEXT)
     rationale: str = Field(default="", max_length=MAX_QUEUE_TEXT)
 
     @model_validator(mode="after")
@@ -86,10 +86,10 @@ class CloseoutQueueRequest(BaseModel):
             "expected_revision": self.expected_revision is not None,
             "contract_path": self.contract_path is not None,
             "candidate_task_document_ref": self.candidate_task_document_ref is not None,
-            "barrier_master_ref": self.barrier_master_ref is not None,
+            "blocker_master_ref": self.blocker_master_ref is not None,
             "admission": self.admission is not None,
             "grade": self.grade is not None,
-            "barrier_judgment_id": self.barrier_judgment_id is not None,
+            "blocker_judgment_id": self.blocker_judgment_id is not None,
             "rationale": bool(self.rationale.strip()),
         }
         mutation = frozenset({"request_id", "expected_revision"})
@@ -101,9 +101,9 @@ class CloseoutQueueRequest(BaseModel):
             "set-admission": mutation | {"candidate_task_document_ref", "admission"},
             "select": mutation | {"candidate_task_document_ref"},
             "release-selection": mutation | {"candidate_task_document_ref"},
-            "acquire-barrier": mutation | {"barrier_master_ref", "rationale"},
-            "release-barrier": mutation | {"barrier_master_ref", "rationale"},
-            "abort-barrier": mutation | {"barrier_master_ref", "barrier_judgment_id"},
+            "acquire-blocker": mutation | {"blocker_master_ref", "rationale"},
+            "release-blocker": mutation | {"blocker_master_ref", "rationale"},
+            "abort-blocker": mutation | {"blocker_master_ref", "blocker_judgment_id"},
         }
         optional: dict[QueueAction, frozenset[str]] = {"declare": frozenset({"admission"})}
         expected = required[self.action]
@@ -326,7 +326,7 @@ class CloseoutCandidateRecord(_StrictModel):
         return self
 
 
-class ActiveAtomicBarrier(_StrictModel):
+class ActiveAtomicBlocker(_StrictModel):
     master: TaskDocumentRef
     graphRevision: str = Field(pattern=r"^[0-9a-f]{64}$")
     acquiredBy: str = Field(max_length=MAX_QUEUE_TEXT)
@@ -335,10 +335,10 @@ class ActiveAtomicBarrier(_StrictModel):
 
     @field_validator("acquiredBy", "acquiredAt", "rationale")
     @classmethod
-    def _nonblank_barrier_metadata(cls, value: str) -> str:
+    def _nonblank_blocker_metadata(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
-            raise ValueError("barrier provenance and rationale must not be blank")
+            raise ValueError("blocker provenance and rationale must not be blank")
         return cleaned
 
 
@@ -350,7 +350,7 @@ class CloseoutQueueState(_StrictModel):
     candidates: dict[str, CloseoutCandidateRecord] = Field(
         default_factory=dict, max_length=MAX_CLOSEOUT_CANDIDATES
     )
-    activeBarrier: ActiveAtomicBarrier | None = None
+    activeBlocker: ActiveAtomicBlocker | None = None
     appliedRequests: list[AppliedQueueRequest] = Field(default_factory=list, max_length=128)
     closed: bool = False
     updatedAt: str = Field(max_length=MAX_QUEUE_SHORT_TEXT)
@@ -369,12 +369,12 @@ class CloseoutQueueState(_StrictModel):
         if len(active) > 1:
             raise ValueError("at most one closeout candidate may own the sprint landing lane")
         if (
-            self.activeBarrier is not None
+            self.activeBlocker is not None
             and active
-            and active[0].owningMaster != self.activeBarrier.master
+            and active[0].owningMaster != self.activeBlocker.master
         ):
-            raise ValueError("an active atomic barrier excludes every other master's lane owner")
-        if self.closed and (self.candidates or self.activeBarrier is not None):
+            raise ValueError("an active atomic blocker excludes every other master's lane owner")
+        if self.closed and (self.candidates or self.activeBlocker is not None):
             raise ValueError("a closed sprint queue must be quiescent")
         return self
 
@@ -400,7 +400,7 @@ class CloseoutQueueResponse(ToolResponse):
     sprintTaskDocumentRef: TaskDocumentRef
     revision: int = Field(ge=0)
     graphRevision: str = Field(pattern=r"^[0-9a-f]{64}$")
-    activeBarrier: ActiveAtomicBarrier | None = None
+    activeBlocker: ActiveAtomicBlocker | None = None
     ready: list[CloseoutQueueCandidateView] = Field(default_factory=list)
     waiting: list[CloseoutQueueCandidateView] = Field(default_factory=list)
     blocked: list[CloseoutQueueCandidateView] = Field(default_factory=list)

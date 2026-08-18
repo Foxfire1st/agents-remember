@@ -469,17 +469,17 @@ def _land_two_external_atomic_leaves(
     return first, second
 
 
-def _acquire_atomic_barrier(fixture) -> None:
+def _acquire_atomic_blocker(fixture) -> None:
     sprint_ref = TaskDocumentRef(repository="repo", path="sprint/task.json")
     master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
     closeout_queue_tool(
         load_config(fixture.config_path),
         CloseoutQueueRequest(
-            action="acquire-barrier",
+            action="acquire-blocker",
             sprint_task_document_ref=sprint_ref,
-            request_id="series-closeout-barrier",
+            request_id="series-closeout-blocker",
             expected_revision=0,
-            barrier_master_ref=master_ref,
+            blocker_master_ref=master_ref,
             rationale="Finish the isolated atomic block before its one super landing.",
         ),
         actor=QueueActor(role="orchestrator", task_document_ref=sprint_ref),

@@ -347,7 +347,7 @@ def _task_doc_publication_overrides(
 
 
 def _task_topology_stable(original: TaskDocument | None, candidate: TaskDocument) -> bool:
-    """Whether an in-barrier task update preserves scheduling identity and membership."""
+    """Whether an in-blocker task update preserves scheduling identity and membership."""
 
     if original is None or original.kind != candidate.kind:
         return False

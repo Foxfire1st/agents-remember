@@ -231,7 +231,7 @@ async def test_preflight_refuses_prompt_and_setter_while_exact_turn_is_active() 
 
 
 @pytest.mark.anyio
-async def test_reversing_pending_codex_settings_clears_fresh_turn_barrier() -> None:
+async def test_reversing_pending_codex_settings_clears_fresh_turn_blocker() -> None:
     data = fixture()
     add_model(data, efforts=("low", "medium", "xhigh"))
     transport = FakeCodexTransport()

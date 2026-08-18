@@ -206,23 +206,23 @@ class CloseoutQueueStore:
             if (
                 completed
                 and current is not None
-                and (current.candidates or current.activeBarrier is not None)
+                and (current.candidates or current.activeBlocker is not None)
             ):
                 raise CloseoutQueueStoreError(
-                    "a sprint cannot complete while closeout candidates or a barrier remain"
+                    "a sprint cannot complete while closeout candidates or a blocker remain"
                 )
             if (
                 not completed
                 and current is not None
                 and (
-                    current.activeBarrier is not None
+                    current.activeBlocker is not None
                     or any(
                         candidate.state != "declared" for candidate in current.candidates.values()
                     )
                 )
             ):
                 raise CloseoutQueueStoreError(
-                    "sprint task facts are frozen while a candidate or atomic barrier owns the landing lane"
+                    "sprint task facts are frozen while a candidate or atomic blocker owns the landing lane"
                 )
             if current is not None and current.closed != completed:
                 target = current.model_copy(
@@ -292,14 +292,14 @@ class CloseoutQueueStore:
             # sprint fact set during the short selected/in-flight lane so the
             # candidate's final graph/readiness proof cannot race a side write.
             lane_blocks = lane_owner is not None
-            barrier_blocks = (
+            blocker_blocks = (
                 current is not None
-                and current.activeBarrier is not None
-                and (current.activeBarrier.master != owning_master or not topology_stable)
+                and current.activeBlocker is not None
+                and (current.activeBlocker.master != owning_master or not topology_stable)
             )
-            if lane_blocks or barrier_blocks:
+            if lane_blocks or blocker_blocks:
                 raise CloseoutQueueStoreError(
-                    "sprint task facts are frozen while a candidate or atomic barrier owns the landing lane"
+                    "sprint task facts are frozen while a candidate or atomic blocker owns the landing lane"
                 )
             return publication()
 
@@ -394,7 +394,7 @@ class CloseoutQueueStore:
             update={
                 "revision": 0,
                 "candidates": {},
-                "activeBarrier": None,
+                "activeBlocker": None,
                 "appliedRequests": [],
                 "closed": False,
             }

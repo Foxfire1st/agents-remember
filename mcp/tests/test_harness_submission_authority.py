@@ -605,7 +605,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await authority.stop(forced=True)
 
-    async def test_impossible_possible_send_preflight_installs_resolvable_unknown_barrier(
+    async def test_impossible_possible_send_preflight_installs_resolvable_unknown_blocker(
         self,
     ) -> None:
         adapter = _AuthorityAdapter()
@@ -690,7 +690,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_reconciled_refusal_terminates_the_operation_and_frees_the_head(self) -> None:
         """An ambiguous send the vendor later disowns must stop blocking the timeline.
 
-        The unknown barrier exists because the authority does not know whether the prompt
+        The unknown blocker exists because the authority does not know whether the prompt
         landed. When the adapter finally answers ``rejected`` or ``unsupported`` it DOES
         know, and the record has to become terminal AND release the head -- an operation
         that is provably not in flight must not keep the next one out.
@@ -907,7 +907,7 @@ class SubmissionLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await ledger.operation_timeline("epoch-1")).items), 1)
 
     async def test_an_ambiguous_setter_with_no_recorded_value_settles_nobody(self) -> None:
-        """The ambiguity barrier is installed unconditionally; a set-result is not invented.
+        """The ambiguity blocker is installed unconditionally; a set-result is not invented.
 
         ``HarnessSubmissionAuthority`` never builds this shape -- every setter it admits
         carries the value the caller asked for -- but ``OperationRecord`` is a plain mutable

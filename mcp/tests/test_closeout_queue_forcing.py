@@ -266,11 +266,11 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         with self.assertRaisesRegex(CloseoutQueueError, "more than 4096 dependency edges"):
             _graph_context(TaskDocumentTopology(fixture.coord), SPRINT)
 
-    def test_atomic_barrier_allows_only_topology_stable_work_inside_its_master(self) -> None:
-        fixture = QueueFixture(self.root / "barrier-task-scope", atomic_b=True)
+    def test_atomic_blocker_allows_only_topology_stable_work_inside_its_master(self) -> None:
+        fixture = QueueFixture(self.root / "blocker-task-scope", atomic_b=True)
         fixture.mutate(
-            "acquire-barrier",
-            barrier=MASTER_B,
+            "acquire-blocker",
+            blocker=MASTER_B,
             rationale="Isolate the atomic master sequence.",
         )
         task_doc_tool(
@@ -295,11 +295,11 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
                     fixture.cfg,
                     blocked_target,
                     operation="set_field",
-                    edit=TaskDocEdit(fields={"objective": "cross the atomic barrier"}),
+                    edit=TaskDocEdit(fields={"objective": "cross the atomic blocker"}),
                 )
 
-    def test_atomic_barrier_allows_own_master_reopen_and_refuses_another_master(self) -> None:
-        fixture = QueueFixture(self.root / "barrier-reopen-scope", atomic_b=True)
+    def test_atomic_blocker_allows_own_master_reopen_and_refuses_another_master(self) -> None:
+        fixture = QueueFixture(self.root / "blocker-reopen-scope", atomic_b=True)
 
         def prepare_completed_leaf(master_ref: TaskDocumentRef, leaf_ref: TaskDocumentRef):
             closed = fixture.close_contract(master_ref)
@@ -378,8 +378,8 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         )
         own = prepare_completed_leaf(MASTER_B, LEAF_B)
         fixture.mutate(
-            "acquire-barrier",
-            barrier=MASTER_B,
+            "acquire-blocker",
+            blocker=MASTER_B,
             rationale="Keep the atomic recovery sequence isolated.",
         )
         own_result = reopen_task(own.contract_path)

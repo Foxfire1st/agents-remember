@@ -449,7 +449,7 @@ class QueueLifecycleRemainderTests(unittest.TestCase):
             def inspect(_initial, action):
                 return action(
                     SimpleNamespace(
-                        activeBarrier=None,
+                        activeBlocker=None,
                         candidates={
                             "leaf": SimpleNamespace(
                                 owningMaster=master_ref,

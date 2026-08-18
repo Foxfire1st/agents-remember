@@ -5,7 +5,7 @@ import unittest
 
 from agents_remember.controlplane.closeout_queue_records import CloseoutQueuePendingTransaction
 from agents_remember.models.closeout_queue import (
-    ActiveAtomicBarrier,
+    ActiveAtomicBlocker,
     AppliedQueueRequest,
     CandidateAdmissionFacts,
     CloseoutCandidateRecord,
@@ -159,7 +159,7 @@ class CloseoutQueueModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "must not be blank"):
             AppliedQueueRequest(requestId=" ", fingerprint=HEX64, revision=1)
 
-    def test_admission_and_barrier_metadata_is_explained_and_trimmed(self) -> None:
+    def test_admission_and_blocker_metadata_is_explained_and_trimmed(self) -> None:
         facts = CandidateAdmissionFacts(
             resourceReady=False,
             resourceReason="  unavailable ",
@@ -167,7 +167,7 @@ class CloseoutQueueModelTests(unittest.TestCase):
             admissionReason="  held ",
         )
         self.assertEqual((facts.resourceReason, facts.admissionReason), ("unavailable", "held"))
-        barrier = ActiveAtomicBarrier(
+        blocker = ActiveAtomicBlocker(
             master=MASTER_A,
             graphRevision=HEX64,
             acquiredBy="  orchestrator ",
@@ -175,7 +175,7 @@ class CloseoutQueueModelTests(unittest.TestCase):
             rationale="  isolate framework ",
         )
         self.assertEqual(
-            (barrier.acquiredBy, barrier.acquiredAt, barrier.rationale),
+            (blocker.acquiredBy, blocker.acquiredAt, blocker.rationale),
             ("orchestrator", NOW, "isolate framework"),
         )
         for field in ("acquiredBy", "acquiredAt", "rationale"):
@@ -183,9 +183,9 @@ class CloseoutQueueModelTests(unittest.TestCase):
                 self.subTest(field=field),
                 self.assertRaisesRegex(ValidationError, "must not be blank"),
             ):
-                ActiveAtomicBarrier.model_validate(
+                ActiveAtomicBlocker.model_validate(
                     {
-                        **barrier.model_dump(mode="json"),
+                        **blocker.model_dump(mode="json"),
                         field: " ",
                     }
                 )
@@ -274,7 +274,7 @@ class CloseoutQueueModelTests(unittest.TestCase):
         candidate = _candidate()
         key = candidate.taskDocumentRef.key
         receipt = AppliedQueueRequest(requestId="r", fingerprint=HEX64, revision=1)
-        barrier = ActiveAtomicBarrier(
+        blocker = ActiveAtomicBlocker(
             master=MASTER_A,
             graphRevision=HEX64,
             acquiredBy="orchestrator",
@@ -300,12 +300,12 @@ class CloseoutQueueModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "excludes"):
             _state(
                 candidates={active_b.taskDocumentRef.key: active_b},
-                activeBarrier=barrier,
+                activeBlocker=blocker,
             )
         with self.assertRaisesRegex(ValidationError, "quiescent"):
             _state(candidates={key: candidate}, closed=True)
         with self.assertRaisesRegex(ValidationError, "quiescent"):
-            _state(activeBarrier=barrier, closed=True)
+            _state(activeBlocker=blocker, closed=True)
 
     def test_pending_transactions_bind_revision_status_and_receipt(self) -> None:
         receipt = AppliedQueueRequest(requestId="r", fingerprint=HEX64, revision=1)
@@ -376,7 +376,7 @@ class CloseoutQueueModelTests(unittest.TestCase):
                     "state": CloseoutQueueState.model_construct(
                         **{
                             **closed.__dict__,
-                            "activeBarrier": ActiveAtomicBarrier(
+                            "activeBlocker": ActiveAtomicBlocker(
                                 master=MASTER_A,
                                 graphRevision=HEX64,
                                 acquiredBy="orchestrator",

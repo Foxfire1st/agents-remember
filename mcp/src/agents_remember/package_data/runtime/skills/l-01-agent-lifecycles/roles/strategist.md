@@ -60,14 +60,14 @@ worker work.
   an explicit **"unplannable as scoped"** finding, never a silent guess.
 - **Detection/judgment split:** tooling reports task membership, paths, routes, call/import
   relationships, lineage, readiness, cycles, and derived topological waves. This seat judges
-  dependency meaning, execution nature, blast radius, priority, and barrier placement, records
+  dependency meaning, execution nature, blast radius, priority, and blocker placement, records
   each judgment with evidence, and never disguises a stable tie-break as priority reasoning.
 
 ## The Method — Eight Phases (the operating procedure)
 
 Run every phase; the artifact schema (`../templates/orchestration-task.md`) requires each phase's
 output. Inventory, surface, relationship, and graph-shape facts are tool-verifiable. Dependency
-meaning, execution nature, blast radius, priority, and barrier placement are model judgments
+meaning, execution nature, blast radius, priority, and blocker placement are model judgments
 **disciplined by mandatory citations** and the artifact schema — the plan gets the same adversarial
 treatment as everything else.
 
@@ -117,11 +117,11 @@ treatment as everything else.
    opposite directions, a leaf assuming state another leaf removes, duplicate work, vocabulary
    drift. **Directional contradictions are quo-vadis → architect** (via the drawing board; see
    Duties §5).
-7. **Canonical graph and barriers** — write one activity-on-node graph whose nodes exactly match
+7. **Canonical graph and blockers** — write one activity-on-node graph whose nodes exactly match
    the sprint's commanded master documents. Each edge is predecessor → successor with a nonblank,
    evidence-backed reason. The control plane derives stable topological waves and refuses cycles;
    do not persist hand-numbered positions. CONFLICT relations become a predecessor edge or a
-   still-planning leaf move. Place atomic masters as explicit barriers: predecessors finish before
+   still-planning leaf move. Place atomic masters as explicit blockers: predecessors finish before
    the block starts, the block exposes no partial result, and successors wait for its one landing.
    The graph may place a block first, between waves, or last. A throwaway experiment that should
    not stall the sprint stays outside the sprint graph and, if successful, follows its own
@@ -129,7 +129,7 @@ treatment as everything else.
 8. **The orchestration task** — fill `../templates/orchestration-task.md`; the template REQUIRES
    the shown work: dependency graph with per-edge evidence, blast-radius register, coherence
    findings, execution-nature decisions, priority grades, leaf moves + rationale, canonical graph,
-   derived waves/barriers, and re-evaluation triggers. Then the
+   derived waves/blockers, and re-evaluation triggers. Then the
    drawing-board rounds begin.
 
 **Input quality bounds output:** thin task-doc scopes degrade the plan, but the method converts
@@ -154,7 +154,7 @@ against the route map; new surfaces by declaration — parent route + intended s
 ### 3 — Analysis
 
 Method phases 3–7: the evidence relation list, doctrine edges, execution-nature classifications,
-blast-radius and priority registers, coherence sweep, canonical graph, and barriers. Keep the
+blast-radius and priority registers, coherence sweep, canonical graph, and blockers. Keep the
 evidence inventory (queries run, files read, citations per edge and judgment) as you go — the
 artifact requires it.
 

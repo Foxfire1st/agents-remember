@@ -59,7 +59,7 @@ def publish_series_integration_under_authority(
     contract: WorktreeContract,
     publication: Callable[[], T],
 ) -> T:
-    """Hold the atomic barrier and exact task/ref authority through its one landing."""
+    """Hold the atomic blocker and exact task/ref authority through its one landing."""
 
     if contract.kind != "series":
         raise RuntimeError("atomic series integration authority requires a series contract")
@@ -99,11 +99,11 @@ def _publish_atomic_series_edge(
                 f"atomic-series-{edge}-graph-moved",
                 f"atomic master {edge} graph changed before protected publication",
             )
-        barrier = state.activeBarrier
-        if barrier is None or barrier.master != master_ref:
+        blocker = state.activeBlocker
+        if blocker is None or blocker.master != master_ref:
             raise CloseoutQueueError(
-                f"atomic-series-{edge}-barrier-required",
-                f"atomic master {edge} requires its exact active sprint landing barrier",
+                f"atomic-series-{edge}-blocker-required",
+                f"atomic master {edge} requires its exact active sprint landing blocker",
             )
         candidates = [
             candidate.taskDocumentRef.key

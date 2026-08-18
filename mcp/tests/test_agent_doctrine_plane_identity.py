@@ -164,8 +164,8 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "Master Execution Nature (explicit judgment)",
             "Priority Register (explicit judgment)",
             "Canonical executionGraph Adoption Payload",
-            "Derived Waves And Barrier Walk",
-            "barrier-placement judgment <id>",
+            "Derived Waves And Blocker Walk",
+            "blocker-placement judgment <id>",
             "sprint decision log and Judgment Register",
         )
     )

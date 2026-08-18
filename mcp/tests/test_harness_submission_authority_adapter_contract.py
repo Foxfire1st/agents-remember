@@ -5,7 +5,7 @@ type, acknowledge somebody else's request, or claim an acceptance the contract f
 dispatch. None of those may be projected as a settled outcome, and none of them may be
 projected as a rejection either --
 the adapter method has already returned, so the authority cannot certify that nothing crossed
-the wire. Every case below therefore ends in the same place: an ``unknown`` barrier that pins
+the wire. Every case below therefore ends in the same place: an ``unknown`` blocker that pins
 the head, keeps the successor undispatched, and waits for an operator to resolve it.
 """
 
@@ -106,7 +106,7 @@ class AdapterAnswerContractTests(unittest.IsolatedAsyncioTestCase):
             # Not a transport failure: the connection is fine, the answer was not.
             self.assertEqual(adapter.current.control, "ready")
 
-            queued = await authority.submit(_prompt("behind-the-barrier"))
+            queued = await authority.submit(_prompt("behind-the-blocker"))
             self.assertEqual(queued.acceptance, "queued")
             self.assertEqual(await dispatched_ids(adapter, expected=2), ["wrong-type"])
             self.assertEqual(await state_of(authority, "wrong-type"), "unknown")
@@ -120,7 +120,7 @@ class AdapterAnswerContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await state_of(authority, "wrong-type"), "rejected")
             self.assertEqual(
                 await dispatched_ids(adapter, expected=2),
-                ["wrong-type", "behind-the-barrier"],
+                ["wrong-type", "behind-the-blocker"],
             )
         finally:
             await authority.stop(forced=True)
@@ -159,7 +159,7 @@ class AdapterAnswerContractTests(unittest.IsolatedAsyncioTestCase):
 
         ``queued`` from an adapter that has already been handed the operation says the vendor
         holds a submission the authority cannot see, order or withdraw. It is refused as an
-        acceptance and converted into the barrier, keeping the vendor's own correlation handle
+        acceptance and converted into the blocker, keeping the vendor's own correlation handle
         so an operator can go and look.
         """
 

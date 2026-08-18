@@ -126,7 +126,7 @@ class HarnessControlConformanceTests1(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop("forced")
 
-    async def test_bad_set_result_installs_resolvable_unknown_barrier_without_poisoning(
+    async def test_bad_set_result_installs_resolvable_unknown_blocker_without_poisoning(
         self,
     ) -> None:
         invalid = (

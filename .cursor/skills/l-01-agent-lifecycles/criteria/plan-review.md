@@ -45,7 +45,7 @@ win/urgency rationale, affected dependents, evidence, author, and confidence is 
 **Validate the canonical graph and derive its waves mechanically.** Its node set must equal the
 sprint's `orchestrates` membership and the classified master set. Every predecessor edge must be
 supported by the relation evidence, no cycle may exist, and the displayed waves must equal the
-stable topological derivation rather than a persisted/manual position. An atomic barrier must wait
+stable topological derivation rather than a persisted/manual position. An atomic blocker must wait
 for every predecessor, expose no intermediate state, and release successors only after its one
 landing. Stable node order may break an equal-priority tie but must never masquerade as priority.
 
@@ -61,7 +61,7 @@ flagged at the top of the coherence findings, not buried.
 
 **Facts and judgments must remain distinguishable and owned.** Recompute a sample of mechanical
 facts from task docs, route indexes, source graphs, and lineage. Check that execution nature,
-priority, dependency meaning, and barrier placement are explicit judgments with evidence rather
+priority, dependency meaning, and blocker placement are explicit judgments with evidence rather
 than code-invented policy. The plan must assign ordinary ready-frontier recomputation and bounded
 reprioritization to the orchestrator, substantial graph/classification reshapes to a proposed
 strategist pass through the architect, and master-local readiness reporting to managers. A manager

@@ -580,13 +580,13 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
     async def test_operator_resolution_crosses_the_socket_for_both_wire_actions(
         self,
     ) -> None:  # pragma: no cover
-        """`resolve` and `resolve-operation` are the operator's half of the ambiguity barrier.
+        """`resolve` and `resolve-operation` are the operator's half of the ambiguity blocker.
 
         An ambiguous send parks the timeline: the authority cannot say whether the prompt
         landed, so nothing else is admitted until a human answers. Both actions are declared
         in `_CONTROL_ACTIONS`, and until now neither had crossed the socket in a test -- so
         the two things asserted here are that the payload reaches the authority intact and
-        that the barrier is actually lifted, which is the whole point of the round trip.
+        that the blocker is actually lifted, which is the whole point of the round trip.
         """
         with tempfile.TemporaryDirectory() as tmp_str:
             identity = _identity("operator-resolution")
@@ -629,7 +629,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(resolved["state"], "rejected")
                 self.assertEqual(resolved["requestId"], "unknown-1")
                 self.assertEqual(resolved["detail"], "operator saw no turn in the pane")
-                # The barrier is gone: the parked timeline is free again.
+                # The blocker is gone: the parked timeline is free again.
                 self.assertIsNone(bridge.submissions().active_operation)
 
                 # A refusal the handler itself owns, so a malformed state never reaches
@@ -642,7 +642,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                         {"requestId": "unknown-1", "state": "maybe", "detail": "d"},
                     )
 
-                # The prompt queued behind the barrier now dispatches, and disconnects the
+                # The prompt queued behind the blocker now dispatches, and disconnects the
                 # same way -- so there is a second ambiguous head for the other action.
                 assert adapter.current is not None
                 adapter.emit(

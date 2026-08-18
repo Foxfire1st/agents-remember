@@ -52,7 +52,7 @@ class CloseoutQueuePendingTransaction(DurableRecord):
                 or self.requestFingerprint != expected_fingerprint
                 or self.state.closed != self.sprintCompleted
                 or self.state.candidates
-                or self.state.activeBarrier is not None
+                or self.state.activeBlocker is not None
                 or self.state.appliedRequests
             ):
                 raise ValueError(

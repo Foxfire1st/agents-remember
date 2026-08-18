@@ -77,7 +77,7 @@ def _retire_reported_leaf_seats(
     task_document_ref: TaskDocumentRef,
     closure: SeatClosure,
 ) -> dict[str, list[str]]:
-    """Retire eligible leaf seats after the durable turn-report ordering barrier."""
+    """Retire eligible leaf seats after the durable turn-report ordering blocker."""
     reports = OperatorInboxStore(observer_root(config)).current().values()
     reported_sessions = {
         report.senderAgentId

@@ -43,7 +43,7 @@ from .closeout_queue_errors import CloseoutQueueError
 
 @dataclass(frozen=True)
 class AtomicMasterLandingAuthority:
-    """Configured task/ref authority required to release one atomic sprint barrier."""
+    """Configured task/ref authority required to release one atomic sprint blocker."""
 
     coordination_root: Path
     repo_name: str
@@ -63,8 +63,8 @@ def atomic_master_landing_authority(
     source_branch = sprint.document.integrationBranch
     if configured is None or not source_branch:
         raise CloseoutQueueError(
-            "atomic-barrier-authority-unavailable",
-            "atomic barrier release requires a configured repository and sprint super",
+            "atomic-blocker-authority-unavailable",
+            "atomic blocker release requires a configured repository and sprint super",
         )
     code_repository = repository_identity(configured.path)
     memory_mode = memory_mode_for_repository(configured.path, configured.memory_root)
@@ -73,8 +73,8 @@ def atomic_master_landing_authority(
     )
     if code_repository is None or (memory_mode == "external" and memory_repository is None):
         raise CloseoutQueueError(
-            "atomic-barrier-authority-unavailable",
-            "atomic barrier release cannot resolve configured Git repository identity",
+            "atomic-blocker-authority-unavailable",
+            "atomic blocker release cannot resolve configured Git repository identity",
         )
     return AtomicMasterLandingAuthority(
         coordination_root=config.coordination_root.resolve(),
@@ -214,12 +214,12 @@ def require_atomic_master_landed(
         contract = load_contract(series_contract_path(master.path.parent))
     except (OSError, RuntimeError, ValueError) as exc:
         raise CloseoutQueueError(
-            "atomic-barrier-master-landing-unproven",
+            "atomic-blocker-master-landing-unproven",
             f"atomic master has no valid exact landing contract: {exc}",
         ) from exc
     if not _atomic_contract_matches_master(contract, master, authority):
         raise CloseoutQueueError(
-            "atomic-barrier-master-landing-unproven",
+            "atomic-blocker-master-landing-unproven",
             "atomic master completion does not prove one exact code-and-memory landing onto super",
         )
     try:
@@ -228,7 +228,7 @@ def require_atomic_master_landed(
         operation_landed = _atomic_operation_landed(contract, authority)
     except (OSError, RuntimeError, ValueError) as exc:
         raise CloseoutQueueError(
-            "atomic-barrier-master-landing-unproven",
+            "atomic-blocker-master-landing-unproven",
             f"atomic master has no valid exact landing contract: {exc}",
         ) from exc
     if not all(
@@ -241,7 +241,7 @@ def require_atomic_master_landed(
         )
     ):
         raise CloseoutQueueError(
-            "atomic-barrier-master-landing-unproven",
+            "atomic-blocker-master-landing-unproven",
             "atomic master completion does not prove one exact code-and-memory landing onto super",
         )
 

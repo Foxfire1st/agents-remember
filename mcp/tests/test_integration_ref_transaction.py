@@ -41,7 +41,7 @@ from agents_remember.worktrees.modules.integrate import (
 from agents_remember.worktrees.series_closeout import atomic_series_ledger_prefix
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from integration_branch_authority_test_support import (
-    _acquire_atomic_barrier,
+    _acquire_atomic_blocker,
     _land_two_external_atomic_leaves,
 )
 from test_integration_branch_authority import (
@@ -375,7 +375,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
     def test_atomic_series_publication_refuses_injected_prefix_before_super_movement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp), external_memory=True)
-            _acquire_atomic_barrier(fixture)
+            _acquire_atomic_blocker(fixture)
             _first, final = _land_two_external_atomic_leaves(fixture)
             series = fixture.master_contract
             memory_repo = series.memory_repo_path

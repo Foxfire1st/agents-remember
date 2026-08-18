@@ -21,7 +21,7 @@ from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout_queue import (
-    ActiveAtomicBarrier,
+    ActiveAtomicBlocker,
     CandidateAdmissionFacts,
     CloseoutCandidateRecord,
     CloseoutQueueCandidateView,
@@ -76,7 +76,7 @@ from .closeout_queue_candidate_evidence import (
 from .closeout_queue_errors import CloseoutQueueError
 from .closeout_queue_evidence import (
     PRIORITY_RANK,
-    canonical_barrier_abort,
+    canonical_blocker_abort,
     canonical_grade,
     curator_evidence,
     curator_evidence_blockers,
@@ -97,9 +97,9 @@ _ACTIONS = frozenset(
         "set-admission",
         "select",
         "release-selection",
-        "acquire-barrier",
-        "release-barrier",
-        "abort-barrier",
+        "acquire-blocker",
+        "release-blocker",
+        "abort-blocker",
     }
 )
 
@@ -256,21 +256,21 @@ def _apply_action(
         return _declare_candidate(current, context, actor)
     if context.action in {"withdraw", "set-grade", "set-admission", "select", "release-selection"}:
         return _apply_candidate_action(current, context, actor)
-    if context.action == "acquire-barrier":
+    if context.action == "acquire-blocker":
         _require_sprint_role(actor, context.graph, "orchestrator")
-        return _acquire_barrier(
+        return _acquire_blocker(
             context.graph,
             current,
             context.request,
             context.timestamp,
             actor.identity,
         )
-    if context.action == "release-barrier":
+    if context.action == "release-blocker":
         _require_sprint_role(actor, context.graph, "orchestrator")
-        return _release_barrier(context.graph, current, context.request, context.config)
-    if context.action == "abort-barrier":
+        return _release_blocker(context.graph, current, context.request, context.config)
+    if context.action == "abort-blocker":
         _require_sprint_role(actor, context.graph, "orchestrator")
-        return _abort_barrier(context.graph, current, context.request)
+        return _abort_blocker(context.graph, current, context.request)
     raise AssertionError(f"unhandled closeout queue action: {context.action}")
 
 
@@ -482,56 +482,56 @@ def _bind_queue_contract(
     )
 
 
-def _acquire_barrier(
+def _acquire_blocker(
     graph: _GraphContext,
     state: CloseoutQueueState,
     request: CloseoutQueueRequest,
     timestamp: str,
     actor_identity: str,
 ) -> CloseoutQueueState:
-    master_ref = _task_ref(request.barrier_master_ref, "barrier_master_ref")
+    master_ref = _task_ref(request.blocker_master_ref, "blocker_master_ref")
     master = graph.masters.get(master_ref)
     if master is None:
         raise CloseoutQueueError(
-            "atomic-barrier-master-unknown", f"master is not in the sprint graph: {master_ref.key}"
+            "atomic-blocker-master-unknown", f"master is not in the sprint graph: {master_ref.key}"
         )
     if master.document.executionNature != "atomic":
         raise CloseoutQueueError(
-            "atomic-barrier-nature-required", "only an atomic master can own a barrier"
+            "atomic-blocker-nature-required", "only an atomic master can own a blocker"
         )
-    require_source_bases_current(_require_unsealed_barrier_series(master))
-    if state.activeBarrier is not None:
+    require_source_bases_current(_require_unsealed_blocker_series(master))
+    if state.activeBlocker is not None:
         if (
-            state.activeBarrier.master == master_ref
-            and state.activeBarrier.graphRevision == graph.revision
+            state.activeBlocker.master == master_ref
+            and state.activeBlocker.graphRevision == graph.revision
         ):
             return state
-        if state.activeBarrier.master == master_ref:
+        if state.activeBlocker.master == master_ref:
             raise CloseoutQueueError(
-                "atomic-barrier-graph-stale",
-                "the active barrier belongs to an older graph revision; release it first",
+                "atomic-blocker-graph-stale",
+                "the active blocker belongs to an older graph revision; release it first",
             )
         raise CloseoutQueueError(
-            "atomic-barrier-active", f"barrier is already held by {state.activeBarrier.master.key}"
+            "atomic-blocker-active", f"blocker is already held by {state.activeBlocker.master.key}"
         )
     incomplete = _incomplete_predecessors(graph, master_ref)
     if incomplete:
         raise CloseoutQueueError(
-            "atomic-barrier-predecessors-incomplete",
-            f"atomic barrier predecessors are incomplete: {[ref.key for ref in incomplete]!r}",
+            "atomic-blocker-predecessors-incomplete",
+            f"atomic blocker predecessors are incomplete: {[ref.key for ref in incomplete]!r}",
         )
     if any(candidate.state != "declared" for candidate in state.candidates.values()):
         raise CloseoutQueueError(
-            "atomic-barrier-in-flight-conflict", "the sprint landing lane is not drained"
+            "atomic-blocker-in-flight-conflict", "the sprint landing lane is not drained"
         )
     rationale = request.rationale.strip()
     if not rationale:
         raise CloseoutQueueError(
-            "atomic-barrier-rationale-required", "barrier acquisition requires rationale"
+            "atomic-blocker-rationale-required", "blocker acquisition requires rationale"
         )
     return state.model_copy(
         update={
-            "activeBarrier": ActiveAtomicBarrier(
+            "activeBlocker": ActiveAtomicBlocker(
                 master=master_ref,
                 graphRevision=graph.revision,
                 acquiredBy=actor_identity,
@@ -542,44 +542,44 @@ def _acquire_barrier(
     )
 
 
-def _require_unsealed_barrier_series(master: Any) -> WorktreeContract:
+def _require_unsealed_blocker_series(master: Any) -> WorktreeContract:
     path = series_contract_path(master.path.parent)
     try:
         return require_series_path_accepting_leaves(
             path,
-            operation="atomic barrier acquisition",
+            operation="atomic blocker acquisition",
         )
     except RuntimeError as exc:
         raise CloseoutQueueError(
-            "atomic-barrier-series-sealed",
+            "atomic-blocker-series-sealed",
             str(exc),
         ) from exc
 
 
-def _release_barrier(
+def _release_blocker(
     graph: _GraphContext,
     state: CloseoutQueueState,
     request: CloseoutQueueRequest,
     config: McpRuntimeConfig,
 ) -> CloseoutQueueState:
-    if state.activeBarrier is None:
-        raise CloseoutQueueError("atomic-barrier-not-active", "no atomic barrier is active")
-    asserted = _task_ref(request.barrier_master_ref, "barrier_master_ref")
-    if asserted != state.activeBarrier.master:
+    if state.activeBlocker is None:
+        raise CloseoutQueueError("atomic-blocker-not-active", "no atomic blocker is active")
+    asserted = _task_ref(request.blocker_master_ref, "blocker_master_ref")
+    if asserted != state.activeBlocker.master:
         raise CloseoutQueueError(
-            "atomic-barrier-owner-mismatch",
-            f"active barrier belongs to {state.activeBarrier.master.key}",
+            "atomic-blocker-owner-mismatch",
+            f"active blocker belongs to {state.activeBlocker.master.key}",
         )
     if any(candidate.owningMaster == asserted for candidate in state.candidates.values()):
         raise CloseoutQueueError(
-            "atomic-barrier-candidates-remain",
+            "atomic-blocker-candidates-remain",
             "the atomic master still has declared or lifecycle-owned candidates",
         )
     master = graph.masters.get(asserted)
     if master is None or master.document.status != "Completed":
         raise CloseoutQueueError(
-            "atomic-barrier-master-incomplete",
-            "normal barrier release requires the canonical atomic master completion edge",
+            "atomic-blocker-master-incomplete",
+            "normal blocker release requires the canonical atomic master completion edge",
         )
     require_atomic_master_landed(
         master,
@@ -587,34 +587,34 @@ def _release_barrier(
     )
     if not request.rationale.strip():
         raise CloseoutQueueError(
-            "atomic-barrier-rationale-required", "barrier release requires rationale"
+            "atomic-blocker-rationale-required", "blocker release requires rationale"
         )
-    return state.model_copy(update={"activeBarrier": None})
+    return state.model_copy(update={"activeBlocker": None})
 
 
-def _abort_barrier(
+def _abort_blocker(
     graph: _GraphContext, state: CloseoutQueueState, request: CloseoutQueueRequest
 ) -> CloseoutQueueState:
-    if state.activeBarrier is None:
-        raise CloseoutQueueError("atomic-barrier-not-active", "no atomic barrier is active")
-    asserted = _task_ref(request.barrier_master_ref, "barrier_master_ref")
-    if asserted != state.activeBarrier.master:
+    if state.activeBlocker is None:
+        raise CloseoutQueueError("atomic-blocker-not-active", "no atomic blocker is active")
+    asserted = _task_ref(request.blocker_master_ref, "blocker_master_ref")
+    if asserted != state.activeBlocker.master:
         raise CloseoutQueueError(
-            "atomic-barrier-owner-mismatch",
-            f"active barrier belongs to {state.activeBarrier.master.key}",
+            "atomic-blocker-owner-mismatch",
+            f"active blocker belongs to {state.activeBlocker.master.key}",
         )
     if any(candidate.owningMaster == asserted for candidate in state.candidates.values()):
         raise CloseoutQueueError(
-            "atomic-barrier-candidates-remain",
+            "atomic-blocker-candidates-remain",
             "withdraw or finish every atomic candidate before recording an abort",
         )
-    canonical_barrier_abort(
-        request.barrier_judgment_id,
+    canonical_blocker_abort(
+        request.blocker_judgment_id,
         authority=graph.grade_authority,
         master_ref=asserted,
         graph_revision=graph.revision,
     )
-    return state.model_copy(update={"activeBarrier": None})
+    return state.model_copy(update={"activeBlocker": None})
 
 
 def _projection(
@@ -639,8 +639,8 @@ def _projection(
         "sprintTaskDocumentRef": graph.sprint.ref.model_dump(mode="json"),
         "revision": state.revision,
         "graphRevision": graph.revision,
-        "activeBarrier": state.activeBarrier.model_dump(mode="json")
-        if state.activeBarrier
+        "activeBlocker": state.activeBlocker.model_dump(mode="json")
+        if state.activeBlocker
         else None,
         **{
             name: [view.model_dump(mode="json") for view in views] for name, views in groups.items()
@@ -665,7 +665,7 @@ def _project_candidates(
     for candidate in state.candidates.values():
         blockers = _candidate_blockers(topology, graph, candidate)
         if candidate.state != "declared":
-            blockers.extend(_waiting_reasons(graph, candidate, lane_owner, state.activeBarrier))
+            blockers.extend(_waiting_reasons(graph, candidate, lane_owner, state.activeBlocker))
             blockers = list(dict.fromkeys(blockers))
         if blockers:
             classification = "blocked"
@@ -676,7 +676,7 @@ def _project_candidates(
             reasons = []
             legal = _in_flight_legal_operations(graph, candidate, actor)
         else:
-            reasons = _waiting_reasons(graph, candidate, lane_owner, state.activeBarrier)
+            reasons = _waiting_reasons(graph, candidate, lane_owner, state.activeBlocker)
             classification = "waiting" if reasons else "ready"
             legal = _declared_legal_operations(graph, candidate, actor, ready=not reasons)
         view = CloseoutQueueCandidateView(
@@ -1052,7 +1052,7 @@ def _waiting_reasons(
     graph: _GraphContext,
     candidate: CloseoutCandidateRecord,
     lane_owner: TaskDocumentRef | None,
-    active_barrier: ActiveAtomicBarrier | None,
+    active_blocker: ActiveAtomicBlocker | None,
 ) -> list[str]:
     reasons = [
         f"predecessor-incomplete: {ref.key}"
@@ -1063,16 +1063,16 @@ def _waiting_reasons(
     if lane_owner is not None and lane_owner != candidate.taskDocumentRef:
         reasons.append(f"integration-lane-owned-by: {lane_owner.key}")
     master = graph.masters.get(candidate.owningMaster)
-    if active_barrier is not None and active_barrier.graphRevision != graph.revision:
-        reasons.append("atomic-barrier-graph-revision-stale")
-    elif active_barrier is not None and active_barrier.master != candidate.owningMaster:
-        reasons.append(f"atomic-barrier-held-by: {active_barrier.master.key}")
+    if active_blocker is not None and active_blocker.graphRevision != graph.revision:
+        reasons.append("atomic-blocker-graph-revision-stale")
+    elif active_blocker is not None and active_blocker.master != candidate.owningMaster:
+        reasons.append(f"atomic-blocker-held-by: {active_blocker.master.key}")
     elif (
         master is not None
         and master.document.executionNature == "atomic"
-        and (active_barrier is None or active_barrier.master != candidate.owningMaster)
+        and (active_blocker is None or active_blocker.master != candidate.owningMaster)
     ):
-        reasons.append("atomic-barrier-required")
+        reasons.append("atomic-blocker-required")
     if not candidate.admission.resourceReady:
         reasons.append(f"resource-unavailable: {candidate.admission.resourceReason}")
     if not candidate.admission.admissionReady:
@@ -1183,7 +1183,7 @@ def _initial_state(
         revision=0,
         graphRevision=graph_revision,
         candidates={},
-        activeBarrier=None,
+        activeBlocker=None,
         appliedRequests=[],
         updatedAt=timestamp,
     )

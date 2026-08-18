@@ -327,7 +327,7 @@ def _require_integration_recovery_candidate(
             graph,
             candidate,
             _active_lane_owner(state),
-            state.activeBarrier,
+            state.activeBlocker,
         )
     )
     if blockers:

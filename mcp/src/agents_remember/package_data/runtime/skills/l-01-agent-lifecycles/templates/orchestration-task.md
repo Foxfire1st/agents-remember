@@ -15,9 +15,9 @@ commanded master's `executionNature`.
 
 1. **Separate facts from judgments.** Tool-derived task membership, paths, routes, seams,
    call/import relationships, lineage, cycles, readiness, and derived waves go in the fact table.
-   Dependency meaning, `organizational` versus `atomic`, blast radius, priority, barrier placement,
+   Dependency meaning, `organizational` versus `atomic`, blast radius, priority, blocker placement,
    and reprioritization go in the canonical Judgment Register with rationale, evidence, author,
-   confidence, and supersession history. The nature, blast-radius, priority, relation, barrier, and
+   confidence, and supersession history. The nature, blast-radius, priority, relation, blocker, and
    leaf-move sections are projections that cite their owning judgment row rather than becoming
    parallel judgment authorities.
    Stable task/node order is a tie-break, never priority judgment.
@@ -70,7 +70,7 @@ commanded master's `executionNature`.
 | ------- | -------------------------------------------------------------------------- | ------- | -------------- | ----------------- | ----------- |
 
 ## Judgment Register (canonical judgment authority)
-| Judgment id | Kind (dependency meaning, execution nature, blast radius, priority, barrier placement, reprioritization, or leaf move) | Subject | Decision | Rationale | Evidence/fact refs | Author | Confidence | Supersedes |
+| Judgment id | Kind (dependency meaning, execution nature, blast radius, priority, blocker placement, reprioritization, or leaf move) | Subject | Decision | Rationale | Evidence/fact refs | Author | Confidence | Supersedes |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------- | ------- | -------- | --------- | ------------------ | ------ | ---------- | ---------- |
 
 ## Touch Surfaces (per leaf — two-sided)
@@ -109,9 +109,9 @@ commanded master's `executionNature`.
 }
 ```
 
-## Derived Waves And Barrier Walk
+## Derived Waves And Blocker Walk
 - Wave <n> (mechanically derived, not persisted): <master refs>
-- Atomic barrier: <master ref> · predecessors <refs> · successors <refs> · barrier-placement judgment <id>
+- Atomic blocker: <master ref> · predecessors <refs> · successors <refs> · blocker-placement judgment <id>
 - Deterministic equal-priority tie-break: canonical graph node order
 
 ## Leaf Moves

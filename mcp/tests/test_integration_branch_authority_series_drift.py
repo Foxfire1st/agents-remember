@@ -12,7 +12,7 @@ from agents_remember.worktrees import lifecycle_operations
 from agents_remember.worktrees.lifecycle_operation_store import operation_record_path
 from agents_remember.worktrees.worktree_contract import write_contract
 from integration_branch_authority_test_support import (
-    _acquire_atomic_barrier,
+    _acquire_atomic_blocker,
     _authority_fixture,
     _complete_atomic_master,
 )
@@ -24,7 +24,7 @@ class IntegrationBranchAuthoritySeriesDriftTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root)
-            _acquire_atomic_barrier(fixture)
+            _acquire_atomic_blocker(fixture)
             _commit_on(fixture.code_repo, "ar/master", "atomic-candidate.txt")
             candidate = _git(fixture.code_repo, "rev-parse", "refs/heads/ar/master")
             _complete_atomic_master(fixture)

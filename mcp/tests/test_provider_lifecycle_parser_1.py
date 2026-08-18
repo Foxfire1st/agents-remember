@@ -567,7 +567,7 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 "cgc_start_all": cgc_refresh_lifecycle.cgc_start_all,
                 "run_compose": cgc_refresh_lifecycle.run_compose,
             }
-            barrier = threading.Barrier(2, timeout=2)
+            blocker = threading.Barrier(2, timeout=2)
             lock = threading.Lock()
             active = 0
             max_active = 0
@@ -581,7 +581,7 @@ class ProviderLifecycleParserTests1(ProviderLifecycleParserTests):
                 with lock:
                     active += 1
                     max_active = max(max_active, active)
-                barrier.wait()
+                blocker.wait()
                 with lock:
                     active -= 1
                 return {

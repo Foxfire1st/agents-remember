@@ -498,7 +498,7 @@ def append_lines(log_path: Path, lines: list[str]) -> None:
 
     A transition batch is one durability unit: either every validated snapshot reaches the
     append before the single fsync, or the caller raises before writing any of them. This avoids
-    turning a bounded sweep into one full log fold and one disk barrier per row.
+    turning a bounded sweep into one full log fold and one disk blocker per row.
     """
     if not lines:
         return

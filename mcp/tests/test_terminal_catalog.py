@@ -425,10 +425,10 @@ class TerminalCatalogTests(unittest.TestCase):
         # read-modify-write serialized under the lock + a unique temp per write, every row survives and the
         # file stays valid JSON. (Pre-fix: lost updates and a torn, unreadable file.)
         ids = [f"s{i:03d}" for i in range(40)]
-        barrier = threading.Barrier(len(ids))
+        blocker = threading.Barrier(len(ids))
 
         def _add(session_id: str) -> None:
-            barrier.wait()  # maximize overlap on the read-modify-write
+            blocker.wait()  # maximize overlap on the read-modify-write
             self.catalog.upsert(
                 _entry(session_id, created_at=f"2026-06-26T00:00:{session_id[-2:]}Z")
             )

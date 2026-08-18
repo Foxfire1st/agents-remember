@@ -66,7 +66,7 @@ via chat context:
    ruling) and one on the master doc (joined sprint X).
 4. **Propose the strategist fit-check — a question, not a dispatch.** Per the spool-up rule,
    ask the developer: "want the strategist to evaluate how this master fits the sprint
-   (dependencies, execution nature, wave/barrier placement, blast radius, and priority)?"
+   (dependencies, execution nature, wave/blocker placement, blast radius, and priority)?"
    Recommend YES when other masters are already in flight, the addition changes dependencies, or
    the accepted graph needs substantial reshaping; recommend SKIP only when the evidence makes a
    bounded graph edit and classification clear. Never auto-run it.

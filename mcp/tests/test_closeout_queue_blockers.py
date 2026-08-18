@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.models.closeout_queue import ActiveAtomicBarrier
+from agents_remember.models.closeout_queue import ActiveAtomicBlocker
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees import closeout_queue as queue
 from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
@@ -351,7 +351,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
                 ["grade-judgment-stale", "grade-evidence-stale"],
             )
 
-    def test_waiting_reasons_cover_lane_barrier_atomic_and_admission_facts(self) -> None:
+    def test_waiting_reasons_cover_lane_blocker_atomic_and_admission_facts(self) -> None:
         no_grade = self.candidate.model_copy(
             update={
                 "grade": None,
@@ -369,7 +369,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             self.graph,
             no_grade,
             LEAF_A.model_copy(update={"path": "other.json"}),
-            ActiveAtomicBarrier(
+            ActiveAtomicBlocker(
                 master=MASTER_B,
                 graphRevision=self.graph.revision,
                 acquiredBy="orchestrator",
@@ -379,10 +379,10 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         )
         self.assertIn("explicit-grade-required", reasons)
         self.assertTrue(any(item.startswith("integration-lane-owned-by") for item in reasons))
-        self.assertTrue(any(item.startswith("atomic-barrier-held-by") for item in reasons))
+        self.assertTrue(any(item.startswith("atomic-blocker-held-by") for item in reasons))
         self.assertIn("resource-unavailable: busy", reasons)
         self.assertIn("admission-blocked: held", reasons)
-        stale = ActiveAtomicBarrier(
+        stale = ActiveAtomicBlocker(
             master=MASTER_A,
             graphRevision="f" * 64,
             acquiredBy="orchestrator",
@@ -390,7 +390,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             rationale="isolate",
         )
         self.assertIn(
-            "atomic-barrier-graph-revision-stale",
+            "atomic-blocker-graph-revision-stale",
             queue._waiting_reasons(self.graph, self.candidate, None, stale),
         )
         atomic_master = replace(
@@ -404,7 +404,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             masters={**self.graph.masters, MASTER_A: atomic_master},
         )
         self.assertIn(
-            "atomic-barrier-required",
+            "atomic-blocker-required",
             queue._waiting_reasons(atomic_graph, self.candidate, None, None),
         )
         predecessor_graph = replace(

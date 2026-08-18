@@ -174,7 +174,7 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                     "published",
                 )
 
-    def test_queue_publication_refuses_graph_barrier_and_candidate_races(self) -> None:
+    def test_queue_publication_refuses_graph_blocker_and_candidate_races(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp))
             master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
@@ -245,7 +245,7 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                         edge="closeout",
                     )
 
-            state = SimpleNamespace(activeBarrier=None, candidates={})
+            state = SimpleNamespace(activeBlocker=None, candidates={})
             with self.assertRaisesRegex(series_closeout.CloseoutQueueError, "graph changed"):
                 publish(
                     state,
@@ -255,11 +255,11 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                     ],
                 )
 
-            with self.assertRaisesRegex(series_closeout.CloseoutQueueError, "barrier"):
+            with self.assertRaisesRegex(series_closeout.CloseoutQueueError, "blocker"):
                 publish(state)
 
             state = SimpleNamespace(
-                activeBarrier=SimpleNamespace(master=master_ref),
+                activeBlocker=SimpleNamespace(master=master_ref),
                 candidates={
                     "leaf": SimpleNamespace(
                         owningMaster=master_ref,

@@ -20,8 +20,8 @@ from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.closeout_queue import (
     CloseoutQueueError,
     QueueActor,
-    _abort_barrier,
-    _acquire_barrier,
+    _abort_blocker,
+    _acquire_blocker,
     _ActionContext,
     _active_lane_owner,
     _admission,
@@ -43,7 +43,7 @@ from agents_remember.worktrees.closeout_queue import (
     _lifecycle_operation_legal,
     _owned_lifecycle_operation,
     _queue_action,
-    _release_barrier,
+    _release_blocker,
     _release_selection,
     _request_fingerprint,
     _required_candidate_ref,
@@ -149,10 +149,10 @@ class CloseoutQueueActionTests(unittest.TestCase):
             expected_revision=0,
             candidate_task_document_ref=LEAF_A,
             contract_path=None,
-            barrier_master_ref=None,
+            blocker_master_ref=None,
             admission=None,
             grade=None,
-            barrier_judgment_id=None,
+            blocker_judgment_id=None,
             rationale="",
         )
         with self.assertRaisesRegex(CloseoutQueueError, "stable request_id"):
@@ -371,48 +371,48 @@ class CloseoutQueueActionTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "unhandled"):
             _apply_action(state, context, actor)
 
-    def test_acquire_barrier_refusal_matrix_and_idempotency(self) -> None:
+    def test_acquire_blocker_refusal_matrix_and_idempotency(self) -> None:
         fixture = self._fixture(atomic_b=True)
         _, graph, state = self._context(fixture)
         valid = CloseoutQueueRequest(
-            action="acquire-barrier",
+            action="acquire-blocker",
             sprint_task_document_ref=SPRINT,
-            request_id="barrier",
+            request_id="blocker",
             expected_revision=0,
-            barrier_master_ref=MASTER_B,
+            blocker_master_ref=MASTER_B,
             rationale=RATIONALE,
         )
-        acquired = _acquire_barrier(graph, state, valid, NOW, "orchestrator")
-        assert acquired.activeBarrier is not None
-        self.assertIs(_acquire_barrier(graph, acquired, valid, NOW, "orchestrator"), acquired)
+        acquired = _acquire_blocker(graph, state, valid, NOW, "orchestrator")
+        assert acquired.activeBlocker is not None
+        self.assertIs(_acquire_blocker(graph, acquired, valid, NOW, "orchestrator"), acquired)
 
         unknown = valid.model_copy(
             update={
-                "barrier_master_ref": TaskDocumentRef(
+                "blocker_master_ref": TaskDocumentRef(
                     repository=SPRINT.repository, path="missing/task.json"
                 )
             }
         )
         with self.assertRaisesRegex(CloseoutQueueError, "not in the sprint graph"):
-            _acquire_barrier(graph, state, unknown, NOW, "orchestrator")
-        non_atomic = valid.model_copy(update={"barrier_master_ref": MASTER_A})
+            _acquire_blocker(graph, state, unknown, NOW, "orchestrator")
+        non_atomic = valid.model_copy(update={"blocker_master_ref": MASTER_A})
         with self.assertRaisesRegex(CloseoutQueueError, "only an atomic"):
-            _acquire_barrier(graph, state, non_atomic, NOW, "orchestrator")
+            _acquire_blocker(graph, state, non_atomic, NOW, "orchestrator")
 
-        stale_barrier = acquired.activeBarrier.model_copy(update={"graphRevision": "0" * 64})
+        stale_blocker = acquired.activeBlocker.model_copy(update={"graphRevision": "0" * 64})
         with self.assertRaisesRegex(CloseoutQueueError, "older graph revision"):
-            _acquire_barrier(
+            _acquire_blocker(
                 graph,
-                state.model_copy(update={"activeBarrier": stale_barrier}),
+                state.model_copy(update={"activeBlocker": stale_blocker}),
                 valid,
                 NOW,
                 "orchestrator",
             )
-        other_barrier = acquired.activeBarrier.model_copy(update={"master": MASTER_A})
+        other_blocker = acquired.activeBlocker.model_copy(update={"master": MASTER_A})
         with self.assertRaisesRegex(CloseoutQueueError, "already held"):
-            _acquire_barrier(
+            _acquire_blocker(
                 graph,
-                state.model_copy(update={"activeBarrier": other_barrier}),
+                state.model_copy(update={"activeBlocker": other_blocker}),
                 valid,
                 NOW,
                 "orchestrator",
@@ -423,25 +423,25 @@ class CloseoutQueueActionTests(unittest.TestCase):
         selected = declared.candidates[LEAF_A.key].model_copy(update={"state": "selected"})
         occupied = declared.model_copy(update={"candidates": {LEAF_A.key: selected}})
         with self.assertRaisesRegex(CloseoutQueueError, "lane is not drained"):
-            _acquire_barrier(graph, occupied, valid, NOW, "orchestrator")
+            _acquire_blocker(graph, occupied, valid, NOW, "orchestrator")
         blank = valid.model_copy(update={"rationale": " "})
         with self.assertRaisesRegex(CloseoutQueueError, "requires rationale"):
-            _acquire_barrier(graph, declared, blank, NOW, "orchestrator")
+            _acquire_blocker(graph, declared, blank, NOW, "orchestrator")
 
         edge_fixture = QueueFixture(Path(self.temp.name) / "edge", edge=True, atomic_b=True)
         _, edge_graph, edge_state = self._context(edge_fixture)
         with self.assertRaisesRegex(CloseoutQueueError, "predecessors are incomplete"):
-            _acquire_barrier(edge_graph, edge_state, valid, NOW, "orchestrator")
+            _acquire_blocker(edge_graph, edge_state, valid, NOW, "orchestrator")
 
-    def test_acquire_barrier_requires_current_source_bases(self) -> None:
+    def test_acquire_blocker_requires_current_source_bases(self) -> None:
         fixture = self._fixture(atomic_b=True)
         _, graph, state = self._context(fixture)
         valid = CloseoutQueueRequest(
-            action="acquire-barrier",
+            action="acquire-blocker",
             sprint_task_document_ref=SPRINT,
-            request_id="barrier",
+            request_id="blocker",
             expected_revision=0,
-            barrier_master_ref=MASTER_B,
+            blocker_master_ref=MASTER_B,
             rationale=RATIONALE,
         )
         with (
@@ -453,39 +453,39 @@ class CloseoutQueueActionTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(CloseoutQueueError, "code source moved"),
         ):
-            _acquire_barrier(graph, state, valid, NOW, "orchestrator")
+            _acquire_blocker(graph, state, valid, NOW, "orchestrator")
 
-    def test_release_and_abort_barrier_require_exact_owner_and_empty_block(self) -> None:
+    def test_release_and_abort_blocker_require_exact_owner_and_empty_block(self) -> None:
         fixture = self._fixture(atomic_b=True)
         _, graph, state = self._context(fixture)
         valid = CloseoutQueueRequest(
-            action="acquire-barrier",
+            action="acquire-blocker",
             sprint_task_document_ref=SPRINT,
-            request_id="barrier",
+            request_id="blocker",
             expected_revision=0,
-            barrier_master_ref=MASTER_B,
+            blocker_master_ref=MASTER_B,
             rationale=RATIONALE,
         )
-        with self.assertRaisesRegex(CloseoutQueueError, "no atomic barrier"):
-            _release_barrier(graph, state, valid, fixture.cfg)
-        with self.assertRaisesRegex(CloseoutQueueError, "no atomic barrier"):
-            _abort_barrier(graph, state, valid)
-        held = _acquire_barrier(graph, state, valid, NOW, "orchestrator")
+        with self.assertRaisesRegex(CloseoutQueueError, "no atomic blocker"):
+            _release_blocker(graph, state, valid, fixture.cfg)
+        with self.assertRaisesRegex(CloseoutQueueError, "no atomic blocker"):
+            _abort_blocker(graph, state, valid)
+        held = _acquire_blocker(graph, state, valid, NOW, "orchestrator")
         with self.assertRaisesRegex(CloseoutQueueError, "master-incomplete"):
-            _release_barrier(graph, held, valid, fixture.cfg)
-        wrong = valid.model_copy(update={"barrier_master_ref": MASTER_A})
+            _release_blocker(graph, held, valid, fixture.cfg)
+        wrong = valid.model_copy(update={"blocker_master_ref": MASTER_A})
         with self.assertRaisesRegex(CloseoutQueueError, "belongs to"):
-            _release_barrier(graph, held, wrong, fixture.cfg)
+            _release_blocker(graph, held, wrong, fixture.cfg)
         with self.assertRaisesRegex(CloseoutQueueError, "belongs to"):
-            _abort_barrier(graph, held, wrong)
+            _abort_blocker(graph, held, wrong)
 
         fixture.declare(MASTER_B)
         _, graph, candidates = self._context(fixture)
-        blocked = candidates.model_copy(update={"activeBarrier": held.activeBarrier})
+        blocked = candidates.model_copy(update={"activeBlocker": held.activeBlocker})
         with self.assertRaisesRegex(CloseoutQueueError, "candidates"):
-            _release_barrier(graph, blocked, valid, fixture.cfg)
+            _release_blocker(graph, blocked, valid, fixture.cfg)
         with self.assertRaisesRegex(CloseoutQueueError, "candidates"):
-            _abort_barrier(graph, blocked, valid)
+            _abort_blocker(graph, blocked, valid)
 
         completed_master = replace(
             graph.masters[MASTER_B],
@@ -495,33 +495,33 @@ class CloseoutQueueActionTests(unittest.TestCase):
             graph,
             masters={**graph.masters, MASTER_B: completed_master},
         )
-        release = valid.model_copy(update={"action": "release-barrier"})
+        release = valid.model_copy(update={"action": "release-blocker"})
         blank_release = release.model_copy(update={"rationale": " "})
         with (
             mock.patch("agents_remember.worktrees.closeout_queue.require_atomic_master_landed"),
             self.assertRaisesRegex(CloseoutQueueError, "rationale-required"),
         ):
-            _release_barrier(completed_graph, held, blank_release, fixture.cfg)
+            _release_blocker(completed_graph, held, blank_release, fixture.cfg)
         with mock.patch(
             "agents_remember.worktrees.closeout_queue.require_atomic_master_landed"
         ) as landing_check:
             self.assertIsNone(
-                _release_barrier(completed_graph, held, release, fixture.cfg).activeBarrier
+                _release_blocker(completed_graph, held, release, fixture.cfg).activeBlocker
             )
         landing_check.assert_called_once()
         self.assertEqual(landing_check.call_args.args[0], completed_master)
         abort = CloseoutQueueRequest(
-            action="abort-barrier",
+            action="abort-blocker",
             sprint_task_document_ref=SPRINT,
             request_id="abort",
             expected_revision=0,
-            barrier_master_ref=MASTER_B,
-            barrier_judgment_id="ABORT-1",
+            blocker_master_ref=MASTER_B,
+            blocker_judgment_id="ABORT-1",
         )
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue.canonical_barrier_abort"
+            "agents_remember.worktrees.closeout_queue.canonical_blocker_abort"
         ) as abort_check:
-            self.assertIsNone(_abort_barrier(graph, held, abort).activeBarrier)
+            self.assertIsNone(_abort_blocker(graph, held, abort).activeBlocker)
         abort_check.assert_called_once_with(
             "ABORT-1",
             authority=graph.grade_authority,

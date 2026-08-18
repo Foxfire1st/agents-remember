@@ -270,11 +270,11 @@ def _atomic_series_terminal_publication(
                 "atomic-series-terminal-graph-moved",
                 "atomic series terminal graph changed before protected retirement",
             )
-        barrier = state.activeBarrier
-        if barrier is not None and barrier.master == master_ref:
+        blocker = state.activeBlocker
+        if blocker is not None and blocker.master == master_ref:
             raise CloseoutQueueError(
-                "atomic-series-terminal-barrier-active",
-                "atomic series terminal mutation requires its sprint landing barrier to be "
+                "atomic-series-terminal-blocker-active",
+                "atomic series terminal mutation requires its sprint landing blocker to be "
                 "released or durably aborted",
             )
         candidates = [
@@ -570,7 +570,7 @@ def _require_integration_boundary_candidate(
             graph,
             candidate,
             _active_lane_owner(state),
-            state.activeBarrier,
+            state.activeBlocker,
         )
     )
     if blockers:
@@ -1024,7 +1024,7 @@ def _claim_closeout(
             context.graph,
             candidate,
             _active_lane_owner(context.state),
-            context.state.activeBarrier,
+            context.state.activeBlocker,
         )
     )
     if blockers:

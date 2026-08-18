@@ -215,7 +215,7 @@ the design: run the bulwark check against the portfolio and the past before disp
   uses `../criteria/plan-review.md`; drawing-board rounds and quo-vadis items stay with the
   architect. The resulting **ORCHESTRATION TASK** carries the evidence-cited dependency graph,
   blast-radius register, execution-nature and priority judgments, coherence findings, leaf moves,
-  and canonical AON graph with derived waves/barriers. Only after the architect rules it does this
+  and canonical AON graph with derived waves/blockers. Only after the architect rules it does this
   seat adopt the artifact into durable task form with a decision-log entry.
 - **Re-evaluation rules:** ordinary readiness changes, candidate arrivals, landed leaves, and
   bounded reprioritization are this seat's job; recompute without a strategist. A new dependency,
@@ -336,13 +336,13 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    proposed super candidate, run the repository's full acceptance once **before** moving super,
    then atomically land that leaf and complete the organizational master only on pass. No master
    branch is merged because none exists.
-4. **Atomic:** acquire the exclusive barrier, let the manager integrate every certified leaf into
+4. **Atomic:** acquire the exclusive blocker, let the manager integrate every certified leaf into
    the isolated atomic branch, then run the full acceptance and land that one branch on super.
    Expose no intermediate atomic leaf to super.
 5. Map the external-memory edge with the code edge. Prefer ancestry-preserving fast-forward/replay;
    carry-over is an explicit recovery for unavoidable divergence, not a routine consequence of
    parallel organizational work.
-6. Record the new super tips and queue event durably, release or retain the barrier, and recompute.
+6. Record the new super tips and queue event durably, release or retain the blocker, and recompute.
 7. **Close completed subordinate seats; retain the manager owner** —
    `lifecycle_finalize_task` retries the default-on completion cleanup for report-bearing
    worker/reviewer/curator seats of its exact leaf: normal retirement kills tmux while preserving
@@ -379,7 +379,7 @@ main
         ├── organizational master A (logical owner only)
         │     ├── leaf A1 (off current super) ──→ super
         │     └── leaf A2 (off refreshed super) ── full A gate ─→ super once
-        ├── atomic master B branch (off current super; exclusive barrier)
+        ├── atomic master B branch (off current super; exclusive blocker)
         │     ├── leaf B1 ─→ B
         │     └── leaf B2 ─→ B ── full B gate ─→ super once
         └── … final: super → main PR (remote merge) + memory carry-over to main + push
