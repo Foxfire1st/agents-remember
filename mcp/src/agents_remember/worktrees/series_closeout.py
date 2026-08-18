@@ -9,7 +9,7 @@ from typing import TypeVar
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.kernel.memory_ledger import find_mapping, parse_ledger_text
+from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import completion_blockers
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
@@ -123,6 +123,10 @@ def _publish_atomic_series_edge(
 
 
 def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:
+    _exact_atomic_landing_chain(series)
+
+
+def _exact_atomic_landing_chain(series: WorktreeContract) -> list[WorktreeContract]:
     expected, sprint_ref = _atomic_leaf_documents(series)
     contracts: dict[str, WorktreeContract] = {}
     for path in sorted((series.task_root / "enclosures").glob("*/series-contract.md")):
@@ -144,7 +148,7 @@ def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:
             "atomic series closeout requires one exact enclosure for every canonical leaf: "
             f"expected={sorted(expected)!r}, found={sorted(contracts)!r}",
         )
-    _require_exact_atomic_landing_chain(series, contracts, expected, sprint_ref)
+    return _require_exact_atomic_landing_chain(series, contracts, expected, sprint_ref)
 
 
 def _require_exact_atomic_landing_chain(
@@ -152,10 +156,11 @@ def _require_exact_atomic_landing_chain(
     contracts: dict[str, WorktreeContract],
     expected: dict[str, TaskDocumentRef],
     sprint_ref: TaskDocumentRef | None,
-) -> None:
+) -> list[WorktreeContract]:
     current_code = series.code_base_commit
     current_memory = series.memory_base_commit if series.memory_mode == "external" else ""
     remaining = dict(contracts)
+    ordered: list[WorktreeContract] = []
     while remaining:
         next_ids = [
             leaf_id
@@ -175,10 +180,24 @@ def _require_exact_atomic_landing_chain(
             leaf,
             _AtomicLandingFacts(expected[leaf_id], sprint_ref),
         )
+        ordered.append(leaf)
         current_code = leaf.integrated_code_commit
         if series.memory_mode == "external":
             current_memory = leaf.integrated_ledger_commit
     _require_atomic_chain_tips(series, current_code, current_memory)
+    return ordered
+
+
+def atomic_series_ledger_prefix(series: WorktreeContract) -> tuple[LedgerRow, ...]:
+    """Return the exact newest-first rows contributed by the atomic leaf chain."""
+
+    if series.kind != "series" or series.memory_mode != "external":
+        raise RuntimeError("atomic series ledger prefix requires an external-memory series")
+    ordered = _exact_atomic_landing_chain(series)
+    return tuple(
+        LedgerRow(leaf.integrated_code_commit, leaf.integrated_memory_content_commit)
+        for leaf in reversed(ordered)
+    )
 
 
 def _require_atomic_chain_tips(

@@ -415,13 +415,13 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
 
             def raced_publication(_contract, publication, **_kwargs):
                 _commit_on(fixture.code_repo, "ar/master", "pre-cas-race.txt")
-                return publication()
+                return publication(SimpleNamespace(organizational_completion=None))
 
             with (
                 mock.patch.object(integrate_module, "claim_queue_candidate_for_integration"),
                 mock.patch.object(
                     integrate_module,
-                    "publish_queue_candidate_integration_under_authority",
+                    "publish_queue_candidate_integration_result_under_authority",
                     side_effect=raced_publication,
                 ),
                 mock.patch.object(

@@ -29,6 +29,7 @@ from agents_remember.worktrees.closeout_queue_lifecycle import (
     complete_queue_candidate_integration,
     require_queue_candidate_for_integration,
 )
+from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -251,7 +252,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
             mock.patch.object(
                 integrate_mod,
                 "_prepare_integration_commits",
-                return_value=(commits, {"passed": True}),
+                return_value=(commits, {"passed": True}, None, False),
             ),
             mock.patch.object(
                 integrate_mod,
@@ -275,7 +276,7 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
             result = integrate_mod._apply_integration(
                 contract,
                 WorktreeArgs(operation_key=integration_key),
-                integrate_mod.IntegrationSources(
+                IntegrationSources(
                     contract.code_base_commit,
                     contract.memory_base_commit,
                     False,

@@ -41,9 +41,10 @@ TASK_DOCUMENT_WRITER_AUTHORITIES = frozenset(
     {
         "application/task_doc_tools.py",
         "application/task_execution_topology.py",
-        "tasks/leaf_doc.py",
         TASK_DOCUMENT_STORE_OWNER,
         "worktrees/modules/finalize.py",
+        "worktrees/modules/start.py",
+        "worktrees/organizational_completion.py",
         "worktrees/reopen.py",
     }
 )

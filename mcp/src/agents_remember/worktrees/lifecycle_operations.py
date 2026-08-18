@@ -35,6 +35,7 @@ from agents_remember.worktrees.closeout_queue_lifecycle import (
     release_queue_candidate_after_reversible_operation,
 )
 from agents_remember.worktrees.integration_branch_authority import integration_targets
+from agents_remember.worktrees.lifecycle_operation_identity import operation_state_fingerprint
 from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
 from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
@@ -47,6 +48,9 @@ from agents_remember.worktrees.modules.git import (
     repository_identity,
 )
 from agents_remember.worktrees.modules.start_contract import memory_mode_for_repository
+from agents_remember.worktrees.organizational_completion_repair import (
+    prepare_organizational_completion_repair,
+)
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -69,25 +73,6 @@ def now_iso() -> str:
 
 def operation_fingerprint(operation_input: LifecycleOperationInput) -> str:
     return _fingerprint_payload(operation_input.model_dump(mode="json"))
-
-
-def operation_state_fingerprint(contract: WorktreeContract) -> str:
-    """Hash lifecycle cells that change only when a sequential operation advanced the task."""
-    return _fingerprint_payload(
-        {
-            "codeBaseCommit": contract.code_base_commit,
-            "memoryBaseCommit": contract.memory_base_commit,
-            "closeoutStatus": contract.closeout_status,
-            "codeCommit": contract.code_commit,
-            "memoryContentCommit": contract.memory_content_commit,
-            "ledgerCommit": contract.ledger_commit,
-            "integrationStatus": contract.integration_status,
-            "integratedCodeCommit": contract.integrated_code_commit,
-            "integratedMemoryContentCommit": contract.integrated_memory_content_commit,
-            "integratedLedgerCommit": contract.integrated_ledger_commit,
-            "cleanup": contract.cleanup,
-        }
-    )
 
 
 def _fingerprint_payload(value: object) -> str:
@@ -249,6 +234,7 @@ def _cancel_operation(
         )
         guidance = "The task-bound operation was cancelled before approval claim."
         result = record.result
+        organizational_repair = record.organizationalRepair
         if conflict is not None:
             guidance = (
                 "The stale certified candidate was retired and closeout was reset. Absorb "
@@ -259,6 +245,18 @@ def _cancel_operation(
                 "conflictTransaction": conflict.model_dump(mode="json"),
                 "nextOperation": "resolve_leaf_then_redeclare",
             }
+        elif isinstance(result, dict) and result.get("state") == (
+            "organizational-completion-gate-failed"
+        ):
+            if organizational_repair is None:
+                raise RuntimeError(
+                    "organizational completion cancellation requires its gate-bound "
+                    "durable repair evidence"
+                )
+            guidance = (
+                "The failed final candidate was retired and the same leaf closeout was "
+                "reset. Repair the leaf, then declare and close it again."
+            )
         return record.model_copy(
             update={
                 "status": "cancelled",
@@ -266,6 +264,7 @@ def _cancel_operation(
                 "cancelRequested": True,
                 "finishedAt": now_iso(),
                 "result": result,
+                "organizationalRepair": organizational_repair,
                 "guidance": guidance,
                 "workerPid": None,
             }
@@ -274,19 +273,7 @@ def _cancel_operation(
     current = store.update(request)
     try:
         if current.status == "cancelled" and not current.irreversibleBoundaryEntered:
-            authority = current.integrationAuthority
-            if authority is not None and authority.conflictTransaction is not None:
-                prepare_queue_candidate_conflict_resolution(
-                    contract,
-                    operation_key=current.operationKey,
-                    authority=authority,
-                )
-            else:
-                release_queue_candidate_after_reversible_operation(
-                    contract,
-                    operation_key=current.operationKey,
-                    operation_kind=kind,
-                )
+            _publish_cancellation_repair(contract, current, kind)
     finally:
         # The store has already cleared workerPid. Always signal the captured
         # process group before surfacing a queue-release failure, or a retry can
@@ -294,6 +281,31 @@ def _cancel_operation(
         if worker_pid is not None:
             _terminate_worker_group(worker_pid)
     return operation_projection(current)
+
+
+def _publish_cancellation_repair(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    kind: LifecycleOperationKind,
+) -> None:
+    authority = record.integrationAuthority
+    if authority is not None and authority.conflictTransaction is not None:
+        prepare_queue_candidate_conflict_resolution(
+            contract,
+            operation_key=record.operationKey,
+            authority=authority,
+        )
+        return
+    if isinstance(record.result, dict) and record.result.get("state") == (
+        "organizational-completion-gate-failed"
+    ):
+        prepare_organizational_completion_repair(contract)
+        return
+    release_queue_candidate_after_reversible_operation(
+        contract,
+        operation_key=record.operationKey,
+        operation_kind=kind,
+    )
 
 
 def operation_projection(

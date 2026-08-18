@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import find_mapping, parse_ledger_text
+from agents_remember.kernel.memory_ledger import (
+    LedgerError,
+    LedgerRow,
+    MemoryLedger,
+    find_unique_mapping,
+    parse_ledger_text,
+)
 from agents_remember.worktrees.integration_branch_authority import (
     branch_worktree_owners,
     integration_targets,
@@ -27,12 +32,18 @@ from agents_remember.worktrees.modules.git import (
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
-class IntegrationSourcesLike(Protocol):
-    @property
-    def current_code_source(self) -> str: ...
+@dataclass(frozen=True)
+class IntegrationSources:
+    """One exact reading of both integration sources and their replay verdicts."""
+
+    current_code_source: str
+    current_memory_source: str
+    code_replay_required: bool
+    memory_replay_required: bool
 
     @property
-    def current_memory_source(self) -> str: ...
+    def replay_required(self) -> bool:
+        return self.code_replay_required or self.memory_replay_required
 
 
 class IntegrationRefRace(RuntimeError):
@@ -79,7 +90,9 @@ def prepare_integration_ref_move(
     contract: WorktreeContract,
     commits: IntegratedCommits,
     args: WorktreeArgs,
-    sources: IntegrationSourcesLike,
+    sources: IntegrationSources,
+    *,
+    expected_series_ledger_prefix: tuple[LedgerRow, ...] = (),
 ) -> IntegrationRefSnapshot:
     """Perform every refusing read before the lifecycle marks the move irreversible."""
 
@@ -114,7 +127,12 @@ def prepare_integration_ref_move(
                 "integrated memory ledger commit is not a fast-forward from the current "
                 "memory branch"
             )
-        require_integrated_ledger_mapping(contract, commits)
+        require_integrated_ledger_mapping(
+            contract,
+            commits,
+            memory_source_commit=memory_head_before,
+            expected_series_prefix=expected_series_ledger_prefix,
+        )
 
     require_current_integration_sources(
         contract,
@@ -209,20 +227,82 @@ def merge_integrated_commits(
 
 
 def require_integrated_ledger_mapping(
-    contract: WorktreeContract, commits: IntegratedCommits
+    contract: WorktreeContract,
+    commits: IntegratedCommits,
+    *,
+    memory_source_commit: str,
+    expected_series_prefix: tuple[LedgerRow, ...] = (),
 ) -> None:
+    if contract.kind not in {"leaf", "series"}:
+        raise RuntimeError("integrated memory ledger requires a leaf or series contract")
     assert contract.memory_repo_path is not None
     blob = run_git(contract.memory_repo_path, ["show", f"{commits.ledger}:memory.md"])
     if blob.returncode != 0:
         raise RuntimeError("integrated ledger commit has no readable memory.md")
-    mapping = find_mapping(parse_ledger_text(blob.stdout), commits.code)
+    source_blob = run_git(
+        contract.memory_repo_path,
+        ["show", f"{memory_source_commit}:memory.md"],
+    )
+    if source_blob.returncode != 0:
+        raise RuntimeError("exact memory source commit has no readable memory.md")
+    try:
+        ledger = parse_ledger_text(blob.stdout)
+        source_ledger = parse_ledger_text(source_blob.stdout)
+        mapping = find_unique_mapping(ledger, commits.code)
+    except LedgerError as error:
+        raise RuntimeError(
+            "integrated memory ledger must contain exactly one landed code mapping"
+        ) from error
     if mapping is None or mapping.memory_commit != commits.memory_content:
         raise RuntimeError(
             "integrated memory ledger does not map landed code commit to landed memory content"
         )
+    if any(row.code_commit == commits.code for row in source_ledger.rows):
+        # No-change leaf: the landed code commit is already mapped by the source ledger, so the
+        # ledger and memory content are unchanged and there is nothing new to verify.
+        return
+    _require_preserved_ledger_history(
+        contract,
+        ledger,
+        source_ledger,
+        mapping,
+        expected_series_prefix,
+    )
     if not is_ancestor(contract.memory_repo_path, commits.memory_content, commits.ledger):
         raise RuntimeError(
             "integrated memory content commit is not reachable from the landed ledger commit"
+        )
+    if not is_ancestor(
+        contract.memory_repo_path,
+        memory_source_commit,
+        commits.memory_content,
+    ):
+        raise RuntimeError(
+            "integrated memory content commit is not based on the exact memory source"
+        )
+
+
+def _require_preserved_ledger_history(
+    contract: WorktreeContract,
+    ledger: MemoryLedger,
+    source_ledger: MemoryLedger,
+    mapping: LedgerRow,
+    expected_series_prefix: tuple[LedgerRow, ...],
+) -> None:
+    if contract.kind == "series":
+        if expected_series_prefix and ledger.rows == [
+            *expected_series_prefix,
+            *source_ledger.rows,
+        ]:
+            return
+        raise RuntimeError(
+            "integrated atomic series ledger does not preserve the exact ordered leaf "
+            "landing prefix and complete source ledger history"
+        )
+    if ledger.rows != [mapping, *source_ledger.rows]:
+        raise RuntimeError(
+            "integrated memory ledger does not prepend exactly one mapping while preserving "
+            "the complete source ledger history"
         )
 
 

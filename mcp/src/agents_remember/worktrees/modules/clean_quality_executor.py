@@ -60,6 +60,7 @@ class CleanQualityRequest:
     mode: str
     diff_base: str
     memory_cap_bytes: int | None = None
+    attestation: Mapping[str, str] | None = None
 
 
 def clean_sandbox_root(worktree_group: Path) -> Path:
@@ -118,7 +119,11 @@ def run_clean_quality(
         )
         return exported
     pipeline_exit = _exported_pipeline_exit(export_root)
-    _publish_reports(export_root, request.worktree_group / "reports")
+    _publish_reports(
+        export_root,
+        request.worktree_group / "reports",
+        attestation=request.attestation,
+    )
     outcome = "passed" if pipeline_exit == 0 else "failed"
     _write_current(
         request.worktree_group,
@@ -199,7 +204,12 @@ def _exported_pipeline_exit(export_root: Path) -> int:
     return exit_code
 
 
-def _publish_reports(source: Path, destination: Path) -> dict[str, object]:
+def _publish_reports(
+    source: Path,
+    destination: Path,
+    *,
+    attestation: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     """Publish one immutable evidence generation, then atomically point readers at it.
 
     Individual report renames cannot make a multi-file result atomic. The generation
@@ -248,6 +258,8 @@ def _publish_reports(source: Path, destination: Path) -> dict[str, object]:
         "generation": generation,
         "files": files,
     }
+    if attestation is not None:
+        manifest["attestation"] = dict(attestation)
     atomic_write_text(
         destination / REPORT_SET_MANIFEST,
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -287,6 +299,23 @@ def published_report_path(destination: Path, name: str) -> Path:
     ):
         raise RuntimeError(f"published Dagger report failed generation verification: {name}")
     return report
+
+
+def published_quality_attestation(destination: Path) -> dict[str, str] | None:
+    """Return the exact caller-bound identity of the published report generation."""
+
+    try:
+        manifest = json.loads((destination / REPORT_SET_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError) as error:
+        raise RuntimeError("no complete Dagger report generation is published") from error
+    attestation = manifest.get("attestation")
+    if attestation is None:
+        return None
+    if not isinstance(attestation, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str) for key, value in attestation.items()
+    ):
+        raise RuntimeError("published Dagger quality attestation is invalid")
+    return dict(attestation)
 
 
 def _validate_generation(root: Path, files: dict[str, dict[str, object]]) -> None:

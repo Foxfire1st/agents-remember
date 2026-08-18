@@ -115,5 +115,5 @@ class PreflightGateTests(unittest.TestCase):
             self.assertIsNone(start_module._long_path_preflight(self._contract()))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

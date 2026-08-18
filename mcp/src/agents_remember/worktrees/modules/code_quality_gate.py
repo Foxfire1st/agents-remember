@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +15,8 @@ from typing import NoReturn
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.worktrees.modules.clean_quality_executor import (
     CleanQualityRequest,
+    published_quality_attestation,
+    published_report_path,
     run_clean_quality,
 )
 
@@ -20,6 +24,7 @@ QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
 FAILURE_OUTPUT_LINES = 40
 REPORT_DIRECTORY_NAME = "reports"
 TEST_RESULTS_REPORT_NAME = "test-results.md"
+CLEAN_QUALITY_RESULTS_NAME = "clean-quality-results.json"
 
 GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
@@ -205,6 +210,7 @@ def run_strict_code_quality_gate(
     diff_base: str = "",
     plan: QualityGatePlan | None = None,
     invocation: str = "closeout-staged",
+    attestation: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Run the altitude-routed quality contract or refuse before the commit.
 
@@ -231,6 +237,7 @@ def run_strict_code_quality_gate(
             mode=plan.mode,
             diff_base=diff_base,
             memory_cap_bytes=plan.memory_cap_bytes,
+            attestation=attestation,
         )
     )
     finished_at = datetime.now(UTC)
@@ -258,6 +265,51 @@ def run_strict_code_quality_gate(
                 requested_memory_cap_bytes=plan.memory_cap_bytes,
             )
         )
+    return _strict_quality_success_payload(
+        target,
+        diff_base=diff_base,
+        plan=plan,
+    )
+
+
+def recover_strict_code_quality_gate(
+    target: QualityGateTarget,
+    *,
+    diff_base: str,
+    plan: QualityGatePlan,
+    attestation: Mapping[str, str],
+) -> dict[str, object] | None:
+    """Recover one exact passed Dagger generation after its caller crashed."""
+
+    reports = target.worktree_group / REPORT_DIRECTORY_NAME
+    try:
+        published = published_quality_attestation(reports)
+    except RuntimeError:
+        return None
+    if published != dict(attestation):
+        return None
+    report_path = published_report_path(reports, CLEAN_QUALITY_RESULTS_NAME)
+    try:
+        result = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError) as error:
+        raise RuntimeError("published Dagger result is unreadable") from error
+    if result.get("status") != "passed" or result.get("exitCode") != 0:
+        return None
+    return _strict_quality_success_payload(
+        target,
+        diff_base=diff_base,
+        plan=plan,
+        report_path=report_path,
+    )
+
+
+def _strict_quality_success_payload(
+    target: QualityGateTarget,
+    *,
+    diff_base: str,
+    plan: QualityGatePlan,
+    report_path: Path | None = None,
+) -> dict[str, object]:
     return {
         "required": True,
         "status": GATE_ENFORCED,
@@ -271,7 +323,7 @@ def run_strict_code_quality_gate(
         "diffBase": diff_base,
         "mode": plan.mode,
         "executor": plan.executor,
-        "reportPath": report_path.as_posix(),
+        "reportPath": (report_path or test_results_report_path(target.worktree_group)).as_posix(),
         **(
             _memory_policy_payload(
                 executor=plan.executor,

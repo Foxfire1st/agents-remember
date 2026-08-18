@@ -22,6 +22,8 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SprintExecutionGraph, TaskDocument, write_task_doc
+from agents_remember.worktrees import integration_quality as quality_mod
+from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.code_quality_gate import (
@@ -87,7 +89,7 @@ def integration_contract(root: Path, *, kind: str = "leaf") -> WorktreeContract:
         task_name = "master-task"
         source_branch = "ar/master"
         work_branch = "ar/l1"
-        if not git(repo, "branch", "--list", source_branch):
+        if not git(repo, "branch", "--list", source_branch):  # pragma: no cover
             git(repo, "branch", source_branch, "main")
         contract = default_contract(
             ContractTask(
@@ -100,7 +102,7 @@ def integration_contract(root: Path, *, kind: str = "leaf") -> WorktreeContract:
             leaf=LeafIdentity(worktree_name="l1", leaf_id="l1"),
             code=RepoBranchPlan(repo, source_branch, work_branch, base),
         )
-        if not contract.code_worktree.exists():
+        if not contract.code_worktree.exists():  # pragma: no cover
             contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
             git(
                 repo,
@@ -212,7 +214,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             git(self.root, "definitely-not-a-git-command")
 
-    def test_external_recovery_proves_task_head_mapping_and_ancestry(self) -> None:
+    def test_external_recovery_proves_the_exact_task_memory_head(self) -> None:
         contract = external_recovery_contract(self.root)
         commits = LifecycleOperationRecoveryCommits(
             codeCommit="a" * 40,
@@ -225,37 +227,9 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "found task memory HEAD"),
         ):
             integrate_mod._prove_external_memory_recovery(contract, commits)
-        for mapping in (None, SimpleNamespace(memory_commit="e" * 40)):
-            with (
-                self.subTest(mapping=mapping),
-                mock.patch.object(integrate_mod, "require_clean"),
-                mock.patch.object(integrate_mod, "head_commit", return_value=commits.ledgerCommit),
-                mock.patch.object(
-                    integrate_mod,
-                    "run_git",
-                    return_value=SimpleNamespace(returncode=0, stdout="ledger", stderr=""),
-                ),
-                mock.patch.object(integrate_mod, "parse_ledger_text"),
-                mock.patch.object(integrate_mod, "find_mapping", return_value=mapping),
-                self.assertRaisesRegex(RuntimeError, "landed ledger mapping"),
-            ):
-                integrate_mod._prove_external_memory_recovery(contract, commits)
         with (
             mock.patch.object(integrate_mod, "require_clean"),
             mock.patch.object(integrate_mod, "head_commit", return_value=commits.ledgerCommit),
-            mock.patch.object(
-                integrate_mod,
-                "run_git",
-                return_value=SimpleNamespace(returncode=0, stdout="ledger", stderr=""),
-            ),
-            mock.patch.object(integrate_mod, "parse_ledger_text"),
-            mock.patch.object(
-                integrate_mod,
-                "find_mapping",
-                return_value=SimpleNamespace(memory_commit=commits.memoryContentCommit),
-            ),
-            mock.patch.object(integrate_mod, "is_ancestor", return_value=False),
-            self.assertRaisesRegex(RuntimeError, "not reachable"),
         ):
             integrate_mod._prove_external_memory_recovery(contract, commits)
 
@@ -360,10 +334,10 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
         with (
             mock.patch.object(
-                integrate_mod, "requires_strict_code_quality", return_value=True
+                quality_mod, "requires_strict_code_quality", return_value=True
             ) as requires,
             mock.patch.object(
-                integrate_mod, "run_strict_code_quality_gate", return_value={"passed": True}
+                quality_mod, "run_strict_code_quality_gate", return_value={"passed": True}
             ) as gate,
         ):
             result, blocked = integrate_mod._run_integration_quality_gate(contract)
@@ -376,7 +350,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         gate.assert_not_called()
 
     def test_prepare_runs_the_altitude_gate_exactly_once_for_each_contract_kind(self) -> None:
-        sources = integrate_mod.IntegrationSources("c0", "", False, False)
+        sources = IntegrationSources("c0", "", False, False)
         for kind in ("leaf", "series"):
             contract = integration_contract(self.root, kind=kind)
             with (
@@ -391,6 +365,16 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
                     "_run_integration_quality_gate",
                     return_value=({"passed": True}, None),
                 ) as gate,
+                mock.patch.object(
+                    integrate_mod,
+                    "_quality_gate_preview",
+                    return_value={"status": "certified-at-leaf-closeout"},
+                ) as preview,
+                mock.patch.object(
+                    integrate_mod,
+                    "preview_organizational_completion",
+                    return_value=None,
+                ),
                 mock.patch.object(
                     integrate_mod,
                     "_integration_source_state_block",
@@ -410,7 +394,12 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
                 )
             assert isinstance(prepared, tuple)
             self.assertEqual(prepared[0], integrate_mod.IntegratedCommits("c1", "", ""))
-            gate.assert_called_once_with(contract)
+            if kind == "series":
+                gate.assert_called_once_with(contract)
+                preview.assert_not_called()
+            else:
+                gate.assert_not_called()
+                preview.assert_called_once_with(contract)
 
     def test_agents_remember_master_integration_refuses_a_missing_self_owned_wrapper(
         self,
@@ -429,7 +418,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             result = integrate_mod._apply_integration(
                 contract,
                 WorktreeArgs(strategy="ff-only"),
-                integrate_mod.IntegrationSources(
+                IntegrationSources(
                     current_code_source="c1",
                     current_memory_source="",
                     code_replay_required=False,
@@ -463,14 +452,18 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
         with (
             mock.patch.object(
-                integrate_mod,
+                quality_mod,
                 "integration_quality_checkout",
                 return_value=nullcontext(exact_candidate),
             ),
-            mock.patch.object(integrate_mod, "requires_strict_code_quality", return_value=True),
-            mock.patch.object(integrate_mod, "_quality_gate_memory_cap", return_value=2147483648),
+            mock.patch.object(quality_mod, "requires_strict_code_quality", return_value=True),
             mock.patch.object(
-                integrate_mod, "run_strict_code_quality_gate", return_value={"passed": True}
+                quality_mod,
+                "quality_gate_settings",
+                return_value=mock.Mock(executor="dagger", memory_cap_bytes=2147483648),
+            ) as settings,
+            mock.patch.object(
+                quality_mod, "run_strict_code_quality_gate", return_value={"passed": True}
             ) as gate,
         ):
             result, blocked = integrate_mod._run_integration_quality_gate(contract)
@@ -489,6 +482,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         assert isinstance(plan, QualityGatePlan)
         self.assertEqual(plan.mode, GATE_FULL)
         self.assertEqual(plan.memory_cap_bytes, 2147483648)
+        settings.assert_called_once_with(contract)
         self.assertEqual(kwargs["invocation"], "master-integration")
 
     def test_altitude_routing_is_kind_based(self) -> None:
@@ -496,8 +490,8 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         series = integration_contract(self.root, kind="series")
 
         with self.assertRaisesRegex(ValueError, "reuses the exact leaf-closeout acceptance"):
-            integrate_mod.quality_gate_mode(leaf)
-        self.assertEqual(integrate_mod.quality_gate_mode(series), GATE_FULL)
+            quality_mod.quality_gate_mode(leaf)
+        self.assertEqual(quality_mod.quality_gate_mode(series), GATE_FULL)
 
     def test_series_preview_reads_the_exact_candidate_not_ambient_checkout(self) -> None:
         repo = self.root / "repo"
@@ -548,12 +542,12 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        self.assertEqual(integrate_mod._quality_gate_memory_cap(contract), 123456)
+        self.assertEqual(quality_mod.quality_gate_settings(contract).memory_cap_bytes, 123456)
 
     def test_quality_gate_memory_is_host_managed_when_the_cap_is_absent(self) -> None:
         contract = integration_contract(self.root, kind="series")
 
-        self.assertIsNone(integrate_mod._quality_gate_memory_cap(contract))
+        self.assertIsNone(quality_mod.quality_gate_settings(contract).memory_cap_bytes)
 
     def test_a_refused_master_gate_blocks_integration_without_merging(self) -> None:
         contract = integration_contract(self.root, kind="series")
@@ -562,8 +556,8 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             raise RuntimeError("strict code-quality gate failed before code commit")
 
         with (
-            mock.patch.object(integrate_mod, "requires_strict_code_quality", return_value=True),
-            mock.patch.object(integrate_mod, "run_strict_code_quality_gate", failing_gate),
+            mock.patch.object(quality_mod, "requires_strict_code_quality", return_value=True),
+            mock.patch.object(quality_mod, "run_strict_code_quality_gate", failing_gate),
             mock.patch.object(integrate_mod, "write_contract"),
             mock.patch.object(
                 integrate_mod,
@@ -575,7 +569,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             result = integrate_mod._apply_integration(
                 contract,
                 WorktreeArgs(strategy="ff-only"),
-                integrate_mod.IntegrationSources(
+                IntegrationSources(
                     current_code_source="c1",
                     current_memory_source="",
                     code_replay_required=False,
@@ -590,7 +584,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
     def test_premerge_blockers_return_without_crossing_the_source_boundary(self) -> None:
         contract = integration_contract(self.root, kind="leaf")
-        sources = integrate_mod.IntegrationSources("c0", "", False, False)
+        sources = IntegrationSources("c0", "", False, False)
         code_block = {"state": "blocked-code-replay"}
         with (
             mock.patch.object(
@@ -609,8 +603,8 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             mock.patch.object(integrate_mod, "_integrated_code_commit", return_value=("c1", None)),
             mock.patch.object(
                 integrate_mod,
-                "_run_integration_quality_gate",
-                return_value=({"passed": True}, None),
+                "_quality_gate_preview",
+                return_value={"status": "certified-at-leaf-closeout"},
             ),
             mock.patch.object(integrate_mod, "_integration_source_state_block", return_value=None),
             mock.patch.object(
@@ -635,8 +629,8 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             mock.patch.object(integrate_mod, "_integrated_code_commit", return_value=("c1", None)),
             mock.patch.object(
                 integrate_mod,
-                "_run_integration_quality_gate",
-                return_value=({"passed": True}, None),
+                "_quality_gate_preview",
+                return_value={"status": "certified-at-leaf-closeout"},
             ),
             mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(
@@ -648,7 +642,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             result = integrate_mod._apply_integration(
                 contract,
                 WorktreeArgs(strategy="ff-only"),
-                integrate_mod.IntegrationSources(
+                IntegrationSources(
                     current_code_source="c0",
                     current_memory_source="",
                     code_replay_required=False,
@@ -670,8 +664,13 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             mock.patch.object(integrate_mod, "_integrated_code_commit", return_value=("c1", None)),
             mock.patch.object(
                 integrate_mod,
-                "_run_integration_quality_gate",
-                return_value=({"passed": True}, None),
+                "_quality_gate_preview",
+                return_value={"status": "certified-at-leaf-closeout"},
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "preview_organizational_completion",
+                return_value=None,
             ),
             mock.patch.object(
                 integrate_mod, "_integration_source_state_block", side_effect=[None, moved]
@@ -684,15 +683,17 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             mock.patch.object(integrate_mod, "claim_queue_candidate_for_integration"),
             mock.patch.object(
                 integrate_mod,
-                "publish_queue_candidate_integration_under_authority",
-                side_effect=lambda _contract, publication, **_kwargs: publication(),
+                "publish_queue_candidate_integration_result_under_authority",
+                side_effect=lambda _contract, publication, **_kwargs: publication(
+                    integrate_mod.IntegrationBoundaryFacts(None, None)
+                ),
             ),
             mock.patch.object(integrate_mod, "merge_integrated_commits") as merge,
         ):
             result = integrate_mod._apply_integration(
                 contract,
                 WorktreeArgs(strategy="ff-only", operation_key="a" * 64),
-                integrate_mod.IntegrationSources(
+                IntegrationSources(
                     current_code_source="c0",
                     current_memory_source="",
                     code_replay_required=False,
@@ -707,7 +708,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
     def test_source_tip_comparison_distinguishes_unchanged_and_moved(self) -> None:
         contract = integration_contract(self.root, kind="leaf")
-        sources = integrate_mod.IntegrationSources(
+        sources = IntegrationSources(
             current_code_source="c0",
             current_memory_source="",
             code_replay_required=False,
@@ -757,15 +758,19 @@ class IntegrationDryRunTests(unittest.TestCase):
             mock.patch.object(
                 integrate_mod,
                 "_integration_replay_requirements",
-                return_value=integrate_mod.IntegrationSources(
+                return_value=IntegrationSources(
                     current_code_source="c1",
                     current_memory_source="",
                     code_replay_required=False,
                     memory_replay_required=False,
                 ),
             ),
-            mock.patch.object(integrate_mod, "_quality_gate_memory_cap", return_value=999),
-            mock.patch.object(integrate_mod, "run_strict_code_quality_gate") as gate,
+            mock.patch.object(
+                quality_mod,
+                "quality_gate_settings",
+                return_value=mock.Mock(executor="dagger", memory_cap_bytes=999),
+            ),
+            mock.patch.object(quality_mod, "run_strict_code_quality_gate") as gate,
             mock.patch.object(integrate_mod, "write_contract"),
         ):
             result = integrate_mod.integrate_result(

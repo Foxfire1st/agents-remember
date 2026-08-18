@@ -6,9 +6,14 @@ import json
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
+from agents_remember.kernel.memory_ledger import (
+    create_initial_ledger,
+    load_ledger,
+    prepend_mapping,
+    write_ledger,
+)
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
@@ -26,11 +31,14 @@ from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
+    LeafIdentity,
     RepoBranchPlan,
+    WorktreeContract,
+    default_contract,
     default_series_contract,
     write_contract,
 )
-from test_source_lineage import _fixture, _git
+from test_source_lineage import _commit_on, _fixture, _git
 
 
 def _closed_leaf_worktree(fixture, _root: Path, *, candidate_commit: bool):
@@ -74,7 +82,11 @@ def _closed_external_leaf_worktrees(fixture, _root: Path):
     memory_commit = _git(memory_worktree, "rev-parse", "HEAD")
     write_ledger(
         memory_worktree / "memory.md",
-        create_initial_ledger("repo", code_commit, memory_commit),
+        prepend_mapping(
+            load_ledger(memory_worktree / "memory.md"),
+            code_commit,
+            memory_commit,
+        ),
     )
     _git(memory_worktree, "add", "memory.md")
     _git(memory_worktree, "commit", "-m", "closed ledger")
@@ -125,11 +137,34 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
     task_root = fixture.coordination / "tasks" / "repo"
     for repo in filter(None, (fixture.code_repo, fixture.leaf_contract.memory_repo_path)):
         _git(repo, "branch", "ar/atomic-two", "super")
+    if external_memory:
+        memory_repo = fixture.leaf_contract.memory_repo_path
+        assert memory_repo is not None
+        code_head = _git(fixture.code_repo, "rev-parse", "ar/master")
+        _git(memory_repo, "switch", "ar/master")
+        (memory_repo / "base.md").write_text("# Base memory\n", encoding="utf-8")
+        _git(memory_repo, "add", "base.md")
+        _git(memory_repo, "commit", "-m", "base memory content")
+        base_memory = _git(memory_repo, "rev-parse", "ar/master")
+        write_ledger(
+            memory_repo / "memory.md",
+            create_initial_ledger("repo", code_head, base_memory),
+        )
+        _git(memory_repo, "add", "memory.md")
+        _git(memory_repo, "commit", "-m", "base memory ledger")
+        _git(memory_repo, "branch", "-f", "leaf", "ar/master")
+        _git(memory_repo, "branch", "-f", "super", "ar/master")
+        _git(memory_repo, "switch", "super")
     master_contract = replace(
         fixture.master_contract,
         memory_mode=memory_mode,
         code_work_branch="ar/master",
         memory_work_branch=("ar/master" if external_memory else ""),
+        memory_base_commit=(
+            _git(cast(Path, fixture.leaf_contract.memory_repo_path), "rev-parse", "ar/master")
+            if external_memory
+            else ""
+        ),
     )
     write_contract(master_contract.contract_path, master_contract)
     fixture.master_contract = master_contract
@@ -138,6 +173,11 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         memory_mode=memory_mode,
         code_source_branch="ar/master",
         memory_source_branch=("ar/master" if external_memory else ""),
+        memory_base_commit=(
+            _git(cast(Path, fixture.leaf_contract.memory_repo_path), "rev-parse", "ar/master")
+            if external_memory
+            else ""
+        ),
     )
     write_contract(fixture.leaf_contract.contract_path, fixture.leaf_contract)
     master_doc = read_task_doc(task_root / "master" / "task.json")
@@ -286,6 +326,147 @@ def _record_atomic_leaf_landing(
     write_contract(landed.contract_path, landed)
     fixture.leaf_contract = landed
     return landed
+
+
+def _record_additional_atomic_leaf_landing(
+    fixture,
+    first: WorktreeContract,
+    code_commit: str,
+    memory_content_commit: str,
+    ledger_commit: str,
+):
+    """Add one canonical child row and persist its exact sequential landing facts."""
+
+    leaf_id = "LEAF-C"
+    series = fixture.master_contract
+    memory_repo = series.memory_repo_path
+    assert memory_repo is not None
+    task = ContractTask(
+        series.task_name,
+        series.repo_name,
+        series.coordination_root,
+        series.workflow_kind,
+        series.memory_mode,
+        parent_task_name=series.parent_task_name,
+    )
+    leaf = default_contract(
+        task,
+        leaf=LeafIdentity(worktree_name=leaf_id.lower(), leaf_id=leaf_id),
+        code=RepoBranchPlan(
+            series.code_repo_path,
+            series.code_work_branch,
+            f"ar/{leaf_id.lower()}",
+            first.integrated_code_commit,
+        ),
+        memory=RepoBranchPlan(
+            memory_repo,
+            series.memory_work_branch,
+            f"ar/{leaf_id.lower()}",
+            first.integrated_ledger_commit,
+        ),
+    )
+    leaf_ref = TaskDocumentRef(
+        repository=series.repo_name,
+        path=f"master/{leaf_id.lower()}.json",
+    )
+    landed = replace(
+        leaf,
+        parent_task_name=series.task_name,
+        parent_contract_path=series.contract_path,
+        closeout_status="completed",
+        approved_for_commit=True,
+        human_review_status="approved",
+        code_commit=code_commit,
+        memory_content_commit=memory_content_commit,
+        ledger_commit=ledger_commit,
+        integration_status="completed",
+        integrated_code_commit=code_commit,
+        integrated_memory_content_commit=memory_content_commit,
+        integrated_ledger_commit=ledger_commit,
+        queue_sprint_task_document="repo/sprint/task.json",
+        queue_candidate_task_document=leaf_ref.key,
+    )
+    first_doc_path = fixture.coordination / "tasks" / "repo" / fixture.leaf_ref.path
+    first_doc = read_task_doc(first_doc_path)
+    write_task_doc(
+        landed.task_root,
+        first_doc.model_copy(
+            update={
+                "id": leaf_id,
+                "slug": leaf_id.lower(),
+                "title": leaf_id,
+            }
+        ),
+    )
+    master = read_task_doc(landed.task_root / "task.json")
+    row = master.subTasks[0].model_copy(
+        update={
+            "number": leaf_id,
+            "name": leaf_id,
+            "file": f"{leaf_id.lower()}.md",
+        }
+    )
+    write_task_doc(
+        landed.task_root,
+        master.model_copy(update={"subTasks": [*master.subTasks, row]}),
+    )
+    write_contract(landed.contract_path, landed)
+    return landed
+
+
+def _land_two_external_atomic_leaves(
+    fixture,
+) -> tuple[WorktreeContract, WorktreeContract]:
+    """Build the exact two-leaf code+memory chain consumed by series integration."""
+
+    memory_repo = fixture.master_contract.memory_repo_path
+    assert memory_repo is not None
+    _commit_on(fixture.code_repo, "ar/master", "atomic-code-one.txt")
+    first_code = _git(fixture.code_repo, "rev-parse", "ar/master")
+    _commit_on(memory_repo, "ar/master", "atomic-memory-one.md")
+    first_memory = _git(memory_repo, "rev-parse", "ar/master")
+    write_ledger(
+        memory_repo / "memory.md",
+        prepend_mapping(
+            load_ledger(memory_repo / "memory.md"),
+            first_code,
+            first_memory,
+        ),
+    )
+    _git(memory_repo, "add", "memory.md")
+    _git(memory_repo, "commit", "-m", "Record first atomic ledger")
+    first_ledger = _git(memory_repo, "rev-parse", "ar/master")
+    first = _record_atomic_leaf_landing(
+        fixture,
+        first_code,
+        memory_content_commit=first_memory,
+        ledger_commit=first_ledger,
+    )
+
+    _commit_on(fixture.code_repo, "ar/master", "atomic-code-two.txt")
+    second_code = _git(fixture.code_repo, "rev-parse", "ar/master")
+    _commit_on(memory_repo, "ar/master", "atomic-memory-two.md")
+    second_memory = _git(memory_repo, "rev-parse", "ar/master")
+    write_ledger(
+        memory_repo / "memory.md",
+        prepend_mapping(
+            load_ledger(memory_repo / "memory.md"),
+            second_code,
+            second_memory,
+        ),
+    )
+    _git(memory_repo, "add", "memory.md")
+    _git(memory_repo, "commit", "-m", "Record second atomic ledger")
+    second_ledger = _git(memory_repo, "rev-parse", "ar/master")
+    second = _record_additional_atomic_leaf_landing(
+        fixture,
+        first,
+        code_commit=second_code,
+        memory_content_commit=second_memory,
+        ledger_commit=second_ledger,
+    )
+    _complete_atomic_master(fixture)
+    return first, second
 
 
 def _acquire_atomic_barrier(fixture) -> None:

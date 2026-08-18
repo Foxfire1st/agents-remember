@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.kernel.memory_ledger import (
+    LedgerRow,
+    load_ledger,
+    prepend_mapping,
+    write_ledger,
+)
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationRecoveryCommits,
@@ -25,12 +32,18 @@ from agents_remember.worktrees.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
+from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import (
     IntegrationSources,
     integrate_result,
 )
+from agents_remember.worktrees.series_closeout import atomic_series_ledger_prefix
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from integration_branch_authority_test_support import (
+    _acquire_atomic_barrier,
+    _land_two_external_atomic_leaves,
+)
 from test_integration_branch_authority import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
@@ -40,6 +53,51 @@ from test_source_lineage import _git
 
 
 class IntegrationRefTransactionTests(unittest.TestCase):
+    @staticmethod
+    def _land_external_recovery_pair(fixture, contract):
+        lifecycle_operations.start_or_observe_operation(
+            IntegrateOperationInput(
+                configPath=fixture.config_path.as_posix(),
+                contractPath=contract.contract_path.as_posix(),
+            ),
+            launcher=lambda *_: None,
+        )
+        store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
+        runtime = OperationRuntime(store)
+        running = runtime.start()
+        authority = running.integrationAuthority
+        assert authority is not None and contract.memory_repo_path is not None
+        recovery = LifecycleOperationRecoveryCommits(
+            codeCommit=contract.code_commit,
+            memoryContentCommit=contract.memory_content_commit,
+            ledgerCommit=contract.ledger_commit,
+        )
+        runtime.progress(
+            "source-merge",
+            {
+                "current_command": "recover exact external integration pair",
+                "irreversible_boundary": True,
+                "recovery_commits": recovery.model_dump(mode="json"),
+            },
+        )
+        _git(
+            fixture.code_repo,
+            "update-ref",
+            f"refs/heads/{authority.codeSourceBranch}",
+            recovery.codeCommit,
+            authority.codeSourceCommit,
+        )
+        _git(
+            contract.memory_repo_path,
+            "update-ref",
+            f"refs/heads/{authority.memorySourceBranch}",
+            recovery.ledgerCommit,
+            authority.memorySourceCommit,
+        )
+        durable = store.read()
+        assert durable is not None
+        return durable, recovery
+
     def test_prepare_ref_move_refuses_code_and_memory_tip_races(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -132,7 +190,415 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(RuntimeError, "no readable memory.md"),
             ):
-                integration_ref_transaction.require_integrated_ledger_mapping(closed, commits)
+                integration_ref_transaction.require_integrated_ledger_mapping(
+                    closed,
+                    commits,
+                    memory_source_commit=closed.memory_base_commit,
+                )
+
+    def test_prepared_move_refuses_mapped_content_outside_the_exact_memory_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            assert closed.memory_repo_path is not None
+            assert closed.ledger_path is not None
+            content_tree = _git(
+                closed.memory_repo_path,
+                "rev-parse",
+                f"{closed.memory_content_commit}^{{tree}}",
+            )
+            unrelated_content = _git(
+                closed.memory_repo_path,
+                "commit-tree",
+                content_tree,
+                "-m",
+                "foreign content",
+            )
+            ledger = load_ledger(closed.ledger_path)
+            rows = [
+                LedgerRow(closed.code_commit, unrelated_content),
+                *(row for row in ledger.rows if row.code_commit != closed.code_commit),
+            ]
+            write_ledger(
+                closed.ledger_path,
+                replace(
+                    ledger,
+                    last_verified_code_commit=closed.code_commit,
+                    last_memory_content_commit=unrelated_content,
+                    rows=rows,
+                ),
+            )
+            _git(closed.memory_worktree, "add", "memory.md")
+            ledger_tree = _git(closed.memory_worktree, "write-tree")
+            forged_ledger = _git(
+                closed.memory_repo_path,
+                "commit-tree",
+                ledger_tree,
+                "-p",
+                closed.memory_base_commit,
+                "-p",
+                unrelated_content,
+                "-m",
+                "merge foreign mapped content",
+            )
+            self.assertFalse(
+                integration_ref_transaction.is_ancestor(
+                    closed.memory_repo_path,
+                    closed.memory_base_commit,
+                    unrelated_content,
+                )
+            )
+            commits = IntegratedCommits(
+                closed.code_commit,
+                unrelated_content,
+                forged_ledger,
+            )
+            sources = IntegrationSources(
+                closed.code_base_commit,
+                closed.memory_base_commit,
+                False,
+                False,
+            )
+            with (
+                mock.patch.object(
+                    integration_ref_transaction,
+                    "require_authorized_integration_commits",
+                ),
+                self.assertRaisesRegex(RuntimeError, "not based on the exact memory source"),
+            ):
+                prepare_integration_ref_move(closed, commits, WorktreeArgs(), sources)
+
+    def test_integrated_ledger_refuses_duplicate_rows_for_the_landed_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            assert closed.memory_repo_path is not None
+            assert closed.ledger_path is not None
+            write_ledger(
+                closed.ledger_path,
+                prepend_mapping(
+                    load_ledger(closed.ledger_path),
+                    closed.code_commit,
+                    closed.memory_content_commit,
+                ),
+            )
+            _git(closed.memory_worktree, "add", "memory.md")
+            _git(closed.memory_worktree, "commit", "-m", "duplicate landed mapping")
+            duplicate_ledger = _git(closed.memory_worktree, "rev-parse", "HEAD")
+            with self.assertRaisesRegex(RuntimeError, "exactly one landed code mapping"):
+                integration_ref_transaction.require_integrated_ledger_mapping(
+                    closed,
+                    IntegratedCommits(
+                        closed.code_commit,
+                        closed.memory_content_commit,
+                        duplicate_ledger,
+                    ),
+                    memory_source_commit=closed.memory_base_commit,
+                )
+
+    def test_atomic_series_ledger_requires_exact_leaf_prefix_and_source_suffix(self) -> None:
+        for mutation in (
+            "drop-leaf-prefix",
+            "reorder-leaf-prefix",
+            "drop-source-row",
+            "rewrite-source-row",
+            "inject-prefix-row",
+        ):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                fixture = _authority_fixture(Path(tmp), external_memory=True)
+                _first, final = _land_two_external_atomic_leaves(fixture)
+                series = fixture.master_contract
+                memory_repo = series.memory_repo_path
+                assert memory_repo is not None
+                ledger_path = memory_repo / "memory.md"
+                ledger = load_ledger(ledger_path)
+                prefix = ledger.rows[:2]
+                source = ledger.rows[2:]
+                self.assertEqual(
+                    tuple(prefix),
+                    atomic_series_ledger_prefix(series),
+                )
+                self.assertTrue(source)
+                if mutation == "drop-leaf-prefix":
+                    rows = [prefix[0], *source]
+                elif mutation == "reorder-leaf-prefix":
+                    rows = [prefix[1], prefix[0], *source]
+                elif mutation == "drop-source-row":
+                    rows = prefix
+                elif mutation == "rewrite-source-row":
+                    rows = [
+                        *prefix,
+                        LedgerRow(source[0].code_commit, "e" * 40),
+                        *source[1:],
+                    ]
+                else:
+                    rows = [
+                        prefix[0],
+                        LedgerRow("f" * 40, "e" * 40),
+                        prefix[1],
+                        *source,
+                    ]
+                write_ledger(
+                    ledger_path,
+                    replace(
+                        ledger,
+                        last_verified_code_commit=rows[0].code_commit,
+                        last_memory_content_commit=rows[0].memory_commit,
+                        rows=rows,
+                    ),
+                )
+                _git(memory_repo, "add", "memory.md")
+                tree = _git(memory_repo, "write-tree")
+                forged_ledger = _git(
+                    memory_repo,
+                    "commit-tree",
+                    tree,
+                    "-p",
+                    final.integrated_ledger_commit,
+                    "-m",
+                    mutation,
+                )
+                with self.assertRaisesRegex(RuntimeError, "exact ordered leaf landing prefix"):
+                    integration_ref_transaction.require_integrated_ledger_mapping(
+                        series,
+                        IntegratedCommits(
+                            final.integrated_code_commit,
+                            final.integrated_memory_content_commit,
+                            forged_ledger,
+                        ),
+                        memory_source_commit=series.memory_base_commit,
+                        expected_series_prefix=atomic_series_ledger_prefix(series),
+                    )
+
+    def test_atomic_series_publication_refuses_injected_prefix_before_super_movement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _authority_fixture(Path(tmp), external_memory=True)
+            _acquire_atomic_barrier(fixture)
+            _first, final = _land_two_external_atomic_leaves(fixture)
+            series = fixture.master_contract
+            memory_repo = series.memory_repo_path
+            assert memory_repo is not None
+            ledger_path = memory_repo / "memory.md"
+            ledger = load_ledger(ledger_path)
+            write_ledger(
+                ledger_path,
+                replace(
+                    ledger,
+                    rows=[
+                        ledger.rows[0],
+                        LedgerRow("f" * 40, "e" * 40),
+                        *ledger.rows[1:],
+                    ],
+                ),
+            )
+            _git(memory_repo, "add", "memory.md")
+            forged_tree = _git(memory_repo, "write-tree")
+            forged_ledger = _git(
+                memory_repo,
+                "commit-tree",
+                forged_tree,
+                "-p",
+                final.integrated_ledger_commit,
+                "-m",
+                "inject unrelated series prefix row",
+            )
+            _git(memory_repo, "reset", "--hard", forged_ledger)
+            forged_final = replace(
+                final,
+                ledger_commit=forged_ledger,
+                integrated_ledger_commit=forged_ledger,
+            )
+            write_contract(forged_final.contract_path, forged_final)
+            forged = replace(
+                series,
+                closeout_status="completed",
+                approved_for_commit=True,
+                human_review_status="approved",
+                code_commit=final.integrated_code_commit,
+                memory_content_commit=final.integrated_memory_content_commit,
+                ledger_commit=forged_ledger,
+            )
+            write_contract(forged.contract_path, forged)
+            lifecycle_operations.start_or_observe_operation(
+                IntegrateOperationInput(
+                    configPath=fixture.config_path.as_posix(),
+                    contractPath=forged.contract_path.as_posix(),
+                ),
+                launcher=lambda *_: None,
+            )
+            store = LifecycleOperationStore(
+                operation_record_path(forged.worktree_group, "integrate")
+            )
+            running = OperationRuntime(store).start()
+            code_super = _git(fixture.code_repo, "rev-parse", "super")
+            memory_super = _git(memory_repo, "rev-parse", "super")
+            contract_bytes = forged.contract_path.read_bytes()
+
+            with (
+                mock.patch.object(
+                    integrate_module,
+                    "_run_integration_quality_gate",
+                    return_value=({"passed": True}, None),
+                ),
+                self.assertRaisesRegex(RuntimeError, "exact ordered leaf landing prefix"),
+            ):
+                integrate_result(
+                    WorktreeArgs(
+                        contract_path=forged.contract_path,
+                        approved=True,
+                        operation_key=running.operationKey,
+                    )
+                )
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), code_super)
+            self.assertEqual(_git(memory_repo, "rev-parse", "super"), memory_super)
+            self.assertEqual(forged.contract_path.read_bytes(), contract_bytes)
+
+    def test_integrated_ledger_refuses_dropped_source_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            assert closed.memory_repo_path is not None
+            assert closed.ledger_path is not None
+            ledger = load_ledger(closed.ledger_path)
+            write_ledger(closed.ledger_path, replace(ledger, rows=[ledger.rows[0]]))
+            _git(closed.memory_worktree, "add", "memory.md")
+            _git(closed.memory_worktree, "commit", "-m", "drop source ledger history")
+            truncated_ledger = _git(closed.memory_worktree, "rev-parse", "HEAD")
+            with self.assertRaisesRegex(RuntimeError, "complete source ledger history"):
+                integration_ref_transaction.require_integrated_ledger_mapping(
+                    closed,
+                    IntegratedCommits(
+                        closed.code_commit,
+                        closed.memory_content_commit,
+                        truncated_ledger,
+                    ),
+                    memory_source_commit=closed.memory_base_commit,
+                )
+
+    def test_both_landed_recovery_refuses_duplicate_code_mapping_before_finalization(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            assert closed.ledger_path is not None
+            write_ledger(
+                closed.ledger_path,
+                prepend_mapping(
+                    load_ledger(closed.ledger_path),
+                    closed.code_commit,
+                    closed.memory_content_commit,
+                ),
+            )
+            _git(closed.memory_worktree, "add", "memory.md")
+            _git(closed.memory_worktree, "commit", "-m", "duplicate recovery mapping")
+            forged = replace(
+                closed,
+                ledger_commit=_git(closed.memory_worktree, "rev-parse", "HEAD"),
+            )
+            write_contract(forged.contract_path, forged)
+            running, recovery = self._land_external_recovery_pair(fixture, forged)
+            contract_bytes = forged.contract_path.read_bytes()
+
+            with (
+                mock.patch.object(
+                    integrate_module,
+                    "publish_queue_candidate_integration_result_under_authority",
+                    side_effect=lambda _contract, publication, **_kwargs: publication(
+                        integrate_module.IntegrationBoundaryFacts(None, None)
+                    ),
+                ),
+                mock.patch.object(integrate_module, "complete_queue_candidate_integration"),
+                self.assertRaisesRegex(RuntimeError, "exactly one landed code mapping"),
+            ):
+                integrate_result(
+                    WorktreeArgs(
+                        contract_path=forged.contract_path,
+                        approved=True,
+                        operation_key=running.operationKey,
+                        recovery_commits=recovery,
+                    )
+                )
+            self.assertEqual(forged.contract_path.read_bytes(), contract_bytes)
+
+    def test_both_landed_recovery_refuses_content_outside_the_exact_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            assert closed.memory_repo_path is not None and closed.ledger_path is not None
+            content_tree = _git(
+                closed.memory_repo_path,
+                "rev-parse",
+                f"{closed.memory_content_commit}^{{tree}}",
+            )
+            unrelated_content = _git(
+                closed.memory_repo_path,
+                "commit-tree",
+                content_tree,
+                "-m",
+                "foreign recovery content",
+            )
+            ledger = load_ledger(closed.ledger_path)
+            rows = [
+                LedgerRow(closed.code_commit, unrelated_content),
+                *(row for row in ledger.rows if row.code_commit != closed.code_commit),
+            ]
+            write_ledger(
+                closed.ledger_path,
+                replace(
+                    ledger,
+                    last_verified_code_commit=closed.code_commit,
+                    last_memory_content_commit=unrelated_content,
+                    rows=rows,
+                ),
+            )
+            _git(closed.memory_worktree, "add", "memory.md")
+            ledger_tree = _git(closed.memory_worktree, "write-tree")
+            forged_ledger = _git(
+                closed.memory_repo_path,
+                "commit-tree",
+                ledger_tree,
+                "-p",
+                closed.memory_base_commit,
+                "-p",
+                unrelated_content,
+                "-m",
+                "merge foreign recovery content",
+            )
+            forged = replace(
+                closed,
+                memory_content_commit=unrelated_content,
+                ledger_commit=forged_ledger,
+            )
+            write_contract(forged.contract_path, forged)
+            running, recovery = self._land_external_recovery_pair(fixture, forged)
+            contract_bytes = forged.contract_path.read_bytes()
+
+            with (
+                mock.patch.object(
+                    integrate_module,
+                    "publish_queue_candidate_integration_result_under_authority",
+                    side_effect=lambda _contract, publication, **_kwargs: publication(
+                        integrate_module.IntegrationBoundaryFacts(None, None)
+                    ),
+                ),
+                mock.patch.object(integrate_module, "complete_queue_candidate_integration"),
+                self.assertRaisesRegex(RuntimeError, "not based on the exact memory source"),
+            ):
+                integrate_result(
+                    WorktreeArgs(
+                        contract_path=forged.contract_path,
+                        approved=True,
+                        operation_key=running.operationKey,
+                        recovery_commits=recovery,
+                    )
+                )
+            self.assertEqual(forged.contract_path.read_bytes(), contract_bytes)
 
     def test_ref_and_checkout_recovery_cover_each_side_and_invalid_side(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -352,8 +818,10 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                     target,
                     authority=authority,
                 )
-                if moved:
-                    (owner / "concurrent-untracked.txt").write_text("keep\n", encoding="utf-8")
+                if moved:  # pragma: no cover
+                    (owner / "concurrent-untracked.txt").write_text(
+                        "keep\n", encoding="utf-8"
+                    )  # pragma: no cover
                 return moved
 
             with (
@@ -464,8 +932,10 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             with (
                 mock.patch(
                     "agents_remember.worktrees.modules.integrate."
-                    "publish_queue_candidate_integration_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(),
+                    "publish_queue_candidate_integration_result_under_authority",
+                    side_effect=lambda _contract, publication, **_kwargs: publication(
+                        integrate_module.IntegrationBoundaryFacts(None, None)
+                    ),
                 ),
                 mock.patch(
                     "agents_remember.worktrees.modules.integrate."
@@ -498,5 +968,5 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             self.assertTrue((memory_owner / "candidate.md").is_file())
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -1009,7 +1009,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             with (
                 mock.patch(
                     "agents_remember.worktrees.modules.integrate."
-                    "publish_queue_candidate_integration_under_authority",
+                    "publish_queue_candidate_integration_result_under_authority",
                     side_effect=lambda _contract, publication, **_kwargs: publication(),
                 ),
                 mock.patch(

@@ -405,13 +405,14 @@ class CloseoutQueueLifecycleUnitTests(unittest.TestCase):
             memory_content_commit="b" * 40,
             ledger_commit="c" * 40,
         )
-        lifecycle.complete_queue_candidate_integration(
-            self.contract,
-            operation_key="d" * 64,
-            code_commit="a" * 40,
-            memory_content_commit="b" * 40,
-            ledger_commit="c" * 40,
-        )
+        with self.assertRaisesRegex(CloseoutQueueError, "durable removal intent"):
+            lifecycle.complete_queue_candidate_integration(
+                self.contract,
+                operation_key="d" * 64,
+                code_commit="a" * 40,
+                memory_content_commit="b" * 40,
+                ledger_commit="c" * 40,
+            )
         self.assertEqual(
             self.store.read(_initial_state(SPRINT, self.graph.revision, NOW)).candidates,
             {},

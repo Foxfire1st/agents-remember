@@ -34,9 +34,9 @@ from agents_remember.kernel.primitives.runtime_config import RepositoryScope
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.tasks import SprintExecutionGraph, TaskDocument, write_task_doc
+from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.integrate import IntegrationSources
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

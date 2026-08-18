@@ -18,7 +18,10 @@ from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
+from agents_remember.models.lifecycles.operation import (
+    IntegrationQualityCertification,
+    LifecycleOperationRecoveryCommits,
+)
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 
@@ -77,6 +80,7 @@ class WorktreeArgs:
     candidate_tree: str | None = None
     approval_claimed: bool = False
     recovery_commits: LifecycleOperationRecoveryCommits | None = None
+    quality_certification: IntegrationQualityCertification | None = None
     operation_progress: Callable[[str, Mapping[str, object]], None] | None = None
 
     @classmethod

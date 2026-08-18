@@ -31,9 +31,12 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, l
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
+    IntegrationQualityCertification,
+    IntegrationQueueCompletionEvidence,
     LifecycleOperationKind,
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
+    OrganizationalCompletionRepairEvidence,
 )
 from agents_remember.worktrees.closeout_queue_lifecycle import (
     release_queue_candidate_after_reversible_operation,
@@ -119,6 +122,31 @@ class OperationRuntime:
             if recovery_value is not None
             else None
         )
+        quality_value = evidence.get("quality_certification")
+        quality_certification = (
+            IntegrationQualityCertification.model_validate(quality_value)
+            if quality_value is not None
+            else None
+        )
+        queue_value = evidence.get("queue_completion")
+        queue_completion = (
+            IntegrationQueueCompletionEvidence.model_validate(queue_value)
+            if queue_value is not None
+            else None
+        )
+        repair_value = evidence.get("organizational_repair")
+        organizational_repair = (
+            OrganizationalCompletionRepairEvidence.model_validate(repair_value)
+            if repair_value is not None
+            else None
+        )
+        failure_value = evidence.get("organizational_failure")
+        organizational_failure = (
+            dict(failure_value)
+            if isinstance(failure_value, Mapping)
+            and failure_value.get("state") == "organizational-completion-gate-failed"
+            else None
+        )
 
         def advance(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
             if record.cancelRequested or record.status == "cancelled":
@@ -137,6 +165,10 @@ class OperationRuntime:
                         record.approvalClaimed or bool(evidence.get("approval_claimed"))
                     ),
                     "recoveryCommits": (recovery_commits or record.recoveryCommits),
+                    "qualityCertification": (quality_certification or record.qualityCertification),
+                    "queueCompletion": (queue_completion or record.queueCompletion),
+                    "organizationalRepair": (organizational_repair or record.organizationalRepair),
+                    "result": organizational_failure or record.result,
                 }
             )
 
@@ -246,10 +278,16 @@ class OperationRuntime:
         self.store.update(terminal)
 
     def fail(self, error: Exception) -> None:
-        self.finish({"reason": str(error)}, ok=False)
+        current = self.store.read()
+        pending = _organizational_repair_failure(current)
+        self.finish(pending or {"reason": str(error)}, ok=False)
 
 
 def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntime) -> None:
+    pending_repair = _organizational_repair_failure(record)
+    if pending_repair is not None:
+        runtime.finish(pending_repair, ok=False)
+        return
     operation_input = record.input
     config = load_config(operation_input.configPath)
     common = {
@@ -260,6 +298,7 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
         "candidate_tree": record.candidateTree,
         "approval_claimed": record.approvalClaimed,
         "recovery_commits": record.recoveryCommits,
+        "quality_certification": record.qualityCertification,
         "operation_progress": runtime.progress,
     }
     if isinstance(operation_input, CloseoutOperationInput):
@@ -286,9 +325,13 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
         payload = integration_completion_payload(config, operation_input, result)
     if result.returncode != 0:
         current = runtime.store.read() or record
-        release_failure = _release_reversible_queue_ownership(
-            current,
-            restored=bool(payload.get("safeToReplace")),
+        release_failure = (
+            None
+            if payload.get("state") == "organizational-completion-gate-failed"
+            else _release_reversible_queue_ownership(
+                current,
+                restored=bool(payload.get("safeToReplace")),
+            )
         )
         if release_failure is not None:
             payload["queueReleaseFailure"] = release_failure
@@ -306,6 +349,8 @@ def _release_reversible_queue_ownership(
     *,
     restored: bool = False,
 ) -> str | None:
+    if _organizational_repair_failure(record) is not None:
+        return None
     if record.irreversibleBoundaryEntered and not restored:
         return None
     try:
@@ -317,6 +362,19 @@ def _release_reversible_queue_ownership(
     except Exception as error:  # queue authority must remain visible in the terminal record
         return str(error)
     return None
+
+
+def _organizational_repair_failure(
+    record: LifecycleOperationRecord | None,
+) -> dict[str, object] | None:
+    if (
+        record is None
+        or record.organizationalRepair is None
+        or not isinstance(record.result, dict)
+        or record.result.get("state") != "organizational-completion-gate-failed"
+    ):
+        return None
+    return dict(record.result)
 
 
 def integration_completion_payload(

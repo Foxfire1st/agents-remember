@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -24,10 +24,17 @@ from agents_remember.models.closeout_queue import (
     CloseoutQueueState,
     QueueEventAction,
 )
-from agents_remember.models.lifecycles.operation import IntegrationOperationAuthority
+from agents_remember.models.lifecycles.operation import (
+    IntegrationOperationAuthority,
+    IntegrationQueueCompletionEvidence,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
+from agents_remember.worktrees.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
 from agents_remember.worktrees.modules.terminal_validation import (
     require_series_children_retired,
 )
@@ -131,6 +138,7 @@ class _IntegrationBoundaryContext:
     topology: TaskDocumentTopology
     binding: QueueBinding
     contract: WorktreeContract
+    operation_key: str
     owner: str
     commits: tuple[str, str, str]
 
@@ -531,6 +539,7 @@ def _integration_boundary_context(
         topology=topology,
         binding=binding,
         contract=contract,
+        operation_key=key,
         owner=_operation_owner(key),
         commits=commits,
     )
@@ -540,8 +549,11 @@ def _integration_boundary_context(
 def _require_integration_boundary_candidate(
     context: _IntegrationBoundaryContext,
     state: CloseoutQueueState,
+    *,
+    graph: Any | None = None,
 ) -> CloseoutCandidateRecord:
-    graph = _graph_context(context.topology, context.binding.sprint_ref)
+    if graph is None:
+        graph = _graph_context(context.topology, context.binding.sprint_ref)
     candidate = _candidate_or_error(state, context.binding.candidate_ref)
     if (
         candidate.state != "integration-in-flight"
@@ -584,6 +596,12 @@ def complete_queue_candidate_integration(
         return
     key = _required_operation_key(operation_key, "integration")
     owner = _operation_owner(key)
+    evidence = integration_queue_completion_evidence(
+        contract,
+        operation_key=key,
+        commits=(code_commit, memory_content_commit, ledger_commit),
+    )
+    assert evidence is not None
     topology = TaskDocumentTopology(contract.coordination_root)
     graph = _graph_context(topology, binding.sprint_ref)
     initial = _initial_state(binding.sprint_ref, graph.revision, now_iso())
@@ -592,6 +610,7 @@ def complete_queue_candidate_integration(
     def complete(state: CloseoutQueueState) -> CloseoutQueueState:
         candidate = state.candidates.get(binding.candidate_ref.key)
         if candidate is None:
+            _require_durable_queue_completion(contract, key, evidence)
             return state
         if (
             candidate.state != "integration-in-flight"
@@ -617,15 +636,106 @@ def complete_queue_candidate_integration(
 
     store.transact(
         initial=initial,
-        event=_internal_event(
-            "complete-integration",
-            f"integration-complete:{owner}",
-            {
-                "candidate": binding.candidate_ref.key,
-                "commits": [code_commit, memory_content_commit, ledger_commit],
-            },
+        event=_integration_completion_event(
+            binding,
+            owner,
+            (code_commit, memory_content_commit, ledger_commit),
         ),
         transform=complete,
+    )
+
+
+def integration_queue_completion_evidence(
+    contract: WorktreeContract,
+    *,
+    operation_key: str,
+    commits: tuple[str, str, str],
+) -> IntegrationQueueCompletionEvidence | None:
+    """Build the exact queue-removal WAL identity for a governed leaf."""
+
+    binding = contract_queue_binding(contract)
+    if binding is None:
+        return None
+    key = _required_operation_key(operation_key, "integration")
+    event = _integration_completion_event(binding, _operation_owner(key), commits)
+    return IntegrationQueueCompletionEvidence(
+        requestId=event.request_id,
+        fingerprint=event.fingerprint,
+    )
+
+
+def record_queue_candidate_integration_completion(
+    contract: WorktreeContract,
+    operation_key: str,
+    commits: tuple[str, str, str],
+    progress: Callable[[str, Mapping[str, object]], None] | None,
+) -> None:
+    """Persist exact candidate-removal intent before the queue transaction."""
+
+    evidence = integration_queue_completion_evidence(
+        contract,
+        operation_key=operation_key,
+        commits=commits,
+    )
+    if evidence is not None and progress is not None:
+        progress(
+            "contract-finalization",
+            {
+                "current_command": "persist exact queue candidate removal intent",
+                "queue_completion": evidence.model_dump(mode="json"),
+            },
+        )
+
+
+def _require_durable_queue_completion(
+    contract: WorktreeContract,
+    operation_key: str,
+    expected: IntegrationQueueCompletionEvidence,
+) -> None:
+    record = LifecycleOperationStore(
+        operation_record_path(contract.worktree_group, "integrate")
+    ).read()
+    if record is None or record.operationKey != operation_key or record.queueCompletion != expected:
+        raise CloseoutQueueError(
+            "closeout-candidate-not-declared",
+            "queue completion has no candidate and no exact durable removal intent",
+        )
+
+
+def _queue_candidate_integration_was_completed(
+    state: CloseoutQueueState,
+    binding: QueueBinding,
+    *,
+    owner: str,
+    commits: tuple[str, str, str],
+) -> bool:
+    event = _integration_completion_event(binding, owner, commits)
+    receipt = next(
+        (item for item in state.appliedRequests if item.requestId == event.request_id),
+        None,
+    )
+    if receipt is None:
+        return False
+    if receipt.fingerprint != event.fingerprint:
+        raise CloseoutQueueError(
+            "closeout-candidate-integration-receipt-mismatch",
+            "the queue completion receipt does not match this exact candidate and commit tuple",
+        )
+    return True
+
+
+def _integration_completion_event(
+    binding: QueueBinding,
+    owner: str,
+    commits: tuple[str, str, str],
+) -> QueueTransaction:
+    return _internal_event(
+        "complete-integration",
+        f"integration-complete:{owner}",
+        {
+            "candidate": binding.candidate_ref.key,
+            "commits": list(commits),
+        },
     )
 
 

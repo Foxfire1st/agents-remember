@@ -31,11 +31,11 @@ from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
 from agents_remember.worktrees.integration_ref_transaction import (
     IntegratedCommits,
+    IntegrationSources,
     prepare_integration_ref_move,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.modules.integrate import IntegrationSources
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

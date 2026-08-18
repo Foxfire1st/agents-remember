@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
-from agents_remember.kernel.agentic_settings import load_agentic_settings
-from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import find_mapping, parse_ledger_text
 from agents_remember.kernel.primitives.gate_policy import (
     GatePolicy,
 )
@@ -22,7 +19,7 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.worktrees.closeout_queue_lifecycle import (
     claim_queue_candidate_for_integration,
     complete_queue_candidate_integration,
-    publish_queue_candidate_integration_under_authority,
+    record_queue_candidate_integration_completion,
 )
 from agents_remember.worktrees.integration_branch_authority import (
     integration_targets,
@@ -33,13 +30,19 @@ from agents_remember.worktrees.integration_operation_authority import (
     require_current_integration_sources,
     require_plane_integration_operation,
 )
-from agents_remember.worktrees.integration_quality_checkout import (
-    integration_quality_checkout,
+from agents_remember.worktrees.integration_quality import (
+    IntegrationQualityFailure,
+    organizational_quality_failure_payload,
+    run_integration_quality_gate,
+)
+from agents_remember.worktrees.integration_quality import (
+    quality_gate_preview as _quality_gate_preview,
 )
 from agents_remember.worktrees.integration_ref_transaction import (
     CheckoutRefresh,
     IntegratedCommits,
     IntegrationRefRace,
+    IntegrationSources,
     merge_integrated_commits,
     prepare_integration_ref_move,
     recover_integration_ref,
@@ -47,15 +50,6 @@ from agents_remember.worktrees.integration_ref_transaction import (
     require_integrated_ledger_mapping,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
-from agents_remember.worktrees.modules.code_quality_gate import (
-    GATE_FULL,
-    QualityGatePlan,
-    QualityGateTarget,
-    code_quality_gate_preview,
-    requires_integrated_acceptance,
-    requires_strict_code_quality,
-    run_strict_code_quality_gate,
-)
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -68,8 +62,23 @@ from agents_remember.worktrees.modules.guidance import (
     next_guidance,
     status_payload,
 )
+from agents_remember.worktrees.modules.integration_publication import (
+    IntegratePreview,
+    IntegrationPublication,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.organizational_completion_integration import (
+    IntegrationBoundaryFacts,
+    organizational_completion_scope_block,
+    preview_organizational_completion,
+    publish_queue_candidate_integration_result_under_authority,
+    recorded_organizational_quality_certification,
+)
+from agents_remember.worktrees.organizational_completion_repair import (
+    record_organizational_completion_repair,
+)
 from agents_remember.worktrees.series_closeout import (
+    atomic_series_ledger_prefix,
     publish_series_integration_under_authority,
 )
 from agents_remember.worktrees.source_lineage import (
@@ -86,60 +95,6 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 HANDOVER_GATE_KIND = "master-handover-approval"
-
-
-def quality_gate_mode(contract: WorktreeContract) -> str:
-    """Return the only accepting integration mode: full, at master altitude."""
-    if contract.kind == "leaf":
-        raise ValueError("leaf integration reuses the exact leaf-closeout acceptance")
-    return GATE_FULL
-
-
-def _quality_gate_settings(contract: WorktreeContract):
-    settings = load_agentic_settings(contract.coordination_root, repo_root=contract.code_repo_path)
-    return settings.quality_gate
-
-
-def _quality_gate_memory_cap(contract: WorktreeContract) -> int | None:
-    return _quality_gate_settings(contract).memory_cap_bytes
-
-
-def _quality_gate_preview(contract: WorktreeContract) -> dict[str, object]:
-    if contract.kind == "leaf":
-        return {
-            "required": False,
-            "status": "certified-at-leaf-closeout",
-            "command": "",
-            "mode": "targeted",
-            "reason": (
-                "leaf integration lands the exact commit certified once at leaf closeout; "
-                "integration does not rerun acceptance"
-            ),
-        }
-    mode = quality_gate_mode(contract)
-    settings = _quality_gate_settings(contract)
-    memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
-    with integration_quality_checkout(contract) as checkout:
-        return code_quality_gate_preview(
-            checkout,
-            code_would_commit=True,
-            diff_base=contract.code_base_commit,
-            plan=QualityGatePlan(
-                mode=mode,
-                memory_cap_bytes=memory_cap_bytes,
-                executor=settings.executor,
-            ),
-            required_when_missing=requires_integrated_acceptance(contract.repo_name),
-        )
-
-
-@dataclass(frozen=True)
-class IntegratePreview:
-    """The evaluated seam guard and the planned altitude-routed quality gate."""
-
-    guard: GateGuard
-    handover_warning: dict[str, object] | None
-    quality_gate: dict[str, object]
 
 
 def handover_gate_guard(
@@ -277,26 +232,6 @@ def validate_integrate_memory_contract(contract: WorktreeContract) -> None:
     require_clean(contract.memory_worktree, "memory worktree")
     if head_commit(contract.memory_worktree) != contract.ledger_commit:
         raise RuntimeError("memory worktree HEAD does not match closeout ledger_commit")
-
-
-@dataclass(frozen=True)
-class IntegrationSources:
-    """Where each side's source branch stands at the moment integration starts.
-
-    Its current head, and whether that head has already moved past the commit closeout
-    landed -- which is exactly what makes a fast-forward impossible and ``--strategy replay``
-    necessary. Head and verdict are read in the same breath per side and every consumer
-    needs both, so they are one reading of the two source branches, not four values.
-    """
-
-    current_code_source: str
-    current_memory_source: str
-    code_replay_required: bool
-    memory_replay_required: bool
-
-    @property
-    def replay_required(self) -> bool:
-        return self.code_replay_required or self.memory_replay_required
 
 
 def _integration_lineage_block(
@@ -543,6 +478,23 @@ def _recover_landed_refs(
         )
         return True
 
+    return _recover_external_landed_refs(
+        contract,
+        args,
+        commits,
+        authority,
+        (code_source, code_before, code_after),
+    )
+
+
+def _recover_external_landed_refs(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    commits: LifecycleOperationRecoveryCommits,
+    authority: IntegrationOperationAuthority,
+    code_refs: tuple[str, str, str],
+) -> bool:
+    code_source, code_before, code_after = code_refs
     if contract.memory_repo_path is None:
         raise RuntimeError("external-memory integration recovery requires a memory repo")
     memory_source = branch_commit(
@@ -553,20 +505,23 @@ def _recover_landed_refs(
     memory_after = commits.ledgerCommit
     if code_source == code_before and memory_source == memory_before:
         return False
-    if code_source == code_after and memory_source == memory_before:
+    recovered_commits = IntegratedCommits(
+        code=code_after,
+        memory_content=commits.memoryContentCommit,
+        ledger=memory_after,
+    )
+    if code_source == code_after and memory_source in {memory_before, memory_after}:
         require_integrated_ledger_mapping(
             contract,
-            IntegratedCommits(
-                code=commits.codeCommit,
-                memory_content=commits.memoryContentCommit,
-                ledger=commits.ledgerCommit,
+            recovered_commits,
+            memory_source_commit=authority.memorySourceCommit,
+            expected_series_prefix=(
+                atomic_series_ledger_prefix(contract)
+                if contract.kind == "series" and contract.memory_mode == "external"
+                else ()
             ),
         )
-        recovered_commits = IntegratedCommits(
-            code=commits.codeCommit,
-            memory_content=commits.memoryContentCommit,
-            ledger=commits.ledgerCommit,
-        )
+    if code_source == code_after and memory_source == memory_before:
         if not recover_integration_ref(
             contract,
             args,
@@ -588,11 +543,6 @@ def _recover_landed_refs(
             f"code={code_source}, memory={memory_source}, expected "
             f"code={code_after}, memory={memory_after}"
         )
-    recovered_commits = IntegratedCommits(
-        code=code_after,
-        memory_content=commits.memoryContentCommit,
-        ledger=memory_after,
-    )
     refresh_recovered_checkout(
         contract,
         args,
@@ -612,7 +562,7 @@ def _prove_external_memory_recovery(
     contract: WorktreeContract,
     commits: LifecycleOperationRecoveryCommits,
 ) -> None:
-    """Prove the task memory head, landed mapping, and content ancestry."""
+    """Prove the closed task memory head still names the recovered ledger."""
     assert contract.memory_repo_path is not None
     if contract.kind == "series":
         task_memory_head = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
@@ -625,28 +575,6 @@ def _prove_external_memory_recovery(
             "integration contract-finalization recovery requires manual reconciliation: "
             f"recorded ledger commit {commits.ledgerCommit}, found task memory HEAD "
             f"{task_memory_head}"
-        )
-    ledger_blob = run_git(
-        contract.memory_repo_path,
-        ["show", f"{commits.ledgerCommit}:memory.md"],
-    )
-    if ledger_blob.returncode != 0:
-        raise RuntimeError("recorded integration ledger commit has no readable memory.md")
-    mapping = find_mapping(parse_ledger_text(ledger_blob.stdout), commits.codeCommit)
-    if mapping is None or mapping.memory_commit != commits.memoryContentCommit:
-        found = "missing" if mapping is None else mapping.memory_commit
-        raise RuntimeError(
-            "integration contract-finalization recovery requires manual reconciliation: "
-            f"landed ledger mapping is {found}, expected {commits.memoryContentCommit}"
-        )
-    if not is_ancestor(
-        contract.memory_repo_path,
-        commits.memoryContentCommit,
-        commits.ledgerCommit,
-    ):
-        raise RuntimeError(
-            "integration contract-finalization recovery requires manual reconciliation: "
-            "recorded memory content is not reachable from the recorded ledger commit"
         )
 
 
@@ -752,6 +680,12 @@ def _prove_completed_integration_descendant(
             memory_content=commits.memoryContentCommit,
             ledger=commits.ledgerCommit,
         ),
+        memory_source_commit=authority.memorySourceCommit,
+        expected_series_prefix=(
+            atomic_series_ledger_prefix(contract)
+            if contract.kind == "series" and contract.memory_mode == "external"
+            else ()
+        ),
     )
 
 
@@ -820,6 +754,16 @@ def _completed_integration_result(
         return None
     if not args.dry_run:
         finalized = load_contract(contract.contract_path)
+        record_queue_candidate_integration_completion(
+            finalized,
+            args.operation_key,
+            (
+                finalized.integrated_code_commit or finalized.code_commit,
+                finalized.integrated_memory_content_commit or finalized.memory_content_commit,
+                finalized.integrated_ledger_commit or finalized.ledger_commit,
+            ),
+            args.operation_progress,
+        )
         complete_queue_candidate_integration(
             finalized,
             operation_key=args.operation_key,
@@ -837,28 +781,29 @@ def _recover_integration_under_authority(
     args: WorktreeArgs,
     authority: IntegrationOperationAuthority,
 ) -> WorktreeCommandResult | None:
-    def publication() -> WorktreeCommandResult | None:
+    def publication(_facts: IntegrationBoundaryFacts | None = None) -> WorktreeCommandResult | None:
         current = load_contract(contract.contract_path)
         if current != contract:
             raise RuntimeError("integration contract changed before recovery finalization")
         return _recover_integration_finalization(current, args, authority)
 
-    if contract.integration_status != "completed":
-        if contract.kind == "series":
-            return publish_series_integration_under_authority(contract, publication)
-        commits = (
-            authority.codeCandidateCommit,
-            authority.memoryContentCommit,
-            authority.ledgerCommit,
-        )
-        return publish_queue_candidate_integration_under_authority(
-            contract,
-            publication,
-            operation_key=args.operation_key,
-            commits=commits,
-        )
-    with integration_authority_lock(contract.coordination_root, contract.repo_name):
-        return publication()
+    if contract.kind == "series":
+        if contract.integration_status != "completed":
+            return publish_series_integration_under_authority(contract, lambda: publication(None))
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            return publication(None)
+    commits = (
+        authority.codeCandidateCommit,
+        authority.memoryContentCommit,
+        authority.ledgerCommit,
+    )
+    return publish_queue_candidate_integration_result_under_authority(
+        contract,
+        publication,
+        operation_key=args.operation_key,
+        commits=commits,
+        recovery=True,
+    )
 
 
 def _continue_integration(
@@ -1027,74 +972,131 @@ def _apply_integration(
     prepared = _prepare_integration_commits(contract, args, sources)
     if isinstance(prepared, WorktreeCommandResult):
         return prepared
-    commits, quality_gate = prepared
-
-    def publication() -> WorktreeCommandResult:
-        current = load_contract(contract.contract_path)
-        if current != contract:
-            raise RuntimeError("integration contract changed before protected-ref movement")
-        if current.kind == "series":
-            require_series_contract_authority(current, operation="worktree_integrate")
-        else:
-            require_ordinary_worktree(current, operation="worktree_integrate")
-        blocked = _integration_source_state_block(current, sources)
-        if blocked is not None:
-            return blocked
-        snapshot = prepare_integration_ref_move(current, commits, args, sources)
-        report_operation_progress(
-            args,
-            "source-merge",
-            current_command="compare-and-swap exact code and memory integration refs",
-            irreversible_boundary=True,
-            recovery_commits={
-                "codeCommit": commits.code,
-                "memoryContentCommit": commits.memory_content,
-                "ledgerCommit": commits.ledger,
-            },
-        )
-        try:
-            merge_integrated_commits(current, commits, snapshot)
-        except IntegrationRefRace as exc:
-            return WorktreeCommandResult(
-                2,
-                {
-                    "state": "integration-ref-raced",
-                    "reason": str(exc),
-                    "summary": str(exc),
-                    "safeToReplace": exc.safe_to_replace,
-                    "developer_decision_required": not exc.safe_to_replace,
-                },
-            )
-        report_operation_progress(
-            args, "contract-finalization", current_command="finalize integration contract edge"
-        )
-        result = _integrated_result(
-            current,
-            args,
-            commits,
-            handover_warning=handover_warning,
-            quality_gate=quality_gate,
-        )
-        return result
+    commits, quality_gate, quality_certification, preflight_completion = prepared
+    locked_args = replace(
+        args,
+        quality_certification=quality_certification or args.quality_certification,
+    )
+    publication = IntegrationPublication(
+        contract=contract,
+        args=args,
+        locked_args=locked_args,
+        sources=sources,
+        commits=commits,
+        preflight_organizational_completion=preflight_completion,
+        quality_gate=quality_gate,
+        handover_warning=handover_warning,
+    )
 
     if contract.kind == "series":
-        result = publish_series_integration_under_authority(contract, publication)
-    else:
-        result = publish_queue_candidate_integration_under_authority(
+        result = publish_series_integration_under_authority(
             contract,
-            publication,
+            lambda: _publish_integration_edge(
+                publication,
+                IntegrationBoundaryFacts(candidate=None, organizational_completion=None),
+            ),
+        )
+    else:
+        result = publish_queue_candidate_integration_result_under_authority(
+            contract,
+            lambda facts: _publish_integration_edge(publication, facts),
             operation_key=args.operation_key,
             commits=(commits.code, commits.memory_content, commits.ledger),
         )
     if result.returncode == 0:
+        finalized = load_contract(contract.contract_path)
+        record_queue_candidate_integration_completion(
+            finalized,
+            args.operation_key,
+            (commits.code, commits.memory_content, commits.ledger),
+            args.operation_progress,
+        )
         complete_queue_candidate_integration(
-            load_contract(contract.contract_path),
+            finalized,
             operation_key=args.operation_key,
             code_commit=commits.code,
             memory_content_commit=commits.memory_content,
             ledger_commit=commits.ledger,
         )
     return result
+
+
+def _publish_integration_edge(
+    publication: IntegrationPublication,
+    facts: IntegrationBoundaryFacts,
+) -> WorktreeCommandResult:
+    current = load_contract(publication.contract.contract_path)
+    if current != publication.contract:
+        raise RuntimeError("integration contract changed before protected-ref movement")
+    if current.kind == "series":
+        require_series_contract_authority(current, operation="worktree_integrate")
+    else:
+        require_ordinary_worktree(current, operation="worktree_integrate")
+    blocked = _integration_source_state_block(current, publication.sources)
+    if blocked is not None:
+        return blocked
+    quality_gate = publication.quality_gate
+    scope_block = organizational_completion_scope_block(
+        preflight_present=publication.preflight_organizational_completion,
+        locked=facts.organizational_completion,
+    )
+    if scope_block is not None:
+        return WorktreeCommandResult(2, scope_block)
+    if facts.organizational_completion is not None:
+        quality_gate, blocked_quality = _run_integration_quality_gate(
+            current,
+            completion=facts.organizational_completion,
+            args=publication.locked_args,
+        )
+        if blocked_quality is not None:
+            return WorktreeCommandResult(2, blocked_quality)
+    snapshot = prepare_integration_ref_move(
+        current,
+        publication.commits,
+        publication.args,
+        publication.sources,
+        expected_series_ledger_prefix=(
+            atomic_series_ledger_prefix(current)
+            if current.kind == "series" and current.memory_mode == "external"
+            else ()
+        ),
+    )
+    report_operation_progress(
+        publication.args,
+        "source-merge",
+        current_command="compare-and-swap exact code and memory integration refs",
+        irreversible_boundary=True,
+        recovery_commits={
+            "codeCommit": publication.commits.code,
+            "memoryContentCommit": publication.commits.memory_content,
+            "ledgerCommit": publication.commits.ledger,
+        },
+    )
+    try:
+        merge_integrated_commits(current, publication.commits, snapshot)
+    except IntegrationRefRace as exc:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "integration-ref-raced",
+                "reason": str(exc),
+                "summary": str(exc),
+                "safeToReplace": exc.safe_to_replace,
+                "developer_decision_required": not exc.safe_to_replace,
+            },
+        )
+    report_operation_progress(
+        publication.args,
+        "contract-finalization",
+        current_command="finalize integration contract edge",
+    )
+    return _integrated_result(
+        current,
+        publication.args,
+        publication.commits,
+        handover_warning=publication.handover_warning,
+        quality_gate=quality_gate,
+    )
 
 
 def _prepare_integration_commits(
@@ -1108,9 +1110,14 @@ def _prepare_integration_commits(
     report_operation_progress(
         args, "integration-quality", current_command="run altitude-routed quality contract"
     )
-    quality_gate, blocked = _run_integration_quality_gate(contract)
-    if blocked is not None:
-        return WorktreeCommandResult(2, blocked)
+    quality_certification = None
+    preflight_completion = False
+    if contract.kind == "series":
+        quality_gate, blocked = _run_integration_quality_gate(contract)
+        if blocked is not None:
+            return WorktreeCommandResult(2, blocked)
+    else:
+        quality_gate = _quality_gate_preview(contract)
     blocked = _integration_source_state_block(contract, sources)
     if blocked is not None:
         return blocked
@@ -1125,48 +1132,66 @@ def _prepare_integration_commits(
         memory_content=integrated_memory_content_commit,
         ledger=integrated_ledger_commit,
     )
-    return commits, quality_gate
+    if contract.kind == "leaf":
+        completion = preview_organizational_completion(contract)
+        if completion is not None:
+            preflight_completion = True
+            quality_gate, blocked = _run_integration_quality_gate(
+                contract,
+                completion=completion,
+                args=args,
+            )
+            if blocked is not None:
+                return WorktreeCommandResult(2, blocked)
+            quality_certification = recorded_organizational_quality_certification(
+                contract,
+                operation_key=args.operation_key,
+            )
+    return commits, quality_gate, quality_certification, preflight_completion
 
 
 def _run_integration_quality_gate(
     contract: WorktreeContract,
+    *,
+    completion=None,
+    args: WorktreeArgs | None = None,
 ) -> tuple[dict[str, object], dict[str, object] | None]:
-    """Run the one integration-owned acceptance: full, at master altitude.
+    """Run the altitude-owned gate and translate failure into lifecycle guidance."""
 
-    Leaf integration reuses the exact targeted acceptance already bound to its closeout
-    commit. Master integration runs the full wrapper once through the pinned Dagger
-    executor inside the integration step itself. An explicit cap remains available.
-    """
-    if contract.kind == "leaf":
-        return _quality_gate_preview(contract), None
-    mode = quality_gate_mode(contract)
-    settings = _quality_gate_settings(contract)
-    memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
     try:
-        with integration_quality_checkout(contract) as checkout:
-            if not requires_strict_code_quality(
-                checkout,
-                code_would_commit=True,
-                required_when_missing=requires_integrated_acceptance(contract.repo_name),
-            ):
-                return _quality_gate_preview(contract), None
-            gate = run_strict_code_quality_gate(
-                QualityGateTarget(
-                    code_worktree=checkout,
-                    worktree_group=contract.worktree_group,
-                ),
-                diff_base=contract.code_base_commit,
-                plan=QualityGatePlan(
-                    mode=mode,
-                    memory_cap_bytes=memory_cap_bytes,
-                    executor=settings.executor,
-                ),
-                invocation="master-integration",
+        outcome = run_integration_quality_gate(
+            contract,
+            completion=completion,
+            certification=(args.quality_certification if args is not None else None),
+            certification_sink=(
+                lambda certification: (
+                    report_operation_progress(
+                        args,
+                        "integration-quality",
+                        current_command="persist exact organizational full-gate certification",
+                        quality_certification=certification.model_dump(mode="json"),
+                    )
+                    if args is not None
+                    else None
+                )
             )
-    except RuntimeError as error:
+            if completion is not None
+            else None,
+        )
+    except IntegrationQualityFailure as error:
+        if error.organizational_completion:
+            failure = organizational_quality_failure_payload(contract, str(error))
+            if args is not None and args.operation_progress is not None:
+                record_organizational_completion_repair(
+                    contract,
+                    operation_key=args.operation_key,
+                    failure=failure,
+                    progress=args.operation_progress,
+                )
+            return {}, failure
         return {}, blocked_integration_payload(
             contract,
             "blocked-quality-gate",
             f"integration refused by the quality gate: {error}",
         )
-    return gate, None
+    return outcome.result, None

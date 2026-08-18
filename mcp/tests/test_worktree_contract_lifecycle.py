@@ -145,5 +145,5 @@ class ContractSchemaVersionTests(unittest.TestCase):
         self.assertEqual(load_contract(path).lifecycle_id, "LC-01H")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

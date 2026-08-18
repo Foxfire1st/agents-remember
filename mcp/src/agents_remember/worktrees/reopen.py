@@ -318,6 +318,7 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
                     memory_content=contract.integrated_memory_content_commit,
                     ledger=contract.integrated_ledger_commit,
                 ),
+                memory_source_commit=contract.memory_base_commit,
             )
         except RuntimeError as exc:
             return WorktreeCommandResult(

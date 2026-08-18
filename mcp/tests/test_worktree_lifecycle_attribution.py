@@ -137,5 +137,5 @@ class AttributeAttachTests(_AttributionCase):
         self.assertEqual(self.amb.current and self.amb.current.id, lc.id)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

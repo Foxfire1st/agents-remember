@@ -1086,13 +1086,15 @@ class TerminalAndCloseoutRemainderTests(unittest.TestCase):
                 mock.patch.object(
                     integrate,
                     "_prepare_integration_commits",
-                    return_value=(IntegratedCommits("code", "", ""), {}),
+                    return_value=(IntegratedCommits("code", "", ""), {}, None, False),
                 ),
                 mock.patch.object(integrate, "load_contract", return_value=changed),
                 mock.patch.object(
                     integrate,
-                    "publish_queue_candidate_integration_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(),
+                    "publish_queue_candidate_integration_result_under_authority",
+                    side_effect=lambda _contract, publication, **_kwargs: publication(
+                        SimpleNamespace(organizational_completion=None)
+                    ),
                 ),
                 self.assertRaisesRegex(RuntimeError, "changed before protected-ref movement"),
             ):

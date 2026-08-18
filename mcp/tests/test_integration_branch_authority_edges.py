@@ -11,7 +11,11 @@ from unittest import mock
 from agents_remember.application import memory_tools
 from agents_remember.application.lifecycle_operation_worker import OperationRuntime
 from agents_remember.application.memory_tools import CarryoverSelection
-from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
+from agents_remember.kernel.memory_ledger import (
+    load_ledger,
+    prepend_mapping,
+    write_ledger,
+)
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.memory import carryover
 from agents_remember.memory.carryover import CarryoverApplyOptions, CarryoverRequest
@@ -32,6 +36,7 @@ from agents_remember.worktrees.integration_branch_authority import integration_s
 from agents_remember.worktrees.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationRefSnapshot,
+    IntegrationSources,
     merge_integrated_commits,
     prepare_integration_ref_move,
 )
@@ -46,7 +51,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.git import branch_exists, ensure_worktree
-from agents_remember.worktrees.modules.integrate import IntegrationSources, integrate_result
+from agents_remember.worktrees.modules.integrate import integrate_result
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -65,6 +70,7 @@ from integration_branch_authority_test_support import (
     _closed_leaf_worktree,
     _complete_atomic_master,
     _doc,
+    _land_two_external_atomic_leaves,
     _record_atomic_leaf_landing,
 )
 from test_closeout_queue import LEAF_A, MASTER_A, QueueFixture
@@ -887,14 +893,21 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             with (
                 mock.patch.object(
                     integrate_module,
-                    "_run_integration_quality_gate",
-                    return_value=({"passed": True}, None),
+                    "_quality_gate_preview",
+                    return_value={"status": "certified-at-leaf-closeout"},
+                ),
+                mock.patch.object(
+                    integrate_module,
+                    "preview_organizational_completion",
+                    return_value=None,
                 ),
                 mock.patch.object(integrate_module, "claim_queue_candidate_for_integration"),
                 mock.patch.object(
                     integrate_module,
-                    "publish_queue_candidate_integration_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(),
+                    "publish_queue_candidate_integration_result_under_authority",
+                    side_effect=lambda _contract, publication, **_kwargs: publication(
+                        integrate_module.IntegrationBoundaryFacts(None, None)
+                    ),
                 ),
                 mock.patch.object(integrate_module, "complete_queue_candidate_integration"),
             ):
@@ -922,7 +935,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             memory_commit = _git(memory, "rev-parse", "ar/master")
             write_ledger(
                 memory / "memory.md",
-                create_initial_ledger("repo", code_commit, memory_commit),
+                prepend_mapping(load_ledger(memory / "memory.md"), code_commit, memory_commit),
             )
             _git(memory, "add", "memory.md")
             _git(memory, "commit", "-m", "atomic ledger")
@@ -1058,24 +1071,10 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             _acquire_atomic_barrier(fixture)
             memory_repo = fixture.master_contract.memory_repo_path
             assert memory_repo is not None
-            _commit_on(fixture.code_repo, "ar/master", "atomic-code.txt")
-            code_candidate = _git(fixture.code_repo, "rev-parse", "ar/master")
-            _commit_on(memory_repo, "ar/master", "atomic-memory.md")
-            memory_content = _git(memory_repo, "rev-parse", "ar/master")
-            write_ledger(
-                memory_repo / "memory.md",
-                create_initial_ledger("repo", code_candidate, memory_content),
-            )
-            _git(memory_repo, "add", "memory.md")
-            _git(memory_repo, "commit", "-m", "Record atomic ledger")
-            ledger_commit = _git(memory_repo, "rev-parse", "ar/master")
-            _record_atomic_leaf_landing(
-                fixture,
-                code_candidate,
-                memory_content_commit=memory_content,
-                ledger_commit=ledger_commit,
-            )
-            _complete_atomic_master(fixture)
+            _first, final = _land_two_external_atomic_leaves(fixture)
+            code_candidate = final.integrated_code_commit
+            memory_content = final.integrated_memory_content_commit
+            ledger_commit = final.integrated_ledger_commit
             series = replace(
                 fixture.master_contract,
                 closeout_status="completed",
@@ -1145,5 +1144,17 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             self.assertEqual(completed.integrated_code_commit, code_candidate)
             self.assertEqual(completed.integrated_memory_content_commit, memory_content)
             self.assertEqual(completed.integrated_ledger_commit, ledger_commit)
+            retried = integrate_result(
+                WorktreeArgs(
+                    contract_path=series.contract_path,
+                    approved=True,
+                    operation_key=running.operationKey,
+                    recovery_commits=crashed.recoveryCommits,
+                    operation_progress=runtime.progress,
+                )
+            )
+            self.assertEqual(retried.payload["state"], "already-integrated")
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), code_candidate)
+            self.assertEqual(_git(memory_repo, "rev-parse", "super"), ledger_commit)
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "main"), code_main_before)
             self.assertEqual(_git(memory_repo, "rev-parse", "main"), memory_main_before)

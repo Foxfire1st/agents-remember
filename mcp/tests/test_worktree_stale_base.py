@@ -305,5 +305,5 @@ def git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

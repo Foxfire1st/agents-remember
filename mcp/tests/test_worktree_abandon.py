@@ -271,5 +271,5 @@ class AbandonLifecyclePhaseTests(unittest.TestCase):
         self.assertEqual(guidance["nextOperation"], "done")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

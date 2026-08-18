@@ -51,6 +51,40 @@ def _validate_recovery_commits_transition(
             raise RuntimeError("recorded lifecycle recovery commits can only fill empty cells")
 
 
+def _validate_quality_certification_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    before = current.qualityCertification
+    after = updated.qualityCertification
+    if before is not None and after != before:
+        raise RuntimeError("recorded integration quality certification is immutable")
+    if after is not None and current.operationKind != "integrate":
+        raise RuntimeError("only integration operations may record quality certification")
+
+
+def _validate_queue_completion_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    before = current.queueCompletion
+    after = updated.queueCompletion
+    if before is not None and after != before:
+        raise RuntimeError("recorded integration queue completion is immutable")
+    if after is not None and current.operationKind != "integrate":
+        raise RuntimeError("only integration operations may record queue completion")
+
+
+def _validate_organizational_repair_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    before = current.organizationalRepair
+    after = updated.organizationalRepair
+    if before is not None and after != before:
+        raise RuntimeError("recorded organizational repair evidence is immutable")
+
+
 def operation_record_path(worktree_group: Path, operation_kind: LifecycleOperationKind) -> Path:
     return worktree_group / "reports" / f"{operation_kind}-operation.json"
 
@@ -190,6 +224,9 @@ class LifecycleOperationStore:
         if current.approvalClaimed and not updated.approvalClaimed:
             raise RuntimeError("a claimed approval cannot become unclaimed")
         _validate_recovery_commits_transition(current, updated)
+        _validate_quality_certification_transition(current, updated)
+        _validate_queue_completion_transition(current, updated)
+        _validate_organizational_repair_transition(current, updated)
         if current.irreversibleBoundaryEntered and not updated.irreversibleBoundaryEntered:
             raise RuntimeError("an entered irreversible boundary cannot be cleared")
         if updated.status == "cancelled" and current.irreversibleBoundaryEntered:

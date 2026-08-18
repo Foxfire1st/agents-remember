@@ -234,6 +234,18 @@ def find_mapping(ledger: MemoryLedger, code_commit: str) -> LedgerRow | None:
     return next((row for row in ledger.rows if row.code_commit == wanted), None)
 
 
+def find_unique_mapping(ledger: MemoryLedger, code_commit: str) -> LedgerRow | None:
+    """Return one code mapping while refusing duplicate authority rows."""
+
+    wanted = code_commit.strip()
+    matches = [row for row in ledger.rows if row.code_commit == wanted]
+    if len(matches) > 1:
+        raise LedgerError(
+            "memory.md ledger must contain exactly one row for the landed code commit"
+        )
+    return matches[0] if matches else None
+
+
 def create_initial_ledger(
     repo_name: str,
     code_commit: str,

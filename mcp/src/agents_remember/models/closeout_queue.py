@@ -44,6 +44,7 @@ QueueEventAction = Literal[
     "claim-integration",
     "complete-integration",
     "prepare-conflict-resolution",
+    "prepare-quality-repair",
     "reclaim-sprint",
 ]
 PriorityGrade = Literal["critical", "high", "normal", "low"]

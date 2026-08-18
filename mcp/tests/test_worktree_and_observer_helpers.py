@@ -858,10 +858,10 @@ class ParentSeriesContractTests(unittest.TestCase):
 
     def _write_sprint_topology(self, root: Path) -> None:
         code_repo = root / "repo"
-        if code_repo.is_dir():
+        if code_repo.is_dir():  # pragma: no cover
             git(code_repo, "branch", "super", "main")
         memory_repo = root / "memory-repos" / f"ar-{self.REPO}"
-        if memory_repo.is_dir():
+        if memory_repo.is_dir():  # pragma: no cover
             git(memory_repo, "branch", "super", "main")
         write_task_doc(
             root / "tasks" / self.REPO / "demo-sprint",
@@ -1129,5 +1129,5 @@ class ParentSeriesContractTests(unittest.TestCase):
             self.assertIn("not a series contract", str(caught.exception))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -991,13 +991,8 @@ class IntegrationRecoveryRemainderTests(unittest.TestCase):
                 ledgerCommit="4" * 40,
             )
             with (
-                mock.patch.object(integrate, "branch_commit", return_value="4" * 40),
-                mock.patch.object(
-                    integrate,
-                    "run_git",
-                    return_value=SimpleNamespace(returncode=1, stdout="", stderr="missing"),
-                ),
-                self.assertRaisesRegex(RuntimeError, "no readable memory.md"),
+                mock.patch.object(integrate, "branch_commit", return_value="wrong-memory-head"),
+                self.assertRaisesRegex(RuntimeError, "found task memory HEAD"),
             ):
                 integrate._prove_external_memory_recovery(contract, commits)
 
@@ -1121,7 +1116,7 @@ class IntegrationRecoveryRemainderTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     integrate,
-                    "publish_queue_candidate_integration_under_authority",
+                    "publish_queue_candidate_integration_result_under_authority",
                     side_effect=lambda _contract, publication, **_kwargs: publication(),
                 ),
                 self.assertRaisesRegex(RuntimeError, "changed before recovery finalization"),
@@ -1145,7 +1140,7 @@ class IntegrationRecoveryRemainderTests(unittest.TestCase):
                 mock.patch.object(
                     integrate,
                     "_prepare_integration_commits",
-                    return_value=(IntegratedCommits("code", "", ""), {}),
+                    return_value=(IntegratedCommits("code", "", ""), {}, None, False),
                 ),
                 mock.patch.object(integrate, "load_contract", return_value=series),
                 mock.patch.object(integrate, "require_series_contract_authority") as require,

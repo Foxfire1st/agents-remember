@@ -12,17 +12,22 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @contextmanager
-def integration_quality_checkout(contract: WorktreeContract) -> Iterator[Path]:
-    """Yield a detached view of the exact atomic candidate, never ambient branch state."""
+def integration_quality_checkout(
+    contract: WorktreeContract,
+    *,
+    commit: str | None = None,
+) -> Iterator[Path]:
+    """Yield a detached exact candidate, or the ordinary leaf worktree when unpinned."""
 
-    if contract.kind == "leaf":
+    if contract.kind == "leaf" and commit is None:
         yield contract.code_worktree
         return
+    exact_commit = commit or contract.code_commit
     with tempfile.TemporaryDirectory(prefix="agents-remember-master-gate-") as root:
         checkout = Path(root) / "candidate"
         require_git(
             contract.code_repo_path,
-            ["worktree", "add", "--detach", checkout.as_posix(), contract.code_commit],
+            ["worktree", "add", "--detach", checkout.as_posix(), exact_commit],
         )
         try:
             yield checkout
