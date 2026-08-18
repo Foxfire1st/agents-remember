@@ -401,6 +401,30 @@
       "title": "Analytics",
       "type": "object"
     },
+    "AtomicBlockerNode": {
+      "additionalProperties": false,
+      "description": "The active atomic-unit master blocker, with its recorded rationale.",
+      "properties": {
+        "acquiredBy": {
+          "default": "",
+          "title": "Acquiredby",
+          "type": "string"
+        },
+        "master": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "master"
+      ],
+      "title": "AtomicBlockerNode",
+      "type": "object"
+    },
     "AttentionItem": {
       "additionalProperties": false,
       "description": "One thing that needs the human, decided by the reducer (note 06, slice 05).\n\nA ranked cross-section of the structural tree + analytics signals -- the\nhome-screen attention queue. Computed server-side so every client (dashboard,\nTUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never\na client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the\nstructural tree so the UI can couple a queue item to its operation-tree node.",
@@ -540,6 +564,90 @@
         "title"
       ],
       "title": "AttentionItem",
+      "type": "object"
+    },
+    "CloseoutCandidateNode": {
+      "additionalProperties": false,
+      "description": "One projected closeout candidate: its queue state, grade, and why it is not selectable.\n\nRead from the durable queue artifact, never re-derived from titles, numbering, labels, or\nopen terminals (L8-R2/R5). ``reasons`` carries the queue's own waiting reasons; the dashboard\nrenders them verbatim rather than inferring readiness.",
+      "properties": {
+        "candidateState": {
+          "title": "Candidatestate",
+          "type": "string"
+        },
+        "gradePriority": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gradepriority"
+        },
+        "owningMaster": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "taskDocumentRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "taskDocumentRef",
+        "owningMaster",
+        "candidateState"
+      ],
+      "title": "CloseoutCandidateNode",
+      "type": "object"
+    },
+    "CloseoutQueueNode": {
+      "additionalProperties": false,
+      "description": "The projected closeout queue for one sprint: candidates, blocker, and graph revision.",
+      "properties": {
+        "activeBlocker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AtomicBlockerNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/CloseoutCandidateNode"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "graphRevision": {
+          "default": "",
+          "title": "Graphrevision",
+          "type": "string"
+        },
+        "revision": {
+          "default": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "sprintRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "sprintRef"
+      ],
+      "title": "CloseoutQueueNode",
       "type": "object"
     },
     "CommitRefNode": {
@@ -3214,6 +3322,21 @@
     },
     "analytics": {
       "$ref": "#/$defs/Analytics"
+    },
+    "closeoutQueues": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/CloseoutQueueNode"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Closeoutqueues"
     },
     "enclosures": {
       "items": {

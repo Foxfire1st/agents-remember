@@ -4,6 +4,7 @@ import { createStore } from "zustand/vanilla";
 import type { ObserverEvent } from "../types/event";
 import type {
   Analytics,
+  CloseoutQueueNode,
   EnclosureNode,
   LifecycleProjection,
   Metrics,
@@ -13,6 +14,10 @@ import type {
   WorkspaceProjection,
 } from "../types/projection";
 import { stableEquals, stampServed } from "./servedAges";
+
+// A defaulted list read keeps `applySnapshotState`'s complexity under the lint budget: the `??` lives
+// here, in a separate function, rather than adding a branch inside the snapshot applier.
+const asList = <T>(value: T[] | undefined): T[] => value ?? [];
 
 export type ConnState = "connecting" | "live" | "signal-lost";
 
@@ -28,6 +33,7 @@ export interface DashboardState {
   enclosures: Record<string, EnclosureNode>; // keyed by `enclosure`
   providers: Record<string, ProviderNode>; // keyed by id
   activeWorktreeGroups: string[]; // worktree-group basenames with a live enclosure (Topology scope)
+  closeoutQueues: CloseoutQueueNode[]; // projected sprint closeout queues (L8)
   metrics: Metrics | null;
   analytics: Analytics | null;
   // The boot-time serving stamp (260703-L15): which build/process is answering. Rides the
@@ -234,6 +240,7 @@ function snapshotUnchanged(
   enclosures: Record<string, EnclosureNode>,
   providers: Record<string, ProviderNode>,
   activeWorktreeGroups: string[],
+  closeoutQueues: CloseoutQueueNode[],
   metrics: Metrics | null,
   analytics: Analytics | null,
   servingBuild: ServingBuild | null,
@@ -244,6 +251,7 @@ function snapshotUnchanged(
     enclosures === state.enclosures &&
     providers === state.providers &&
     activeWorktreeGroups === state.activeWorktreeGroups &&
+    closeoutQueues === state.closeoutQueues &&
     metrics === state.metrics &&
     analytics === state.analytics &&
     servingBuild === state.servingBuild &&
@@ -263,6 +271,7 @@ function applySnapshotState(
     state.activeWorktreeGroups,
     projection.activeWorktreeGroups ?? [],
   );
+  const closeoutQueues = reuse(state.closeoutQueues, asList(projection.closeoutQueues));
   const metrics = reuse(state.metrics, projection.metrics);
   const analytics = reuse(state.analytics, projection.analytics);
   if (analytics !== state.analytics) stampAnalytics(analytics);
@@ -284,6 +293,7 @@ function applySnapshotState(
     enclosures,
     providers,
     activeWorktreeGroups,
+    closeoutQueues,
     metrics,
     analytics,
     servingBuild,
@@ -307,6 +317,7 @@ function applySnapshotState(
     enclosures,
     providers,
     activeWorktreeGroups,
+    closeoutQueues,
     metrics,
     analytics,
     servingBuild,
@@ -323,6 +334,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
   enclosures: {},
   providers: {},
   activeWorktreeGroups: [],
+  closeoutQueues: [],
   metrics: null,
   analytics: null,
   servingBuild: null,

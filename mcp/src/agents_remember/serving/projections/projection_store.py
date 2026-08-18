@@ -259,6 +259,7 @@ def project_and_write(
             ledgers=inputs.ledgers,
             task_documents=inputs.task_documents,
             series=inputs.series,
+            closeout_queues=inputs.closeout_queues,
             engine_process_facts=inputs.engine_process_facts,
             engine_start_progress=inputs.engine_start_progress,
             gates=inputs.gates,

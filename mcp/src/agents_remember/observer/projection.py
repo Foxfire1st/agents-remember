@@ -634,6 +634,45 @@ class TaskExecutionGraphNode(BaseModel):
     edges: list[TaskExecutionEdgeNode] = Field(default_factory=list)
 
 
+class CloseoutCandidateNode(BaseModel):
+    """One projected closeout candidate: its queue state, grade, and why it is not selectable.
+
+    Read from the durable queue artifact, never re-derived from titles, numbering, labels, or
+    open terminals (L8-R2/R5). ``reasons`` carries the queue's own waiting reasons; the dashboard
+    renders them verbatim rather than inferring readiness.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    taskDocumentRef: TaskDocumentRef
+    owningMaster: TaskDocumentRef
+    candidateState: str
+    gradePriority: str | None = None
+    reasons: list[str] = Field(default_factory=list)
+
+
+class AtomicBlockerNode(BaseModel):
+    """The active atomic-unit master blocker, with its recorded rationale."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    master: TaskDocumentRef
+    rationale: str = ""
+    acquiredBy: str = ""
+
+
+class CloseoutQueueNode(BaseModel):
+    """The projected closeout queue for one sprint: candidates, blocker, and graph revision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sprintRef: TaskDocumentRef
+    revision: int = 0
+    graphRevision: str = ""
+    activeBlocker: AtomicBlockerNode | None = None
+    candidates: list[CloseoutCandidateNode] = Field(default_factory=list)
+
+
 class TaskDocNode(BaseModel):
     """A task document's progress and reader content (slice 3c, surface 7).
 
@@ -1041,5 +1080,8 @@ class WorkspaceProjection(BaseModel):
     # so the two views share one definition of "active". The join key matches the worktree-scoped
     # `ProviderNode.worktreeGroup` (a basename) and `Path(EnclosureNode.worktreeGroup).name`.
     activeWorktreeGroups: list[str] = Field(default_factory=list)
+    # Projected closeout queues (one per sprint master with an execution graph), carrying candidate
+    # states, grades, waiting reasons, and the active atomic blocker (L8-R1/R2/R5).
+    closeoutQueues: list[CloseoutQueueNode] | None = None
     metrics: Metrics = Field(default_factory=Metrics)
     analytics: Analytics = Field(default_factory=Analytics)

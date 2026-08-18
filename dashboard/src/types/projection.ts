@@ -105,6 +105,12 @@ export interface Analytics {
   toolReports: ToolReportNode[];
 }
 
+export interface AtomicBlockerNode {
+  acquiredBy: string;
+  master: TaskDocumentRef;
+  rationale: string;
+}
+
 export interface AttentionItem {
   detail?: string;
   enclosure?: string;
@@ -119,6 +125,22 @@ export interface AttentionItem {
   signalTs?: string;
   title: string;
   waitSeconds?: number;
+}
+
+export interface CloseoutCandidateNode {
+  candidateState: string;
+  gradePriority?: string;
+  owningMaster: TaskDocumentRef;
+  reasons: string[];
+  taskDocumentRef: TaskDocumentRef;
+}
+
+export interface CloseoutQueueNode {
+  activeBlocker?: AtomicBlockerNode;
+  candidates: CloseoutCandidateNode[];
+  graphRevision: string;
+  revision: number;
+  sprintRef: TaskDocumentRef;
 }
 
 export interface CommitRefNode {
@@ -583,6 +605,7 @@ export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;
 export interface WorkspaceProjection {
   activeWorktreeGroups: string[];
   analytics: Analytics;
+  closeoutQueues?: CloseoutQueueNode[];
   enclosures: EnclosureNode[];
   generatedAt: string;
   lifecycles: LifecycleProjection[];

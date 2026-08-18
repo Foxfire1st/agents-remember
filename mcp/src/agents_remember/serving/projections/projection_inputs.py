@@ -24,6 +24,7 @@ from agents_remember.observer.event_retention import prune_expired_lifecycle_eve
 from agents_remember.observer.events import Event
 from agents_remember.observer.projection import (
     AgentPickupNode,
+    CloseoutQueueNode,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
@@ -63,6 +64,9 @@ from agents_remember.serving.projections.snapshots import (
     read_task_documents,
     read_tool_reports,
     refresh_engine_process_landing,
+)
+from agents_remember.serving.projections.snapshots_impl._closeout_queue import (
+    read_closeout_queues,
 )
 from pydantic import BaseModel
 
@@ -137,6 +141,7 @@ class ProjectionInputs:
     ledgers: list[LedgerNode]
     task_documents: list[TaskDocNode]
     series: list[SeriesNode]
+    closeout_queues: list[CloseoutQueueNode]
     engine_process_facts: list[EngineProcessFacts]
     engine_start_progress: list[dict[str, Any]]
     gates: list[GateRecord]
@@ -207,6 +212,7 @@ class ProjectionInputState:
         self._expectation_rows: list[ExpectationRowNode] = []
         self._task_documents: list[TaskDocNode] = []
         self._series: list[SeriesNode] = []
+        self._closeout_queues: list[CloseoutQueueNode] = []
         self._engine_process_facts: list[EngineProcessFacts] = []
         self._engine_start_progress: list[dict[str, Any]] = []
         self._gates: list[GateRecord] = []
@@ -227,6 +233,7 @@ class ProjectionInputState:
         now = pass_.now
         self._advance_ages(now)
         pass_ = replace(pass_, tasks_changed=self._refresh_tasks(config, pass_))
+        self._closeout_queues = read_closeout_queues(config.coordination_root, now=pass_.now)
         self._refresh_lifecycles(observer_root, pass_, lifecycle_reader=readers.lifecycle)
         provider_groups = admitted_worktree_groups(self._enclosures, self._lifecycle_logs, now=now)
         engine_groups = active_enclosure_worktree_groups(
@@ -260,6 +267,7 @@ class ProjectionInputState:
             ledgers=ledgers,
             task_documents=self._task_documents,
             series=self._series,
+            closeout_queues=self._closeout_queues,
             engine_process_facts=self._engine_process_facts,
             engine_start_progress=self._engine_start_progress,
             gates=self._gates,
