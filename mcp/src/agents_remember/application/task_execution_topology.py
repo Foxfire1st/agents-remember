@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.git_command import run_git
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     MasterExecutionNature,
@@ -25,7 +26,11 @@ from agents_remember.tasks import (
     render_markdown,
     write_task_doc_batch,
 )
-from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.tasks.document_refs import (
+    ResolvedTaskDocument,
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
 from agents_remember.worktrees.integration_branch_authority import (
     require_topology_migration_authority,
 )
@@ -316,3 +321,91 @@ def _migration_preview(
             line.strip() and line not in rendered_lines for line in existing.splitlines()
         ),
     }
+
+
+@dataclass(frozen=True)
+class ExecutionTopologyInventoryRequest:
+    coordination_root: Path
+    repo_id: str
+    code_repository: Path
+
+
+def inventory_execution_topology(
+    request: ExecutionTopologyInventoryRequest,
+) -> dict[str, Any]:
+    """Enumerate every persistent sprint and commanded master before migration (L9-R1).
+
+    Read-only. The proposed explicit nature preserves current behavior: a commanded master
+    that already has an ``ar/<slug>`` branch is proposed ``atomic`` (it keeps its branch),
+    everything else is proposed ``organizational`` (direct-super ancestry). Legacy sprints
+    carry no dependency edges, so the proposed graph is parallel and edges are left for an
+    accepted strategist/orchestrator ruling — never inferred from file order or names.
+    """
+
+    topology = TaskDocumentTopology(request.coordination_root)
+    masters = topology.repository_masters(request.repo_id)
+    sprints = sorted((m for m in masters if m.document.orchestrates), key=lambda m: m.ref.key)
+    branch_slugs = _branch_slugs(request.code_repository)
+
+    def _blockers(entry: ResolvedTaskDocument) -> list[dict[str, Any]]:
+        return [b.model_dump(mode="json") for b in completion_blockers(entry.document)]
+
+    sprint_rows: list[dict[str, Any]] = []
+    for sprint in sprints:
+        commanded = sorted(topology.children(sprint.ref), key=lambda ref: ref.key)
+        graph = sprint.document.executionGraph
+        sprint_rows.append(
+            {
+                "taskDocumentRef": sprint.ref.model_dump(mode="json"),
+                "status": sprint.document.status,
+                "executionGraph": "present" if graph is not None else "missing",
+                "commandedMasters": [ref.model_dump(mode="json") for ref in commanded],
+                "proposedEdges": [],
+                "edgesRequireRuling": True,
+                "blockers": _blockers(sprint),
+            }
+        )
+
+    commanded = sorted((m for m in masters if not m.document.orchestrates), key=lambda m: m.ref.key)
+    master_rows: list[dict[str, Any]] = []
+    for master in commanded:
+        slug = master.path.parent.name
+        branch = f"ar/{slug}" if slug in branch_slugs else None
+        proposed = "atomic" if branch is not None else "organizational"
+        master_rows.append(
+            {
+                "taskDocumentRef": master.ref.model_dump(mode="json"),
+                "currentNature": master.document.executionNature,
+                "proposedNature": proposed,
+                "branch": branch,
+                "status": master.document.status,
+                "enclosures": [e.model_dump(mode="json") for e in master.document.enclosures],
+                "blockers": _blockers(master),
+            }
+        )
+
+    return {
+        "ok": True,
+        "operation": "task_doc.inventory_execution_topology",
+        "repoId": request.repo_id,
+        "sprintCount": len(sprint_rows),
+        "commandedMasterCount": len(master_rows),
+        "sprints": sprint_rows,
+        "commandedMasters": master_rows,
+    }
+
+
+def _branch_slugs(code_repository: Path) -> frozenset[str]:
+    """Return the ``ar/<slug>`` local branch slugs, used to detect branch-backed masters."""
+
+    result = run_git(code_repository, ["branch", "--format=%(refname:short)"])
+    if result.returncode != 0:
+        raise ExecutionTopologyError(
+            f"cannot enumerate branches: {(result.stderr or result.stdout).strip()}"
+        )
+    slugs: set[str] = set()
+    for line in result.stdout.splitlines():
+        name = line.strip()
+        if name.startswith("ar/"):
+            slugs.add(name.removeprefix("ar/"))
+    return frozenset(slugs)

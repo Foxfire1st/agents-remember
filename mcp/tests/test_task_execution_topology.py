@@ -23,6 +23,8 @@ from agents_remember.application.task_doc_tools import (
 )
 from agents_remember.application.task_execution_topology import (
     ExecutionTopologyError,
+    ExecutionTopologyInventoryRequest,
+    inventory_execution_topology,
     require_commanded_masters_completed,
 )
 from agents_remember.controlplane.closeout_queue_store import queue_store_paths
@@ -199,6 +201,59 @@ class ExecutionTopologyTests(unittest.TestCase):
         git(self.code, "branch", "super", "main")
         self.cfg = _config(self.coord, self.code)
         self.topology = TaskDocumentTopology(self.coord)
+
+    def test_inventory_enumerates_sprints_and_proposes_branch_backed_nature(self) -> None:
+        write_task_doc(
+            self.tasks / "sprint",
+            _master(identity="SPRINT", orchestrates=["master-a", "master-b"]),
+        )
+        write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
+        write_task_doc(self.tasks / "master-b", _master(identity="MASTER-B"))
+        git(self.code, "branch", "ar/master-a", "super")
+
+        inv = inventory_execution_topology(
+            ExecutionTopologyInventoryRequest(
+                coordination_root=self.coord,
+                repo_id=REPOSITORY,
+                code_repository=self.code,
+            )
+        )
+        self.assertEqual(inv["sprintCount"], 1)
+        self.assertEqual(inv["commandedMasterCount"], 2)
+        self.assertEqual(inv["sprints"][0]["executionGraph"], "missing")
+        self.assertEqual(inv["sprints"][0]["edgesRequireRuling"], True)
+        by_path = {m["taskDocumentRef"]["path"]: m for m in inv["commandedMasters"]}
+        self.assertEqual(by_path["master-a/task.json"]["proposedNature"], "atomic")
+        self.assertEqual(by_path["master-a/task.json"]["branch"], "ar/master-a")
+        self.assertEqual(by_path["master-b/task.json"]["proposedNature"], "organizational")
+        self.assertEqual(by_path["master-b/task.json"]["branch"], None)
+
+    def test_inventory_reports_zero_counts_on_an_empty_task_tree(self) -> None:
+        inv = inventory_execution_topology(
+            ExecutionTopologyInventoryRequest(
+                coordination_root=self.coord,
+                repo_id=REPOSITORY,
+                code_repository=self.code,
+            )
+        )
+        self.assertEqual(inv["sprintCount"], 0)
+        self.assertEqual(inv["commandedMasterCount"], 0)
+
+    def test_inventory_refuses_when_branch_enumeration_fails(self) -> None:
+        with (
+            mock.patch(
+                "agents_remember.application.task_execution_topology.run_git",
+                return_value=SimpleNamespace(returncode=1, stdout="", stderr="boom"),
+            ),
+            self.assertRaisesRegex(ExecutionTopologyError, "cannot enumerate branches"),
+        ):
+            inventory_execution_topology(
+                ExecutionTopologyInventoryRequest(
+                    coordination_root=self.coord,
+                    repo_id=REPOSITORY,
+                    code_repository=self.code,
+                )
+            )
 
     def test_queue_scope_split_has_direct_topology_test_ownership(self) -> None:
         self.assertTrue(callable(task_doc_queue_scope.governing_queue_scope))
