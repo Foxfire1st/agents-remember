@@ -499,7 +499,7 @@ def _acquire_barrier(
         raise CloseoutQueueError(
             "atomic-barrier-nature-required", "only an atomic master can own a barrier"
         )
-    _require_unsealed_barrier_series(master)
+    require_source_bases_current(_require_unsealed_barrier_series(master))
     if state.activeBarrier is not None:
         if (
             state.activeBarrier.master == master_ref
@@ -542,10 +542,10 @@ def _acquire_barrier(
     )
 
 
-def _require_unsealed_barrier_series(master: Any) -> None:
+def _require_unsealed_barrier_series(master: Any) -> WorktreeContract:
     path = series_contract_path(master.path.parent)
     try:
-        require_series_path_accepting_leaves(
+        return require_series_path_accepting_leaves(
             path,
             operation="atomic barrier acquisition",
         )

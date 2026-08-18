@@ -433,6 +433,28 @@ class CloseoutQueueActionTests(unittest.TestCase):
         with self.assertRaisesRegex(CloseoutQueueError, "predecessors are incomplete"):
             _acquire_barrier(edge_graph, edge_state, valid, NOW, "orchestrator")
 
+    def test_acquire_barrier_requires_current_source_bases(self) -> None:
+        fixture = self._fixture(atomic_b=True)
+        _, graph, state = self._context(fixture)
+        valid = CloseoutQueueRequest(
+            action="acquire-barrier",
+            sprint_task_document_ref=SPRINT,
+            request_id="barrier",
+            expected_revision=0,
+            barrier_master_ref=MASTER_B,
+            rationale=RATIONALE,
+        )
+        with (
+            mock.patch(
+                "agents_remember.worktrees.closeout_queue.require_source_bases_current",
+                side_effect=CloseoutQueueError(
+                    "closeout-candidate-code-source-moved", "code source moved"
+                ),
+            ),
+            self.assertRaisesRegex(CloseoutQueueError, "code source moved"),
+        ):
+            _acquire_barrier(graph, state, valid, NOW, "orchestrator")
+
     def test_release_and_abort_barrier_require_exact_owner_and_empty_block(self) -> None:
         fixture = self._fixture(atomic_b=True)
         _, graph, state = self._context(fixture)
