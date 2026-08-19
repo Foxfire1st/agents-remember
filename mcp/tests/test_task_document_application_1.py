@@ -294,13 +294,21 @@ class ApplicationTests1(ApplicationTests):
         doc = read_task_doc(Path(str(updated["docPath"])))
         self.assertEqual(doc.statusNote, "core JSON format landed")
 
-    def test_set_field_orchestration_fields_require_explicit_topology_migration(self) -> None:
-        # A legacy master cannot silently become an orchestration sprint or acquire sprint-only
-        # integration policy: either edit would leave its graph and commanded-master natures
-        # undefined.
+    def test_set_field_orchestration_fields_require_exact_commanded_masters(self) -> None:
+        # L13: a graph-less sprint is the legal atomic-sequential default, so turning a
+        # plain master into a sprint now refuses only when its declared facts are
+        # inexact: the super branch is undeclared, or a commanded alias resolves to no
+        # master. Sprint-only integration policy still refuses without orchestrates.
         created = self._create_parent_master()
         refusals = (
-            ({"orchestrates": ["260706_management-repo"]}, "migration-required"),
+            ({"orchestrates": ["260706_management-repo"]}, "declare integrationBranch"),
+            (
+                {
+                    "orchestrates": ["260706_management-repo"],
+                    "integrationBranch": "main",
+                },
+                "resolves to 0 masters",
+            ),
             ({"integrationBranch": "ar/sprint-super"}, "orchestration sprint"),
         )
         for fields, expected in refusals:

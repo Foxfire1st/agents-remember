@@ -73,7 +73,7 @@ from agents_remember.worktrees.modules.integrate import (
 )
 from agents_remember.worktrees.modules.start import attach_result
 from agents_remember.worktrees.modules.sync import sync_result
-from agents_remember.worktrees.worktree_contract import write_contract
+from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
@@ -1176,6 +1176,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             advanced = _git(fixture.code_repo, "rev-parse", "super")
 
             recovered = start_contract.ensure_master_series_contract(spec)
+            assert isinstance(recovered, WorktreeContract)
 
             self.assertNotEqual(advanced, base)
             self.assertEqual(recovered.code_base_commit, advanced)

@@ -38,6 +38,7 @@ from agents_remember.worktrees.lifecycle_operation_store import (
 from agents_remember.worktrees.modules.terminal_validation import (
     require_series_children_retired,
 )
+from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -57,6 +58,7 @@ from .closeout_queue import (
     _waiting_reasons,
     now_iso,
 )
+from .closeout_queue_blocker import _boundary_recovery, _stale_sibling_facts
 from .closeout_queue_candidate_evidence import (
     commit_tree,
 )
@@ -255,10 +257,25 @@ def _atomic_series_terminal_publication(
     topology = TaskDocumentTopology(contract.coordination_root)
     master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
     master = topology.resolve(master_ref)
-    if master.document.executionNature != "atomic":
-        raise RuntimeError("atomic terminal authority requires executionNature='atomic'")
     sprint_ref = topology.parent(master_ref)
-    if sprint_ref is None:
+    sprint = topology.resolve(sprint_ref) if sprint_ref is not None else None
+    # L13-R5a: the effective nature, not the declared cell — a nature-less legacy
+    # master executes atomically under the default, so its series retires normally.
+    try:
+        nature = effective_execution_nature(
+            master.document, sprint.document if sprint is not None else None
+        )
+    except TaskDocumentRefError as exc:
+        raise RuntimeError(
+            f"cannot resolve atomic terminal authority: {exc.status}: {exc}"
+        ) from exc
+    if nature != "atomic":
+        raise RuntimeError("atomic terminal authority requires an effective atomic master nature")
+    if sprint_ref is None or sprint is None:
+        return publication()
+    if sprint.document.executionGraph is None:
+        # The atomic-sequential default (L13-R1): the queue never managed this
+        # sprint, so no queue authority remains to release.
         return publication()
     graph = _graph_context(topology, sprint_ref)
     initial = _initial_state(sprint_ref, graph.revision, now_iso())
@@ -441,32 +458,6 @@ def claim_queue_candidate_for_integration(
     )
 
 
-def require_queue_candidate_current(
-    coordination_root: Path,
-    sprint_ref: TaskDocumentRef,
-    candidate_ref: TaskDocumentRef,
-) -> CloseoutCandidateRecord:
-    """Revalidate a declared pre-closeout candidate for diagnostic callers."""
-
-    topology = TaskDocumentTopology(coordination_root)
-    initial_graph = _graph_context(topology, sprint_ref)
-
-    def inspect(state: CloseoutQueueState) -> CloseoutCandidateRecord:
-        graph = _graph_context(topology, sprint_ref)
-        candidate = _candidate_or_error(state, candidate_ref)
-        blockers = _candidate_blockers(topology, graph, candidate)
-        if blockers:
-            raise CloseoutQueueError(
-                "closeout-candidate-stale",
-                f"candidate facts changed before closeout: {blockers!r}",
-            )
-        return candidate
-
-    return CloseoutQueueStore(coordination_root, sprint_ref).inspect(
-        _initial_state(sprint_ref, initial_graph.revision, now_iso()), inspect
-    )
-
-
 def require_queue_candidate_for_integration(
     contract: WorktreeContract,
     *,
@@ -576,7 +567,8 @@ def _require_integration_boundary_candidate(
     if blockers:
         raise CloseoutQueueError(
             "closeout-candidate-integration-blocked",
-            f"candidate is not legal at the irreversible integration boundary: {blockers!r}",
+            f"candidate is not legal at the irreversible integration boundary: {blockers!r}"
+            f"{_boundary_recovery(blockers)}",
         )
     return candidate
 
@@ -588,12 +580,17 @@ def complete_queue_candidate_integration(
     code_commit: str,
     memory_content_commit: str,
     ledger_commit: str,
-) -> None:
-    """Consume the in-flight queue record after landing; safe on recovery retry."""
+) -> list[dict[str, Any]]:
+    """Consume the in-flight queue record after landing; safe on recovery retry.
+
+    Returns the stale-by-evidence sibling facts (L13-R2): after the lane releases,
+    every remaining candidate whose recorded base pair no longer matches the new
+    source tips is reported with ``worktree_sync`` as its recovery.
+    """
 
     binding = contract_queue_binding(contract)
     if binding is None:
-        return
+        return []
     key = _required_operation_key(operation_key, "integration")
     owner = _operation_owner(key)
     evidence = integration_queue_completion_evidence(
@@ -634,7 +631,7 @@ def complete_queue_candidate_integration(
         candidates.pop(binding.candidate_ref.key)
         return state.model_copy(update={"candidates": candidates})
 
-    store.transact(
+    updated = store.transact(
         initial=initial,
         event=_integration_completion_event(
             binding,
@@ -643,6 +640,7 @@ def complete_queue_candidate_integration(
         ),
         transform=complete,
     )
+    return _stale_sibling_facts(updated)
 
 
 def integration_queue_completion_evidence(
@@ -1093,6 +1091,11 @@ def _claim_integration(
             "integration requires an exact certified closeout candidate",
         )
     blockers = _post_closeout_blockers(context.topology, context.graph, candidate, context.contract)
+    # Certified candidates no longer occupy the lane (L13-R2): the lane serializes
+    # landings, so claiming integration while another candidate is in flight refuses.
+    lane_owner = _active_lane_owner(context.state)
+    if lane_owner is not None and lane_owner != candidate.taskDocumentRef:
+        blockers.append(f"integration-lane-owned-by: {lane_owner.key}")
     if blockers:
         raise CloseoutQueueError(
             "closeout-candidate-integration-blocked",

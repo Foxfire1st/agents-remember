@@ -1,9 +1,12 @@
-# Execution-topology migration (operator guide)
+# Execution-topology authoring (operator guide)
 
-This is the operator-facing cutover procedure for the explicit execution topology
-(`executionNature` on commanded masters, `executionGraph` on orchestration sprints). The
-migration is finite and explicit: a pre-migration snapshot is the rollback mechanism; there
-is no runtime compatibility path kept after cutover.
+This is the operator-facing procedure for the explicit execution topology
+(`executionNature` on commanded masters, `executionGraph` on orchestration sprints).
+A sprint without an `executionGraph` is not an error: it runs the atomic-sequential
+default — every commanded master runs one at a time and fully integrates before the
+next master's series begins, regardless of any declared nature. Authoring a graph is
+the explicit opt-in to dependency-aware scheduling; there is no separate migration
+operation.
 
 ## 1. Inventory (read-only preview)
 
@@ -23,46 +26,60 @@ Reports, without writing anything:
 Proposed edges are always empty (parallel) until a strategist/orchestrator ruling supplies
 them. The inventory never infers edges from file order, names, or status.
 
-## 2. Migrate (atomic write)
+## 2. Author the graph (atomic batch)
 
 ```text
-task_doc.migrate_execution_topology   # one sprint per call
+task_doc.author_execution_graph   # one validated mutation batch per call
   fields = {
-    masters:        [ { taskDocumentRef: {repository, path}, executionNature } ],
-    executionGraph: { nodes: [ {repository, path} ], edges: [ {predecessor, successor, reason} ] }
+    mutations: [
+      { op: 'add_node',    ref: {repository, path} },                  # per commanded master
+      { op: 'set_nature',  ref: {repository, path}, executionNature, judgmentId },
+      { op: 'add_edge',    predecessor, successor, reason, judgmentId }  # optional
+    ]
   }
 ```
 
-Validates that the master set exactly matches the graph nodes, then atomically authors the
-sprint's `executionGraph` and each commanded master's `executionNature`. `dry_run` previews
-every affected JSON/Markdown pair, the ordered classifications, and the derived waves.
+On a graph-less sprint the first `add_node` batch bootstraps the graph (the result
+reports `bootstrapped: true`). Final validation requires exact `orchestrates`
+membership and an explicit nature for every commanded master — a `set_nature`
+mutation in the same batch covers a master document that lacks one. Judgment-bearing
+mutations (edges, segmentation, nature) require a `judgmentId` row in the sprint's
+canonical Judgment Register; sprint creation scaffolds the empty Judgment and
+Priority Register sections so the register is never absent. `dry_run` previews every
+affected JSON/Markdown pair, the ordered classifications, and the derived waves.
 
 Classification rule (preserves current behavior):
 
 - a master with an existing `ar/<slug>` branch is recorded `atomic`;
 - everything else is recorded `organizational` (direct-super ancestry).
 
-## 3. After cutover: fail closed
+## 3. Defaults and fail-closed seams
 
-The first topology consumer refuses a sprint with no `executionGraph` and a commanded master
-with no `executionNature` (`task-execution-topology-migration-required`). There is no
-implicit default and no inferred meaning.
+- No `executionGraph`: the atomic-sequential default schedules the sprint; the
+  closeout queue's read path reports the degraded projection (`mode:
+  "atomic-sequential"`, the series lane owner, and legal next operations).
+- A commanded master with no `executionNature` under an authored graph stays a hard
+  refusal (`task-execution-topology-migration-required`) naming `set_nature`.
+- Malformed canonical registers degrade reads to facts; the write path
+  (`task_doc.set_section`/`replace`/`create`) validates the register shape.
 
 ## 4. Rollback
 
-Rollback restores the pre-migration snapshot — it does not re-enable a compatibility path.
+Rollback restores a snapshot — it does not re-enable a compatibility path.
 
-1. Snapshot `tasks/<repo>/` before migrating (e.g. `git add -A && git commit` in the
+1. Snapshot `tasks/<repo>/` before authoring (e.g. `git add -A && git commit` in the
    coordination tree, or a tarball).
-2. If a migration is wrong, restore that snapshot.
+2. If an authored graph is wrong, restore that snapshot or edit the graph back with
+   `author_execution_graph`.
 3. Re-run the inventory to confirm the restored state matches expectations.
 
 A branch that was already recorded `atomic` is only reclassified by an accepted
-strategist/orchestrator ruling, never by the migration itself.
+strategist/orchestrator ruling, never by the authoring mechanism itself.
 
 ## 5. Release notes
 
-- Persistent sprints and commanded masters are now explicitly typed (`executionNature`) and
-  graph-joined (`executionGraph`).
-- Missing nature/graph is a hard refusal, not a default.
+- Persistent sprints and commanded masters are explicitly typed (`executionNature`)
+  and graph-joined (`executionGraph`).
+- A missing graph selects the atomic-sequential default, not a refusal; a missing
+  nature under an authored graph remains a hard refusal.
 - Rollback is snapshot-based; no dual-reader or feature-switch fallback remains.

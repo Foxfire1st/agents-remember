@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -49,6 +49,11 @@ QueueEventAction = Literal[
 ]
 PriorityGrade = Literal["critical", "high", "normal", "low"]
 MemoryReadiness = Literal["ready", "not-applicable"]
+# Lane-occupying candidate states (L13-R2/R3): the sprint landing lane has room for
+# exactly one selected/closeout-in-flight/integration-in-flight candidate. A certified
+# candidate has left the closeout lane and only waits for its serialized landing, so
+# it neither owns the lane nor hard-blocks atomic blocker acquisition.
+LANE_OCCUPYING_STATES = frozenset({"selected", "closeout-in-flight", "integration-in-flight"})
 MAX_CLOSEOUT_CANDIDATES = 256
 MAX_CLOSEOUT_MASTERS = 256
 MAX_CLOSEOUT_GRAPH_EDGES = 4096
@@ -364,7 +369,9 @@ class CloseoutQueueState(_StrictModel):
         if len(request_ids) != len(set(request_ids)):
             raise ValueError("applied queue request ids must be unique")
         active = [
-            candidate for candidate in self.candidates.values() if candidate.state != "declared"
+            candidate
+            for candidate in self.candidates.values()
+            if candidate.state in LANE_OCCUPYING_STATES
         ]
         if len(active) > 1:
             raise ValueError("at most one closeout candidate may own the sprint landing lane")
@@ -422,3 +429,16 @@ class CloseoutQueueResponse(ToolResponse):
     blocked: list[CloseoutQueueCandidateView] = Field(default_factory=list)
     inFlight: list[CloseoutQueueCandidateView] = Field(default_factory=list)
     updatedAt: str = Field(max_length=MAX_QUEUE_SHORT_TEXT)
+    # L13 read-degradation and scheduling facts. ``mode`` names the resolved
+    # scheduling authority (dag vs the atomic-sequential default); ``registers``
+    # reports each canonical planning register as absent/ok/malformed detail;
+    # ``laneOwner`` names the current landing-lane owner (queue candidate under a
+    # graph, series-holding master under the default); the degraded readout adds
+    # top-level ``legalNextOperations`` so a read never strands its caller.
+    mode: Literal["dag", "atomic-sequential"] | None = None
+    registers: dict[str, str] | None = None
+    laneOwner: str | None = Field(default=None, max_length=MAX_QUEUE_TEXT)
+    legalNextOperations: list[str] | None = Field(default=None, max_length=16)
+    # acquire-blocker reports the in-flight organizational leafs it observed, on
+    # success and on refusal — facts only; the start-anyway decision stays judgment.
+    acquisitionFacts: dict[str, Any] | None = None

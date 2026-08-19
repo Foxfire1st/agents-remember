@@ -1,4 +1,4 @@
-"""Application rules for explicit sprint execution topology and its finite migration."""
+"""Application rules for explicit sprint execution topology authoring."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from pydantic import (
     Field,
     ValidationError,
     field_validator,
-    model_validator,
 )
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
@@ -56,47 +55,7 @@ from agents_remember.worktrees.integration_branch_authority import (
 
 
 class ExecutionTopologyError(AgentsRememberError):
-    """An execution-topology edit or migration is structurally invalid."""
-
-
-class _ExecutionMigrationMaster(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    taskDocumentRef: TaskDocumentRef
-    executionNature: MasterExecutionNature
-
-
-class _ExecutionTopologyMigration(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    masters: list[_ExecutionMigrationMaster] = Field(min_length=1)
-    executionGraph: SprintExecutionGraph
-
-    @model_validator(mode="after")
-    def _check_exact_master_entries(self) -> _ExecutionTopologyMigration:
-        refs = [entry.taskDocumentRef for entry in self.masters]
-        if len(refs) != len(set(refs)):
-            raise ValueError("migration master taskDocumentRef values must be unique")
-        if any(node.kind != "master" for node in self.executionGraph.nodes):
-            raise ValueError(
-                "migrate_execution_topology authors lump nodes only; "
-                "use author_execution_graph for leaf segments"
-            )
-        if set(refs) != set(self.executionGraph.nodes):
-            raise ValueError("migration masters must exactly match executionGraph nodes")
-        return self
-
-
-@dataclass(frozen=True)
-class ExecutionTopologyMigrationRequest:
-    coordination_root: Path
-    repo_id: str
-    code_repository: Path
-    memory_repository: Path | None
-    task_root: Path
-    slug: str | None
-    fields: dict[str, Any]
-    dry_run: bool
+    """An execution-topology authoring edit is structurally invalid."""
 
 
 @dataclass(frozen=True)
@@ -120,102 +79,6 @@ class ExecutionTopologyEditRequest:
     original: TaskDocument | None
     candidate: TaskDocument
     fields: dict[str, Any]
-
-
-def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> dict[str, Any]:
-    """Explicitly cut one legacy sprint and all commanded masters to the new contract."""
-
-    try:
-        migration = _ExecutionTopologyMigration.model_validate(request.fields)
-    except ValidationError as exc:
-        raise ExecutionTopologyError(f"invalid execution-topology migration: {exc}") from exc
-    sprint_path = _existing_json(request.task_root, request.slug)
-    sprint = read_task_doc(sprint_path)
-    if sprint.kind != "master" or not sprint.orchestrates:
-        raise ExecutionTopologyError(
-            "migrate_execution_topology requires an orchestration sprint document"
-        )
-    topology = TaskDocumentTopology(request.coordination_root)
-    try:
-        sprint_ref = topology.canonical_ref(request.repo_id, sprint_path)
-    except TaskDocumentRefError as exc:
-        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
-    sprint_data = sprint.model_dump(by_alias=True)
-    sprint_data["executionGraph"] = migration.executionGraph.model_dump(mode="json")
-    candidate_sprint = TaskDocument.model_validate(sprint_data)
-    overrides: dict[TaskDocumentRef, TaskDocument] = {sprint_ref: candidate_sprint}
-    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]] = [
-        (sprint_ref, request.task_root, candidate_sprint)
-    ]
-    for entry in migration.masters:
-        try:
-            resolved = topology.resolve(entry.taskDocumentRef)
-        except TaskDocumentRefError as exc:
-            raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
-        if resolved.document.kind != "master" or resolved.document.orchestrates:
-            raise ExecutionTopologyError(
-                f"migration target is not a commanded master: {entry.taskDocumentRef.key}"
-            )
-        data = resolved.document.model_dump(by_alias=True)
-        data["executionNature"] = entry.executionNature
-        candidate = TaskDocument.model_validate(data)
-        overrides[entry.taskDocumentRef] = candidate
-        documents.append((entry.taskDocumentRef, resolved.path.parent, candidate))
-    _validate_topology(topology, sprint_ref, overrides)
-
-    result: dict[str, Any] = {
-        "ok": True,
-        "operation": "task_doc.migrate_execution_topology",
-        "state": "would-migrate" if request.dry_run else "migrated",
-        "sprintTaskDocumentRef": sprint_ref.model_dump(mode="json"),
-        "migratedMasters": [
-            {
-                "taskDocumentRef": entry.taskDocumentRef.model_dump(mode="json"),
-                "executionNature": entry.executionNature,
-            }
-            for entry in migration.masters
-        ],
-        "executionWaves": [
-            [node.model_dump(mode="json") for node in wave]
-            for wave in migration.executionGraph.derived_waves()
-        ],
-    }
-    if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
-            _require_migration_publication_authority(request, overrides)
-        result["dryRun"] = True
-        result["documents"] = [
-            _migration_preview(ref, root, document) for ref, root, document in documents
-        ]
-        return result
-
-    def publication() -> list[tuple[Path, Path]]:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
-            _require_migration_publication_authority(request, overrides)
-            return write_task_doc_batch([(root, document) for _ref, root, document in documents])
-
-    queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
-    written = queue.publish_sprint_update(
-        publication,
-        completed=candidate_sprint.status == "Completed",
-        recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
-        validate_completion=lambda: require_commanded_masters_completed(
-            topology,
-            sprint_ref,
-            overrides,
-        ),
-    )
-    result["documents"] = [
-        {
-            "taskDocumentRef": ref.model_dump(mode="json"),
-            "docPath": json_path.as_posix(),
-            "renderedPath": markdown_path.as_posix(),
-        }
-        for (ref, _root, _document), (json_path, markdown_path) in zip(
-            documents, written, strict=True
-        )
-    ]
-    return result
 
 
 class _AuthoringMutationBase(BaseModel):
@@ -322,10 +185,14 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
     The incremental authoring operation (L11-R5): add/remove node, add/remove edge,
     move leaf between segments, reclassify execution nature. Judgment-bearing
     mutations (edges, segmentation, nature) require a judgmentId resolved against the
-    sprint's canonical Judgment Register; the mechanism never invents one. The batch
-    validates the candidate graph, cross-document membership, node-kind legality, and
-    partition completeness before anything is written; dry_run previews every affected
-    JSON/Markdown pair with rendered diff and wouldLose.
+    sprint's canonical Judgment Register; the mechanism never invents one. A graph-less
+    sprint is the bootstrap seam (L13): the batch starts from an empty draft, so the
+    first ``add_node`` batch creates the graph; final validation requires exact
+    orchestrates membership and an explicit nature for every commanded master (a
+    ``set_nature`` mutation in the same batch when the master document lacks one).
+    The batch validates the candidate graph, cross-document membership, node-kind
+    legality, and partition completeness before anything is written; dry_run previews
+    every affected JSON/Markdown pair with rendered diff and wouldLose.
     """
 
     try:
@@ -337,11 +204,6 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
     if sprint.kind != "master" or not sprint.orchestrates:
         raise ExecutionTopologyError(
             "author_execution_graph requires an orchestration sprint document"
-        )
-    if sprint.executionGraph is None:
-        raise ExecutionTopologyError(
-            "author_execution_graph requires a migrated sprint; "
-            "run task_doc.migrate_execution_topology first"
         )
     topology = TaskDocumentTopology(request.coordination_root)
     try:
@@ -360,6 +222,7 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
         "ok": True,
         "operation": "task_doc.author_execution_graph",
         "state": "would-author" if request.dry_run else "authored",
+        "bootstrapped": sprint.executionGraph is None,
         "sprintTaskDocumentRef": sprint_ref.model_dump(mode="json"),
         "appliedMutations": [
             mutation.model_dump(mode="json", exclude_none=True) for mutation in authoring.mutations
@@ -373,10 +236,10 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
     }
     if request.dry_run:
         with integration_authority_lock(request.coordination_root, request.repo_id):
-            _require_migration_publication_authority(request, prepared.overrides)
+            _require_authoring_publication_authority(request, prepared.overrides)
         result["dryRun"] = True
         result["documents"] = [
-            _migration_preview(ref, root, document) for ref, root, document in prepared.documents
+            _document_preview(ref, root, document) for ref, root, document in prepared.documents
         ]
         return result
     result["documents"] = _publish_authoring(request, topology, sprint_ref, prepared)
@@ -390,15 +253,24 @@ def _prepare_authoring(
     task_root: Path,
     authoring: _ExecutionGraphAuthoring,
 ) -> _AuthoringCandidate:
-    try:
-        commanded = topology.validate_execution_topology(sprint_ref)
-    except TaskDocumentRefError as exc:
-        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
     graph = sprint.executionGraph
-    assert graph is not None  # guarded by author_execution_graph
-    draft = _GraphDraft(nodes=list(graph.nodes), edges=list(graph.edges), natures={})
+    if graph is None:
+        # Bootstrap seam (L13): no prior graph, so commanded membership comes from the
+        # orchestrates aliases; the final _validate_topology below then requires the
+        # candidate graph plus natures to cover every commanded master exactly.
+        commanded = set(topology.children(sprint_ref))
+    else:
+        try:
+            commanded = {master.ref for master in topology.validate_execution_topology(sprint_ref)}
+        except TaskDocumentRefError as exc:
+            raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
+    draft = _GraphDraft(
+        nodes=list(graph.nodes) if graph is not None else [],
+        edges=list(graph.edges) if graph is not None else [],
+        natures={},
+    )
     for mutation in authoring.mutations:
-        _MUTATION_HANDLERS[mutation.op](draft, mutation, {master.ref for master in commanded})
+        _MUTATION_HANDLERS[mutation.op](draft, mutation, commanded)
     try:
         candidate_graph = SprintExecutionGraph(nodes=draft.nodes, edges=draft.edges)
     except ValidationError as exc:
@@ -437,7 +309,7 @@ def _publish_authoring(
 ) -> list[dict[str, Any]]:
     def publication() -> list[tuple[Path, Path]]:
         with integration_authority_lock(request.coordination_root, request.repo_id):
-            _require_migration_publication_authority(request, prepared.overrides)
+            _require_authoring_publication_authority(request, prepared.overrides)
             return write_task_doc_batch(
                 [(root, document) for _ref, root, document in prepared.documents]
             )
@@ -500,8 +372,8 @@ def _verify_authoring_judgments(
         raise ExecutionTopologyError(
             "task-execution-graph-judgment-register-missing: "
             f"sprint {sprint_ref.key} has no 'Judgment Register (canonical judgment "
-            "authority)' section; scaffold the canonical Judgment Register before "
-            "judgment-bearing graph authoring"
+            "authority)' section; restore it with task_doc.set_section (sprint creation "
+            "scaffolds the empty canonical registers; the write path validates their shape)"
         )
     try:
         judgments, _priorities = planning_authorities(sprint)
@@ -748,8 +620,8 @@ def _authoring_placement_facts(
     ]
 
 
-def _require_migration_publication_authority(
-    request: ExecutionTopologyMigrationRequest | ExecutionTopologyAuthoringRequest,
+def _require_authoring_publication_authority(
+    request: ExecutionTopologyAuthoringRequest,
     overrides: dict[TaskDocumentRef, TaskDocument],
 ) -> None:
     try:
@@ -803,7 +675,19 @@ def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> No
         elif request.original is not None and request.original.orchestrates:
             raise ExecutionTopologyError(
                 "an orchestration sprint cannot remove its execution topology through "
-                f"task_doc.{request.operation}; use an explicit migration"
+                f"task_doc.{request.operation}; use task_doc.author_execution_graph"
+            )
+        if (
+            request.original is not None
+            and request.original.executionGraph is not None
+            and request.candidate.executionGraph is None
+        ):
+            # The default mode may be chosen at creation, but an authored graph is
+            # only ever retired through the graph-authoring seam, never by dropping
+            # the field from a write.
+            raise ExecutionTopologyError(
+                "an orchestration sprint cannot remove its executionGraph through "
+                f"task_doc.{request.operation}; use task_doc.author_execution_graph"
             )
         sprint_refs.update(
             sprint.ref
@@ -814,6 +698,11 @@ def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> No
             )
         )
         for sprint_ref in sorted(sprint_refs, key=lambda item: item.key):
+            sprint = topology.resolve_candidate(sprint_ref, overrides)
+            if sprint.document.executionGraph is None:
+                # The atomic-sequential default (L13-R1): a graph-less sprint has no
+                # topology contract to validate; the series lane serializes masters.
+                continue
             topology.validate_execution_topology(sprint_ref, overrides=overrides)
     except TaskDocumentRefError as exc:
         raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
@@ -862,7 +751,7 @@ def _validate_topology(
         raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
 
 
-def _migration_preview(
+def _document_preview(
     ref: TaskDocumentRef, task_root: Path, document: TaskDocument
 ) -> dict[str, Any]:
     rendered = render_markdown(document)
@@ -899,7 +788,7 @@ class ExecutionTopologyInventoryRequest:
 def inventory_execution_topology(
     request: ExecutionTopologyInventoryRequest,
 ) -> dict[str, Any]:
-    """Enumerate every persistent sprint and commanded master before migration (L9-R1).
+    """Enumerate every persistent sprint and commanded master before graph authoring.
 
     Read-only. The proposed explicit nature preserves current behavior: a commanded master
     that already has an ``ar/<slug>`` branch is proposed ``atomic`` (it keeps its branch),

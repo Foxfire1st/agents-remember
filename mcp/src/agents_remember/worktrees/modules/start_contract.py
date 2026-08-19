@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.tasks import read_task_doc
+from agents_remember.tasks import TaskDocument, read_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampPlan,
@@ -41,6 +41,13 @@ from agents_remember.worktrees.modules.leaf_ref_start import (
     resolve_start_leaf_doc_id,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.scheduling_mode import (
+    TERMINAL_SERIES_CLEANUP,
+    commanded_sprint_masters,
+    effective_execution_nature,
+    resolve_scheduling_mode,
+    sequential_lane_owner,
+)
 from agents_remember.worktrees.task_resolver import (
     leaf_enclosure_path,
     resolve_active_task_root,
@@ -164,16 +171,19 @@ def _task_root_has_master_artifact(task_root: Path) -> bool:
 
 
 def _master_execution_nature(task_root: Path) -> str | None:
+    """The master document's declared nature; a nature-less master reports ``None``.
+
+    Nature-less masters are legal legacy state: the atomic-sequential default
+    (L13-R1) resolves them to an effective atomic nature at the decision point,
+    so reading the declared cell here must not raise.
+    """
+
     task_path = task_root / "task.json"
     if not task_path.is_file():
         return None
     document = read_task_doc(task_path)
     if document.kind != "master":
         return None
-    if document.executionNature not in ("organizational", "atomic"):
-        raise RuntimeError(
-            "master leaf start requires executionNature='organizational' or 'atomic'"
-        )
     return document.executionNature
 
 
@@ -206,16 +216,25 @@ def ensure_master_series_contract(
     spec: MasterSeriesContractSpec,
     *,
     dry_run: bool = False,
-) -> WorktreeContract:
+) -> WorktreeContract | WorktreeCommandResult:
     """Return or create the plane-owned contract for one canonical master document.
 
     The orchestrator must be able to create the manager seat before that manager starts the
     first leaf.  Contract and integration-branch identity therefore belong to the structural
     plane, not to the first worker request.  First-leaf start calls this same owner so both
     entry points remain one operation rather than competing bootstrap implementations.
+
+    Under the atomic-sequential default (L13-R1: the commanding sprint has no
+    executionGraph) at most one master is in flight: creating a series while another
+    commanded master still owns the lane returns a blocked result payload (state
+    ``sequential-lane-owned``) that orders the work — land the owner first — instead
+    of refusing it outright.
     """
 
     _require_commanded_atomic_master(spec)
+    lane_block = _sequential_lane_block(spec)
+    if lane_block is not None:
+        return lane_block
 
     if dry_run:
         existing = _existing_master_series_contract(spec)
@@ -232,6 +251,9 @@ def ensure_master_series_contract(
         ),
     ):
         _require_commanded_atomic_master(spec)
+        lane_block = _sequential_lane_block(spec)
+        if lane_block is not None:
+            return lane_block
         recovering = _recover_master_series_bootstrap(spec)
         if recovering is not None:
             return recovering
@@ -244,18 +266,67 @@ def ensure_master_series_contract(
         return contract
 
 
+def _sequential_lane_block(spec: MasterSeriesContractSpec) -> WorktreeCommandResult | None:
+    """Block a second in-flight master under the atomic-sequential default (L13-R1).
+
+    A stored fact decides ownership: the other master's series contract exists with
+    non-terminal cleanup. The blocked result orders the work — land the owner first —
+    and always names a legal next operation.
+    """
+
+    topology = TaskDocumentTopology(spec.coordination_root)
+    master_ref = topology.canonical_ref(spec.repo_name, spec.task_root / "task.json")
+    sprint_ref = topology.parent(master_ref)
+    if sprint_ref is None:
+        # A standalone master is trivially sequential: no lane to contend for.
+        return None
+    # Fail closed (L13 review): if the commanding sprint cannot be resolved, the
+    # lane question is unanswered and the bootstrap must not proceed — the
+    # TaskDocumentRefError propagates as the typed refusal.
+    mode = resolve_scheduling_mode(topology, sprint_ref)
+    if mode.mode != "atomic-sequential":
+        return None
+    owner = sequential_lane_owner(topology, mode)
+    if owner is None or owner.ref == master_ref:
+        return None
+    owner_contract = series_contract_path(owner.path.parent)
+    return WorktreeCommandResult(
+        2,
+        {
+            "state": "sequential-lane-owned",
+            "laneOwner": owner.ref.key,
+            "laneOwnerContractPath": owner_contract.as_posix(),
+            "legalNextOperations": [
+                f"complete master {owner.ref.key} and land its series "
+                "(worktree_closeout_apply, then worktree_integrate)",
+                "retire the owner series contract (worktree_cleanup or worktree_abandon): "
+                f"{owner_contract.as_posix()}",
+                "retry this master series bootstrap once the lane is free",
+            ],
+            "summary": (
+                f"atomic-sequential sprint {sprint_ref.key} already has master "
+                f"{owner.ref.key} in flight; one master fully integrates before the "
+                "next master's series begins"
+            ),
+        },
+    )
+
+
 def _require_commanded_atomic_master(spec: MasterSeriesContractSpec) -> None:
     topology = TaskDocumentTopology(spec.coordination_root)
     try:
         master_ref = topology.canonical_ref(spec.repo_name, spec.task_root / "task.json")
         master = topology.resolve(master_ref)
-        if master.document.executionNature != "atomic":
-            raise RuntimeError(
-                f"series bootstrap requires executionNature='atomic', got "
-                f"{master.document.executionNature!r}"
-            )
         sprint_ref = topology.parent(master_ref)
-        if sprint_ref is None:
+        sprint = topology.resolve(sprint_ref) if sprint_ref is not None else None
+        nature = effective_execution_nature(
+            master.document, sprint.document if sprint is not None else None
+        )
+        if nature != "atomic":
+            raise RuntimeError(
+                f"series bootstrap requires an effective atomic master nature, got {nature!r}"
+            )
+        if sprint_ref is None or sprint is None:
             default_branch = repository_default_branch(spec.code_repo)
             if spec.protected_branch.removeprefix("refs/heads/") != default_branch:
                 raise RuntimeError(
@@ -263,14 +334,13 @@ def _require_commanded_atomic_master(spec: MasterSeriesContractSpec) -> None:
                     "branch"
                 )
             return
-        sprint = topology.resolve(sprint_ref)
-        commanded = topology.validate_execution_topology(sprint_ref)
+        commanded = {item.ref for item in commanded_sprint_masters(topology, sprint)}
     except TaskDocumentRefError as exc:
         raise RuntimeError(
             f"cannot resolve atomic series bootstrap authority: {exc.status}: {exc}"
         ) from exc
-    if not any(item.ref == master_ref for item in commanded):
-        raise RuntimeError("atomic series bootstrap task is not commanded by the sprint graph")
+    if master_ref not in commanded:
+        raise RuntimeError("atomic series bootstrap task is not commanded by the sprint")
     if sprint.document.integrationBranch != spec.protected_branch:
         raise RuntimeError(
             "atomic series bootstrap source does not match the sprint integrationBranch"
@@ -301,6 +371,10 @@ def _existing_master_series_contract(
         raise RuntimeError(f"parent task contract is not readable: {path}") from exc
     if existing.kind != "series":
         raise RuntimeError(f"parent task contract is not a series contract: {path}")
+    if existing.cleanup in TERMINAL_SERIES_CLEANUP:
+        # Stale terminal artifact (L13-R5b): it no longer owns the lane; the
+        # caller's fresh bootstrap replaces it.
+        return None
     if not all(
         (
             _same_master_task_edge(existing, spec, path),
@@ -758,9 +832,11 @@ def _declared_integration_source_branch(context, task_root: Path) -> str:
         master = topology.resolve(master_ref)
         parent_ref = topology.parent(master_ref)
         if parent_ref is None:
-            if master.document.executionNature != "atomic":
+            # L13-R5e: a nature-less standalone master is atomic by default; only an
+            # explicit organizational standalone master stays refused.
+            if master.document.executionNature == "organizational":
                 raise RuntimeError(
-                    "only an explicit atomic master may exist outside a sprint graph"
+                    "only an effective atomic master may exist outside a sprint graph"
                 )
             return repository_default_branch(context.code_repository_root)
         parent = topology.resolve(parent_ref)
@@ -777,7 +853,7 @@ def _declared_integration_source_branch(context, task_root: Path) -> str:
 
 def _parent_series_contract(
     context, args: WorktreeArgs, memory_mode: str
-) -> WorktreeContract | None:
+) -> WorktreeContract | WorktreeCommandResult | None:
     if not args.task_name:
         return None
     task_root = resolve_active_task_root(
@@ -787,14 +863,22 @@ def _parent_series_contract(
         parent_task=args.parent_task,
     )
     nature = _master_execution_nature(task_root)
-    if nature == "organizational":
-        if series_contract_path(task_root).exists():
-            raise RuntimeError("organizational master must not carry an atomic series contract")
+    if nature is None and not _task_root_has_master_artifact(task_root):
+        # No master document governs this task root: the leaf starts ungoverned.
         return None
-    if nature is None and not series_contract_path(task_root).exists():
+    if _is_graph_organizational(context, task_root, nature):
+        # Organizational semantics exist only under an authored graph (L13-R1).
+        # A terminal stale series artifact no longer owns anything and is ignored
+        # (L13-R5b); the start result reports its staleSeriesArtifact fact.
+        stale = series_contract_path(task_root)
+        if stale.exists():
+            try:
+                terminal = load_contract(stale).cleanup in TERMINAL_SERIES_CLEANUP
+            except ContractError:
+                terminal = False
+            if not terminal:
+                raise RuntimeError("organizational master must not carry an atomic series contract")
         return None
-    if nature != "atomic":
-        raise RuntimeError("series contract requires an explicit atomic master task")
     repo = context.code_repository_root
     integration_branch = f"ar/{slugify(args.task_name)}"
     leaf_branch = args.work_branch or f"ar/{args.worktree_name}"
@@ -822,8 +906,33 @@ def _parent_series_contract(
         ),
         dry_run=args.dry_run,
     )
+    if isinstance(series, WorktreeCommandResult):
+        return series
     require_series_accepting_leaves(series, operation="atomic leaf start")
     return series
+
+
+def _is_graph_organizational(context, task_root: Path, nature: str | None) -> bool:
+    """Whether the master takes the organizational lane (only under an authored graph)."""
+
+    if nature != "organizational":
+        return False
+    sprint = _commanding_sprint_document(context, task_root)
+    return sprint is not None and sprint.executionGraph is not None
+
+
+def _commanding_sprint_document(context, task_root: Path) -> TaskDocument | None:
+    """The document of the sprint commanding this master, if topology resolves one."""
+
+    topology = TaskDocumentTopology(context.coordination_root)
+    try:
+        master_ref = topology.canonical_ref(context.code_repository_name, task_root / "task.json")
+        sprint_ref = topology.parent(master_ref)
+        if sprint_ref is None:
+            return None
+        return topology.resolve(sprint_ref).document
+    except TaskDocumentRefError:
+        return None
 
 
 def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
@@ -965,6 +1074,9 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
         )
     )
     parent_series = _parent_series_contract(context, args, memory_mode)
+    if isinstance(parent_series, WorktreeCommandResult):
+        # Blocked start (e.g. the atomic-sequential lane is owned by another master).
+        return parent_series
     source_branch = _start_source_branch(context, args, task_root, parent_series, repo)
     base_commit = _start_code_base(repo, source_branch, args, parent_series)
     memory_source_branch = _external_memory_value(memory_mode, source_branch)

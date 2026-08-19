@@ -754,25 +754,24 @@ def _completed_integration_result(
         return None
     if not args.dry_run:
         finalized = load_contract(contract.contract_path)
-        record_queue_candidate_integration_completion(
-            finalized,
-            args.operation_key,
-            (
-                finalized.integrated_code_commit or finalized.code_commit,
-                finalized.integrated_memory_content_commit or finalized.memory_content_commit,
-                finalized.integrated_ledger_commit or finalized.ledger_commit,
-            ),
-            args.operation_progress,
+        landed = (
+            finalized.integrated_code_commit or finalized.code_commit,
+            finalized.integrated_memory_content_commit or finalized.memory_content_commit,
+            finalized.integrated_ledger_commit or finalized.ledger_commit,
         )
-        complete_queue_candidate_integration(
+        record_queue_candidate_integration_completion(
+            finalized, args.operation_key, landed, args.operation_progress
+        )
+        stale = complete_queue_candidate_integration(
             finalized,
             operation_key=args.operation_key,
-            code_commit=finalized.integrated_code_commit or finalized.code_commit,
-            memory_content_commit=(
-                finalized.integrated_memory_content_commit or finalized.memory_content_commit
-            ),
-            ledger_commit=finalized.integrated_ledger_commit or finalized.ledger_commit,
+            code_commit=landed[0],
+            memory_content_commit=landed[1],
+            ledger_commit=landed[2],
         )
+        # L13-R2: the released lane leaves stale-base siblings stale-by-evidence.
+        if stale:
+            completed.payload["staleByEvidence"] = stale
     return completed
 
 
@@ -1011,13 +1010,16 @@ def _apply_integration(
             (commits.code, commits.memory_content, commits.ledger),
             args.operation_progress,
         )
-        complete_queue_candidate_integration(
+        stale = complete_queue_candidate_integration(
             finalized,
             operation_key=args.operation_key,
             code_commit=commits.code,
             memory_content_commit=commits.memory_content,
             ledger_commit=commits.ledger,
         )
+        # L13-R2: the released lane leaves stale-base siblings stale-by-evidence.
+        if stale:
+            result.payload["staleByEvidence"] = stale
     return result
 
 

@@ -45,7 +45,6 @@ from agents_remember.worktrees.closeout_queue import (
 from agents_remember.worktrees.closeout_queue_lifecycle import (
     claim_queue_candidate_for_closeout,
     release_queue_candidate_after_reversible_operation,
-    require_queue_candidate_current,
 )
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
@@ -753,7 +752,7 @@ class CloseoutQueueTests(unittest.TestCase):
         with self.assertRaisesRegex(CloseoutQueueError, "does not prove one exact"):
             fixture.mutate("release-blocker", blocker=MASTER_B)
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue.require_atomic_master_landed"
+            "agents_remember.worktrees.closeout_queue_blocker.require_atomic_master_landed"
         ) as landed:
             released = fixture.mutate("release-blocker", blocker=MASTER_B)
         landed.assert_called_once()
@@ -799,7 +798,6 @@ class CloseoutQueueTests(unittest.TestCase):
     def test_candidate_and_evidence_drift_fail_closed(self) -> None:
         fixture = QueueFixture(Path(self.temp.name))
         fixture.declare(MASTER_A)
-        require_queue_candidate_current(fixture.coord, SPRINT, LEAF_A)
         contract = fixture.contracts[MASTER_A]
         (contract.code_worktree / "feature.txt").write_text("changed\n", encoding="utf-8")
         self.assertIn("candidate-tree-stale", fixture.status()["blocked"][0]["reasons"])

@@ -48,6 +48,11 @@ from agents_remember.tasks.readiness import (
     completed_master_rows_to_validate,
     missing_unresolved_master_rows,
 )
+from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.closeout_queue_evidence import (
+    register_scaffold_sections,
+    require_register_sections_valid,
+)
 from agents_remember.worktrees.integration_branch_authority import (
     require_topology_publication_authority,
 )
@@ -70,10 +75,8 @@ from .task_execution_topology import (
     ExecutionTopologyAuthoringRequest,
     ExecutionTopologyEditRequest,
     ExecutionTopologyError,
-    ExecutionTopologyMigrationRequest,
     author_execution_graph,
     enforce_execution_topology_edit,
-    migrate_execution_topology,
     require_commanded_masters_completed,
 )
 from .task_reopen import (
@@ -91,7 +94,6 @@ VALID_OPERATIONS = (
     "set_section",
     "append_decision",
     "record_route_review",
-    "migrate_execution_topology",
     "author_execution_graph",
     "set_field",
     "get",
@@ -233,6 +235,7 @@ def task_doc_tool(
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
     _enforce_terminal_status(doc)
     _enforce_completed_master_rows(task_root, operation, original, doc, edit)
+    _enforce_register_section_shapes(doc)
     try:
         enforce_execution_topology_edit(
             ExecutionTopologyEditRequest(
@@ -378,23 +381,6 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
             json_path,
             markdown_path_for(context.task_root, doc),
         )
-    if context.operation == "migrate_execution_topology":
-        repository = context.config.repositories[context.target.repo_id]
-        try:
-            return migrate_execution_topology(
-                ExecutionTopologyMigrationRequest(
-                    coordination_root=context.config.coordination_root,
-                    repo_id=context.target.repo_id,
-                    code_repository=repository.path,
-                    memory_repository=repository.memory_root,
-                    task_root=context.task_root,
-                    slug=context.target.slug,
-                    fields=context.fields,
-                    dry_run=context.dry_run,
-                )
-            )
-        except ExecutionTopologyError as exc:
-            raise TaskDocError(str(exc)) from exc
     if context.operation == "author_execution_graph":
         repository = context.config.repositories[context.target.repo_id]
         try:
@@ -545,6 +531,7 @@ def _build_doc(
         # contract is a subTask; anything else (no contract, or a standalone
         # top-level task) is a master.
         data["kind"] = "subTask" if (contract is not None and contract.kind == "leaf") else "master"
+    _scaffold_register_sections(data)
     if contract is not None:
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
         if contract.kind == "leaf" and contract.lifecycle_id and data.get("kind") != "master":
@@ -558,6 +545,30 @@ def _build_doc(
                 }
             ]
     return _validate(data)
+
+
+def _scaffold_register_sections(data: dict[str, Any]) -> None:
+    """Scaffold the empty canonical planning registers at sprint creation (L13-R6).
+
+    A new orchestration sprint gains the Judgment and Priority Register sections as
+    empty canonical tables so set-grade never dead-ends on a missing register; the
+    strategist/orchestrator still authors every row by judgment.
+    """
+    if data.get("kind") != "master" or not data.get("orchestrates"):
+        return
+    sections: list[dict[str, Any]] = data.setdefault("sections", [])
+    present = {str(section.get("heading", "")).strip().casefold() for section in sections}
+    for scaffold in register_scaffold_sections():
+        if scaffold["heading"].strip().casefold() not in present:
+            sections.append(dict(scaffold))
+
+
+def _enforce_register_section_shapes(doc: TaskDocument) -> None:
+    """Write-time register validation: malformed canonical registers never persist."""
+    try:
+        require_register_sections_valid(doc)
+    except CloseoutQueueError as exc:
+        raise TaskDocError(str(exc)) from exc
 
 
 @dataclass(frozen=True)

@@ -350,13 +350,7 @@ class CloseoutQueueLifecycleUnitTests(unittest.TestCase):
             ],
         )
 
-    def test_public_revalidation_refuses_stale_or_unclaimed_candidates(self) -> None:
-        with (
-            mock.patch.object(lifecycle, "_candidate_blockers", return_value=["stale"]),
-            self.assertRaisesRegex(CloseoutQueueError, "candidate-stale"),
-        ):
-            lifecycle.require_queue_candidate_current(self.fixture.coord, SPRINT, LEAF_A)
-
+    def test_integration_revalidation_refuses_unclaimed_candidates(self) -> None:
         with self.assertRaisesRegex(CloseoutQueueError, "integration-claim-required"):
             lifecycle.require_queue_candidate_for_integration(
                 self.contract,

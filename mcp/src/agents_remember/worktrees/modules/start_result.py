@@ -10,6 +10,7 @@ from agents_remember.worktrees.modules.guidance import (
     recovery_guidance,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.scheduling_mode import stale_series_artifact_fact
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -103,7 +104,7 @@ def _start_result_facts(
     memory_state: dict[str, object],
     provider_state: dict[str, object],
 ) -> dict[str, object]:
-    return {
+    facts: dict[str, object] = {
         "code_worktree": code_state,
         "memory": memory_state,
         "providers": provider_state,
@@ -114,3 +115,9 @@ def _start_result_facts(
         "task_artifact": contract.task_artifact.as_posix(),
         "contract": contract_payload(contract),
     }
+    stale = stale_series_artifact_fact(contract.task_root)
+    if stale is not None:
+        # L13-R5b: a terminal series artifact under an organizational master was
+        # ignored; report the fact instead of refusing the start.
+        facts["staleSeriesArtifact"] = stale
+    return facts

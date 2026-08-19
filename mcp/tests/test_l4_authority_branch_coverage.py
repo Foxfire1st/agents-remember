@@ -762,6 +762,7 @@ class IntegrationBranchAuthorityCoverageTests(unittest.TestCase):
                     master,
                     sprint_ref,
                     (),
+                    "atomic",
                 )
 
 

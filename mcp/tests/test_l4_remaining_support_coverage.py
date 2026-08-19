@@ -133,19 +133,12 @@ class ApplicationAuthorityRemainderTests(unittest.TestCase):
         resolved = SimpleNamespace(
             ref=ref,
             path=Path("/coordination/tasks/repo/master/task.json"),
-            document=SimpleNamespace(executionNature=None),
+            document=SimpleNamespace(slug="master", executionNature=None),
         )
         topology = SimpleNamespace(altitude=lambda _ref: "master", parent=lambda _ref: None)
         config = SimpleNamespace(coordination_root=Path("/coordination"))
-        with mock.patch.object(agent_tools, "TaskDocumentTopology", return_value=topology):
-            outcome = agent_tools._manager_series_bootstrap_refusal(
-                cast(Any, config), cast(Any, resolved)
-            )
-        assert outcome is not None
-        assert outcome.detail is not None
-        self.assertIn("executionNature", outcome.detail)
-
-        resolved.document.executionNature = "atomic"
+        # L13-R5e: a nature-less standalone master is atomic by default and
+        # dispatches its manager series with the repository default branch.
         repo = SimpleNamespace(repo_id="repo", path=Path("/code"), memory_root=None)
         with (
             mock.patch.object(agent_tools, "TaskDocumentTopology", return_value=topology),
@@ -160,6 +153,22 @@ class ApplicationAuthorityRemainderTests(unittest.TestCase):
             )
         spec = ensure.call_args.args[0]
         self.assertEqual((spec.parent_task_name, spec.protected_branch), ("", "main"))
+
+        # A nature-less master under an authored graph is still a refusal naming
+        # the missing nature cell (the set_nature recovery lives there).
+        sprint = SimpleNamespace(document=SimpleNamespace(executionGraph={"nodes": []}))
+        graphed = SimpleNamespace(
+            altitude=lambda _ref: "master",
+            parent=lambda _ref: object(),
+            resolve=lambda _ref: sprint,
+        )
+        with mock.patch.object(agent_tools, "TaskDocumentTopology", return_value=graphed):
+            outcome = agent_tools._manager_series_bootstrap_refusal(
+                cast(Any, config), cast(Any, resolved)
+            )
+        assert outcome is not None
+        assert outcome.detail is not None
+        self.assertIn("executionNature", outcome.detail)
 
     def test_task_document_publication_rejects_escape_and_wraps_authority_error(self) -> None:
         context = SimpleNamespace(
@@ -191,7 +200,7 @@ class ApplicationAuthorityRemainderTests(unittest.TestCase):
                 "wrong authority",
             ),
         ):
-            task_execution_topology._require_migration_publication_authority(cast(Any, request), {})
+            task_execution_topology._require_authoring_publication_authority(cast(Any, request), {})
 
 
 class BootstrapAndMemoryRemainderTests(unittest.TestCase):

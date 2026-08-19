@@ -174,6 +174,9 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
             topology = SimpleNamespace(
                 canonical_ref=lambda *_args: master_ref,
                 parent=lambda _ref: sprint_ref,
+                resolve=lambda _ref: SimpleNamespace(
+                    document=SimpleNamespace(executionGraph={"nodes": []})
+                ),
             )
 
             def publish(
@@ -351,7 +354,10 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
             series_closeout._require_atomic_master_complete(
                 cast(
                     TaskDocumentTopology,
-                    SimpleNamespace(resolve=lambda _ref: organizational),
+                    SimpleNamespace(
+                        resolve=lambda _ref: organizational,
+                        parent=lambda _ref: None,
+                    ),
                 ),
                 master_ref,
             )
@@ -366,7 +372,10 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
             series_closeout._require_atomic_master_complete(
                 cast(
                     TaskDocumentTopology,
-                    SimpleNamespace(resolve=lambda _ref: incomplete),
+                    SimpleNamespace(
+                        resolve=lambda _ref: incomplete,
+                        parent=lambda _ref: None,
+                    ),
                 ),
                 master_ref,
             )

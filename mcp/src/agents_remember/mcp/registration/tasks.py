@@ -37,7 +37,13 @@ def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) ->
         task-completion, and admission facts without inventing judgment. Public responses and
         artifacts never expose lifecycle operation keys; task-addressed closeout/integration
         cancellation and recovery own later transitions and the irreversible integration seam
-        revalidates the complete claim."""
+        revalidates the complete claim. The 'status' read never fails on a missing executionGraph
+        or missing/malformed registers: it reports the degraded projection (mode, registers,
+        laneOwner, legalNextOperations) instead. A closeout or integration whose recorded base
+        pair no longer matches the current source tips is refused with worktree_sync named as the
+        recovery; a completed landing reports stale-by-evidence siblings. An in-flight atomic
+        block owns the sprint landing lane for its entire lifetime, acquisition reports in-flight
+        organizational leafs as facts, and a certified candidate no longer occupies the lane."""
         return closeout_queue_payload(config, request)
 
 
@@ -115,12 +121,14 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
-        'set_section' | 'append_decision' | 'record_route_review' | 'migrate_execution_topology' |
+        'set_section' | 'append_decision' | 'record_route_review' |
         'author_execution_graph' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
         title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
-        steps, ... — a master takes subTasks + ordered sections instead of steps); 'replace' takes a
+        steps, ... — a master takes subTasks + ordered sections instead of steps, and an
+        orchestration sprint is scaffolded with empty canonical Judgment and Priority Register
+        sections); 'replace' takes a
         full replacement document in fields and rewrites the existing JSON+markdown after schema
         validation; 'set_step' takes
         step={id, title, status, parent?, note?}; an explicit status clears an earlier skip disposition.
@@ -129,24 +137,21 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         'set_subtask' (master) takes subtask={number, name,
         file?, status?, scope?}; 'remove_subtask' (master) takes subtask={number, keep_file?} and drops that
         sub-task row AND deletes its leaf doc (json+md) unless keep_file=true; 'set_section' (master) takes
-        section={heading, kind?, body?};
+        section={heading, kind?, body?} — a section carrying a canonical register heading must keep
+        the exact register table shape (write-time validation);
         'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
         evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
         evidence path must be a real task-relative file. It overwrites the prior candidate's review.
-        'migrate_execution_topology' targets an orchestration sprint and atomically authors its
-        executionGraph plus every commanded master's explicit executionNature from
-        fields={masters:[{taskDocumentRef:{repository,path}, executionNature}],
-        executionGraph:{nodes:[{repository,path}], edges:[{predecessor:{repository,path},
-        successor:{repository,path}, reason}]}}; dry_run previews every affected JSON/Markdown
-        pair, the ordered master classifications, and the derived waves. It authors lump nodes
-        only — the initial bootstrap.
         'author_execution_graph' applies one validated atomic batch of structural mutations to a
-        migrated sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
+        sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
         {op:'add_node', ref:{repository,path}, kind?:'master'|'segment', leafIds?:[...]},
         {op:'remove_node', ref, leafId?:sample}, {op:'add_edge', predecessor, successor, reason,
         judgmentId}, {op:'remove_edge', predecessor, successor, judgmentId}, {op:'move_leaf', ref,
         leafId, toSegment:sampleLeafId, judgmentId}, or {op:'set_nature', ref, executionNature,
-        judgmentId}. Edge endpoints are a bare {repository,path} (the master's sole node) or
+        judgmentId}. On a graph-less sprint the first add_node batch bootstraps the graph (the
+        result reports bootstrapped:true); final validation requires exact orchestrates membership
+        and an explicit nature for every commanded master. Edge endpoints are a bare
+        {repository,path} (the master's sole node) or
         {ref, leafId} addressing the segment containing that leaf. Judgment-bearing mutations
         (edges, segmentation, nature) require a judgmentId row in the sprint's Judgment Register
         section; the mechanism never invents one. The batch refuses segment nodes on atomic

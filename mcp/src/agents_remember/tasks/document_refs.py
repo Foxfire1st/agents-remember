@@ -146,7 +146,10 @@ class TaskDocumentTopology:
             return "sprint"
         if len(parents) == 1:
             return "master"
-        if not parents and resolved.document.executionNature == "atomic":
+        if not parents and resolved.document.executionNature != "organizational":
+            # Explicit atomic or nature-less legacy master (L13-R5e): a standalone
+            # master resolves as a master without migration; only an explicit
+            # organizational standalone master stays a dead-end.
             return "master"
         if not parents:
             raise TaskDocumentRefError(
@@ -164,8 +167,10 @@ class TaskDocumentTopology:
             return self._leaf_parent(resolved).ref
         parents = self._sprint_parents(resolved)
         if (
-            resolved.document.orchestrates or resolved.document.executionNature == "atomic"
+            resolved.document.orchestrates or resolved.document.executionNature != "organizational"
         ) and not parents:
+            # Standalone sprint, or a standalone master: an explicit atomic nature
+            # or the atomic-sequential default (L13-R5e) — either way no parent edge.
             return None
         if len(parents) == 1:
             return parents[0].ref
@@ -210,6 +215,20 @@ class TaskDocumentTopology:
             return tuple(dict.fromkeys(children))
         return tuple(parent.ref for parent in self._commanded_masters(resolved))
 
+    def commanded_masters(
+        self,
+        sprint: ResolvedTaskDocument,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """The sprint's exact alias-commanded masters, honoring pending overrides.
+
+        Unlike ``children`` this never re-resolves the sprint from disk, so it works
+        for a candidate sprint document that has not been published yet.
+        """
+
+        return self._commanded_masters_exact(sprint, overrides or {})
+
     def validate_execution_topology(
         self,
         sprint_ref: TaskDocumentRef,
@@ -218,10 +237,10 @@ class TaskDocumentTopology:
     ) -> tuple[ResolvedTaskDocument, ...]:
         """Validate one sprint's exact commanded membership and execution contract.
 
-        Legacy documents remain parseable so the explicit migration operation can inspect
-        them. They never acquire inferred meaning: the first topology consumer reports a
-        migration-required status until both the sprint graph and every commanded master's
-        execution nature exist.
+        Legacy documents remain parseable so graph authoring can inspect them. They
+        never acquire inferred meaning: the first topology consumer reports a
+        migration-required status until both the sprint graph and every commanded
+        master's execution nature exist (bootstrap: ``task_doc.author_execution_graph``).
         """
 
         candidates = overrides or {}
@@ -236,7 +255,7 @@ class TaskDocumentTopology:
             raise TaskDocumentRefError(
                 "task-execution-topology-migration-required",
                 f"orchestration sprint {sprint_ref.key} has no executionGraph; "
-                "run task_doc.migrate_execution_topology",
+                "bootstrap one with task_doc.author_execution_graph",
             )
         commanded = self._commanded_masters_exact(sprint, candidates)
         commanded_refs = {master.ref for master in commanded}
@@ -255,7 +274,7 @@ class TaskDocumentTopology:
                 raise TaskDocumentRefError(
                     "task-execution-topology-migration-required",
                     f"commanded master {master.ref.key} has no executionNature; "
-                    "run task_doc.migrate_execution_topology",
+                    "set one with task_doc.author_execution_graph (set_nature)",
                 )
             nature_by_ref[master.ref] = master.document.executionNature
         for node in graph.nodes:

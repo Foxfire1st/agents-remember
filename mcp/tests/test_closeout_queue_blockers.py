@@ -7,11 +7,21 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.models.closeout_queue import ActiveAtomicBlocker
+from agents_remember.controlplane.closeout_queue_store import (
+    CloseoutQueueStore,
+    QueueTransaction,
+)
+from agents_remember.models.closeout_queue import (
+    ActiveAtomicBlocker,
+    CloseoutQueueRequest,
+    CloseoutQueueState,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees import closeout_queue as queue
+from agents_remember.worktrees.closeout_queue_blocker import _acquire_blocker
 from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.closeout_queue_graph import acquisition_facts
 from test_closeout_queue import LEAF_A, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
 
 
@@ -301,7 +311,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
                     self.candidate,
                     replace(self.contract, memory_mode="disabled"),
                 ),
-                ["lineage", "code-source-moved"],
+                ["lineage", "code-source-moved: run worktree_sync, then retry"],
             )
         missing = replace(self.contract, memory_repo_path=None)
         with (
@@ -325,7 +335,10 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             blockers = queue._source_and_ledger_blockers(self.candidate, self.contract)
         self.assertEqual(
             blockers,
-            ["memory-source-moved", "ledger-base-mapping-changed"],
+            [
+                "memory-source-moved: run worktree_sync, then retry",
+                "ledger-base-mapping-changed: run worktree_sync, then retry",
+            ],
         )
 
     def test_grade_blockers_detect_invalid_judgment_and_each_drift_class(self) -> None:
@@ -422,3 +435,149 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlockerLifetimeExclusivityTests(unittest.TestCase):
+    """L13-R3: an in-flight atomic block owns the sprint landing lane for life."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
+        self.topology = TaskDocumentTopology(self.fixture.coord)
+        self.graph = queue._graph_context(self.topology, SPRINT)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _request(self, master: TaskDocumentRef) -> CloseoutQueueRequest:
+        return CloseoutQueueRequest(
+            action="acquire-blocker",
+            sprint_task_document_ref=SPRINT,
+            request_id="acquire",
+            expected_revision=0,
+            blocker_master_ref=master,
+            rationale="isolate the landing lane",
+        )
+
+    def _state(self) -> CloseoutQueueState:
+        return CloseoutQueueStore(self.fixture.coord, SPRINT).read(
+            queue._initial_state(SPRINT, self.graph.revision, NOW)
+        )
+
+    def test_second_block_is_refused_with_structured_owner_facts(self) -> None:
+        acquired = _acquire_blocker(
+            self.graph, self._state(), self._request(MASTER_B), NOW, "orchestrator"
+        )
+        assert acquired.activeBlocker is not None
+        # Same master, same graph revision: idempotent.
+        self.assertIs(
+            _acquire_blocker(self.graph, acquired, self._request(MASTER_B), NOW, "orchestrator"),
+            acquired,
+        )
+        # A second atomic master can never hold a concurrent block.
+        atomic_a = replace(
+            self.graph.masters[MASTER_A],
+            document=self.graph.masters[MASTER_A].document.model_copy(
+                update={"executionNature": "atomic"}
+            ),
+        )
+        graph = replace(self.graph, masters={**self.graph.masters, MASTER_A: atomic_a})
+        with (
+            mock.patch(
+                "agents_remember.worktrees.closeout_queue_blocker._require_unsealed_blocker_series",
+                return_value=mock.sentinel.series,
+            ),
+            mock.patch(
+                "agents_remember.worktrees.closeout_queue_blocker.require_source_bases_current"
+            ),
+            self.assertRaises(CloseoutQueueError) as raised,
+        ):
+            _acquire_blocker(graph, acquired, self._request(MASTER_A), NOW, "orchestrator")
+        self.assertEqual(raised.exception.status, "atomic-blocker-active")
+        detail = str(raised.exception)
+        self.assertIn("atomicBlockerOwner", detail)
+        self.assertIn(MASTER_B.key, detail)
+        self.assertIn("inFlightOrganizationalLeafs", detail)
+
+    def test_certified_sibling_is_a_fact_not_a_hard_drain(self) -> None:
+        # L13-R3: the hard drain refusal applies only to lane-occupying states;
+        # a certified sibling is reported as an acquisition fact instead.
+        self.fixture.declare(MASTER_A)
+        state = self._state()
+        certified = state.candidates[LEAF_A.key].model_copy(
+            update={
+                "state": "certified",
+                "closeoutCodeCommit": "a" * 40,
+                "closeoutMemoryContentCommit": "b" * 40,
+                "closeoutLedgerCommit": "c" * 40,
+            }
+        )
+        state = state.model_copy(update={"candidates": {LEAF_A.key: certified}})
+        acquired = _acquire_blocker(self.graph, state, self._request(MASTER_B), NOW, "orchestrator")
+        assert acquired.activeBlocker is not None
+        self.assertEqual(acquired.activeBlocker.master, MASTER_B)
+        facts = acquisition_facts(self.graph, acquired)
+        self.assertEqual(
+            facts["inFlightOrganizationalLeafs"],
+            [
+                {
+                    "candidate": LEAF_A.key,
+                    "owningMaster": MASTER_A.key,
+                    "state": "certified",
+                }
+            ],
+        )
+
+    def test_lane_occupying_candidate_keeps_the_hard_drain_refusal(self) -> None:
+        self.fixture.declare(MASTER_A)
+        self.fixture.mutate("select", candidate=LEAF_A)
+        with self.assertRaises(CloseoutQueueError) as raised:
+            _acquire_blocker(
+                self.graph, self._state(), self._request(MASTER_B), NOW, "orchestrator"
+            )
+        self.assertEqual(raised.exception.status, "atomic-blocker-in-flight-conflict")
+        detail = str(raised.exception)
+        self.assertIn(LEAF_A.key, detail)
+        self.assertIn("ownerCandidate", detail)
+
+    def test_acquire_success_reports_acquisition_facts(self) -> None:
+        self.fixture.declare(MASTER_A)
+        state = self._state()
+        certified = state.candidates[LEAF_A.key].model_copy(
+            update={
+                "state": "certified",
+                "closeoutCodeCommit": "a" * 40,
+                "closeoutMemoryContentCommit": "b" * 40,
+                "closeoutLedgerCommit": "c" * 40,
+            }
+        )
+        store = CloseoutQueueStore(self.fixture.coord, SPRINT)
+        store.transact(
+            initial=state,
+            event=QueueTransaction(
+                action="declare",
+                request_id="certify-a",
+                fingerprint="c" * 64,
+                recorded_at=NOW,
+                actor="orchestrator@repo-a/sprint/task.json",
+                rationale="",
+            ),
+            transform=lambda current: current.model_copy(
+                update={"candidates": {LEAF_A.key: certified}}
+            ),
+        )
+        result = self.fixture.mutate(
+            "acquire-blocker", blocker=MASTER_B, rationale="isolate the lane"
+        )
+        facts = result["acquisitionFacts"]
+        assert isinstance(facts, dict)
+        self.assertEqual(
+            facts["inFlightOrganizationalLeafs"],
+            [
+                {
+                    "candidate": LEAF_A.key,
+                    "owningMaster": MASTER_A.key,
+                    "state": "certified",
+                }
+            ],
+        )

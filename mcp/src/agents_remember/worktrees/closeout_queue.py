@@ -21,6 +21,7 @@ from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout_queue import (
+    LANE_OCCUPYING_STATES,
     ActiveAtomicBlocker,
     CandidateAdmissionFacts,
     CloseoutCandidateRecord,
@@ -50,6 +51,11 @@ from agents_remember.worktrees.route_review import (
     RouteReviewError,
     code_candidate_tree,
 )
+from agents_remember.worktrees.scheduling_mode import (
+    SchedulingMode,
+    resolve_scheduling_mode,
+    sequential_lane_owner,
+)
 from agents_remember.worktrees.source_lineage import (
     lineage_refusal,
     source_lineage_for_contract,
@@ -62,34 +68,33 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
+from .closeout_queue_blocker import _abort_blocker, _acquire_blocker, _release_blocker
 from .closeout_queue_candidate_evidence import (
-    atomic_master_landing_authority,
     commit_tree,
     ledger_mapping,
     memory_candidate_tree,
     operation_owner_fingerprint,
-    require_atomic_master_landed,
     require_source_bases_current,
     route_review_blockers,
     route_review_fact,
 )
-from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_errors import CloseoutQueueError, queue_task_ref
 from .closeout_queue_evidence import (
-    canonical_blocker_abort,
     canonical_grade,
     curator_evidence,
     curator_evidence_blockers,
+    register_section_facts,
 )
 from .closeout_queue_graph import (
     QueueGraphContext as _GraphContext,
 )
 from .closeout_queue_graph import (
-    graph_context as _graph_context,
-)
-from .closeout_queue_graph import (
-    master_incomplete_predecessors,
+    acquisition_facts,
     predecessor_waiting_reasons,
     ready_sort_key,
+)
+from .closeout_queue_graph import (
+    graph_context as _graph_context,
 )
 
 _ACTIONS = frozenset(
@@ -185,67 +190,181 @@ def closeout_queue_tool(
     now: str | None = None,
 ) -> dict[str, Any]:
     action = _queue_action(request.action)
-    sprint_ref = _task_ref(request.sprint_task_document_ref, "sprint_task_document_ref")
+    sprint_ref = queue_task_ref(request.sprint_task_document_ref, "sprint_task_document_ref")
     topology = TaskDocumentTopology(config.coordination_root)
-    graph = _graph_context(topology, sprint_ref)
     timestamp = (now or now_iso()).strip()
     if not timestamp:
         raise CloseoutQueueError("closeout-queue-time-invalid", "timestamp must not be blank")
+    if action == "status":
+        # The only read action (L13-R4): never raises on an absent graph or a
+        # missing/malformed register — it reports the degraded projection instead.
+        return _status_readout(config, topology, sprint_ref, actor=actor, timestamp=timestamp)
+    graph = _graph_context(topology, sprint_ref)
     initial = _initial_state(sprint_ref, graph.revision, timestamp)
     store = CloseoutQueueStore(config.coordination_root, sprint_ref)
     _authorize_status_scope(actor, graph)
     if graph.sprint.document.status == "Completed":
-        if action != "status":
+        raise CloseoutQueueError(
+            "closeout-queue-sprint-completed",
+            "completed sprint queues are reclaimed and cannot accept mutations",
+        )
+    request_id = (request.request_id or "").strip()
+    if not request_id:
+        raise CloseoutQueueError(
+            "closeout-queue-request-id-required",
+            f"{action} requires a stable request_id for crash-safe retry",
+        )
+
+    def apply_current_graph(current: CloseoutQueueState) -> CloseoutQueueState:
+        if request.expected_revision != current.revision:
+            raise CloseoutQueueError(
+                "closeout-queue-revision-stale",
+                f"mutation expected revision {request.expected_revision}, current is {current.revision}; read status and retry with a new request id",
+            )
+        live_graph = _graph_context(topology, sprint_ref)
+        _authorize_status_scope(actor, live_graph)
+        if live_graph.sprint.document.status == "Completed":
             raise CloseoutQueueError(
                 "closeout-queue-sprint-completed",
                 "completed sprint queues are reclaimed and cannot accept mutations",
             )
-        # Status never rewrites state or races the task-document-owned sprint transition.
-        state = store.read(initial)
-    elif action == "status":
-        state = store.read(initial)
-    else:
-        request_id = (request.request_id or "").strip()
-        if not request_id:
-            raise CloseoutQueueError(
-                "closeout-queue-request-id-required",
-                f"{action} requires a stable request_id for crash-safe retry",
-            )
-
-        def apply_current_graph(current: CloseoutQueueState) -> CloseoutQueueState:
-            if request.expected_revision != current.revision:
-                raise CloseoutQueueError(
-                    "closeout-queue-revision-stale",
-                    f"mutation expected revision {request.expected_revision}, current is {current.revision}; read status and retry with a new request id",
-                )
-            live_graph = _graph_context(topology, sprint_ref)
-            _authorize_status_scope(actor, live_graph)
-            if live_graph.sprint.document.status == "Completed":
-                raise CloseoutQueueError(
-                    "closeout-queue-sprint-completed",
-                    "completed sprint queues are reclaimed and cannot accept mutations",
-                )
-            return _apply_action(
-                current,
-                _ActionContext(config, topology, live_graph, request, action, timestamp),
-                actor,
-            )
-
-        state = store.transact(
-            initial=initial,
-            event=QueueTransaction(
-                action=cast(QueueEventAction, action),
-                request_id=request_id,
-                fingerprint=_request_fingerprint(request, actor),
-                recorded_at=timestamp,
-                actor=actor.identity,
-                rationale=request.rationale,
-            ),
-            transform=apply_current_graph,
+        return _apply_action(
+            current,
+            _ActionContext(config, topology, live_graph, request, action, timestamp),
+            actor,
         )
+
+    state = store.transact(
+        initial=initial,
+        event=QueueTransaction(
+            action=cast(QueueEventAction, action),
+            request_id=request_id,
+            fingerprint=_request_fingerprint(request, actor),
+            recorded_at=timestamp,
+            actor=actor.identity,
+            rationale=request.rationale,
+        ),
+        transform=apply_current_graph,
+    )
     graph = _graph_context(topology, sprint_ref)
     _authorize_status_scope(actor, graph)
     return _projection(topology, graph, state, action, actor)
+
+
+def _status_readout(
+    config: McpRuntimeConfig,
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    *,
+    actor: QueueActor,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Project the sprint queue for the one read action (L13-R4).
+
+    ``status`` never raises on an absent executionGraph or missing/malformed
+    canonical registers: a graph-less sprint projects the atomic-sequential
+    default with its series lane owner, and a graph sprint with degraded
+    registers still projects, with the register facts attached. Only mutations
+    stay guarded.
+    """
+
+    try:
+        sprint = topology.resolve(sprint_ref)
+    except TaskDocumentRefError as exc:
+        raise CloseoutQueueError(exc.status, str(exc)) from exc
+    if sprint.document.kind != "master" or not sprint.document.orchestrates:
+        raise CloseoutQueueError(
+            "closeout-queue-sprint-required",
+            f"closeout queue status requires an orchestration sprint: {sprint_ref.key}",
+        )
+    if sprint.document.executionGraph is None:
+        try:
+            mode = resolve_scheduling_mode(topology, sprint_ref)
+        except TaskDocumentRefError as exc:
+            raise CloseoutQueueError(exc.status, str(exc)) from exc
+        _authorize_degraded_scope(actor, mode)
+        return _degraded_projection(topology, mode, timestamp)
+    graph = _graph_context(topology, sprint_ref, strict_registers=False)
+    _authorize_status_scope(actor, graph)
+    store = CloseoutQueueStore(config.coordination_root, sprint_ref)
+    initial = _initial_state(sprint_ref, graph.revision, timestamp)
+    # Status never rewrites state or races the task-document-owned sprint transition.
+    state = store.read(initial)
+    payload = _projection(topology, graph, state, "status", actor)
+    registers = payload.get("registers") or {}
+    degraded = {name: fact for name, fact in registers.items() if fact != "ok"}
+    if degraded:
+        payload["state"] = "degraded"
+        payload["legalNextOperations"] = [
+            "repair the register section with task_doc.set_section "
+            f"(registers: {degraded!r}); the write path validates the canonical shape"
+        ]
+        payload["summary"] = (
+            f"Sprint queue projected with degraded planning registers: {degraded!r}. "
+            "Scheduling reads report facts; mutations stay guarded."
+        )
+    return payload
+
+
+def _authorize_degraded_scope(actor: QueueActor, mode: SchedulingMode) -> None:
+    sprint_roles = {"architect", "strategist", "orchestrator"}
+    if actor.task_document_ref == mode.sprint.ref and actor.role in sprint_roles:
+        return
+    if actor.role == "manager" and any(
+        actor.task_document_ref == master.ref for master in mode.masters
+    ):
+        return
+    raise CloseoutQueueError(
+        "closeout-queue-caller-refused",
+        "closeout queue access requires the sprint architect/strategist/orchestrator or a commanded manager",
+    )
+
+
+def _degraded_projection(
+    topology: TaskDocumentTopology, mode: SchedulingMode, timestamp: str
+) -> dict[str, Any]:
+    """The atomic-sequential default projection for a sprint without a graph."""
+
+    owner = sequential_lane_owner(topology, mode)
+    legal = [
+        "work the lane-owning master to completion (worktree_closeout_apply, then "
+        "worktree_integrate, then worktree_cleanup releases the lane)",
+        "bootstrap a dependency graph with task_doc.author_execution_graph "
+        "(first add_node batch creates it; set_nature covers every commanded master)",
+    ]
+    if owner is None:
+        legal.insert(
+            0,
+            "start the next master's series (dispatch its manager or start its first "
+            "leaf); masters run one at a time under the atomic-sequential default",
+        )
+    summary = (
+        f"Sprint {mode.sprint.ref.key} has no executionGraph: atomic-sequential default; "
+        f"lane owner: {owner.ref.key if owner is not None else 'none'}."
+    )
+    return {
+        "ok": True,
+        "operation": "closeout_queue",
+        "action": "status",
+        "state": "degraded",
+        "summary": summary,
+        "sprintTaskDocumentRef": mode.sprint.ref.model_dump(mode="json"),
+        "revision": 0,
+        "graphRevision": hashlib.sha256(
+            f"closeout-queue:no-graph:{mode.sprint.ref.key}".encode()
+        ).hexdigest(),
+        "mode": mode.mode,
+        "registers": register_section_facts(mode.sprint),
+        "laneOwner": owner.ref.key if owner is not None else None,
+        "legalNextOperations": legal,
+        "leafPlacementFacts": [],
+        "activeBlocker": None,
+        "ready": [],
+        "waiting": [],
+        "blocked": [],
+        "inFlight": [],
+        "updatedAt": timestamp,
+    }
 
 
 def _apply_action(
@@ -486,141 +605,6 @@ def _bind_queue_contract(
     )
 
 
-def _acquire_blocker(
-    graph: _GraphContext,
-    state: CloseoutQueueState,
-    request: CloseoutQueueRequest,
-    timestamp: str,
-    actor_identity: str,
-) -> CloseoutQueueState:
-    master_ref = _task_ref(request.blocker_master_ref, "blocker_master_ref")
-    master = graph.masters.get(master_ref)
-    if master is None:
-        raise CloseoutQueueError(
-            "atomic-blocker-master-unknown", f"master is not in the sprint graph: {master_ref.key}"
-        )
-    if master.document.executionNature != "atomic":
-        raise CloseoutQueueError(
-            "atomic-blocker-nature-required", "only an atomic master can own a blocker"
-        )
-    require_source_bases_current(_require_unsealed_blocker_series(master))
-    if state.activeBlocker is not None:
-        if (
-            state.activeBlocker.master == master_ref
-            and state.activeBlocker.graphRevision == graph.revision
-        ):
-            return state
-        if state.activeBlocker.master == master_ref:
-            raise CloseoutQueueError(
-                "atomic-blocker-graph-stale",
-                "the active blocker belongs to an older graph revision; release it first",
-            )
-        raise CloseoutQueueError(
-            "atomic-blocker-active", f"blocker is already held by {state.activeBlocker.master.key}"
-        )
-    incomplete = list(master_incomplete_predecessors(graph, master_ref))
-    if incomplete:
-        raise CloseoutQueueError(
-            "atomic-blocker-predecessors-incomplete",
-            f"atomic blocker predecessors are incomplete: {[node.ref.key for node in incomplete]!r}",
-        )
-    if any(candidate.state != "declared" for candidate in state.candidates.values()):
-        raise CloseoutQueueError(
-            "atomic-blocker-in-flight-conflict", "the sprint landing lane is not drained"
-        )
-    rationale = request.rationale.strip()
-    if not rationale:
-        raise CloseoutQueueError(
-            "atomic-blocker-rationale-required", "blocker acquisition requires rationale"
-        )
-    return state.model_copy(
-        update={
-            "activeBlocker": ActiveAtomicBlocker(
-                master=master_ref,
-                graphRevision=graph.revision,
-                acquiredBy=actor_identity,
-                acquiredAt=timestamp,
-                rationale=rationale,
-            )
-        }
-    )
-
-
-def _require_unsealed_blocker_series(master: Any) -> WorktreeContract:
-    path = series_contract_path(master.path.parent)
-    try:
-        return require_series_path_accepting_leaves(
-            path,
-            operation="atomic blocker acquisition",
-        )
-    except RuntimeError as exc:
-        raise CloseoutQueueError(
-            "atomic-blocker-series-sealed",
-            str(exc),
-        ) from exc
-
-
-def _release_blocker(
-    graph: _GraphContext,
-    state: CloseoutQueueState,
-    request: CloseoutQueueRequest,
-    config: McpRuntimeConfig,
-) -> CloseoutQueueState:
-    if state.activeBlocker is None:
-        raise CloseoutQueueError("atomic-blocker-not-active", "no atomic blocker is active")
-    asserted = _task_ref(request.blocker_master_ref, "blocker_master_ref")
-    if asserted != state.activeBlocker.master:
-        raise CloseoutQueueError(
-            "atomic-blocker-owner-mismatch",
-            f"active blocker belongs to {state.activeBlocker.master.key}",
-        )
-    if any(candidate.owningMaster == asserted for candidate in state.candidates.values()):
-        raise CloseoutQueueError(
-            "atomic-blocker-candidates-remain",
-            "the atomic master still has declared or lifecycle-owned candidates",
-        )
-    master = graph.masters.get(asserted)
-    if master is None or master.document.status != "Completed":
-        raise CloseoutQueueError(
-            "atomic-blocker-master-incomplete",
-            "normal blocker release requires the canonical atomic master completion edge",
-        )
-    require_atomic_master_landed(
-        master,
-        atomic_master_landing_authority(config, graph.sprint),
-    )
-    if not request.rationale.strip():
-        raise CloseoutQueueError(
-            "atomic-blocker-rationale-required", "blocker release requires rationale"
-        )
-    return state.model_copy(update={"activeBlocker": None})
-
-
-def _abort_blocker(
-    graph: _GraphContext, state: CloseoutQueueState, request: CloseoutQueueRequest
-) -> CloseoutQueueState:
-    if state.activeBlocker is None:
-        raise CloseoutQueueError("atomic-blocker-not-active", "no atomic blocker is active")
-    asserted = _task_ref(request.blocker_master_ref, "blocker_master_ref")
-    if asserted != state.activeBlocker.master:
-        raise CloseoutQueueError(
-            "atomic-blocker-owner-mismatch",
-            f"active blocker belongs to {state.activeBlocker.master.key}",
-        )
-    if any(candidate.owningMaster == asserted for candidate in state.candidates.values()):
-        raise CloseoutQueueError(
-            "atomic-blocker-candidates-remain",
-            "withdraw or finish every atomic candidate before recording an abort",
-        )
-    canonical_blocker_abort(
-        request.blocker_judgment_id,
-        authority=graph.grade_authority,
-        master_ref=asserted,
-        graph_revision=graph.revision,
-    )
-    return state.model_copy(update={"activeBlocker": None})
-
-
 def _projection(
     topology: TaskDocumentTopology,
     graph: _GraphContext,
@@ -630,6 +614,7 @@ def _projection(
 ) -> dict[str, Any]:
     groups = _project_candidates(topology, graph, state, actor)
     total = sum(len(items) for items in groups.values())
+    lane_owner = _active_lane_owner(state)
     return {
         "ok": True,
         "operation": "closeout_queue",
@@ -643,6 +628,12 @@ def _projection(
         "sprintTaskDocumentRef": graph.sprint.ref.model_dump(mode="json"),
         "revision": state.revision,
         "graphRevision": graph.revision,
+        "mode": "dag",
+        "registers": register_section_facts(graph.sprint),
+        "laneOwner": lane_owner.key if lane_owner is not None else None,
+        "acquisitionFacts": (
+            acquisition_facts(graph, state) if action == "acquire-blocker" else None
+        ),
         "leafPlacementFacts": list(graph.leaf_facts),
         "activeBlocker": state.activeBlocker.model_dump(mode="json")
         if state.activeBlocker
@@ -1004,6 +995,8 @@ def _common_candidate_blockers(
 def _source_and_ledger_blockers(
     candidate: CloseoutCandidateRecord, contract: WorktreeContract
 ) -> list[str]:
+    """Stale-base blockers; each names its recovery (L13-R2: sync first, then retry)."""
+
     blockers: list[str] = []
     lineage = lineage_refusal(source_lineage_for_contract(contract))
     if lineage is not None:
@@ -1012,7 +1005,7 @@ def _source_and_ledger_blockers(
         branch_commit(contract.code_repo_path, contract.code_source_branch)
         != candidate.codeBaseCommit
     ):
-        blockers.append("code-source-moved")
+        blockers.append("code-source-moved: run worktree_sync, then retry")
     if contract.memory_mode != "external":
         return blockers
     if contract.memory_repo_path is None or candidate.memoryBaseCommit is None:
@@ -1022,9 +1015,9 @@ def _source_and_ledger_blockers(
         branch_commit(contract.memory_repo_path, contract.memory_source_branch)
         != candidate.memoryBaseCommit
     ):
-        blockers.append("memory-source-moved")
+        blockers.append("memory-source-moved: run worktree_sync, then retry")
     if ledger_mapping(contract) != candidate.ledgerMemoryCommit:
-        blockers.append("ledger-base-mapping-changed")
+        blockers.append("ledger-base-mapping-changed: run worktree_sync, then retry")
     return blockers
 
 
@@ -1068,7 +1061,7 @@ def _waiting_reasons(
     if active_blocker is not None and active_blocker.graphRevision != graph.revision:
         reasons.append("atomic-blocker-graph-revision-stale")
     elif active_blocker is not None and active_blocker.master != candidate.owningMaster:
-        reasons.append(f"atomic-blocker-held-by: {active_blocker.master.key}")
+        reasons.append(_blocker_held_reason(active_blocker, lane_owner))
     elif (
         master is not None
         and master.document.executionNature == "atomic"
@@ -1082,12 +1075,32 @@ def _waiting_reasons(
     return reasons
 
 
+def _blocker_held_reason(
+    active_blocker: ActiveAtomicBlocker, lane_owner: TaskDocumentRef | None
+) -> str:
+    """The blocker-held fact plus the identity of the lane candidate it owns (L13-R3)."""
+
+    reason = f"atomic-blocker-held-by: {active_blocker.master.key}"
+    if lane_owner is not None and _candidate_master_ref(lane_owner) == active_blocker.master:
+        reason = f"{reason} (owner candidate: {lane_owner.key})"
+    return reason
+
+
+def _candidate_master_ref(candidate_ref: TaskDocumentRef) -> TaskDocumentRef:
+    """The canonical master ref of a leaf candidate ref (the owning directory)."""
+
+    return TaskDocumentRef(
+        repository=candidate_ref.repository,
+        path=f"{Path(candidate_ref.path).parent.as_posix()}/task.json",
+    )
+
+
 def _active_lane_owner(state: CloseoutQueueState) -> TaskDocumentRef | None:
     return next(
         (
             candidate.taskDocumentRef
             for candidate in state.candidates.values()
-            if candidate.state != "declared"
+            if candidate.state in LANE_OCCUPYING_STATES
         ),
         None,
     )
@@ -1126,22 +1139,8 @@ def _admission(raw: CandidateAdmissionFacts | None) -> CandidateAdmissionFacts:
         raise CloseoutQueueError("closeout-admission-invalid", str(exc)) from exc
 
 
-def _task_ref(
-    raw: TaskDocumentRef | dict[str, Any] | None,
-    label: str,
-) -> TaskDocumentRef:
-    if raw is None:
-        raise CloseoutQueueError("closeout-queue-reference-required", f"{label} is required")
-    if isinstance(raw, TaskDocumentRef):
-        return raw
-    try:
-        return TaskDocumentRef.model_validate(raw)
-    except ValidationError as exc:
-        raise CloseoutQueueError("closeout-queue-reference-invalid", f"{label}: {exc}") from exc
-
-
 def _required_candidate_ref(request: CloseoutQueueRequest) -> TaskDocumentRef:
-    return _task_ref(request.candidate_task_document_ref, "candidate_task_document_ref")
+    return queue_task_ref(request.candidate_task_document_ref, "candidate_task_document_ref")
 
 
 def _candidate_or_error(

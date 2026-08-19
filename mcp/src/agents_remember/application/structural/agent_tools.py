@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -54,11 +55,13 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.worktrees.integration_branch_authority import repository_default_branch
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
 )
 from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
+from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
@@ -422,17 +425,18 @@ def _manager_series_bootstrap_refusal(
         topology = TaskDocumentTopology(config.coordination_root)
         if topology.altitude(resolved.ref) != "master":
             raise ValueError("manager dispatch requires a canonical master task document")
-        if resolved.document.executionNature == "organizational":
-            return None
-        if resolved.document.executionNature != "atomic":
-            raise ValueError("manager dispatch requires executionNature organizational or atomic")
-        repo = require_repo(config, resolved.ref.repository)
         parent_ref = topology.parent(resolved.ref)
-        if parent_ref is None:
+        parent = topology.resolve(parent_ref) if parent_ref is not None else None
+        nature = effective_execution_nature(
+            resolved.document, parent.document if parent is not None else None
+        )
+        if nature == "organizational":
+            return None
+        repo = require_repo(config, resolved.ref.repository)
+        if parent is None:
             parent_task_name = ""
             protected_branch = repository_default_branch(repo.path)
         else:
-            parent = topology.resolve(parent_ref)
             if not parent.document.integrationBranch:
                 raise ValueError(
                     f"commanding sprint {parent.ref.path} does not declare integrationBranch; "
@@ -444,7 +448,7 @@ def _manager_series_bootstrap_refusal(
                 )
             parent_task_name = parent.path.parent.name
             protected_branch = parent.document.integrationBranch
-        ensure_master_series_contract(
+        series = ensure_master_series_contract(
             MasterSeriesContractSpec(
                 coordination_root=config.coordination_root,
                 repo_name=repo.repo_id,
@@ -456,6 +460,17 @@ def _manager_series_bootstrap_refusal(
                 protected_branch=protected_branch,
             )
         )
+        if isinstance(series, WorktreeCommandResult):
+            # Blocked bootstrap (e.g. the atomic-sequential lane is owned): surface the
+            # ordering payload — it names the lane owner and the legal next operations.
+            return StructuralOutcome(
+                "dispatch_agent",
+                False,
+                str(series.payload.get("state", "series-bootstrap-blocked")),
+                resolved.ref,
+                "manager",
+                json.dumps(series.payload, sort_keys=True, default=str),
+            )
     except (AuthorityError, OSError, RuntimeError, TaskDocumentRefError, ValueError) as exc:
         return StructuralOutcome(
             "dispatch_agent",

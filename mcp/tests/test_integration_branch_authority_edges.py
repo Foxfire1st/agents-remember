@@ -311,6 +311,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     protected_branch="super",
                 )
             )
+            assert isinstance(contract, WorktreeContract)
             self.assertEqual(
                 _git(fixture.code_repo, "rev-parse", "refs/heads/ar/atomic-three"), base
             )

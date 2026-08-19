@@ -92,7 +92,7 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "recommend **yes**",
             "Never dispatch the strategist without the developer's yes",
             "Resolve this before step 1 above",
-            "migrate_execution_topology",
+            "author_execution_graph",
             "An organizational master has no branch",
             "recommend skipping only when a ruled plan is complete",
         )

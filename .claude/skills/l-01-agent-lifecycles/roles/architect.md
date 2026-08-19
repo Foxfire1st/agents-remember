@@ -60,8 +60,9 @@ via chat context:
 2. **Attach it through one coherent topology edit:** add the master's slug to the sprint's
    top-level `orchestrates` list and add its exact task-document reference to `executionGraph` in
    the same previewed task-document change. Membership and graph nodes must remain an exact set;
-   a partial `orchestrates` edit is invalid. `task_doc.migrate_execution_topology` is the explicit
-   one-time path for a legacy sprint that lacks the fields, not a routine fallback.
+   a partial `orchestrates` edit is invalid. `task_doc.author_execution_graph` owns graph edits,
+   including the first bootstrap onto a graph-less sprint (which otherwise runs the
+   atomic-sequential default).
 3. **Log both sides:** a decision-log entry on the sprint doc (master added, why, developer
    ruling) and one on the master doc (joined sprint X).
 4. **Propose the strategist fit-check — a question, not a dispatch.** Per the spool-up rule,

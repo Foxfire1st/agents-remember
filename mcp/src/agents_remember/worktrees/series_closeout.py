@@ -12,7 +12,11 @@ from agents_remember.controlplane.integration_authority_lock import integration_
 from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import completion_blockers
-from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
+from agents_remember.tasks.document_refs import (
+    ResolvedTaskDocument,
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
 from agents_remember.worktrees.closeout_queue import (
     CloseoutQueueError,
     _graph_context,
@@ -28,6 +32,7 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     worktree_dirty,
 )
+from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -88,6 +93,11 @@ def _publish_atomic_series_edge(
             return publication()
 
     if sprint_ref is None:
+        return repository_publication()
+    sprint = topology.resolve(sprint_ref)
+    if sprint.document.executionGraph is None:
+        # Atomic-sequential default (L13-R1): no queue graph exists; the master
+        # already owns the sequential lane through its live series contract.
         return repository_publication()
     graph = _graph_context(topology, sprint_ref)
     initial = _initial_state(sprint_ref, graph.revision, now_iso())
@@ -378,7 +388,19 @@ def _require_atomic_master_complete(
     master_ref: TaskDocumentRef,
 ) -> ResolvedTaskDocument:
     master = topology.resolve(master_ref)
-    if master.document.executionNature != "atomic":
+    sprint_ref = topology.parent(master_ref)
+    sprint = topology.resolve(sprint_ref) if sprint_ref is not None else None
+    try:
+        # L13-R5a: the effective nature — a nature-less legacy master executes
+        # atomically under the default and closes out without migration.
+        nature = effective_execution_nature(
+            master.document, sprint.document if sprint is not None else None
+        )
+    except TaskDocumentRefError as exc:
+        raise CloseoutQueueError(
+            "atomic-series-closeout-task-invalid", f"{exc.status}: {exc}"
+        ) from exc
+    if nature != "atomic":
         raise CloseoutQueueError(
             "atomic-series-closeout-task-invalid",
             "series closeout requires the canonical atomic master task",

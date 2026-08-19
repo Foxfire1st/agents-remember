@@ -42,7 +42,9 @@ commanded master's `executionNature`.
    if it succeeds.
 6. **Adoption is explicit.** The strategist writes this draft but does not edit task docs. The
    orchestrator adopts it through previewed `task_doc` operations and records the architect ruling.
-   `task_doc.migrate_execution_topology` is a finite legacy cutover, not a runtime fallback.
+   A sprint adopted without an `executionGraph` runs the atomic-sequential default;
+   `task_doc.author_execution_graph` bootstraps or edits the graph — it is never a runtime
+   fallback.
 7. **Review before adoption.** Run `../criteria/plan-review.md`; revisions append round sections
    rather than erasing history. The artifact remains standing scope after adoption.
 

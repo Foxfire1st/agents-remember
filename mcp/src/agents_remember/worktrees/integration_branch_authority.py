@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument
+from agents_remember.tasks import MasterExecutionNature, TaskDocument
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
@@ -35,6 +35,11 @@ from agents_remember.worktrees.modules.git import (
     branch_exists,
     current_branch,
     repository_identity,
+)
+from agents_remember.worktrees.scheduling_mode import (
+    TERMINAL_SERIES_CLEANUP,
+    commanded_sprint_masters,
+    effective_execution_nature,
 )
 from agents_remember.worktrees.task_resolver import (
     iter_leaf_enclosure_contracts,
@@ -539,18 +544,18 @@ def _integration_surfaces(
     for sprint in masters:
         if not sprint.document.orchestrates:
             continue
-        try:
-            commanded = topology.validate_execution_topology(sprint.ref, overrides=overrides)
-        except TaskDocumentRefError as exc:
-            raise RuntimeError(
-                f"cannot resolve integration-branch authority: {exc.status}: {exc}"
-            ) from exc
         branch = sprint.document.integrationBranch
         if not branch:
             raise RuntimeError(
                 f"integration-branch authority requires {sprint.ref.key} to declare "
                 "integrationBranch"
             )
+        try:
+            commanded = commanded_sprint_masters(topology, sprint, overrides=overrides)
+        except TaskDocumentRefError as exc:
+            raise RuntimeError(
+                f"cannot resolve integration-branch authority: {exc.status}: {exc}"
+            ) from exc
         commanded_refs.update(master.ref for master in commanded)
         surfaces.extend(
             _surface(
@@ -562,15 +567,29 @@ def _integration_surfaces(
             for side in scope.sides
         )
         for master in commanded:
-            surfaces.extend(_master_integration_surfaces(scope, master, branch))
+            surfaces.extend(
+                _master_integration_surfaces(
+                    scope,
+                    master,
+                    branch,
+                    nature=effective_execution_nature(master.document, sprint.document),
+                )
+            )
     for master in masters:
         if (
             master.ref in commanded_refs
             or master.document.orchestrates
-            or master.document.executionNature != "atomic"
+            or effective_execution_nature(master.document, None) != "atomic"
         ):
             continue
-        surfaces.extend(_master_integration_surfaces(scope, master, None))
+        surfaces.extend(
+            _master_integration_surfaces(
+                scope,
+                master,
+                None,
+                nature=effective_execution_nature(master.document, None),
+            )
+        )
     return _deduplicated(surfaces)
 
 
@@ -686,7 +705,13 @@ def _require_no_live_leaf_collisions(
                 f"{contract.contract_path}"
             )
         _require_live_leaf_workbench_unprotected(contract, candidate_keys)
-        _require_live_leaf_source_authority(contract, master, sprint_ref, candidate)
+        # The effective nature (L13-R1): under the atomic-sequential default even an
+        # organizational-declared master lands through its atomic series lane.
+        nature = effective_execution_nature(
+            master.document,
+            topology.resolve(sprint_ref).document if sprint_ref is not None else None,
+        )
+        _require_live_leaf_source_authority(contract, master, sprint_ref, candidate, nature)
         for side in _repository_sides(contract):
             source_key = _branch_key(side, side.source_branch)
             if source_key in current_keys and source_key not in candidate_keys:
@@ -719,7 +744,7 @@ def _publication_master_authority(
     for sprint in masters:
         if not sprint.document.orchestrates:
             continue
-        for master in topology.validate_execution_topology(sprint.ref, overrides=overrides):
+        for master in commanded_sprint_masters(topology, sprint, overrides=overrides):
             existing = authority.get(master.ref)
             if existing is not None and existing[1] != sprint.ref:
                 raise RuntimeError(
@@ -730,7 +755,7 @@ def _publication_master_authority(
     for master in masters:
         if master.ref in commanded or master.document.orchestrates:
             continue
-        if master.document.executionNature == "atomic":
+        if effective_execution_nature(master.document, None) == "atomic":
             authority[master.ref] = (master, None)
     return authority
 
@@ -796,11 +821,10 @@ def _require_live_leaf_source_authority(
     master: ResolvedTaskDocument,
     sprint_ref: TaskDocumentRef | None,
     candidate: tuple[IntegrationSurface, ...],
+    nature: MasterExecutionNature,
 ) -> None:
     expected_kind: IntegrationSurfaceKind = (
-        "sprint-super"
-        if master.document.executionNature == "organizational"
-        else "atomic-integration"
+        "sprint-super" if nature == "organizational" else "atomic-integration"
     )
     expected_owner = (
         sprint_ref.key
@@ -839,21 +863,18 @@ def _master_integration_surfaces(
     scope: _BranchScope,
     master: ResolvedTaskDocument,
     super_branch: str | None,
+    *,
+    nature: MasterExecutionNature,
 ) -> list[IntegrationSurface]:
     path = series_contract_path(master.path.parent)
     expected = f"ar/{slugify(master.path.parent.name)}"
-    if master.document.executionNature == "organizational":
-        if path.is_file() and _load_series(path).cleanup != "completed":
+    if nature == "organizational":
+        if path.is_file() and _load_series(path).cleanup not in TERMINAL_SERIES_CLEANUP:
             raise RuntimeError(
                 f"organizational master {master.ref.key} retains a live series contract; "
-                "complete the explicit topology cutover before ordinary work starts"
+                "retire it with worktree_cleanup or worktree_abandon before ordinary work starts"
             )
         return []
-    if master.document.executionNature != "atomic":
-        raise RuntimeError(
-            f"commanded master {master.ref.key} has unsupported executionNature "
-            f"{master.document.executionNature!r}"
-        )
     if not path.is_file():
         return [
             _surface(
@@ -882,10 +903,17 @@ def _master_authority(scope: _BranchScope) -> _MasterAuthority:
             f"cannot resolve integration-branch authority: {exc.status}: {exc}"
         ) from exc
     if sprint_ref is None:
-        return _MasterAuthority(topology, master_ref, None, None, master.document.executionNature)
+        return _MasterAuthority(
+            topology,
+            master_ref,
+            None,
+            None,
+            effective_execution_nature(master.document, None),
+        )
     try:
         sprint = topology.resolve(sprint_ref)
-        topology.validate_execution_topology(sprint_ref)
+        if sprint.document.executionGraph is not None:
+            topology.validate_execution_topology(sprint_ref)
     except TaskDocumentRefError as exc:
         raise RuntimeError(
             f"cannot resolve integration-branch authority: {exc.status}: {exc}"
@@ -900,7 +928,7 @@ def _master_authority(scope: _BranchScope) -> _MasterAuthority:
         master_ref,
         sprint_ref,
         branch,
-        master.document.executionNature,
+        effective_execution_nature(master.document, sprint.document),
     )
 
 

@@ -187,7 +187,7 @@ class StartAuthorityCoverageTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(start_contract, "TaskDocumentTopology", return_value=topology),
-                self.assertRaisesRegex(RuntimeError, "only an explicit atomic master"),
+                self.assertRaisesRegex(RuntimeError, "only an effective atomic master"),
             ):
                 start_contract._declared_integration_source_branch(
                     context, fixture.leaf_contract.task_root
@@ -229,10 +229,10 @@ class StartAuthorityCoverageTests(unittest.TestCase):
                 )
 
             task_root = fixture.leaf_contract.task_root
-            for nature, reason in (
-                ("organizational", "must not carry"),
-                ("invalid", "explicit atomic master"),
-                ("atomic", "would equal the integration branch"),
+            graph_sprint = SimpleNamespace(executionGraph=SimpleNamespace(nodes=[]))
+            for nature, sprint, reason in (
+                ("organizational", graph_sprint, "must not carry"),
+                ("atomic", None, "would equal the integration branch"),
             ):
                 with (
                     self.subTest(nature=nature),
@@ -241,6 +241,11 @@ class StartAuthorityCoverageTests(unittest.TestCase):
                     ),
                     mock.patch.object(
                         start_contract, "_master_execution_nature", return_value=nature
+                    ),
+                    mock.patch.object(
+                        start_contract,
+                        "_commanding_sprint_document",
+                        return_value=sprint,
                     ),
                     self.assertRaisesRegex(RuntimeError, reason),
                 ):

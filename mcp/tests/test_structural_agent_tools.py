@@ -512,6 +512,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         self.assertTrue(start_contract_mod._master_series_bootstrap_record_path(spec).is_file())
 
         contract = ensure_master_series_contract(spec)
+        assert isinstance(contract, WorktreeContract)
         self.assertEqual(contract.code_source_branch, "ar/super")
         self.assertTrue(contract_path.is_file())
         self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
@@ -552,6 +553,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         self.assertTrue(start_contract_mod._master_series_bootstrap_record_path(spec).is_file())
 
         contract = ensure_master_series_contract(spec)
+        assert isinstance(contract, WorktreeContract)
         self.assertTrue(branch_exists(memory_repo, "ar/master"))
         self.assertTrue(contract.contract_path.is_file())
         self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
@@ -593,6 +595,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         fresh_memory = branch_commit(memory_repo, "ar/super")
 
         contract = ensure_master_series_contract(spec)
+        assert isinstance(contract, WorktreeContract)
 
         self.assertEqual(branch_commit(code_repo, "ar/master"), fresh_code)
         self.assertEqual(branch_commit(memory_repo, "ar/master"), fresh_memory)
@@ -632,6 +635,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
 
         contract = ensure_master_series_contract(spec, dry_run=True)
+        assert isinstance(contract, WorktreeContract)
 
         self.assertEqual(contract.code_work_branch, "ar/master")
         self.assertFalse(branch_exists(code_repo, "ar/master"))
@@ -655,6 +659,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         self.assertTrue(start_contract_mod._master_series_bootstrap_record_path(spec).is_file())
 
         contract = ensure_master_series_contract(spec)
+        assert isinstance(contract, WorktreeContract)
         self.assertTrue(contract.contract_path.is_file())
         self.assertFalse(start_contract_mod._master_series_bootstrap_record_path(spec).exists())
 
@@ -662,6 +667,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         code_repo, memory_repo = self._series_bootstrap_repositories()
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
         contract = ensure_master_series_contract(spec)
+        assert isinstance(contract, WorktreeContract)
 
         with self.assertRaisesRegex(RuntimeError, "does not match the sprint integrationBranch"):
             ensure_master_series_contract(replace(spec, protected_branch="main"))
@@ -681,6 +687,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         code_repo, memory_repo = self._series_bootstrap_repositories()
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
         contract = ensure_master_series_contract(spec)
+        assert isinstance(contract, WorktreeContract)
         sibling_code = self.root / "sibling-code"
         sibling_memory = self.root / "sibling-memory"
         for repo, sibling in ((code_repo, sibling_code), (memory_repo, sibling_memory)):
@@ -700,6 +707,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         )
         start_contract_mod.write_contract(contract.contract_path, sibling_contract)
         adopted = ensure_master_series_contract(spec)
+        assert isinstance(adopted, WorktreeContract)
         self.assertEqual(adopted.code_repo_path, sibling_code)
         self.assertEqual(adopted.code_worktree, sibling_code)
         self.assertEqual(adopted.memory_repo_path, sibling_memory)
@@ -796,6 +804,7 @@ class StructuralAgentToolTests(unittest.TestCase):
 
         self.assertEqual(writes, 1)
         self.assertEqual(first_contract, second_contract)
+        assert isinstance(first_contract, WorktreeContract)
         self.assertTrue(first_contract.contract_path.is_file())
         for repo in (code_repo, memory_repo):
             branches = subprocess.run(

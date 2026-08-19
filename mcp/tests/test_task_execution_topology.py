@@ -32,6 +32,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.snapshots_impl._task_documents import read_task_documents
 from agents_remember.tasks import (
+    Section,
     SprintExecutionGraph,
     TaskDocument,
     read_task_doc,
@@ -95,6 +96,20 @@ def _graph(*, reverse: bool = False) -> dict[str, Any]:
             }
         ],
     }
+
+
+_JUDGMENT_HEADER = (
+    "| Judgment id | Kind (dependency meaning, execution nature, blast radius, priority, "
+    "blocker placement, reprioritization, or leaf move) | Subject | Decision | Rationale | "
+    "Evidence/fact refs | Author | Confidence | Supersedes |"
+)
+
+
+def _judgment_row(judgment_id: str, author: str = "strategist") -> str:
+    return (
+        f"| {judgment_id} | execution nature | graph | nature=ruled | Explicit graph ruling. | "
+        f"notes.md | {author} | high | |"
+    )
 
 
 class ExecutionGraphSchemaTests(unittest.TestCase):
@@ -374,29 +389,62 @@ class ExecutionTopologyTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def _write_legacy(self) -> None:
+    def _write_legacy(self, *, register: bool = True) -> None:
+        sections = (
+            [
+                Section(
+                    kind="freeform",
+                    heading="Judgment Register (canonical judgment authority)",
+                    body="\n".join(
+                        [
+                            _JUDGMENT_HEADER,
+                            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                            _judgment_row("J-nature-a"),
+                            _judgment_row("J-nature-b"),
+                            _judgment_row("J-edge"),
+                        ]
+                    ),
+                )
+            ]
+            if register
+            else []
+        )
         write_task_doc(
             self.tasks / "sprint",
             _master(identity="SPRINT", orchestrates=["master-a", "master-b"]).model_copy(
-                update={"integrationBranch": "super"}
+                update={"integrationBranch": "super", "sections": sections}
             ),
         )
         write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
         write_task_doc(self.tasks / "master-b", _master(identity="MASTER-B"))
 
-    def _migration_fields(self) -> dict[str, Any]:
+    def _bootstrap_fields(self) -> dict[str, Any]:
+        """The first-batch mutations that author a graph onto a graph-less sprint (L13)."""
+
         return {
-            "masters": [
+            "mutations": [
+                {"op": "add_node", "ref": MASTER_A.model_dump()},
+                {"op": "add_node", "ref": MASTER_B.model_dump()},
                 {
-                    "taskDocumentRef": MASTER_A.model_dump(),
+                    "op": "set_nature",
+                    "ref": MASTER_A.model_dump(),
                     "executionNature": "organizational",
+                    "judgmentId": "J-nature-a",
                 },
                 {
-                    "taskDocumentRef": MASTER_B.model_dump(),
+                    "op": "set_nature",
+                    "ref": MASTER_B.model_dump(),
                     "executionNature": "atomic",
+                    "judgmentId": "J-nature-b",
                 },
-            ],
-            "executionGraph": _graph(),
+                {
+                    "op": "add_edge",
+                    "predecessor": MASTER_A.model_dump(),
+                    "successor": MASTER_B.model_dump(),
+                    "reason": "Shared contract must land first.",
+                    "judgmentId": "J-edge",
+                },
+            ]
         }
 
     def _task_doc(
@@ -415,12 +463,12 @@ class ExecutionTopologyTests(unittest.TestCase):
             dry_run=dry_run,
         )
 
-    def _migrate(self, *, dry_run: bool = False) -> dict[str, Any]:
+    def _bootstrap(self, *, dry_run: bool = False) -> dict[str, Any]:
         return task_doc_tool(
             self.cfg,
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
-            operation="migrate_execution_topology",
-            edit=TaskDocEdit(fields=self._migration_fields()),
+            operation="author_execution_graph",
+            edit=TaskDocEdit(fields=self._bootstrap_fields()),
             dry_run=dry_run,
         )
 
@@ -430,13 +478,18 @@ class ExecutionTopologyTests(unittest.TestCase):
             self.topology.validate_execution_topology(SPRINT)
         self.assertEqual(raised.exception.status, "task-execution-topology-migration-required")
 
-        with self.assertRaisesRegex(TaskDocError, "migration-required"):
-            task_doc_tool(
-                self.cfg,
-                TaskDocTarget(repo_id=REPOSITORY, task_name="master-a"),
-                operation="set_field",
-                edit=TaskDocEdit(fields={"executionNature": "organizational"}),
-            )
+        # L13-R7: a nature-less legacy master under the atomic-sequential default
+        # takes an explicit nature write without any migration dead-end.
+        task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id=REPOSITORY, task_name="master-a"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"executionNature": "organizational"}),
+        )
+        self.assertEqual(
+            read_task_doc(self.tasks / "master-a" / "task.json").executionNature,
+            "organizational",
+        )
 
     def test_topology_refuses_a_non_sprint_and_confines_override_identity(self) -> None:
         write_task_doc(
@@ -606,37 +659,26 @@ class ExecutionTopologyTests(unittest.TestCase):
         with self.assertRaisesRegex(TaskDocError, "cannot remove its execution topology"):
             self._task_doc("sprint", "replace", fields=downgraded_sprint)
 
-    def test_migration_previews_then_atomically_publishes_graph_natures_render_and_projection(
+    def test_bootstrap_previews_then_atomically_publishes_graph_natures_render_and_projection(
         self,
     ) -> None:
         self._write_legacy()
         before = {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()}
-        preview = self._migrate(dry_run=True)
-        self.assertEqual(preview["state"], "would-migrate")
+        preview = self._bootstrap(dry_run=True)
+        self.assertEqual(preview["state"], "would-author")
+        self.assertEqual(preview["bootstrapped"], True)
         self.assertEqual(len(preview["documents"]), 3)
         self.assertEqual(
             preview["executionWaves"], [[MASTER_A.model_dump()], [MASTER_B.model_dump()]]
-        )
-        self.assertEqual(
-            preview["migratedMasters"],
-            [
-                {
-                    "taskDocumentRef": MASTER_A.model_dump(),
-                    "executionNature": "organizational",
-                },
-                {
-                    "taskDocumentRef": MASTER_B.model_dump(),
-                    "executionNature": "atomic",
-                },
-            ],
         )
         self.assertEqual(
             before,
             {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()},
         )
 
-        applied = self._migrate()
-        self.assertEqual(applied["state"], "migrated")
+        applied = self._bootstrap()
+        self.assertEqual(applied["state"], "authored")
+        self.assertEqual(applied["bootstrapped"], True)
         sprint = read_task_doc(self.tasks / "sprint" / "task.json")
         master_a = read_task_doc(self.tasks / "master-a" / "task.json")
         master_b = read_task_doc(self.tasks / "master-b" / "task.json")
@@ -688,7 +730,7 @@ class ExecutionTopologyTests(unittest.TestCase):
                         "predecessor": {"ref": MASTER_A.model_dump(), "leafId": None},
                         "successor": {"ref": MASTER_B.model_dump(), "leafId": None},
                         "reason": "Shared contract must land first.",
-                        "judgmentId": None,
+                        "judgmentId": "J-edge",
                     }
                 ],
             },
@@ -696,7 +738,7 @@ class ExecutionTopologyTests(unittest.TestCase):
 
     def test_execution_waves_validates_and_returns_one_pinned_sprint_snapshot(self) -> None:
         self._write_legacy()
-        self._migrate()
+        self._bootstrap()
         sprint_path = self.tasks / "sprint" / "task.json"
         real_read = task_document_refs.read_task_doc
         sprint_reads = 0
@@ -720,37 +762,40 @@ class ExecutionTopologyTests(unittest.TestCase):
             self.assertEqual(self.topology.execution_waves(SPRINT), [[MASTER_A], [MASTER_B]])
         self.assertGreaterEqual(sprint_reads, 2)
 
-    def test_migration_authors_lump_nodes_only(self) -> None:
+    def test_bootstrap_refuses_a_segment_node_on_an_atomic_master(self) -> None:
         self._write_legacy()
-        fields = self._migration_fields()
-        fields["executionGraph"] = {
-            "nodes": [
-                {"kind": "segment", "ref": MASTER_A.model_dump(), "leafIds": ["L1"]},
-                MASTER_B.model_dump(),
-            ],
-            "edges": [],
+        fields = self._bootstrap_fields()
+        fields["mutations"][1] = {
+            "op": "add_node",
+            "ref": MASTER_B.model_dump(),
+            "kind": "segment",
+            "leafIds": ["L1"],
+            "judgmentId": "J-edge",
         }
         with self.assertRaisesRegex(TaskDocError, "lump nodes only"):
             task_doc_tool(
                 self.cfg,
                 TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
-                operation="migrate_execution_topology",
+                operation="author_execution_graph",
                 edit=TaskDocEdit(fields=fields),
             )
 
-    def test_migration_refuses_non_exact_membership_and_rolls_back_cross_root_failure(self) -> None:
+    def test_bootstrap_refuses_non_exact_membership_and_rolls_back_cross_root_failure(
+        self,
+    ) -> None:
         self._write_legacy()
-        incomplete = self._migration_fields()
-        incomplete["masters"] = incomplete["masters"][:1]
-        incomplete["executionGraph"] = {
-            "nodes": [MASTER_A.model_dump()],
-            "edges": [],
-        }
+        incomplete = self._bootstrap_fields()
+        incomplete["mutations"] = [
+            mutation
+            for mutation in incomplete["mutations"]
+            if mutation.get("ref") != MASTER_B.model_dump()
+            and mutation.get("successor") != MASTER_B.model_dump()
+        ]
         with self.assertRaisesRegex(TaskDocError, "membership must exactly match"):
             task_doc_tool(
                 self.cfg,
                 TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
-                operation="migrate_execution_topology",
+                operation="author_execution_graph",
                 edit=TaskDocEdit(fields=incomplete),
             )
 
@@ -773,7 +818,7 @@ class ExecutionTopologyTests(unittest.TestCase):
             mock.patch.object(task_store, "atomic_write_text", side_effect=fail_third_write),
             self.assertRaisesRegex(OSError, "forced cross-root"),
         ):
-            self._migrate()
+            self._bootstrap()
         self.assertEqual(
             before,
             {
@@ -786,47 +831,12 @@ class ExecutionTopologyTests(unittest.TestCase):
         self.assertFalse(state_path.exists())
         self.assertFalse(pending_path.exists())
 
-    def test_migration_refuses_invalid_request_shapes_before_reading_or_writing(self) -> None:
+    def test_bootstrap_refuses_invalid_request_shapes_before_reading_or_writing(self) -> None:
         self._write_legacy()
         invalid_requests = (
-            (
-                "at least 1 item",
-                {"masters": [], "executionGraph": _graph()},
-            ),
-            (
-                "must be unique",
-                {
-                    "masters": [
-                        {
-                            "taskDocumentRef": MASTER_A.model_dump(),
-                            "executionNature": "organizational",
-                        },
-                        {
-                            "taskDocumentRef": MASTER_A.model_dump(),
-                            "executionNature": "atomic",
-                        },
-                    ],
-                    "executionGraph": {
-                        "nodes": [MASTER_A.model_dump()],
-                        "edges": [],
-                    },
-                },
-            ),
-            (
-                "must exactly match",
-                {
-                    "masters": [
-                        {
-                            "taskDocumentRef": MASTER_A.model_dump(),
-                            "executionNature": "organizational",
-                        }
-                    ],
-                    "executionGraph": {
-                        "nodes": [MASTER_B.model_dump()],
-                        "edges": [],
-                    },
-                },
-            ),
+            ("mutations", {}),
+            ("at least 1 item", {"mutations": []}),
+            ("mutations", {"mutations": [{"op": "explode"}]}),
         )
         before = {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()}
         for expected, fields in invalid_requests:
@@ -834,7 +844,7 @@ class ExecutionTopologyTests(unittest.TestCase):
                 task_doc_tool(
                     self.cfg,
                     TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
-                    operation="migrate_execution_topology",
+                    operation="author_execution_graph",
                     edit=TaskDocEdit(fields=fields),
                 )
         self.assertEqual(
@@ -842,28 +852,31 @@ class ExecutionTopologyTests(unittest.TestCase):
             {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()},
         )
 
-    def test_migration_refuses_missing_or_non_sprint_target(self) -> None:
+    def test_bootstrap_refuses_missing_or_non_sprint_target(self) -> None:
         with self.assertRaisesRegex(TaskDocError, "task document not found"):
-            self._migrate()
+            self._bootstrap()
 
         write_task_doc(self.tasks / "sprint", _master(identity="SPRINT"))
         with self.assertRaisesRegex(TaskDocError, "requires an orchestration sprint"):
-            self._migrate()
+            self._bootstrap()
 
-    def test_migration_refuses_unresolved_or_non_master_entries(self) -> None:
+    def test_bootstrap_refuses_unresolved_or_non_master_entries(self) -> None:
         self._write_legacy()
-        missing_fields = self._migration_fields()
-        missing_fields["masters"][1]["taskDocumentRef"] = MASTER_C.model_dump()
-        missing_fields["executionGraph"] = {
-            "nodes": [MASTER_A.model_dump(), MASTER_C.model_dump()],
-            "edges": [],
-        }
-        with self.assertRaisesRegex(TaskDocError, "does not exist"):
+        fields = self._bootstrap_fields()
+        fields["mutations"].append(
+            {
+                "op": "set_nature",
+                "ref": MASTER_C.model_dump(),
+                "executionNature": "atomic",
+                "judgmentId": "J-edge",
+            }
+        )
+        with self.assertRaisesRegex(TaskDocError, "is not commanded by the sprint"):
             task_doc_tool(
                 self.cfg,
                 TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
-                operation="migrate_execution_topology",
-                edit=TaskDocEdit(fields=missing_fields),
+                operation="author_execution_graph",
+                edit=TaskDocEdit(fields=fields),
             )
 
         write_task_doc(
@@ -880,8 +893,8 @@ class ExecutionTopologyTests(unittest.TestCase):
                 }
             ),
         )
-        with self.assertRaisesRegex(TaskDocError, "not a commanded master"):
-            self._migrate()
+        with self.assertRaisesRegex(TaskDocError, "is not commanded by the sprint"):
+            self._bootstrap()
 
     def test_regular_master_edit_refuses_a_task_root_outside_the_repository(self) -> None:
         outside_contract = self.coord / "outside" / "series-contract.md"
@@ -903,7 +916,7 @@ class ExecutionTopologyTests(unittest.TestCase):
         self.assertFalse((outside_contract.parent / "task.json").exists())
         self.assertFalse((outside_contract.parent / "task.md").exists())
 
-    def test_migration_normalizes_an_out_of_root_sprint_to_task_doc_error(self) -> None:
+    def test_bootstrap_normalizes_an_out_of_root_sprint_to_task_doc_error(self) -> None:
         outside = self.coord / "outside"
         write_task_doc(
             outside,
@@ -916,8 +929,8 @@ class ExecutionTopologyTests(unittest.TestCase):
                     repo_id=REPOSITORY,
                     contract_path=(outside / "series-contract.md").as_posix(),
                 ),
-                operation="migrate_execution_topology",
-                edit=TaskDocEdit(fields=self._migration_fields()),
+                operation="author_execution_graph",
+                edit=TaskDocEdit(fields=self._bootstrap_fields()),
             )
 
 

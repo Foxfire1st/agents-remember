@@ -137,7 +137,7 @@ class IntegrationBranchAuthorityBootstrapEdgeTests(unittest.TestCase):
                     "_publish_master_series_contract",
                     side_effect=reclassify_master,
                 ),
-                self.assertRaisesRegex(RuntimeError, "executionNature='atomic'"),
+                self.assertRaisesRegex(RuntimeError, "effective atomic master nature"),
             ):
                 start_contract.ensure_master_series_contract(spec)
 

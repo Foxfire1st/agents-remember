@@ -215,11 +215,11 @@ class IntegrationBranchAuthorityRemainderTests(unittest.TestCase):
         master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
         sprint_one = SimpleNamespace(
             ref=TaskDocumentRef(repository="repo", path="s1/task.json"),
-            document=SimpleNamespace(orchestrates=["master"]),
+            document=SimpleNamespace(orchestrates=["master"], executionGraph={"nodes": []}),
         )
         sprint_two = SimpleNamespace(
             ref=TaskDocumentRef(repository="repo", path="s2/task.json"),
-            document=SimpleNamespace(orchestrates=["master"]),
+            document=SimpleNamespace(orchestrates=["master"], executionGraph={"nodes": []}),
         )
         master = SimpleNamespace(ref=master_ref)
         topology = SimpleNamespace(validate_execution_topology=lambda *_args, **_kwargs: (master,))
@@ -267,8 +267,14 @@ class IntegrationBranchAuthorityRemainderTests(unittest.TestCase):
             path=Path("/coordination/tasks/repo/master/task.json"),
             document=SimpleNamespace(executionNature=None),
         )
-        with self.assertRaisesRegex(RuntimeError, "unsupported executionNature"):
-            authority._master_integration_surfaces(scope, cast(Any, master), "super")
+        # L13: the caller computes the effective nature; a nature-less legacy master
+        # is atomic by default and no longer refuses surface resolution.
+        self.assertEqual(
+            authority._master_integration_surfaces(
+                scope, cast(Any, master), "super", nature="atomic"
+            ),
+            [],
+        )
 
         sprint_ref = TaskDocumentRef(repository="repo", path="sprint/task.json")
         topology = SimpleNamespace(
@@ -277,7 +283,10 @@ class IntegrationBranchAuthorityRemainderTests(unittest.TestCase):
                 master
                 if ref == master_ref
                 else SimpleNamespace(
-                    ref=sprint_ref, document=SimpleNamespace(integrationBranch="super")
+                    ref=sprint_ref,
+                    document=SimpleNamespace(
+                        integrationBranch="super", executionGraph={"nodes": []}
+                    ),
                 )
             ),
             parent=lambda _ref: sprint_ref,
@@ -295,7 +304,10 @@ class IntegrationBranchAuthorityRemainderTests(unittest.TestCase):
         topology.resolve = lambda ref: (
             master
             if ref == master_ref
-            else SimpleNamespace(ref=sprint_ref, document=SimpleNamespace(integrationBranch=None))
+            else SimpleNamespace(
+                ref=sprint_ref,
+                document=SimpleNamespace(integrationBranch=None, executionGraph={"nodes": []}),
+            )
         )
         with (
             mock.patch.object(authority, "TaskDocumentTopology", return_value=topology),
@@ -414,7 +426,7 @@ class QueueLifecycleRemainderTests(unittest.TestCase):
                 mock.patch.object(
                     closeout_queue_lifecycle, "TaskDocumentTopology", return_value=topology
                 ),
-                self.assertRaisesRegex(RuntimeError, "executionNature='atomic'"),
+                self.assertRaisesRegex(RuntimeError, "effective atomic master nature"),
             ):
                 closeout_queue_lifecycle._atomic_series_terminal_publication(
                     fixture.master_contract, lambda: None
@@ -441,7 +453,7 @@ class QueueLifecycleRemainderTests(unittest.TestCase):
             topology = SimpleNamespace(
                 canonical_ref=lambda *_args: master_ref,
                 resolve=lambda _ref: SimpleNamespace(
-                    document=SimpleNamespace(executionNature="atomic")
+                    document=SimpleNamespace(executionNature="atomic", executionGraph={"nodes": []})
                 ),
                 parent=lambda _ref: sprint_ref,
             )
@@ -700,9 +712,10 @@ class BootstrapRemainderTests(unittest.TestCase):
                 return_value=SimpleNamespace(kind="master", executionNature=None),
             ),
             mock.patch.object(Path, "is_file", return_value=True),
-            self.assertRaisesRegex(RuntimeError, "requires executionNature"),
         ):
-            start_contract._master_execution_nature(Path("/task"))
+            # L13-R5e: a nature-less master is legal legacy state; the declared
+            # cell reads None and the atomic-sequential default decides later.
+            assert start_contract._master_execution_nature(Path("/task")) is None
 
         spec = start_contract.MasterSeriesContractSpec(
             Path("/coordination"),
@@ -730,13 +743,14 @@ class BootstrapRemainderTests(unittest.TestCase):
 
         sprint_ref = TaskDocumentRef(repository="repo", path="sprint/task.json")
         sprint = SimpleNamespace(
-            ref=sprint_ref, document=SimpleNamespace(integrationBranch="feature")
+            ref=sprint_ref,
+            document=SimpleNamespace(integrationBranch="feature", executionGraph={"nodes": []}),
         )
         commanded = SimpleNamespace(
             canonical_ref=lambda *_args: master_ref,
             resolve=lambda ref: master if ref == master_ref else sprint,
             parent=lambda _ref: sprint_ref,
-            validate_execution_topology=lambda _ref: (),
+            validate_execution_topology=lambda _ref, **_kwargs: (),
         )
         with (
             mock.patch.object(start_contract, "TaskDocumentTopology", return_value=commanded),

@@ -13,6 +13,7 @@ from agents_remember.models.closeout_queue import (
     MAX_CLOSEOUT_GRAPH_EDGES,
     MAX_CLOSEOUT_MASTERS,
     CloseoutQueueCandidateView,
+    CloseoutQueueState,
     SchedulingGrade,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -30,6 +31,31 @@ from agents_remember.tasks.document_refs import (
 
 from .closeout_queue_errors import CloseoutQueueError
 from .closeout_queue_evidence import PRIORITY_RANK, GradeAuthority, planning_authorities
+
+
+def acquisition_facts(graph: QueueGraphContext, state: CloseoutQueueState) -> dict[str, Any]:
+    """In-flight organizational leafs observed at blocker acquisition (L13-R3).
+
+    Facts only — they inform the strategist/orchestrator start-anyway judgment; the
+    mechanism never decides from them. In-flight means the candidate holds or held
+    the landing lane past plain declaration.
+    """
+
+    in_flight = sorted(
+        (
+            {
+                "candidate": candidate.taskDocumentRef.key,
+                "owningMaster": candidate.owningMaster.key,
+                "state": candidate.state,
+            }
+            for candidate in state.candidates.values()
+            if candidate.state != "declared"
+            and (master := graph.masters.get(candidate.owningMaster)) is not None
+            and master.document.executionNature == "organizational"
+        ),
+        key=lambda row: row["candidate"],
+    )
+    return {"inFlightOrganizationalLeafs": in_flight}
 
 
 @dataclass(frozen=True)
@@ -50,8 +76,18 @@ class QueueGraphContext:
     grade_authority: GradeAuthority
 
 
-def graph_context(topology: TaskDocumentTopology, sprint_ref: TaskDocumentRef) -> QueueGraphContext:
-    """Resolve, validate, cap, and index one sprint execution graph."""
+def graph_context(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    *,
+    strict_registers: bool = True,
+) -> QueueGraphContext:
+    """Resolve, validate, cap, and index one sprint execution graph.
+
+    ``strict_registers`` guards mutations: a malformed canonical planning register
+    refuses with the repair named. Read paths (L13-R4) pass ``False`` so a malformed
+    register degrades the projection instead of failing it.
+    """
 
     try:
         sprint = topology.resolve(sprint_ref)
@@ -60,7 +96,10 @@ def graph_context(topology: TaskDocumentTopology, sprint_ref: TaskDocumentRef) -
     graph = sprint.document.executionGraph
     if graph is None:
         raise CloseoutQueueError(
-            "task-execution-topology-migration-required", "sprint has no executionGraph"
+            "task-execution-topology-migration-required",
+            "sprint has no executionGraph; the sprint runs atomic-sequentially by default "
+            "(masters land one at a time through the series lane), or bootstrap a graph "
+            "with task_doc.author_execution_graph",
         )
     if len(graph.nodes) > MAX_CLOSEOUT_MASTERS:
         raise CloseoutQueueError(
@@ -100,7 +139,14 @@ def graph_context(topology: TaskDocumentTopology, sprint_ref: TaskDocumentRef) -
     ).hexdigest()
     completed = {ref for ref, master in master_map.items() if master.document.status == "Completed"}
     leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, completed)
-    judgments, priorities = planning_authorities(sprint)
+    try:
+        judgments, priorities = planning_authorities(sprint, strict=strict_registers)
+    except CloseoutQueueError as exc:
+        raise CloseoutQueueError(
+            exc.status,
+            f"{exc}; recovery: repair the sprint's canonical register section with "
+            "task_doc.set_section (the register shape is validated at write time)",
+        ) from exc
     return QueueGraphContext(
         sprint,
         graph,

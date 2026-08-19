@@ -130,13 +130,109 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
     def _snapshot(self) -> dict[Path, bytes]:
         return {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()}
 
-    def test_authoring_requires_a_migrated_sprint(self) -> None:
+    def test_graph_less_sprint_bootstraps_on_first_add_node_batch(self) -> None:
+        # L13: no migrate prerequisite — the first add_node batch creates the graph,
+        # and set_nature mutations in the same batch cover nature-less masters.
+        sections = [
+            Section(
+                kind="freeform",
+                heading=JUDGMENT_HEADING,
+                body=_judgment_register(
+                    [
+                        _judgment_row("J-nature-a"),
+                        _judgment_row("J-nature-b"),
+                    ]
+                ),
+            )
+        ]
         write_task_doc(
             self.tasks / "sprint",
-            _master(identity="SPRINT", orchestrates=["master-a"]),
+            _master(identity="SPRINT", orchestrates=["master-a", "master-b"]).model_copy(
+                update={"integrationBranch": "super", "sections": sections}
+            ),
         )
-        with self.assertRaisesRegex(TaskDocError, "migrate_execution_topology first"):
-            self._author([{"op": "remove_node", "ref": MASTER_A.model_dump()}])
+        write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
+        write_task_doc(self.tasks / "master-b", _master(identity="MASTER-B"))
+
+        result = self._author(
+            [
+                {"op": "add_node", "ref": MASTER_A.model_dump()},
+                {"op": "add_node", "ref": MASTER_B.model_dump()},
+                {
+                    "op": "set_nature",
+                    "ref": MASTER_A.model_dump(),
+                    "executionNature": "organizational",
+                    "judgmentId": "J-nature-a",
+                },
+                {
+                    "op": "set_nature",
+                    "ref": MASTER_B.model_dump(),
+                    "executionNature": "atomic",
+                    "judgmentId": "J-nature-b",
+                },
+            ]
+        )
+        self.assertEqual(result["state"], "authored")
+        self.assertEqual(result["bootstrapped"], True)
+        sprint = read_task_doc(self.tasks / "sprint" / "task.json")
+        assert sprint.executionGraph is not None
+        self.assertEqual(
+            [node.ref for node in sprint.executionGraph.nodes],
+            [MASTER_A, MASTER_B],
+        )
+        self.assertEqual(
+            read_task_doc(self.tasks / "master-a" / "task.json").executionNature,
+            "organizational",
+        )
+        self.assertEqual(
+            read_task_doc(self.tasks / "master-b" / "task.json").executionNature,
+            "atomic",
+        )
+
+    def test_bootstrap_requires_exact_membership_and_natures(self) -> None:
+        sections = [
+            Section(
+                kind="freeform",
+                heading=JUDGMENT_HEADING,
+                body=_judgment_register([_judgment_row("J-nature-a")]),
+            )
+        ]
+        write_task_doc(
+            self.tasks / "sprint",
+            _master(identity="SPRINT", orchestrates=["master-a", "master-b"]).model_copy(
+                update={"integrationBranch": "super", "sections": sections}
+            ),
+        )
+        write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
+        write_task_doc(self.tasks / "master-b", _master(identity="MASTER-B"))
+
+        # Missing the master-b node: the candidate graph does not cover orchestrates.
+        with self.assertRaisesRegex(TaskDocError, "membership must exactly match"):
+            self._author(
+                [
+                    {"op": "add_node", "ref": MASTER_A.model_dump()},
+                    {
+                        "op": "set_nature",
+                        "ref": MASTER_A.model_dump(),
+                        "executionNature": "organizational",
+                        "judgmentId": "J-nature-a",
+                    },
+                ]
+            )
+        # Missing the master-b nature: exact membership, but a nature-less master remains.
+        with self.assertRaisesRegex(TaskDocError, "has no executionNature"):
+            self._author(
+                [
+                    {"op": "add_node", "ref": MASTER_A.model_dump()},
+                    {"op": "add_node", "ref": MASTER_B.model_dump()},
+                    {
+                        "op": "set_nature",
+                        "ref": MASTER_A.model_dump(),
+                        "executionNature": "organizational",
+                        "judgmentId": "J-nature-a",
+                    },
+                ]
+            )
 
     def test_judgment_provenance_is_enforced(self) -> None:
         self._write_fixture()
@@ -487,6 +583,9 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
         self.assertIn("author_execution_graph", VALID_OPERATIONS)
         source = Path(registration_tasks.__file__).read_text(encoding="utf-8")
         self.assertIn("'author_execution_graph'", source)
+        # L13-R5f: the finite migration operation is removed; authoring bootstraps.
+        self.assertNotIn("migrate_execution_topology", VALID_OPERATIONS)
+        self.assertNotIn("migrate_execution_topology", source)
 
     def test_blank_mutation_judgment_id_is_refused(self) -> None:
         self._write_fixture()

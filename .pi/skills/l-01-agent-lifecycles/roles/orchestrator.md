@@ -232,8 +232,10 @@ the design: run the bulwark check against the portfolio and the past before disp
   task doc carrying a top-level `orchestrates` list naming the master tasks it commands — the
   dashboard derives the orchestration > master > leaf hierarchy (and the rank insignia) from that
   field. `orchestrates`, `executionGraph.nodes`, and the classified master set must agree exactly;
-  adoption uses previewed task-document operations, with `migrate_execution_topology` reserved for
-  an explicit legacy cutover.
+  adoption uses previewed task-document operations. A sprint without an `executionGraph` runs the
+  atomic-sequential default (one master fully integrates before the next starts);
+  `task_doc.author_execution_graph` bootstraps a graph onto it (first `add_node` batch) and edits
+  one incrementally afterwards.
 - **Gate:** the portfolio plan gate — one wholesale architect/developer review of the reshaped
   portfolio + the orchestration task (sprint scope + DAG + dispatch order). **No git surface** —
   not even the super branch exists yet.

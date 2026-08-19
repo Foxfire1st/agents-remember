@@ -18,6 +18,7 @@ from agents_remember.models.closeout_queue import (
     SchedulingGradeInput,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -27,6 +28,10 @@ PRIORITY_RANK = {"critical": 0, "high": 1, "normal": 2, "low": 3}
 MAX_CURATOR_SOURCE_CANDIDATES = 2048
 JUDGMENT_REGISTER_SECTION = "judgment register (canonical judgment authority)"
 PRIORITY_REGISTER_SECTION = "priority register (explicit judgment)"
+# Display headings used when the registers are scaffolded into a sprint document;
+# the parser matches case-insensitively against the section constants above.
+JUDGMENT_REGISTER_HEADING = "Judgment Register (canonical judgment authority)"
+PRIORITY_REGISTER_HEADING = "Priority Register (explicit judgment)"
 JUDGMENT_REGISTER_HEADER = (
     "Judgment id",
     "Kind (dependency meaning, execution nature, blast radius, priority, blocker placement, "
@@ -405,19 +410,105 @@ def _require_matching_judgment(
 
 
 def planning_authorities(
-    sprint: ResolvedTaskDocument,
+    sprint: ResolvedTaskDocument, *, strict: bool = True
 ) -> tuple[dict[str, JudgmentAuthority], dict[str, PriorityAuthority]]:
-    """Parse the exact canonical Judgment and Priority Register tables once per projection."""
+    """Parse the exact canonical Judgment and Priority Register tables once per projection.
+
+    Strict mode (mutations) raises on a malformed register. The read path (L13-R4)
+    parses tolerantly: a malformed register is skipped so the projection still
+    reports, and ``register_section_facts`` carries the malformed detail.
+    """
 
     judgments: dict[str, JudgmentAuthority] = {}
     priorities: dict[str, PriorityAuthority] = {}
     for section in sprint.document.sections:
         heading = section.heading.strip().casefold()
-        if heading == JUDGMENT_REGISTER_SECTION:
-            _append_judgments(judgments, section.body)
-        elif heading == PRIORITY_REGISTER_SECTION:
-            _append_priorities(priorities, section.body)
+        try:
+            if heading == JUDGMENT_REGISTER_SECTION:
+                _append_judgments(judgments, section.body)
+            elif heading == PRIORITY_REGISTER_SECTION:
+                _append_priorities(priorities, section.body)
+        except CloseoutQueueError:
+            if strict:
+                raise
     return judgments, priorities
+
+
+def register_section_facts(sprint: ResolvedTaskDocument) -> dict[str, str]:
+    """Per-register read facts — ``absent``, ``ok``, or ``malformed: <detail>`` (L13-R4).
+
+    Read-only and never raises: an absent or malformed register is a fact about the
+    sprint document, not a read failure.
+    """
+
+    facts: dict[str, str] = {}
+    registers: tuple[tuple[str, str, Any], ...] = (
+        ("judgmentRegister", JUDGMENT_REGISTER_SECTION, _append_judgments),
+        ("priorityRegister", PRIORITY_REGISTER_SECTION, _append_priorities),
+    )
+    for key, register_heading, parser in registers:
+        bodies = [
+            section.body
+            for section in sprint.document.sections
+            if section.heading.strip().casefold() == register_heading
+        ]
+        if not bodies:
+            facts[key] = "absent"
+            continue
+        try:
+            for body in bodies:
+                parser({}, body)
+        except CloseoutQueueError as exc:
+            facts[key] = f"malformed: {exc}"
+        else:
+            facts[key] = "ok"
+    return facts
+
+
+def require_register_sections_valid(document: TaskDocument) -> None:
+    """Write-time gate (L13-R6): a register-heading section must parse strictly.
+
+    Applied by task_doc create/replace/set_section so the canonical registers can
+    never become malformed through a task-document write; read paths stay tolerant.
+    """
+
+    for section in document.sections:
+        heading = section.heading.strip().casefold()
+        try:
+            if heading == JUDGMENT_REGISTER_SECTION:
+                _append_judgments({}, section.body)
+            elif heading == PRIORITY_REGISTER_SECTION:
+                _append_priorities({}, section.body)
+        except CloseoutQueueError as exc:
+            raise CloseoutQueueError(
+                "closeout-grade-register-shape-invalid",
+                f"section {section.heading!r} must keep the canonical register shape: {exc}",
+            ) from exc
+
+
+def empty_register_table(header: tuple[str, ...]) -> str:
+    """The canonical header plus separator rows of a register with no entries yet."""
+
+    row = "| " + " | ".join(header) + " |"
+    separator = "| " + " | ".join("---" for _ in header) + " |"
+    return f"{row}\n{separator}"
+
+
+def register_scaffold_sections() -> list[dict[str, str]]:
+    """The empty canonical planning registers scaffolded at sprint creation (L13-R6)."""
+
+    return [
+        {
+            "kind": "freeform",
+            "heading": JUDGMENT_REGISTER_HEADING,
+            "body": empty_register_table(JUDGMENT_REGISTER_HEADER),
+        },
+        {
+            "kind": "freeform",
+            "heading": PRIORITY_REGISTER_HEADING,
+            "body": empty_register_table(PRIORITY_REGISTER_HEADER),
+        },
+    ]
 
 
 def _append_judgments(target: dict[str, JudgmentAuthority], body: str) -> None:

@@ -265,9 +265,9 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             if item["taskDocumentRef"] == LEAF_A2.model_dump()
         )
         self.assertIn("source-lineage-stale", blocked["reasons"])
-        self.assertIn("code-source-moved", blocked["reasons"])
-        self.assertIn("memory-source-moved", blocked["reasons"])
-        self.assertNotIn("ledger-base-mapping-changed", blocked["reasons"])
+        moved = {item.split(":")[0] for item in blocked["reasons"]}
+        self.assertTrue({"code-source-moved", "memory-source-moved"} <= moved)
+        self.assertNotIn("ledger-base-mapping-changed", moved)
         self.assertEqual(blocked["candidateState"], "declared")
         code_tip = git(second.code_repo_path, "rev-parse", second.code_source_branch)
         assert second.memory_repo_path is not None

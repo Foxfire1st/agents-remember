@@ -52,6 +52,7 @@ from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
+    WorktreeContract,
     contract_to_text,
     default_contract,
     default_series_contract,
@@ -952,7 +953,9 @@ class ParentSeriesContractTests(unittest.TestCase):
                 self._context(root, code_repo), self._args(), "internal"
             )
 
-            assert contract is not None
+            # A lane-blocked start returns a WorktreeCommandResult payload instead;
+            # these tests exercise the unblocked path and assert the contract.
+            assert isinstance(contract, WorktreeContract)
             self.assertEqual(contract.kind, "series")
             self.assertEqual(contract.task_name, self.TASK)
             self.assertEqual(contract.code_source_branch, "super")
@@ -976,7 +979,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                 self._context(root, code_repo), self._args(dry_run=True), "internal"
             )
 
-            assert contract is not None
+            assert isinstance(contract, WorktreeContract)
             self.assertEqual(contract.code_work_branch, f"ar/{self.TASK}")
             self.assertNotIn(f"ar/{self.TASK}", self._branches(code_repo))
             self.assertFalse(series_contract_path(task_root).exists())
@@ -1013,7 +1016,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                 self._context(root, code_repo), self._args(), "external"
             )
 
-            assert contract is not None
+            assert isinstance(contract, WorktreeContract)
             self.assertEqual(contract.memory_repo_path, memory_repo)
             self.assertEqual(contract.memory_source_branch, "super")
             self.assertEqual(contract.memory_work_branch, f"ar/{self.TASK}")
@@ -1048,7 +1051,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                 self._context(root, code_repo), self._args(), "internal"
             )
 
-            assert contract is not None
+            assert isinstance(contract, WorktreeContract)
             self.assertEqual(contract.kind, "series")
             self.assertEqual(contract.code_work_branch, f"ar/{self.TASK}")
             # Adoption must not touch the repo: the recorded branch is not invented.

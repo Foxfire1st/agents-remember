@@ -20,8 +20,6 @@ from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.closeout_queue import (
     CloseoutQueueError,
     QueueActor,
-    _abort_blocker,
-    _acquire_blocker,
     _ActionContext,
     _active_lane_owner,
     _admission,
@@ -43,16 +41,20 @@ from agents_remember.worktrees.closeout_queue import (
     _lifecycle_operation_legal,
     _owned_lifecycle_operation,
     _queue_action,
-    _release_blocker,
     _release_selection,
     _request_fingerprint,
     _required_candidate_ref,
-    _task_ref,
     closeout_queue_tool,
+)
+from agents_remember.worktrees.closeout_queue_blocker import (
+    _abort_blocker,
+    _acquire_blocker,
+    _release_blocker,
 )
 from agents_remember.worktrees.closeout_queue_candidate_evidence import (
     operation_owner_fingerprint,
 )
+from agents_remember.worktrees.closeout_queue_errors import queue_task_ref
 from test_closeout_queue import (
     LEAF_A,
     MASTER_A,
@@ -446,7 +448,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
         )
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.require_source_bases_current",
+                "agents_remember.worktrees.closeout_queue_blocker.require_source_bases_current",
                 side_effect=CloseoutQueueError(
                     "closeout-candidate-code-source-moved", "code source moved"
                 ),
@@ -498,12 +500,14 @@ class CloseoutQueueActionTests(unittest.TestCase):
         release = valid.model_copy(update={"action": "release-blocker"})
         blank_release = release.model_copy(update={"rationale": " "})
         with (
-            mock.patch("agents_remember.worktrees.closeout_queue.require_atomic_master_landed"),
+            mock.patch(
+                "agents_remember.worktrees.closeout_queue_blocker.require_atomic_master_landed"
+            ),
             self.assertRaisesRegex(CloseoutQueueError, "rationale-required"),
         ):
             _release_blocker(completed_graph, held, blank_release, fixture.cfg)
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue.require_atomic_master_landed"
+            "agents_remember.worktrees.closeout_queue_blocker.require_atomic_master_landed"
         ) as landing_check:
             self.assertIsNone(
                 _release_blocker(completed_graph, held, release, fixture.cfg).activeBlocker
@@ -519,7 +523,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             blocker_judgment_id="ABORT-1",
         )
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue.canonical_blocker_abort"
+            "agents_remember.worktrees.closeout_queue_blocker.canonical_blocker_abort"
         ) as abort_check:
             self.assertIsNone(_abort_blocker(graph, held, abort).activeBlocker)
         abort_check.assert_called_once_with(
@@ -662,12 +666,12 @@ class CloseoutQueueActionTests(unittest.TestCase):
                 self.assertIsNone(owned(changed))
 
     def test_small_helpers_refuse_invalid_refs_actions_and_candidates(self) -> None:
-        self.assertEqual(_task_ref(LEAF_A, "leaf"), LEAF_A)
-        self.assertEqual(_task_ref(LEAF_A.model_dump(), "leaf"), LEAF_A)
+        self.assertEqual(queue_task_ref(LEAF_A, "leaf"), LEAF_A)
+        self.assertEqual(queue_task_ref(LEAF_A.model_dump(), "leaf"), LEAF_A)
         with self.assertRaisesRegex(CloseoutQueueError, "is required"):
-            _task_ref(None, "leaf")
+            queue_task_ref(None, "leaf")
         with self.assertRaisesRegex(CloseoutQueueError, "reference-invalid"):
-            _task_ref({"repository": "repo-a", "path": "../bad"}, "leaf")
+            queue_task_ref({"repository": "repo-a", "path": "../bad"}, "leaf")
         with self.assertRaisesRegex(CloseoutQueueError, "is required"):
             _required_candidate_ref(
                 CloseoutQueueRequest.model_construct(candidate_task_document_ref=None)

@@ -134,7 +134,12 @@ def route_review_blockers(contract: WorktreeContract, expected: RouteReviewFact)
 
 
 def require_source_bases_current(contract: WorktreeContract) -> None:
-    """Require both transitive ancestry and the exact immediate source heads."""
+    """Require both transitive ancestry and the exact immediate source heads.
+
+    Sync-first admission (L13-R2): a candidate whose recorded base pair no longer
+    equals the current source tips is refused with ``worktree_sync`` named as the
+    recovery.
+    """
 
     try:
         require_current_source_lineage(contract, operation="closeout queue declaration")
@@ -145,7 +150,8 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
         != contract.code_base_commit
     ):
         raise CloseoutQueueError(
-            "closeout-candidate-code-source-moved", "code source moved after leaf start"
+            "closeout-candidate-code-source-moved",
+            "code source moved after leaf start; run worktree_sync, then retry",
         )
     if contract.memory_mode == "external":
         if contract.memory_repo_path is None or not contract.memory_base_commit:
@@ -157,7 +163,8 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
             != contract.memory_base_commit
         ):
             raise CloseoutQueueError(
-                "closeout-candidate-memory-source-moved", "memory source moved after leaf start"
+                "closeout-candidate-memory-source-moved",
+                "memory source moved after leaf start; run worktree_sync, then retry",
             )
 
 
