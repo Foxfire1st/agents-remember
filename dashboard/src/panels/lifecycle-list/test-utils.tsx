@@ -86,6 +86,7 @@ export function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "title">)
     subTasks: [],
     sections: [],
     orchestrates: [],
+    seats: [],
     executionWaves: [],
     ...over,
   } satisfies TaskDocNode;

@@ -525,6 +525,7 @@ export interface TaskDocNode {
   references: string[];
   repository: string;
   requirements: string[];
+  seats: TaskSeatNode[];
   sections: TaskSectionNode[];
   status: string;
   steps: TaskStepNode[];
@@ -562,6 +563,13 @@ export interface TaskExecutionNode {
   ref: TaskDocumentRef;
 }
 
+export interface TaskSeatNode {
+  identity?: string;
+  label: string;
+  role: string;
+  state: string;
+}
+
 export interface TaskSectionNode {
   body: string;
   heading: string;
@@ -594,6 +602,7 @@ export interface TaskSubStepNode {
 export interface TaskSubTaskRefNode {
   file: string;
   linkedLifecycleId?: string;
+  masterRef?: TaskDocumentRef;
   name: string;
   number: string;
   scope: string;

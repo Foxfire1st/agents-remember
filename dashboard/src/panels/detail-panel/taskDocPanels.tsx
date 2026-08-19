@@ -34,7 +34,7 @@ function TaskDocBody({
   openDoc: TaskDocNode | undefined;
   sliceDocs: TaskDocNode[];
 } & PanelCallbacks) {
-  const { fullTaskDoc, analytics, taskDocumentBodyState, jump, setOpenSlug } =
+  const { fullTaskDoc, analytics, taskDocumentBodyState, jump, setOpenSlug, docPathForRef } =
     state;
   const seriesList = analytics?.series ?? [];
   if (selectedTaskDoc.kind === "master" && openDoc) {
@@ -57,6 +57,7 @@ function TaskDocBody({
         onJump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
+        docPathForRef={docPathForRef}
       />
     );
   }
@@ -207,6 +208,7 @@ export function SeriesDetailPanel({
           onJump={state.jump}
           onOpenChangeSet={onOpenChangeSet}
           onOpenNotes={onOpenNotes}
+          docPathForRef={state.docPathForRef}
         />
       )}
     </Panel>

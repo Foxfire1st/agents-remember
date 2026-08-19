@@ -2941,6 +2941,13 @@
           "title": "Requirements",
           "type": "array"
         },
+        "seats": {
+          "items": {
+            "$ref": "#/$defs/TaskSeatNode"
+          },
+          "title": "Seats",
+          "type": "array"
+        },
         "sections": {
           "items": {
             "$ref": "#/$defs/TaskSectionNode"
@@ -3121,6 +3128,43 @@
       "title": "TaskExecutionNode",
       "type": "object"
     },
+    "TaskSeatNode": {
+      "additionalProperties": false,
+      "description": "One first-class seat of an orchestration sprint (L14-R3).\n\nMirrors ``tasks.document.SprintSeat``: the sprint document owns the seat record, so seat task\ndocuments leave the sprint's task index (existing ones stay on disk as historical records).\n``identity`` is a correlatable session or catalog id — provenance for correlation, never an\nauthority source.",
+      "properties": {
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "state": {
+          "default": "planned",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "TaskSeatNode",
+      "type": "object"
+    },
     "TaskSectionNode": {
       "additionalProperties": false,
       "description": "One ordered section of a master's render plan: freeform prose or a generated block (6g).\n\nMirrors ``tasks.document.Section`` so the master overview renders its bespoke sections in order.",
@@ -3289,6 +3333,17 @@
           ],
           "default": null,
           "title": "Linkedlifecycleid"
+        },
+        "masterRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "name": {
           "title": "Name",

@@ -119,6 +119,7 @@ function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNo
     title: "Event River Readable Activity Feed",
     orchestrates: [],
     executionWaves: [],
+    seats: [],
     ...rest,
   };
 }

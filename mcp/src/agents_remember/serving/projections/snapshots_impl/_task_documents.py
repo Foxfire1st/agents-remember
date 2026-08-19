@@ -21,6 +21,7 @@ from agents_remember.observer.projection import (
     TaskDocNode,
     TaskExecutionGraphNode,
     TaskExecutionNode,
+    TaskSeatNode,
     TaskSectionNode,
     TaskStepDispositionNode,
     TaskStepNode,
@@ -358,6 +359,7 @@ def _task_doc_node(
                 status=ref.status,
                 scope=ref.scope,
                 linkedLifecycleId=_ref_lifecycle(base_dir, ref.file, lifecycle_by_dir),
+                masterRef=ref.masterRef,
             )
             for ref in doc.subTasks
         ],
@@ -369,6 +371,15 @@ def _task_doc_node(
         else [],
         masterLifecycleId=parent_lifecycle,
         orchestrates=list(doc.orchestrates),
+        seats=[
+            TaskSeatNode(
+                role=seat.role,
+                label=seat.label,
+                identity=seat.identity,
+                state=seat.state,
+            )
+            for seat in doc.seats
+        ],
         executionNature=doc.executionNature,
         executionGraph=(
             TaskExecutionGraphNode.model_validate(doc.executionGraph.model_dump(mode="json"))
@@ -396,6 +407,11 @@ def _task_doc_body_revision(doc: TaskDocument) -> str:
         "openQuestions": list(doc.openQuestions),
         "references": list(doc.references),
         "sections": [section.model_dump(mode="json") for section in doc.sections],
+        # Sprint structure (L14): the sub-task index rows (typed masterRef links included) and the
+        # first-class seats ride the always-on summary, but an OPEN reader renders the fetched body
+        # — so both join the revision and a linkage/seat edit refetches an already-open sprint doc.
+        "subTasks": [ref.model_dump(mode="json") for ref in doc.subTasks],
+        "seats": [seat.model_dump(mode="json") for seat in doc.seats],
         "executionNature": doc.executionNature,
         "executionGraph": (
             doc.executionGraph.model_dump(mode="json") if doc.executionGraph is not None else None

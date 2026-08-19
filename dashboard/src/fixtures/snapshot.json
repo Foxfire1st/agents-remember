@@ -744,6 +744,7 @@
             "kind": "freeform"
           }
         ],
+        "seats": [],
         "status": "in-progress",
         "steps": [
           {
@@ -880,12 +881,48 @@
         "references": [],
         "repository": "agents-remember",
         "requirements": [],
+        "seats": [
+          {
+            "identity": "agent-sim-orchestrator",
+            "label": "Sprint Orchestrator",
+            "role": "orchestrator",
+            "state": "active"
+          },
+          {
+            "label": "",
+            "role": "strategist",
+            "state": "planned"
+          }
+        ],
         "sections": [],
         "status": "planning",
         "steps": [],
         "stepsDone": 0,
         "stepsTotal": 0,
-        "subTasks": [],
+        "subTasks": [
+          {
+            "file": "",
+            "masterRef": {
+              "path": "sim-master-a/task.json",
+              "repository": "agents-remember"
+            },
+            "name": "parallel feature work",
+            "number": "1",
+            "scope": "",
+            "status": "inProgress"
+          },
+          {
+            "file": "",
+            "masterRef": {
+              "path": "sim-master-b/task.json",
+              "repository": "agents-remember"
+            },
+            "name": "atomic framework block",
+            "number": "2",
+            "scope": "",
+            "status": "planning"
+          }
+        ],
         "title": "dependency-aware sprint"
       },
       {
@@ -904,6 +941,7 @@
         "references": [],
         "repository": "agents-remember",
         "requirements": [],
+        "seats": [],
         "sections": [],
         "status": "planning",
         "steps": [],
@@ -928,6 +966,7 @@
         "references": [],
         "repository": "agents-remember",
         "requirements": [],
+        "seats": [],
         "sections": [],
         "status": "planning",
         "steps": [],

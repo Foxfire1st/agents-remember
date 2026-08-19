@@ -208,6 +208,7 @@ function masterDoc(): TaskDocNode {
     orchestrates: [],
     executionWaves: [],
     subTasks: [],
+    seats: [],
     sections: [],
   };
 }

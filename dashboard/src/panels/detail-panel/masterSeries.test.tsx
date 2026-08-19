@@ -1,4 +1,5 @@
 import { fireEvent, render } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DetailPanel } from "./DetailPanel";
@@ -315,6 +316,107 @@ describe("DetailPanel master series navigation (6g)", () => {
     );
     fireEvent.click(getByTestId("subtask-open-link-2")); // the "→" cross-series row
     expect(onOpenLifecycle).toHaveBeenCalledWith("LC-OTHER");
+  });
+
+  it("opens the commanded master from a sprint masterRef row, then drills to its leaf (L14-R2)", () => {
+    // The sprint → master → leaf click path: a sprint row's typed `masterRef` resolves against
+    // the full projected pool (the master lives in ANOTHER folder, never in `sliceDocs`) and the
+    // row dispatches the task-doc selection for it — the same `taskdoc:` key the Cockpit's open()
+    // passes through to `setSelectedId`.
+    const sprint = taskDoc({
+      id: "SPRINT",
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Commanding Sprint",
+      docPath: "/tasks/repo-a/sprint/task.json",
+      orchestrates: ["master"],
+      subTasks: [
+        {
+          number: "1",
+          name: "Commanded Master",
+          file: "",
+          status: "inProgress",
+          scope: "",
+          masterRef: { repository: "repo-a", path: "master/task.json" },
+        },
+      ],
+    });
+    const master = taskDoc({
+      id: "MASTER",
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Commanded Master",
+      docPath: "/tasks/repo-a/master/task.json",
+      subTasks: [
+        { number: "1", name: "Leaf one", file: "01_leaf.md", status: "planning", scope: "" },
+      ],
+    });
+    const leaf = taskDoc({
+      id: "1",
+      lifecycleId: undefined,
+      kind: "subTask",
+      title: "Leaf one",
+      docPath: "/tasks/repo-a/master/01_leaf.json",
+      objective: "Leaf objective.",
+    });
+    seedTaskDocuments([sprint, master, leaf]);
+
+    // A stateful shell standing in for the Cockpit: the row jump becomes the next selection.
+    function Shell() {
+      const [selectedId, setSelectedId] = useState<string | null>(
+        "taskdoc:/tasks/repo-a/sprint/task.json",
+      );
+      return <DetailPanel selectedId={selectedId} onOpenLifecycle={setSelectedId} />;
+    }
+    const { getAllByText, getByTestId, getByText } = render(<Shell />);
+
+    // sprint → master: the typed row renders as the "⇒" master link, not a slice or static row
+    const masterRow = getByTestId("subtask-open-master-1");
+    expect(masterRow.textContent).toContain("⇒ 1. Commanded Master");
+    fireEvent.click(masterRow);
+
+    // the master document reader renders, with its leaf rows visible
+    expect(getAllByText("Commanded Master").length).toBeGreaterThan(0);
+    const leafRow = getByTestId("subtask-open-1");
+    expect(leafRow.textContent).toContain("Leaf one");
+
+    // master → leaf: the full sprint → master → leaf drill-down
+    fireEvent.click(leafRow);
+    expect(getByText("Leaf objective.")).toBeTruthy();
+  });
+
+  it("keeps a masterRef row static when the commanded master is not projected", () => {
+    // Fallback honesty: a masterRef whose target is absent from the projected pool (bounded
+    // summary limit, another repo's docs) degrades to the row's older behavior — here, with no
+    // same-folder slice and no cross-series link, the static index row.
+    const sprint = taskDoc({
+      id: "SPRINT",
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Commanding Sprint",
+      docPath: "/tasks/repo-a/sprint/task.json",
+      orchestrates: ["missing"],
+      subTasks: [
+        {
+          number: "1",
+          name: "Unprojected Master",
+          file: "",
+          status: "planning",
+          scope: "",
+          masterRef: { repository: "repo-a", path: "missing/task.json" },
+        },
+      ],
+    });
+    seedTaskDocuments([sprint]);
+
+    const { getByTestId, queryByTestId } = render(
+      <DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />,
+    );
+
+    expect(queryByTestId("subtask-open-master-1")).toBeNull();
+    const row = getByTestId("subtask-open-1");
+    expect(row.tagName.toLowerCase()).toBe("div");
+    expect(row.textContent).toContain("1. Unprojected Master");
   });
 
   it("renders markdown in master sections (GFM table + bold), not raw", () => {

@@ -10,13 +10,14 @@ import {
   type TaskDocumentBodyState,
 } from "../../data/useTaskDocumentBody";
 import { orderedByCreation } from "../../data/taskHierarchy";
-import { qualifiedLeafKey } from "../../data/taskIdentity";
+import { qualifiedLeafKey, taskDocSelectionKey } from "../../data/taskIdentity";
 import type {
   ProviderNode,
   SubTaskRow,
   TaskCodeExampleNode,
   TaskDecisionNode,
   TaskDocNode,
+  TaskDocumentRef,
   TaskSectionNode,
   TaskStepNode,
 } from "../../types/projection";
@@ -81,6 +82,7 @@ export function TaskContent({
   onJump,
   onOpenChangeSet,
   onOpenNotes,
+  docPathForRef,
 }: {
   docs: TaskDocNode[];
   bodyState: TaskDocumentBodyState | undefined;
@@ -88,6 +90,7 @@ export function TaskContent({
   onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this task.</p>;
@@ -104,6 +107,7 @@ export function TaskContent({
         onJump={onJump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
+        docPathForRef={docPathForRef}
       />
     );
   }
@@ -131,6 +135,7 @@ export function MasterOverview({
   onJump,
   onOpenChangeSet,
   onOpenNotes,
+  docPathForRef,
 }: {
   doc: MasterDocView;
   bodyState: TaskDocumentBodyState | undefined;
@@ -139,6 +144,7 @@ export function MasterOverview({
   onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   return (
     <div className={taskdoc}>
@@ -161,7 +167,13 @@ export function MasterOverview({
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
       {doc.subTasks.length > 0 ? (
         <Section title="Sub-tasks">
-          <SubTaskIndex refs={doc.subTasks} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />
+          <SubTaskIndex
+            refs={doc.subTasks}
+            sliceDocs={sliceDocs}
+            onOpen={onOpen}
+            onJump={onJump}
+            docPathForRef={docPathForRef}
+          />
         </Section>
       ) : null}
       {doc.objective ? (
@@ -177,6 +189,7 @@ export function MasterOverview({
           sliceDocs={sliceDocs}
           onOpen={onOpen}
           onJump={onJump}
+          docPathForRef={docPathForRef}
         />
       ))}
       {/* The series' coordination notes (design records, friction ledger, reports/) —
@@ -209,12 +222,14 @@ export function MasterSection({
   sliceDocs,
   onOpen,
   onJump,
+  docPathForRef,
 }: {
   section: TaskSectionNode;
   doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   return (
     <Section title={section.heading}>
@@ -226,10 +241,50 @@ export function MasterSection({
           onOpen={onOpen}
           onJump={onJump}
           testidPrefix="subtask-mid"
+          docPathForRef={docPathForRef}
         />
       ) : null}
       {section.kind === "sharedDecisions" ? <DecisionList items={doc.decisions} /> : null}
     </Section>
+  );
+}
+
+// A sprint row carrying a typed masterRef (L14-R1): opens the commanded master document directly
+// — the sprint → master leg of the drill-down (L14-R2). Only a task-doc master's rows can carry
+// one (`SeriesSubTaskNode` has no such field), so like the cross-series link this is structurally
+// unreachable for a series rendered via `seriesAsMasterDoc`.
+function MasterRefIndexRow({
+  ref,
+  masterRef,
+  masterPath,
+  position,
+  label,
+  meta,
+  onJump,
+  testidPrefix,
+}: {
+  ref: SubTaskRow;
+  masterRef: TaskDocumentRef;
+  masterPath: string;
+  position: number;
+  label: string;
+  meta: ReactNode;
+  onJump: (id: string) => void;
+  testidPrefix: string;
+}) {
+  return (
+    <li key={subTaskKey(ref, position - 1)}>
+      <button
+        type="button"
+        className={crossButton}
+        onClick={() => onJump(taskDocSelectionKey(masterPath))}
+        data-testid={`${testidPrefix}-master-${position}`}
+        title={`open the ${masterRef.path} master document`}
+      >
+        <span>⇒ {label}</span>
+        {meta}
+      </button>
+    </li>
   );
 }
 
@@ -242,6 +297,7 @@ function SubTaskIndexRow({
   onOpen,
   onJump,
   testidPrefix,
+  docPathForRef,
 }: {
   ref: SubTaskRow;
   position: number;
@@ -249,14 +305,30 @@ function SubTaskIndexRow({
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   testidPrefix: string;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   const match = sliceForRef(sliceDocs, ref);
   const { displayNumber, displayName } = subTaskDisplay(match, ref);
   const label = `${displayNumber}. ${displayName}`;
   const meta = subTaskMeta(match, ref);
+  // masterRef first (L14-R2), then the older behaviors; an unprojected masterRef target falls through.
+  const masterRef = "masterRef" in ref ? ref.masterRef : undefined;
+  const masterPath = masterRef && docPathForRef ? docPathForRef(masterRef) : undefined;
+  if (masterRef && masterPath) {
+    return (
+      <MasterRefIndexRow
+        ref={ref}
+        masterRef={masterRef}
+        masterPath={masterPath}
+        position={position}
+        label={label}
+        meta={meta}
+        onJump={onJump}
+        testidPrefix={testidPrefix}
+      />
+    );
+  }
   // A row whose ref points at another master is a parallel/external series → jump lifecycles.
-  // Only a task-doc master's rows can cross-link: `SeriesSubTaskNode` has no such field, so
-  // this branch is structurally unreachable for a series rendered via `seriesAsMasterDoc`.
   const linkedLifecycleId = "linkedLifecycleId" in ref ? ref.linkedLifecycleId : undefined;
   if (linkedLifecycleId) {
     return (
@@ -326,12 +398,14 @@ export function SubTaskIndex({
   onOpen,
   onJump,
   testidPrefix = "subtask-open",
+  docPathForRef,
 }: {
   refs: SubTaskRow[];
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   testidPrefix?: string;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   if (refs.length === 0) {
     return <p className="muted">No sub-tasks indexed.</p>;
@@ -351,6 +425,7 @@ export function SubTaskIndex({
           onOpen={onOpen}
           onJump={onJump}
           testidPrefix={testidPrefix}
+          docPathForRef={docPathForRef}
         />
       ))}
     </ul>

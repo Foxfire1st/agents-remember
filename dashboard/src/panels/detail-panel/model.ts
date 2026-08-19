@@ -7,6 +7,8 @@ import {
   stripExt,
 } from "../../data/taskHierarchy";
 import {
+  sameTaskDocumentRef,
+  taskDocumentRefForDoc,
   taskDocsForLifecycle,
   type TaskSelection,
 } from "../../data/taskIdentity";
@@ -15,6 +17,7 @@ import type {
   SeriesNode,
   SubTaskRow,
   TaskDocNode,
+  TaskDocumentRef,
 } from "../../types/projection";
 
 export const dirName = (docPath: string): string => pathDir(docPath).split("/").filter(Boolean).pop() ?? "";
@@ -32,6 +35,16 @@ export const sliceForRef = (sliceDocs: TaskDocNode[], ref: SubTaskRow): TaskDocN
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
 export const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
+
+// The docPath a typed `masterRef` (L14-R1) points at, resolved against the FULL projected pool —
+// a sprint's commanded master lives in another folder, so `sliceDocs` can never answer this.
+// Undefined when the target is not projected (bounded summary limit, another repo's docs), which
+// is the caller's signal to fall back to the row's older behaviors.
+export const docPathForTaskRef = (
+  docs: TaskDocNode[],
+  ref: TaskDocumentRef,
+): string | undefined =>
+  docs.find((doc) => sameTaskDocumentRef(taskDocumentRefForDoc(doc), ref))?.docPath;
 
 function seriesSliceDoc(
   allDocs: TaskDocNode[],

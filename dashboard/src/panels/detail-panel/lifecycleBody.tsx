@@ -265,6 +265,7 @@ function DetailBody({
         onJump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
+        docPathForRef={state.docPathForRef}
       />
     );
   }
@@ -281,6 +282,7 @@ function DetailBody({
         onJump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
+        docPathForRef={state.docPathForRef}
       />
     );
   }
@@ -292,6 +294,7 @@ function DetailBody({
       onJump={jump}
       onOpenChangeSet={onOpenChangeSet}
       onOpenNotes={onOpenNotes}
+      docPathForRef={state.docPathForRef}
     />
   );
 }

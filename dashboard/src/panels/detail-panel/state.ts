@@ -18,7 +18,7 @@ import type {
   SeriesNode,
   TaskDocNode,
 } from '../../types/projection';
-import { displayedLeafDoc, displayedReaderDoc } from './model';
+import { displayedLeafDoc, displayedReaderDoc, docPathForTaskRef } from './model';
 
 export interface DetailPanelProps {
   selectedId: string | null;
@@ -116,6 +116,11 @@ export function useDetailPanelState({ selectedId, onOpenLifecycle, onViewTask }:
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   useEffect(() => setOpenSlug(null), [selectedId]);
   const allDocs = analytics?.taskDocuments ?? [];
+  // Sprint → master drill-down (L14-R2): resolve a sub-task row's typed masterRef against the
+  // full projected pool. The row dispatches the result through `jump(taskDocSelectionKey(...))`,
+  // exactly how the parent-series crumb already opens a task document.
+  const docPathForRef = (ref: TaskDocumentRef): string | undefined =>
+    docPathForTaskRef(allDocs, ref);
   const selection = parseTaskSelection(selectedId, lifecycles, analytics);
   const selectedTaskDoc = resolveSelectedTaskDoc(selection, allDocs);
   const lifecycleId = resolveLifecycleId(selection, selectedTaskDoc);
@@ -165,6 +170,7 @@ export function useDetailPanelState({ selectedId, onOpenLifecycle, onViewTask }:
     openSlug,
     setOpenSlug,
     allDocs,
+    docPathForRef,
     selection,
     selectedTaskDoc,
     lifecycle,

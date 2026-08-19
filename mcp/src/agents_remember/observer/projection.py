@@ -600,6 +600,27 @@ class TaskSubTaskRefNode(BaseModel):
     # it links to — the dashboard renders such a row as a "→" cross-series jump (slice 6g). Null for an
     # in-series slice row.
     linkedLifecycleId: str | None = None
+    # The typed master link (L14-R1): on an orchestration sprint, the exact commanded master document
+    # this row tracks — the dashboard opens that document directly (sprint → master drill-down). Null
+    # for an ordinary master's leaf rows and for legacy slug-only membership rows.
+    masterRef: TaskDocumentRef | None = None
+
+
+class TaskSeatNode(BaseModel):
+    """One first-class seat of an orchestration sprint (L14-R3).
+
+    Mirrors ``tasks.document.SprintSeat``: the sprint document owns the seat record, so seat task
+    documents leave the sprint's task index (existing ones stay on disk as historical records).
+    ``identity`` is a correlatable session or catalog id — provenance for correlation, never an
+    authority source.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    label: str = ""
+    identity: str | None = None
+    state: str = "planned"  # planned | active | retired
 
 
 class TaskSectionNode(BaseModel):
@@ -762,6 +783,9 @@ class TaskDocNode(BaseModel):
     # orchestration task -- the master task names it commands. The dashboard derives the
     # orchestration > master > leaf hierarchy from it; docs without the field render as before.
     orchestrates: list[str] = Field(default_factory=list)
+    # The sprint's first-class seats (L14-R3): non-empty only on an orchestration sprint master;
+    # the dashboard renders them as structure, never as seat task documents.
+    seats: list[TaskSeatNode] = Field(default_factory=list)
     # A commanded master's declared Git execution nature. None is an explicit legacy/migration
     # signal, never an organizational default.
     executionNature: MasterExecutionNature | None = None

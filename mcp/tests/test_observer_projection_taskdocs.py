@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.projection import SeriesNode, TaskDocNode
 from agents_remember.observer.reducer import AnalyticalInputs, build_analytics
 from agents_remember.serving.projections.snapshots import (
@@ -138,6 +139,90 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         by_id = {node.id: node for node in nodes}
         self.assertEqual(by_id["SPRINT-02"].orchestrates, ["260706_management-repo"])
         self.assertEqual(by_id["D"].orchestrates, [])
+
+    def test_projects_sprint_master_ref_rows_and_seats(self) -> None:
+        # L14-R2/R3: a sprint's typed masterRef rows and first-class seats ride the projection
+        # (the dashboard's sprint -> master drill-down and seat structure); ordinary rows and
+        # docs carry neither.
+        write_task_doc(
+            self.coord / "tasks" / "repo-a" / "sprint",
+            self._doc(
+                id="SPRINT",
+                slug="task",
+                kind="master",
+                title="Sprint",
+                orchestrates=["master"],
+                subTasks=[
+                    {
+                        "number": "1",
+                        "name": "Commanded master",
+                        "status": "inProgress",
+                        "masterRef": {"repository": "repo-a", "path": "master/task.json"},
+                    }
+                ],
+                seats=[
+                    {
+                        "role": "orchestrator",
+                        "label": "Orch",
+                        "identity": "agent-1",
+                        "state": "active",
+                    },
+                    {"role": "strategist"},
+                ],
+            ),
+        )
+        write_task_doc(self.coord / "tasks" / "repo-a" / "series", self._master())
+        write_task_doc(self.coord / "tasks" / "repo-a" / "demo", self._doc())
+
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+
+        by_id = {node.id: node for node in nodes}
+        sprint = by_id["SPRINT"]
+        self.assertEqual(
+            sprint.subTasks[0].masterRef,
+            TaskDocumentRef(repository="repo-a", path="master/task.json"),
+        )
+        self.assertEqual(
+            [(seat.role, seat.label, seat.identity, seat.state) for seat in sprint.seats],
+            [("orchestrator", "Orch", "agent-1", "active"), ("strategist", "", None, "planned")],
+        )
+        self.assertIsNone(by_id["series"].subTasks[0].masterRef)
+        self.assertEqual(by_id["series"].seats, [])
+        self.assertEqual(by_id["D"].seats, [])
+
+    def test_body_revision_covers_sprint_structure(self) -> None:
+        # An open reader renders the fetched body and refetches only when bodyRevision moves, so
+        # the revision must cover the sprint's seats and typed masterRef rows (L14-R2) — an
+        # already-open sprint doc would otherwise never pick up a linkage or seat edit.
+        root = self.coord / "tasks" / "repo-a" / "sprint"
+        base: dict[str, object] = {
+            "id": "SPRINT",
+            "slug": "task",
+            "kind": "master",
+            "title": "Sprint",
+            "orchestrates": ["master"],
+        }
+        write_task_doc(root, self._doc(**base))
+        first = read_task_documents(self.coord, enclosures=[], now=FRESH)[0].bodyRevision
+        write_task_doc(root, self._doc(**base, seats=[{"role": "orchestrator"}]))
+        second = read_task_documents(self.coord, enclosures=[], now=FRESH)[0].bodyRevision
+        write_task_doc(
+            root,
+            self._doc(
+                **base,
+                subTasks=[
+                    {
+                        "number": "1",
+                        "name": "Commanded master",
+                        "status": "planning",
+                        "masterRef": {"repository": "repo-a", "path": "master/task.json"},
+                    }
+                ],
+            ),
+        )
+        third = read_task_documents(self.coord, enclosures=[], now=FRESH)[0].bodyRevision
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(second, third)
 
     def test_summary_limit_never_evicts_task_root_grouping_authorities(self) -> None:
         sprint_root = self.coord / "tasks" / "repo-a" / "sprint"

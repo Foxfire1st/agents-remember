@@ -51,6 +51,7 @@ const taskDoc: TaskDocNode = {
   subTasks: [],
   sections: [],
   orchestrates: [],
+  seats: [],
   executionWaves: [],
 };
 
