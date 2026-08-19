@@ -20,12 +20,14 @@ from unittest import mock
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.worktrees import integration_branch_authority as authority
 from agents_remember.worktrees.closeout_queue_lifecycle import (
     require_atomic_series_terminal_release,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.start_contract import (
     _commanding_sprint_document,
+    _declared_integration_source_branch,
     _parent_series_contract,
 )
 from agents_remember.worktrees.modules.start_result import started_result
@@ -307,6 +309,74 @@ class LegacyNatureToleranceTests(unittest.TestCase):
         fact = result.payload["staleSeriesArtifact"]
         assert isinstance(fact, dict)
         self.assertEqual(fact["fact"], "staleSeriesArtifact")
+
+    def test_nature_less_master_series_retires_through_terminal_authority_under_default_mode(
+        self,
+    ) -> None:
+        # The graph-less sprint branch of the terminal publication: no queue graph
+        # exists, so the series retires through the repository authority alone.
+        master_ref = TaskDocumentRef(repository=REPO, path="legacy/task.json")
+        write_task_doc(self.tasks / "legacy", _master(master_ref, None))
+        write_task_doc(
+            self.tasks / "sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "SPRINT",
+                    "slug": "sprint",
+                    "title": "Sprint",
+                    "kind": "master",
+                    "status": "inProgress",
+                    "repo": REPO,
+                    "createdAt": NOW,
+                    "orchestrates": ["legacy"],
+                    "integrationBranch": "main",
+                }
+            ),
+        )
+        contract = self._series_contract(self.tasks / "legacy", "legacy")
+        require_atomic_series_terminal_release(contract)
+
+    def test_master_authority_skips_graph_validation_under_the_default_mode(self) -> None:
+        # A graph-less sprint: _master_authority reads the super branch and the
+        # effective atomic nature without a graph validation pass.
+        master_ref = TaskDocumentRef(repository=REPO, path="legacy/task.json")
+        write_task_doc(self.tasks / "legacy", _master(master_ref, None))
+        write_task_doc(
+            self.tasks / "sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "SPRINT",
+                    "slug": "sprint",
+                    "title": "Sprint",
+                    "kind": "master",
+                    "status": "inProgress",
+                    "repo": REPO,
+                    "createdAt": NOW,
+                    "orchestrates": ["legacy"],
+                    "integrationBranch": "main",
+                }
+            ),
+        )
+        scope = authority._BranchScope(self.coord, REPO, self.tasks / "legacy", ())
+        resolved = authority._master_authority(scope)
+        self.assertEqual(resolved.sprint_branch, "main")
+        self.assertEqual(resolved.execution_nature, "atomic")
+
+    def test_publication_authority_skips_a_standalone_organizational_master(self) -> None:
+        # The non-atomic arm of the standalone census: an explicit organizational
+        # standalone master claims no atomic integration surface.
+        master_ref = TaskDocumentRef(repository=REPO, path="org/task.json")
+        write_task_doc(self.tasks / "org", _master(master_ref, "organizational"))
+        masters = authority._publication_master_authority(self.topology, REPO, {})
+        self.assertNotIn(master_ref, masters)
+
+    def test_declared_source_branch_refuses_a_standalone_organizational_master(self) -> None:
+        # L13-R5e: only an effective atomic master may exist outside a sprint graph;
+        # the explicit organizational standalone refuses at the topology parent edge.
+        master_ref = TaskDocumentRef(repository=REPO, path="org/task.json")
+        write_task_doc(self.tasks / "org", _master(master_ref, "organizational"))
+        with self.assertRaisesRegex(RuntimeError, "cannot resolve one parent"):
+            _declared_integration_source_branch(self._context(), self.tasks / "org")
 
 
 if __name__ == "__main__":

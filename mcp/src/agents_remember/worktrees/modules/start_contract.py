@@ -829,15 +829,11 @@ def _declared_integration_source_branch(context, task_root: Path) -> str:
     topology = TaskDocumentTopology(context.coordination_root)
     try:
         master_ref = topology.canonical_ref(context.code_repository_name, task_root / "task.json")
-        master = topology.resolve(master_ref)
         parent_ref = topology.parent(master_ref)
         if parent_ref is None:
-            # L13-R5e: a nature-less standalone master is atomic by default; only an
-            # explicit organizational standalone master stays refused.
-            if master.document.executionNature == "organizational":
-                raise RuntimeError(
-                    "only an effective atomic master may exist outside a sprint graph"
-                )
+            # L13-R5e: a nature-less standalone master is atomic by default. An explicit
+            # organizational standalone master already refused in TaskDocumentTopology.parent
+            # (task-document-parent-missing), one frame up.
             return repository_default_branch(context.code_repository_root)
         parent = topology.resolve(parent_ref)
     except TaskDocumentRefError as exc:

@@ -172,6 +172,17 @@ class CloseoutLaneSyncFirstTests(unittest.TestCase):
             ],
         )
 
+    def test_sibling_with_current_bases_reports_no_stale_fact(self) -> None:
+        # The not-stale arm: a sibling whose recorded base pair still matches the
+        # source tips produces no stale-by-evidence row.
+        self.fixture.declare(MASTER_B)
+        topology = TaskDocumentTopology(self.fixture.coord)
+        graph = queue._graph_context(topology, SPRINT)
+        state = CloseoutQueueStore(self.fixture.coord, SPRINT).read(
+            queue._initial_state(SPRINT, graph.revision, NOW)
+        )
+        self.assertEqual(_stale_sibling_facts(state), [])
+
 
 class CloseoutLaneSerializationTests(unittest.TestCase):
     """L13-R2/R3: the landing lane serializes; refusal branches report, never swallow."""

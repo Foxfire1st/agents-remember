@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.document_refs import TaskDocumentRefError
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules import start_contract
@@ -183,11 +184,19 @@ class StartAuthorityCoverageTests(unittest.TestCase):
                     if ref == master_ref
                     else SimpleNamespace(document=SimpleNamespace(integrationBranch=""))
                 ),
-                parent=lambda ref: None if ref == master_ref else sprint_ref,
+                # An explicit organizational standalone master refuses at the topology
+                # parent edge (task-document-parent-missing), one frame down.
+                parent=lambda ref: (
+                    (_ for _ in ()).throw(
+                        TaskDocumentRefError("task-document-parent-missing", "no sprint")
+                    )
+                    if ref == master_ref
+                    else sprint_ref
+                ),
             )
             with (
                 mock.patch.object(start_contract, "TaskDocumentTopology", return_value=topology),
-                self.assertRaisesRegex(RuntimeError, "only an effective atomic master"),
+                self.assertRaisesRegex(RuntimeError, "cannot resolve the commanding sprint"),
             ):
                 start_contract._declared_integration_source_branch(
                     context, fixture.leaf_contract.task_root
