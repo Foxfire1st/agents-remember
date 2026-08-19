@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import difflib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
@@ -17,19 +25,30 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     MasterExecutionNature,
+    SprintExecutionEdge,
+    SprintExecutionEndpoint,
     SprintExecutionGraph,
+    SprintExecutionNode,
     TaskDocument,
     completion_blockers,
     json_path_for,
+    leaf_placement_facts,
     markdown_path_for,
+    numbering_drift_hints,
     read_task_doc,
     render_markdown,
+    resolve_graph_endpoint,
     write_task_doc_batch,
 )
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
     TaskDocumentTopology,
+)
+from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.closeout_queue_evidence import (
+    JUDGMENT_REGISTER_SECTION,
+    planning_authorities,
 )
 from agents_remember.worktrees.integration_branch_authority import (
     require_topology_migration_authority,
@@ -58,6 +77,11 @@ class _ExecutionTopologyMigration(BaseModel):
         refs = [entry.taskDocumentRef for entry in self.masters]
         if len(refs) != len(set(refs)):
             raise ValueError("migration master taskDocumentRef values must be unique")
+        if any(node.kind != "master" for node in self.executionGraph.nodes):
+            raise ValueError(
+                "migrate_execution_topology authors lump nodes only; "
+                "use author_execution_graph for leaf segments"
+            )
         if set(refs) != set(self.executionGraph.nodes):
             raise ValueError("migration masters must exactly match executionGraph nodes")
         return self
@@ -65,6 +89,18 @@ class _ExecutionTopologyMigration(BaseModel):
 
 @dataclass(frozen=True)
 class ExecutionTopologyMigrationRequest:
+    coordination_root: Path
+    repo_id: str
+    code_repository: Path
+    memory_repository: Path | None
+    task_root: Path
+    slug: str | None
+    fields: dict[str, Any]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class ExecutionTopologyAuthoringRequest:
     coordination_root: Path
     repo_id: str
     code_repository: Path
@@ -140,7 +176,7 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
             for entry in migration.masters
         ],
         "executionWaves": [
-            [ref.model_dump(mode="json") for ref in wave]
+            [node.model_dump(mode="json") for node in wave]
             for wave in migration.executionGraph.derived_waves()
         ],
     }
@@ -182,8 +218,538 @@ def migrate_execution_topology(request: ExecutionTopologyMigrationRequest) -> di
     return result
 
 
+class _AuthoringMutationBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("judgmentId", check_fields=False)
+    @classmethod
+    def _trim_judgment_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("mutation judgmentId must not be blank")
+        return trimmed
+
+
+class _AddNodeMutation(_AuthoringMutationBase):
+    op: Literal["add_node"]
+    ref: TaskDocumentRef
+    kind: Literal["master", "segment"] = "master"
+    leafIds: list[str] = Field(default_factory=list)
+    judgmentId: str | None = None
+
+
+class _RemoveNodeMutation(_AuthoringMutationBase):
+    op: Literal["remove_node"]
+    ref: TaskDocumentRef
+    # A leaf id sampling the segment to remove; omitted when the master has one node.
+    leafId: str | None = None
+    judgmentId: str | None = None
+
+
+class _AddEdgeMutation(_AuthoringMutationBase):
+    op: Literal["add_edge"]
+    predecessor: TaskDocumentRef | SprintExecutionEndpoint
+    successor: TaskDocumentRef | SprintExecutionEndpoint
+    reason: str
+    judgmentId: str
+
+
+class _RemoveEdgeMutation(_AuthoringMutationBase):
+    op: Literal["remove_edge"]
+    predecessor: TaskDocumentRef | SprintExecutionEndpoint
+    successor: TaskDocumentRef | SprintExecutionEndpoint
+    judgmentId: str
+
+
+class _MoveLeafMutation(_AuthoringMutationBase):
+    op: Literal["move_leaf"]
+    ref: TaskDocumentRef
+    leafId: str
+    # A leaf id sampling the target segment (segments are addressed, never named).
+    toSegment: str
+    judgmentId: str
+
+
+class _SetNatureMutation(_AuthoringMutationBase):
+    op: Literal["set_nature"]
+    ref: TaskDocumentRef
+    executionNature: MasterExecutionNature
+    judgmentId: str
+
+
+_GraphAuthoringMutation = Annotated[
+    _AddNodeMutation
+    | _RemoveNodeMutation
+    | _AddEdgeMutation
+    | _RemoveEdgeMutation
+    | _MoveLeafMutation
+    | _SetNatureMutation,
+    Field(discriminator="op"),
+]
+
+
+class _ExecutionGraphAuthoring(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mutations: list[_GraphAuthoringMutation] = Field(min_length=1)
+
+
+@dataclass
+class _GraphDraft:
+    """The mutable working copy one authoring batch mutates before final validation."""
+
+    nodes: list[SprintExecutionNode]
+    edges: list[SprintExecutionEdge]
+    natures: dict[TaskDocumentRef, MasterExecutionNature]
+
+
+@dataclass(frozen=True)
+class _AuthoringCandidate:
+    """The fully validated authoring result, ready for preview or publication."""
+
+    graph: SprintExecutionGraph
+    sprint: TaskDocument
+    overrides: dict[TaskDocumentRef, TaskDocument]
+    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]]
+    placement_facts: list[dict[str, Any]]
+
+
+def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[str, Any]:
+    """Apply one validated batch of structural mutations to a sprint executionGraph.
+
+    The incremental authoring operation (L11-R5): add/remove node, add/remove edge,
+    move leaf between segments, reclassify execution nature. Judgment-bearing
+    mutations (edges, segmentation, nature) require a judgmentId resolved against the
+    sprint's canonical Judgment Register; the mechanism never invents one. The batch
+    validates the candidate graph, cross-document membership, node-kind legality, and
+    partition completeness before anything is written; dry_run previews every affected
+    JSON/Markdown pair with rendered diff and wouldLose.
+    """
+
+    try:
+        authoring = _ExecutionGraphAuthoring.model_validate(request.fields)
+    except ValidationError as exc:
+        raise ExecutionTopologyError(f"invalid execution-graph authoring: {exc}") from exc
+    sprint_path = _existing_json(request.task_root, request.slug)
+    sprint = read_task_doc(sprint_path)
+    if sprint.kind != "master" or not sprint.orchestrates:
+        raise ExecutionTopologyError(
+            "author_execution_graph requires an orchestration sprint document"
+        )
+    if sprint.executionGraph is None:
+        raise ExecutionTopologyError(
+            "author_execution_graph requires a migrated sprint; "
+            "run task_doc.migrate_execution_topology first"
+        )
+    topology = TaskDocumentTopology(request.coordination_root)
+    try:
+        sprint_ref = topology.canonical_ref(request.repo_id, sprint_path)
+    except TaskDocumentRefError as exc:
+        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
+    _verify_authoring_judgments(topology, sprint_ref, authoring.mutations)
+    prepared = _prepare_authoring(
+        topology,
+        sprint_ref,
+        sprint,
+        request.task_root,
+        authoring,
+    )
+    result: dict[str, Any] = {
+        "ok": True,
+        "operation": "task_doc.author_execution_graph",
+        "state": "would-author" if request.dry_run else "authored",
+        "sprintTaskDocumentRef": sprint_ref.model_dump(mode="json"),
+        "appliedMutations": [
+            mutation.model_dump(mode="json", exclude_none=True) for mutation in authoring.mutations
+        ],
+        "executionWaves": [
+            [node.model_dump(mode="json") for node in wave]
+            for wave in prepared.graph.derived_waves()
+        ],
+        "leafPlacementFacts": prepared.placement_facts,
+        "numberingHints": numbering_drift_hints(prepared.graph),
+    }
+    if request.dry_run:
+        with integration_authority_lock(request.coordination_root, request.repo_id):
+            _require_migration_publication_authority(request, prepared.overrides)
+        result["dryRun"] = True
+        result["documents"] = [
+            _migration_preview(ref, root, document) for ref, root, document in prepared.documents
+        ]
+        return result
+    result["documents"] = _publish_authoring(request, topology, sprint_ref, prepared)
+    return result
+
+
+def _prepare_authoring(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    sprint: TaskDocument,
+    task_root: Path,
+    authoring: _ExecutionGraphAuthoring,
+) -> _AuthoringCandidate:
+    try:
+        commanded = topology.validate_execution_topology(sprint_ref)
+    except TaskDocumentRefError as exc:
+        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
+    graph = sprint.executionGraph
+    assert graph is not None  # guarded by author_execution_graph
+    draft = _GraphDraft(nodes=list(graph.nodes), edges=list(graph.edges), natures={})
+    for mutation in authoring.mutations:
+        _MUTATION_HANDLERS[mutation.op](draft, mutation, {master.ref for master in commanded})
+    try:
+        candidate_graph = SprintExecutionGraph(nodes=draft.nodes, edges=draft.edges)
+    except ValidationError as exc:
+        raise ExecutionTopologyError(f"invalid execution graph after mutations: {exc}") from exc
+    sprint_data = sprint.model_dump(by_alias=True)
+    sprint_data["executionGraph"] = candidate_graph.model_dump(mode="json")
+    candidate_sprint = TaskDocument.model_validate(sprint_data)
+    overrides: dict[TaskDocumentRef, TaskDocument] = {sprint_ref: candidate_sprint}
+    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]] = [
+        (sprint_ref, task_root, candidate_sprint)
+    ]
+    for ref, nature in draft.natures.items():
+        # `ref` passed the commanded-membership check in _apply_set_nature, so it resolves.
+        resolved = topology.resolve(ref)
+        data = resolved.document.model_dump(by_alias=True)
+        data["executionNature"] = nature
+        candidate = TaskDocument.model_validate(data)
+        overrides[ref] = candidate
+        documents.append((ref, resolved.path.parent, candidate))
+    _validate_topology(topology, sprint_ref, overrides)
+    _require_complete_partitions(topology, sprint_ref, overrides)
+    return _AuthoringCandidate(
+        graph=candidate_graph,
+        sprint=candidate_sprint,
+        overrides=overrides,
+        documents=documents,
+        placement_facts=_authoring_placement_facts(topology, sprint_ref, overrides),
+    )
+
+
+def _publish_authoring(
+    request: ExecutionTopologyAuthoringRequest,
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    prepared: _AuthoringCandidate,
+) -> list[dict[str, Any]]:
+    def publication() -> list[tuple[Path, Path]]:
+        with integration_authority_lock(request.coordination_root, request.repo_id):
+            _require_migration_publication_authority(request, prepared.overrides)
+            return write_task_doc_batch(
+                [(root, document) for _ref, root, document in prepared.documents]
+            )
+
+    queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
+    written = queue.publish_sprint_update(
+        publication,
+        completed=prepared.sprint.status == "Completed",
+        recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+        validate_completion=lambda: require_commanded_masters_completed(
+            topology,
+            sprint_ref,
+            prepared.overrides,
+        ),
+    )
+    return [
+        {
+            "taskDocumentRef": ref.model_dump(mode="json"),
+            "docPath": json_path.as_posix(),
+            "renderedPath": markdown_path.as_posix(),
+        }
+        for (ref, _root, _document), (json_path, markdown_path) in zip(
+            prepared.documents, written, strict=True
+        )
+    ]
+
+
+def _verify_authoring_judgments(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    mutations: list[_GraphAuthoringMutation],
+) -> None:
+    """Verify every claimed judgmentId against the sprint's canonical Judgment Register.
+
+    Fail-closed with a named recovery: a sprint without a ``Judgment Register
+    (canonical judgment authority)`` section cannot take judgment-bearing mutations.
+    """
+
+    claimed = [
+        (mutation.op, judgment_id)
+        for mutation in mutations
+        if (judgment_id := getattr(mutation, "judgmentId", None))
+    ]
+    statically_required = [
+        mutation.op
+        for mutation in mutations
+        if _statically_judgment_bearing(mutation) and not getattr(mutation, "judgmentId", None)
+    ]
+    if statically_required:
+        raise ExecutionTopologyError(
+            "task-execution-graph-judgment-required: mutations "
+            f"{statically_required!r} require a judgmentId from the sprint Judgment Register"
+        )
+    if not claimed:
+        return
+    # The sprint ref was canonicalized and resolved by the caller just above.
+    sprint = topology.resolve(sprint_ref)
+    headings = {section.heading.strip().casefold() for section in sprint.document.sections}
+    if JUDGMENT_REGISTER_SECTION not in headings:
+        raise ExecutionTopologyError(
+            "task-execution-graph-judgment-register-missing: "
+            f"sprint {sprint_ref.key} has no 'Judgment Register (canonical judgment "
+            "authority)' section; scaffold the canonical Judgment Register before "
+            "judgment-bearing graph authoring"
+        )
+    try:
+        judgments, _priorities = planning_authorities(sprint)
+    except CloseoutQueueError as exc:
+        raise ExecutionTopologyError(str(exc)) from exc
+    for op, judgment_id in claimed:
+        judgment = judgments.get(judgment_id)
+        if judgment is None:
+            raise ExecutionTopologyError(
+                "task-execution-graph-judgment-unknown: "
+                f"canonical Judgment Register has no row {judgment_id!r} (mutation {op})"
+            )
+        if judgment.author not in {"strategist", "orchestrator"}:
+            raise ExecutionTopologyError(
+                "task-execution-graph-judgment-author-refused: "
+                f"judgment {judgment_id!r} was authored by {judgment.author!r}; "
+                "only strategist/orchestrator rows may back graph authoring"
+            )
+
+
+def _statically_judgment_bearing(mutation: _GraphAuthoringMutation) -> bool:
+    if isinstance(mutation, _AddNodeMutation):
+        return mutation.kind == "segment"
+    # remove_node is decided against the resolved node at application time.
+    return not isinstance(mutation, _RemoveNodeMutation)
+
+
+def _require_mutation_judgment(mutation: _AddNodeMutation | _RemoveNodeMutation) -> None:
+    if not (mutation.judgmentId or "").strip():
+        raise ExecutionTopologyError(
+            "task-execution-graph-judgment-required: "
+            f"{mutation.op} on a segment requires a judgmentId from the sprint Judgment Register"
+        )
+
+
+def _apply_add_node(
+    draft: _GraphDraft, mutation: _AddNodeMutation, _commanded: set[TaskDocumentRef]
+) -> None:
+    try:
+        node = SprintExecutionNode(kind=mutation.kind, ref=mutation.ref, leafIds=mutation.leafIds)
+    except ValidationError as exc:
+        raise ExecutionTopologyError(f"invalid add_node mutation: {exc}") from exc
+    if node.kind == "segment":
+        _require_mutation_judgment(mutation)
+    if node in draft.nodes:
+        raise ExecutionTopologyError(
+            f"task-execution-graph-node-duplicate: node is already declared: {node.ref.key}"
+        )
+    draft.nodes.append(node)
+
+
+def _draft_node(
+    draft: _GraphDraft, ref: TaskDocumentRef, leaf_id: str | None
+) -> SprintExecutionNode:
+    nodes = [node for node in draft.nodes if node.ref == ref]
+    if leaf_id is not None:
+        nodes = [node for node in nodes if leaf_id in node.leafIds]
+    if not nodes:
+        raise ExecutionTopologyError(
+            f"task-execution-graph-node-unknown: no node of {ref.key} matches the mutation"
+        )
+    if len(nodes) > 1:
+        raise ExecutionTopologyError(
+            f"task-execution-graph-node-ambiguous: {ref.key} has {len(nodes)} nodes; "
+            "name a leafId of the target segment"
+        )
+    return nodes[0]
+
+
+def _edge_touches_node(edge: SprintExecutionEdge, node: SprintExecutionNode) -> bool:
+    for endpoint in (edge.predecessor, edge.successor):
+        ref = endpoint.ref if isinstance(endpoint, SprintExecutionEndpoint) else endpoint
+        leaf = endpoint.leafId if isinstance(endpoint, SprintExecutionEndpoint) else None
+        if ref == node.ref and (leaf is None or leaf in node.leafIds):
+            return True
+    return False
+
+
+def _apply_remove_node(
+    draft: _GraphDraft, mutation: _RemoveNodeMutation, _commanded: set[TaskDocumentRef]
+) -> None:
+    target = _draft_node(draft, mutation.ref, mutation.leafId)
+    if target.kind == "segment":
+        _require_mutation_judgment(mutation)
+    if any(_edge_touches_node(edge, target) for edge in draft.edges):
+        raise ExecutionTopologyError(
+            f"task-execution-graph-node-in-use: node {target.ref.key} still has edges; "
+            "remove them first"
+        )
+    draft.nodes.remove(target)
+
+
+def _resolved_draft_edge(
+    draft: _GraphDraft, edge: SprintExecutionEdge
+) -> tuple[SprintExecutionNode, SprintExecutionNode]:
+    try:
+        return (
+            resolve_graph_endpoint(draft.nodes, edge.predecessor),
+            resolve_graph_endpoint(draft.nodes, edge.successor),
+        )
+    except ValueError as exc:
+        raise ExecutionTopologyError(str(exc)) from exc
+
+
+def _apply_add_edge(
+    draft: _GraphDraft, mutation: _AddEdgeMutation, _commanded: set[TaskDocumentRef]
+) -> None:
+    try:
+        edge = SprintExecutionEdge(
+            predecessor=mutation.predecessor,
+            successor=mutation.successor,
+            reason=mutation.reason,
+            judgmentId=mutation.judgmentId,
+        )
+    except ValidationError as exc:
+        raise ExecutionTopologyError(f"invalid add_edge mutation: {exc}") from exc
+    pair = _resolved_draft_edge(draft, edge)
+    if pair[0] == pair[1]:
+        raise ExecutionTopologyError("execution-graph edge cannot point a node to itself")
+    if any(_resolved_draft_edge(draft, existing) == pair for existing in draft.edges):
+        raise ExecutionTopologyError(
+            "task-execution-graph-edge-duplicate: the edge is already declared"
+        )
+    draft.edges.append(edge)
+
+
+def _apply_remove_edge(
+    draft: _GraphDraft, mutation: _RemoveEdgeMutation, _commanded: set[TaskDocumentRef]
+) -> None:
+    probe = SprintExecutionEdge(
+        predecessor=mutation.predecessor,
+        successor=mutation.successor,
+        reason="removal probe",
+        judgmentId=mutation.judgmentId,
+    )
+    pair = _resolved_draft_edge(draft, probe)
+    matches = [
+        index for index, edge in enumerate(draft.edges) if _resolved_draft_edge(draft, edge) == pair
+    ]
+    if not matches:
+        raise ExecutionTopologyError(
+            "task-execution-graph-edge-unknown: no declared edge matches the mutation endpoints"
+        )
+    draft.edges.pop(matches[0])
+
+
+def _apply_move_leaf(
+    draft: _GraphDraft, mutation: _MoveLeafMutation, _commanded: set[TaskDocumentRef]
+) -> None:
+    segments = [node for node in draft.nodes if node.ref == mutation.ref and node.kind == "segment"]
+    source = next((node for node in segments if mutation.leafId in node.leafIds), None)
+    target = next((node for node in segments if mutation.toSegment in node.leafIds), None)
+    if target is None:
+        raise ExecutionTopologyError(
+            f"task-execution-graph-segment-unknown: no segment of {mutation.ref.key} contains "
+            f"leaf {mutation.toSegment!r}"
+        )
+    if source is None:
+        # Placing a leaf the master gained after authoring (L11-R2): no source segment.
+        draft.nodes[draft.nodes.index(target)] = target.model_copy(
+            update={"leafIds": [*target.leafIds, mutation.leafId]}
+        )
+        return
+    if source == target:
+        raise ExecutionTopologyError(
+            f"task-execution-graph-leaf-already-placed: leaf {mutation.leafId!r} is already "
+            "in that segment"
+        )
+    remaining = [leaf for leaf in source.leafIds if leaf != mutation.leafId]
+    if not remaining:
+        raise ExecutionTopologyError(
+            f"task-execution-graph-segment-empty: move_leaf would empty a segment of "
+            f"{mutation.ref.key}; use remove_node instead"
+        )
+    draft.nodes[draft.nodes.index(source)] = source.model_copy(update={"leafIds": remaining})
+    draft.nodes[draft.nodes.index(target)] = target.model_copy(
+        update={"leafIds": [*target.leafIds, mutation.leafId]}
+    )
+
+
+def _apply_set_nature(
+    draft: _GraphDraft, mutation: _SetNatureMutation, commanded: set[TaskDocumentRef]
+) -> None:
+    if mutation.ref not in commanded:
+        raise ExecutionTopologyError(
+            "task-execution-graph-membership-invalid: set_nature target is not commanded by "
+            f"the sprint: {mutation.ref.key}"
+        )
+    draft.natures[mutation.ref] = mutation.executionNature
+
+
+_MUTATION_HANDLERS: dict[str, Callable[[_GraphDraft, Any, set[TaskDocumentRef]], None]] = {
+    "add_node": _apply_add_node,
+    "remove_node": _apply_remove_node,
+    "add_edge": _apply_add_edge,
+    "remove_edge": _apply_remove_edge,
+    "move_leaf": _apply_move_leaf,
+    "set_nature": _apply_set_nature,
+}
+
+
+def _require_complete_partitions(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    overrides: dict[TaskDocumentRef, TaskDocument],
+) -> None:
+    """Refuse to persist a graph whose segments do not exactly cover the live leaf sets."""
+
+    # Runs after _validate_topology with the same overrides, so validation cannot fail here.
+    placements = topology.execution_leaf_placement(sprint_ref, overrides=overrides)
+    unknown = [
+        f"{report.master.ref.key}:{leaf}"
+        for report in placements
+        for leaf in report.placement.unknown_leaf_ids
+    ]
+    if unknown:
+        raise ExecutionTopologyError(
+            "task-execution-graph-partition-unknown-leaf: segments place leafs outside the "
+            f"master's planned leaf set: {unknown!r}"
+        )
+    unplaced = [
+        f"{report.master.ref.key}:{leaf}"
+        for report in placements
+        for leaf in report.placement.unplaced_leaf_ids
+    ]
+    if unplaced:
+        raise ExecutionTopologyError(
+            "task-execution-graph-partition-incomplete: every planned leaf of a segmented "
+            f"master must be placed; unplaced={unplaced!r}"
+        )
+
+
+def _authoring_placement_facts(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    overrides: dict[TaskDocumentRef, TaskDocument],
+) -> list[dict[str, Any]]:
+    # Runs after _validate_topology with the same overrides, so validation cannot fail here.
+    placements = topology.execution_leaf_placement(sprint_ref, overrides=overrides)
+    return [
+        fact
+        for report in placements
+        for fact in leaf_placement_facts(report.master.ref.key, report.placement)
+    ]
+
+
 def _require_migration_publication_authority(
-    request: ExecutionTopologyMigrationRequest,
+    request: ExecutionTopologyMigrationRequest | ExecutionTopologyAuthoringRequest,
     overrides: dict[TaskDocumentRef, TaskDocument],
 ) -> None:
     try:

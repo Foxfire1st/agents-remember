@@ -27,7 +27,13 @@ from agents_remember.models.task_document_ref import (
     MAX_TASK_REPOSITORY_LENGTH,
     TaskDocumentRef,
 )
-from agents_remember.tasks import SprintExecutionGraph, TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    SprintExecutionNode,
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.closeout_queue import (
     CloseoutQueueError,
@@ -232,7 +238,9 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
             sprint.model_copy(
                 update={
                     "orchestrates": [f"node-{number:03d}" for number in range(257)],
-                    "executionGraph": SprintExecutionGraph(nodes=too_many_nodes),
+                    "executionGraph": SprintExecutionGraph(
+                        nodes=[SprintExecutionNode(ref=ref) for ref in too_many_nodes]
+                    ),
                 }
             ),
         )

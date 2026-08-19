@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import SprintExecutionGraph, SubTaskRef, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.closeout_queue import _graph_context, _initial_state
 from agents_remember.worktrees.orchestration_portfolio import (
@@ -122,6 +123,45 @@ class PortfolioFrontierTests(unittest.TestCase):
         self.assertEqual(slice_foreign.executionNature, "unknown")
         self.assertEqual(slice_foreign.incompletePredecessors, [])
         self.assertEqual(slice_foreign.candidates, [])
+
+    def test_frontier_orders_an_unmapped_leaf_candidate_by_its_masters_first_node(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name))
+        sprint_path = fixture.tasks / "sprint" / "task.json"
+        sprint = read_task_doc(sprint_path)
+        graph = SprintExecutionGraph.model_validate(
+            {
+                "nodes": [
+                    {"kind": "segment", "ref": MASTER_A.model_dump(), "leafIds": ["LEAF-A"]},
+                    {"kind": "segment", "ref": MASTER_A.model_dump(), "leafIds": ["LEAF-A2"]},
+                    MASTER_B.model_dump(),
+                ],
+                "edges": [],
+            }
+        )
+        write_task_doc(sprint_path.parent, sprint.model_copy(update={"executionGraph": graph}))
+        master_a_path = fixture.tasks / "master-a" / "task.json"
+        master_a = read_task_doc(master_a_path)
+        write_task_doc(
+            master_a_path.parent,
+            master_a.model_copy(
+                update={
+                    "subTasks": [
+                        *master_a.subTasks,
+                        SubTaskRef(number="LEAF-A2", name="LEAF-A2", file="leaf-a2.md"),
+                    ]
+                }
+            ),
+        )
+        fixture.declare(MASTER_A)
+        graph, state = self._graph_and_state(fixture)
+        # A candidate whose leaf ref maps to no segment falls back to the master's
+        # earliest node order (the conservative scheduling answer).
+        unmapped = TaskDocumentRef(repository="repo-a", path="master-a/leaf-a9.json")
+        candidate = state.candidates[LEAF_A.key].model_copy(update={"taskDocumentRef": unmapped})
+        state = state.model_copy(update={"candidates": {unmapped.key: candidate}})
+        frontier = recompute_frontier(graph, state)
+        self.assertEqual(len(frontier), 1)
+        self.assertEqual(frontier[0].nodeOrder, 0)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,6 @@ from .closeout_queue_candidate_evidence import (
 )
 from .closeout_queue_errors import CloseoutQueueError
 from .closeout_queue_evidence import (
-    PRIORITY_RANK,
     canonical_blocker_abort,
     canonical_grade,
     curator_evidence,
@@ -86,6 +85,11 @@ from .closeout_queue_graph import (
 )
 from .closeout_queue_graph import (
     graph_context as _graph_context,
+)
+from .closeout_queue_graph import (
+    master_incomplete_predecessors,
+    predecessor_waiting_reasons,
+    ready_sort_key,
 )
 
 _ACTIONS = frozenset(
@@ -514,11 +518,11 @@ def _acquire_blocker(
         raise CloseoutQueueError(
             "atomic-blocker-active", f"blocker is already held by {state.activeBlocker.master.key}"
         )
-    incomplete = _incomplete_predecessors(graph, master_ref)
+    incomplete = list(master_incomplete_predecessors(graph, master_ref))
     if incomplete:
         raise CloseoutQueueError(
             "atomic-blocker-predecessors-incomplete",
-            f"atomic blocker predecessors are incomplete: {[ref.key for ref in incomplete]!r}",
+            f"atomic blocker predecessors are incomplete: {[node.ref.key for node in incomplete]!r}",
         )
     if any(candidate.state != "declared" for candidate in state.candidates.values()):
         raise CloseoutQueueError(
@@ -639,6 +643,7 @@ def _projection(
         "sprintTaskDocumentRef": graph.sprint.ref.model_dump(mode="json"),
         "revision": state.revision,
         "graphRevision": graph.revision,
+        "leafPlacementFacts": list(graph.leaf_facts),
         "activeBlocker": state.activeBlocker.model_dump(mode="json")
         if state.activeBlocker
         else None,
@@ -692,7 +697,7 @@ def _project_candidates(
             grade=candidate.grade,
         )
         groups[_group_name(classification)].append(view)
-    groups["ready"].sort(key=lambda view: _ready_sort_key(graph, view))
+    groups["ready"].sort(key=lambda view: ready_sort_key(graph, view))
     for name in ("waiting", "blocked", "inFlight"):
         groups[name].sort(key=lambda item: item.taskDocumentRef.key)
     return groups
@@ -1054,10 +1059,7 @@ def _waiting_reasons(
     lane_owner: TaskDocumentRef | None,
     active_blocker: ActiveAtomicBlocker | None,
 ) -> list[str]:
-    reasons = [
-        f"predecessor-incomplete: {ref.key}"
-        for ref in _incomplete_predecessors(graph, candidate.owningMaster)
-    ]
+    reasons = predecessor_waiting_reasons(graph, candidate.owningMaster, candidate.taskDocumentRef)
     if candidate.grade is None:
         reasons.append("explicit-grade-required")
     if lane_owner is not None and lane_owner != candidate.taskDocumentRef:
@@ -1078,12 +1080,6 @@ def _waiting_reasons(
     if not candidate.admission.admissionReady:
         reasons.append(f"admission-blocked: {candidate.admission.admissionReason}")
     return reasons
-
-
-def _incomplete_predecessors(
-    graph: _GraphContext, master_ref: TaskDocumentRef
-) -> list[TaskDocumentRef]:
-    return list(graph.incomplete_predecessors[master_ref])
 
 
 def _active_lane_owner(state: CloseoutQueueState) -> TaskDocumentRef | None:
@@ -1164,15 +1160,6 @@ def _queue_action(value: str) -> QueueAction:
             "closeout-queue-action-invalid", f"unsupported closeout queue action: {value!r}"
         )
     return cast(QueueAction, action)
-
-
-def _ready_sort_key(graph: _GraphContext, view: CloseoutQueueCandidateView) -> tuple[Any, ...]:
-    grade = cast(SchedulingGrade, view.grade)
-    return (
-        PRIORITY_RANK[grade.priority],
-        graph.node_order[view.owningMaster],
-        view.taskDocumentRef.key,
-    )
 
 
 def _initial_state(

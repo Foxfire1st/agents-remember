@@ -33,7 +33,12 @@ from agents_remember.kernel.primitives.gate_policy import (
 from agents_remember.kernel.primitives.runtime_config import RepositoryScope
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.paths import observer_logs_root
-from agents_remember.tasks import SprintExecutionGraph, TaskDocument, write_task_doc
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    SprintExecutionNode,
+    TaskDocument,
+    write_task_doc,
+)
 from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -94,7 +99,7 @@ def _real_gate_contract(coordination_root: Path) -> WorktreeContract:
                 "createdAt": "2026-08-15T00:00:00+00:00",
                 "orchestrates": [task_name],
                 "integrationBranch": "super",
-                "executionGraph": SprintExecutionGraph(nodes=[master_ref]),
+                "executionGraph": SprintExecutionGraph(nodes=[SprintExecutionNode(ref=master_ref)]),
             }
         ),
     )

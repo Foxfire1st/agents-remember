@@ -2865,7 +2865,7 @@
         "executionWaves": {
           "items": {
             "items": {
-              "$ref": "#/$defs/TaskDocumentRef"
+              "$ref": "#/$defs/TaskExecutionNode"
             },
             "type": "array"
           },
@@ -3016,15 +3016,27 @@
       "additionalProperties": false,
       "description": "One reasoned dependency edge in a sprint task document.",
       "properties": {
+        "judgmentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judgmentid"
+        },
         "predecessor": {
-          "$ref": "#/$defs/TaskDocumentRef"
+          "$ref": "#/$defs/TaskExecutionEndpointNode"
         },
         "reason": {
           "title": "Reason",
           "type": "string"
         },
         "successor": {
-          "$ref": "#/$defs/TaskDocumentRef"
+          "$ref": "#/$defs/TaskExecutionEndpointNode"
         }
       },
       "required": [
@@ -3033,6 +3045,32 @@
         "reason"
       ],
       "title": "TaskExecutionEdgeNode",
+      "type": "object"
+    },
+    "TaskExecutionEndpointNode": {
+      "additionalProperties": false,
+      "description": "One resolved-form edge endpoint: the master ref plus the segment-sampling leaf id.\n\nThe persisted grammar also allows a bare ref (lump/legacy); the before-validator\nlifts that form so the served shape is uniform.",
+      "properties": {
+        "leafId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leafid"
+        },
+        "ref": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "TaskExecutionEndpointNode",
       "type": "object"
     },
     "TaskExecutionGraphNode": {
@@ -3048,13 +3086,39 @@
         },
         "nodes": {
           "items": {
-            "$ref": "#/$defs/TaskDocumentRef"
+            "$ref": "#/$defs/TaskExecutionNode"
           },
           "title": "Nodes",
           "type": "array"
         }
       },
       "title": "TaskExecutionGraphNode",
+      "type": "object"
+    },
+    "TaskExecutionNode": {
+      "additionalProperties": false,
+      "description": "One graph node: a whole-master lump or a leaf-segment of one master (L11-R1).",
+      "properties": {
+        "kind": {
+          "default": "master",
+          "title": "Kind",
+          "type": "string"
+        },
+        "leafIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Leafids",
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "TaskExecutionNode",
       "type": "object"
     },
     "TaskSectionNode": {

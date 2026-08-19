@@ -18,6 +18,7 @@ from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
+    SprintExecutionNode,
     TaskDocument,
     read_task_doc,
     write_task_doc,
@@ -195,7 +196,10 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
                 "integrationBranch": "super",
                 "orchestrates": ["master", "atomic-two"],
                 "executionGraph": SprintExecutionGraph(
-                    nodes=[master_ref, sibling_ref],
+                    nodes=[
+                        SprintExecutionNode(ref=master_ref),
+                        SprintExecutionNode(ref=sibling_ref),
+                    ],
                     edges=[],
                 ),
             }
@@ -276,7 +280,9 @@ def _add_atomic_master_to_sprint(fixture, task_root: Path) -> None:
             update={
                 "orchestrates": [*sprint.orchestrates, "atomic-three"],
                 "executionGraph": sprint.executionGraph.model_copy(
-                    update={"nodes": [*sprint.executionGraph.nodes, atomic_ref]}
+                    update={
+                        "nodes": [*sprint.executionGraph.nodes, SprintExecutionNode(ref=atomic_ref)]
+                    }
                 ),
             }
         ),

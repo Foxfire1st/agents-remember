@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Literal, cast
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks.document import SprintExecutionGraph, TaskDocument
+from agents_remember.tasks.document import (
+    LeafPlacement,
+    SprintExecutionGraph,
+    SprintExecutionNode,
+    TaskDocument,
+    derived_leaf_placement,
+)
 from agents_remember.tasks.store import read_task_doc
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
@@ -37,6 +43,19 @@ class ResolvedTaskDocument:
     ref: TaskDocumentRef
     path: Path
     document: TaskDocument
+
+
+@dataclass(frozen=True)
+class MasterLeafPlacement:
+    """One commanded master's live leaf-to-segment placement report (L11-R2/R6).
+
+    Read paths surface ``placement.unknown_leaf_ids`` and
+    ``placement.unplaced_leaf_ids`` as facts; only the graph-authoring write path
+    refuses an incomplete partition.
+    """
+
+    master: ResolvedTaskDocument
+    placement: LeafPlacement
 
 
 class TaskDocumentTopology:
@@ -221,7 +240,7 @@ class TaskDocumentTopology:
             )
         commanded = self._commanded_masters_exact(sprint, candidates)
         commanded_refs = {master.ref for master in commanded}
-        graph_refs = set(graph.nodes)
+        graph_refs = set(graph.master_refs())
         if graph_refs != commanded_refs:
             missing = sorted(ref.key for ref in commanded_refs - graph_refs)
             extra = sorted(ref.key for ref in graph_refs - commanded_refs)
@@ -230,6 +249,7 @@ class TaskDocumentTopology:
                 f"executionGraph membership must exactly match orchestrates; "
                 f"missing={missing!r}, extra={extra!r}",
             )
+        nature_by_ref: dict[TaskDocumentRef, str | None] = {}
         for master in commanded:
             if master.document.executionNature is None:
                 raise TaskDocumentRefError(
@@ -237,9 +257,53 @@ class TaskDocumentTopology:
                     f"commanded master {master.ref.key} has no executionNature; "
                     "run task_doc.migrate_execution_topology",
                 )
+            nature_by_ref[master.ref] = master.document.executionNature
+        for node in graph.nodes:
+            if node.kind == "segment" and nature_by_ref[node.ref] == "atomic":
+                raise TaskDocumentRefError(
+                    "task-execution-graph-node-kind-invalid",
+                    f"atomic master {node.ref.key} admits lump nodes only; refused segment "
+                    f"node with leafIds={node.leafIds!r}",
+                )
         return commanded
 
-    def execution_waves(self, sprint_ref: TaskDocumentRef) -> list[list[TaskDocumentRef]]:
+    def execution_leaf_placement(
+        self,
+        sprint_ref: TaskDocumentRef,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[MasterLeafPlacement, ...]:
+        """Return each commanded master's live leaf placement after topology validation.
+
+        The re-validation hook (L11-R6): computed against the master's *live* subTasks
+        rows, so a leaf set that changed after graph authoring shows up as unknown or
+        unplaced facts. Lump-only masters report an empty placement.
+        """
+
+        candidates = overrides or {}
+        masters = self.validate_execution_topology(sprint_ref, overrides=overrides)
+        sprint = self._resolve_with_overrides(sprint_ref, candidates)
+        graph = sprint.document.executionGraph
+        if graph is None:  # pragma: no cover - validate_execution_topology already refused
+            raise TaskDocumentRefError(
+                "task-execution-topology-migration-required",
+                f"orchestration sprint {sprint_ref.key} has no executionGraph",
+            )
+        completed = {master.ref for master in masters if master.document.status == "Completed"}
+        return tuple(
+            MasterLeafPlacement(
+                master=master,
+                placement=derived_leaf_placement(
+                    graph,
+                    master.ref,
+                    [row.number for row in master.document.subTasks],
+                    completed,
+                ),
+            )
+            for master in masters
+        )
+
+    def execution_waves(self, sprint_ref: TaskDocumentRef) -> list[list[SprintExecutionNode]]:
         """Return the graph-derived waves after exact cross-document validation."""
 
         sprint = self.resolve(sprint_ref)

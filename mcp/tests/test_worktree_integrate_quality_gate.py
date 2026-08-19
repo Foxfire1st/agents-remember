@@ -21,7 +21,12 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import SprintExecutionGraph, TaskDocument, write_task_doc
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    SprintExecutionNode,
+    TaskDocument,
+    write_task_doc,
+)
 from agents_remember.worktrees import integration_quality as quality_mod
 from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.modules import integrate as integrate_mod
@@ -156,7 +161,7 @@ def integration_contract(root: Path, *, kind: str = "leaf") -> WorktreeContract:
                 "createdAt": "2026-08-15T00:00:00+00:00",
                 "orchestrates": [task_name],
                 "integrationBranch": source_branch,
-                "executionGraph": SprintExecutionGraph(nodes=[master_ref]),
+                "executionGraph": SprintExecutionGraph(nodes=[SprintExecutionNode(ref=master_ref)]),
             }
         ),
     )

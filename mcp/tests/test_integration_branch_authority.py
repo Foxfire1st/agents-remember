@@ -24,6 +24,7 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
+    SprintExecutionNode,
     read_task_doc,
     write_task_doc,
 )
@@ -260,7 +261,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     update={
                         "orchestrates": ["atomic-two"],
                         "executionGraph": SprintExecutionGraph(
-                            nodes=[sibling_ref],
+                            nodes=[SprintExecutionNode(ref=sibling_ref)],
                             edges=[],
                         ),
                     }
@@ -668,7 +669,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     update={
                         "orchestrates": ["atomic-two"],
                         "executionGraph": SprintExecutionGraph(
-                            nodes=[sibling_ref],
+                            nodes=[SprintExecutionNode(ref=sibling_ref)],
                             edges=[],
                         ),
                     }
@@ -1144,7 +1145,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                             update={
                                 "nodes": [
                                     *sprint.executionGraph.nodes,
-                                    atomic_three_ref,
+                                    SprintExecutionNode(ref=atomic_three_ref),
                                 ]
                             }
                         ),

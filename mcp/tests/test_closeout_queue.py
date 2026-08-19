@@ -27,7 +27,12 @@ from agents_remember.models.closeout_queue import (
     SchedulingGradeInput,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import Step, TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import (
+    Step,
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.closeout_queue import (
     CloseoutQueueError,

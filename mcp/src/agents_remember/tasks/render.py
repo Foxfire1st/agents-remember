@@ -20,6 +20,7 @@ from .document import (
     RouteReviewRecord,
     Section,
     SprintExecutionGraph,
+    SprintExecutionNode,
     Step,
     StepDisposition,
     SubTaskRef,
@@ -118,13 +119,14 @@ def _header_lines(doc: TaskDocument) -> list[str]:
 
 
 def _execution_graph_lines(graph: SprintExecutionGraph) -> list[str]:
-    nodes = [f"- `{node.key}`" for node in graph.nodes]
+    nodes = [f"- {_graph_node_label(node)}" for node in graph.nodes]
     edges = [
-        f"- `{edge.predecessor.key}` → `{edge.successor.key}` — {edge.reason}"
+        f"- {_graph_node_label(graph.resolve_endpoint(edge.predecessor))} → "
+        f"{_graph_node_label(graph.resolve_endpoint(edge.successor))} — {edge.reason}"
         for edge in graph.edges
     ] or ["- _None._"]
     waves = [
-        f"- Wave {index}: " + ", ".join(f"`{node.key}`" for node in wave)
+        f"- Wave {index}: " + ", ".join(_graph_node_label(node) for node in wave)
         for index, wave in enumerate(graph.derived_waves(), start=1)
     ]
     return [
@@ -140,6 +142,14 @@ def _execution_graph_lines(graph: SprintExecutionGraph) -> list[str]:
         "",
         *waves,
     ]
+
+
+def _graph_node_label(node: SprintExecutionNode) -> str:
+    """Backticked node key; a segment adds its leaf list as the qualifier (L11-R9)."""
+    if node.kind != "segment":
+        return f"`{node.ref.key}`"
+    leafs = ", ".join(f"`{leaf}`" for leaf in node.leafIds)
+    return f"`{node.ref.key}` (leafs: {leafs})"
 
 
 def _section(heading: str, body: list[str]) -> list[str]:

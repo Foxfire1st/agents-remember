@@ -29,6 +29,7 @@ from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
+    SprintExecutionNode,
     TaskDocument,
     read_task_doc,
     write_task_doc,
@@ -127,7 +128,9 @@ def write_current_task_lineage(
             update={
                 "orchestrates": [master_name],
                 "integrationBranch": super_branch,
-                "executionGraph": SprintExecutionGraph(nodes=[master_ref], edges=[]),
+                "executionGraph": SprintExecutionGraph(
+                    nodes=[SprintExecutionNode(ref=master_ref)], edges=[]
+                ),
             }
         )
     else:

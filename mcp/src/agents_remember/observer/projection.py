@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.task_document import MasterExecutionNature
@@ -615,14 +615,56 @@ class TaskSectionNode(BaseModel):
     body: str = ""
 
 
+class TaskExecutionEndpointNode(BaseModel):
+    """One resolved-form edge endpoint: the master ref plus the segment-sampling leaf id.
+
+    The persisted grammar also allows a bare ref (lump/legacy); the before-validator
+    lifts that form so the served shape is uniform.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: TaskDocumentRef
+    leafId: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_bare_ref(cls, value: Any) -> Any:
+        if isinstance(value, TaskDocumentRef):
+            return {"ref": value}
+        if isinstance(value, dict) and "ref" not in value and "repository" in value:
+            return {"ref": value}
+        return value
+
+
+class TaskExecutionNode(BaseModel):
+    """One graph node: a whole-master lump or a leaf-segment of one master (L11-R1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "master"
+    ref: TaskDocumentRef
+    leafIds: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_bare_ref(cls, value: Any) -> Any:
+        if isinstance(value, TaskDocumentRef):
+            return {"ref": value}
+        if isinstance(value, dict) and "ref" not in value and "repository" in value:
+            return {"ref": value}
+        return value
+
+
 class TaskExecutionEdgeNode(BaseModel):
     """One reasoned dependency edge in a sprint task document."""
 
     model_config = ConfigDict(extra="forbid")
 
-    predecessor: TaskDocumentRef
-    successor: TaskDocumentRef
+    predecessor: TaskExecutionEndpointNode
+    successor: TaskExecutionEndpointNode
     reason: str
+    judgmentId: str | None = None
 
 
 class TaskExecutionGraphNode(BaseModel):
@@ -630,7 +672,7 @@ class TaskExecutionGraphNode(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    nodes: list[TaskDocumentRef] = Field(default_factory=list)
+    nodes: list[TaskExecutionNode] = Field(default_factory=list)
     edges: list[TaskExecutionEdgeNode] = Field(default_factory=list)
 
 
@@ -725,7 +767,7 @@ class TaskDocNode(BaseModel):
     executionNature: MasterExecutionNature | None = None
     # Sprint-only persisted graph plus mechanically derived topological waves.
     executionGraph: TaskExecutionGraphNode | None = None
-    executionWaves: list[list[TaskDocumentRef]] = Field(default_factory=list)
+    executionWaves: list[list[TaskExecutionNode]] = Field(default_factory=list)
 
 
 class SeriesSubTaskNode(BaseModel):

@@ -16,9 +16,18 @@ the observer never projects them as a lifecycle node.
 
 from __future__ import annotations
 
-from typing import Literal, Self
+import re
+from dataclasses import dataclass
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -157,12 +166,99 @@ class TaskEnclosureRef(_Doc):
     enclosurePath: str
 
 
+class SprintExecutionEndpoint(_Doc):
+    """One edge endpoint: a bare master ref, or a leaf id sampling the target segment.
+
+    A bare ``ref`` addresses the master's only node (a lump, or its single segment);
+    ``ref`` + ``leafId`` addresses the segment node containing that leaf. Resolution
+    to a node happens in graph validation, never at parse time.
+    """
+
+    ref: TaskDocumentRef
+    leafId: str | None = None
+
+    @field_validator("leafId")
+    @classmethod
+    def _trim_nonblank_leaf_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("execution-graph endpoint leafId must not be blank")
+        return trimmed
+
+
+class SprintExecutionNode(_Doc):
+    """One graph node: a whole-master lump or a leaf-segment of one master.
+
+    Legacy graphs persist lump nodes as bare ``{"repository", "path"}`` refs. The
+    before-validator lifts those into lump nodes and the serializer emits the bare
+    shape back, so a lump-only graph parses and re-serializes byte-identically
+    (L11-R7). A lump node compares equal to its bare ref, so ref-keyed lookups keep
+    working unchanged for lump graphs.
+    """
+
+    kind: Literal["master", "segment"] = "master"
+    ref: TaskDocumentRef
+    leafIds: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_ref(cls, value: Any) -> Any:
+        if isinstance(value, TaskDocumentRef):
+            return {"ref": value}
+        if isinstance(value, dict) and "ref" not in value and "repository" in value:
+            return {"ref": value}
+        return value
+
+    @field_validator("leafIds")
+    @classmethod
+    def _trim_leaf_ids(cls, value: list[str]) -> list[str]:
+        trimmed = [leaf.strip() for leaf in value]
+        if any(not leaf for leaf in trimmed):
+            raise ValueError("execution-graph node leafIds must not be blank")
+        return trimmed
+
+    @model_validator(mode="after")
+    def _check_kind_leafs(self) -> Self:
+        if self.kind == "segment":
+            if not self.leafIds:
+                raise ValueError("execution-graph segment node requires a non-empty leafIds")
+            if len(set(self.leafIds)) != len(self.leafIds):
+                raise ValueError("execution-graph segment node leafIds must be unique")
+        elif self.leafIds:
+            raise ValueError("execution-graph lump node has no leafIds")
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SprintExecutionNode):
+            return (
+                self.kind == other.kind and self.ref == other.ref and self.leafIds == other.leafIds
+            )
+        if isinstance(other, TaskDocumentRef):
+            return self.kind == "master" and self.ref == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        if self.kind == "master":
+            return hash((self.ref.repository, self.ref.path))
+        return hash((self.ref.repository, self.ref.path, tuple(self.leafIds)))
+
+    @model_serializer
+    def _serialize(self) -> dict[str, Any]:
+        ref = {"repository": self.ref.repository, "path": self.ref.path}
+        if self.kind == "master":
+            return ref
+        return {"kind": "segment", "ref": ref, "leafIds": list(self.leafIds)}
+
+
 class SprintExecutionEdge(_Doc):
     """One reasoned predecessor edge in the sprint's activity-on-node graph."""
 
-    predecessor: TaskDocumentRef
-    successor: TaskDocumentRef
+    predecessor: TaskDocumentRef | SprintExecutionEndpoint
+    successor: TaskDocumentRef | SprintExecutionEndpoint
     reason: str
+    judgmentId: str | None = None
 
     @field_validator("reason")
     @classmethod
@@ -172,58 +268,128 @@ class SprintExecutionEdge(_Doc):
             raise ValueError("execution-graph edge reason must not be blank")
         return trimmed
 
+    @field_validator("judgmentId")
+    @classmethod
+    def _trim_nonblank_judgment_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("execution-graph edge judgmentId must not be blank")
+        return trimmed
+
     @model_validator(mode="after")
     def _check_distinct_endpoints(self) -> Self:
         if self.predecessor == self.successor:
-            raise ValueError("execution-graph edge cannot point a master to itself")
+            raise ValueError("execution-graph edge cannot point a node to itself")
         return self
+
+
+def resolve_graph_endpoint(
+    nodes: list[SprintExecutionNode],
+    endpoint: TaskDocumentRef | SprintExecutionEndpoint,
+) -> SprintExecutionNode:
+    """Resolve one edge endpoint to exactly one declared node."""
+    ref = endpoint.ref if isinstance(endpoint, SprintExecutionEndpoint) else endpoint
+    leaf = endpoint.leafId if isinstance(endpoint, SprintExecutionEndpoint) else None
+    matches = [node for node in nodes if node.ref == ref]
+    if leaf is not None:
+        matches = [node for node in matches if leaf in node.leafIds]
+        if not matches:
+            raise ValueError(
+                f"execution-graph endpoint leaf {leaf!r} is not placed in any node of {ref.key}"
+            )
+    elif not matches:
+        raise ValueError(f"execution-graph edge endpoint must be a declared node: {ref.key}")
+    if len(matches) > 1:
+        raise ValueError(
+            f"execution-graph edge endpoint {ref.key} is ambiguous; "
+            "name a leafId of the target segment"
+        )
+    return matches[0]
 
 
 class SprintExecutionGraph(_Doc):
     """The persisted AON graph; positions and waves are always derived from it."""
 
-    nodes: list[TaskDocumentRef] = Field(min_length=1)
+    nodes: list[SprintExecutionNode] = Field(min_length=1)
     edges: list[SprintExecutionEdge] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_graph_shape(self) -> Self:
-        node_set = set(self.nodes)
-        if len(node_set) != len(self.nodes):
+        if len(set(self.nodes)) != len(self.nodes):
             raise ValueError("execution-graph nodes must be unique")
-        edge_keys = [(edge.predecessor, edge.successor) for edge in self.edges]
-        if len(set(edge_keys)) != len(edge_keys):
+        self._check_leaf_ownership()
+        resolved = [self._resolved_edge(edge) for edge in self.edges]
+        if len(set(resolved)) != len(resolved):
             raise ValueError("execution-graph edges must be unique")
-        unknown = {
-            endpoint
-            for edge in self.edges
-            for endpoint in (edge.predecessor, edge.successor)
-            if endpoint not in node_set
-        }
-        if unknown:
-            raise ValueError(
-                "execution-graph edge endpoints must be declared nodes: "
-                f"{sorted(ref.key for ref in unknown)!r}"
-            )
         self.derived_waves()
         return self
 
-    def derived_waves(self) -> list[list[TaskDocumentRef]]:
-        """Return deterministic topological waves, refusing a directed cycle."""
+    def _check_leaf_ownership(self) -> None:
+        by_master: dict[TaskDocumentRef, list[SprintExecutionNode]] = {}
+        for node in self.nodes:
+            by_master.setdefault(node.ref, []).append(node)
+        for ref, nodes in by_master.items():
+            if len(nodes) > 1 and any(node.kind == "master" for node in nodes):
+                raise ValueError(
+                    "execution-graph lump and segment appearances of one master are mutually "
+                    f"exclusive: {ref.key}"
+                )
+        placed: dict[str, TaskDocumentRef] = {}
+        for node in self.nodes:
+            for leaf in node.leafIds:
+                owner = placed.get(leaf)
+                if owner is not None:
+                    raise ValueError(
+                        f"execution-graph leaf {leaf!r} is placed in more than one node "
+                        f"({owner.key} and {node.ref.key})"
+                    )
+                placed[leaf] = node.ref
+
+    def resolve_endpoint(
+        self, endpoint: TaskDocumentRef | SprintExecutionEndpoint
+    ) -> SprintExecutionNode:
+        """Resolve one edge endpoint to exactly one declared node."""
+        return resolve_graph_endpoint(self.nodes, endpoint)
+
+    def _resolved_edge(
+        self, edge: SprintExecutionEdge
+    ) -> tuple[SprintExecutionNode, SprintExecutionNode]:
+        predecessor = self.resolve_endpoint(edge.predecessor)
+        successor = self.resolve_endpoint(edge.successor)
+        if predecessor == successor:
+            raise ValueError("execution-graph edge cannot point a node to itself")
+        return predecessor, successor
+
+    def master_refs(self) -> list[TaskDocumentRef]:
+        """The distinct masters this graph places, in node declaration order."""
+        return list(dict.fromkeys(node.ref for node in self.nodes))
+
+    def nodes_for(self, ref: TaskDocumentRef) -> list[SprintExecutionNode]:
+        """Every node (lump or segments) placing one master, in declaration order."""
+        return [node for node in self.nodes if node.ref == ref]
+
+    def derived_waves(self) -> list[list[SprintExecutionNode]]:
+        """Return deterministic topological waves over nodes, refusing a directed cycle."""
 
         order = {node: index for index, node in enumerate(self.nodes)}
         indegree = dict.fromkeys(self.nodes, 0)
-        successors: dict[TaskDocumentRef, list[TaskDocumentRef]] = {node: [] for node in self.nodes}
+        successors: dict[SprintExecutionNode, list[SprintExecutionNode]] = {
+            node: [] for node in self.nodes
+        }
         for edge in self.edges:
-            indegree[edge.successor] += 1
-            successors[edge.predecessor].append(edge.successor)
+            predecessor, successor = self._resolved_edge(edge)
+            indegree[successor] += 1
+            successors[predecessor].append(successor)
         ready = [node for node in self.nodes if indegree[node] == 0]
-        waves: list[list[TaskDocumentRef]] = []
+        waves: list[list[SprintExecutionNode]] = []
         visited = 0
         while ready:
             wave = sorted(ready, key=order.__getitem__)
             waves.append(wave)
             visited += len(wave)
-            next_ready: list[TaskDocumentRef] = []
+            next_ready: list[SprintExecutionNode] = []
             for node in wave:
                 for successor in successors[node]:
                     indegree[successor] -= 1
@@ -233,6 +399,130 @@ class SprintExecutionGraph(_Doc):
         if visited != len(self.nodes):
             raise ValueError("execution-graph must be acyclic")
         return waves
+
+
+@dataclass(frozen=True)
+class LeafPlacement:
+    """One master's authored and derived leaf-to-segment placement (L11-R2)."""
+
+    placed: dict[str, SprintExecutionNode]
+    unknown_leaf_ids: tuple[str, ...]
+    unplaced_leaf_ids: tuple[str, ...]
+    derived: dict[str, SprintExecutionNode]
+    derived_all_blocked: bool
+
+
+def derived_leaf_placement(
+    graph: SprintExecutionGraph,
+    master_ref: TaskDocumentRef,
+    planned_leaf_ids: list[str],
+    completed_refs: set[TaskDocumentRef],
+) -> LeafPlacement:
+    """Map one master's planned leafs to its segments, deriving unplaced placements.
+
+    Pure: unplaced leafs (the master's leaf set grew after authoring) schedule as if
+    appended to the master's latest unblocked segment -- latest by derived wave index,
+    then node declaration order. When every segment is blocked the latest overall is
+    used and ``derived_all_blocked`` flags the fallback. A lump master covers its leafs
+    implicitly and reports no placement facts.
+    """
+
+    segments = [node for node in graph.nodes_for(master_ref) if node.kind == "segment"]
+    if not segments:
+        return LeafPlacement({}, (), (), {}, False)
+    planned = list(dict.fromkeys(planned_leaf_ids))
+    planned_set = set(planned)
+    placed: dict[str, SprintExecutionNode] = {}
+    for node in segments:
+        for leaf in node.leafIds:
+            placed[leaf] = node
+    unknown = tuple(leaf for leaf in placed if leaf not in planned_set)
+    unplaced = tuple(leaf for leaf in planned if leaf not in placed)
+    derived: dict[str, SprintExecutionNode] = {}
+    all_blocked = False
+    if unplaced:
+        target, all_blocked = _latest_unblocked_segment(graph, segments, completed_refs)
+        derived = {leaf: target for leaf in unplaced}
+    return LeafPlacement(placed, unknown, unplaced, derived, all_blocked)
+
+
+def _latest_unblocked_segment(
+    graph: SprintExecutionGraph,
+    segments: list[SprintExecutionNode],
+    completed_refs: set[TaskDocumentRef],
+) -> tuple[SprintExecutionNode, bool]:
+    wave_of = {node: index for index, wave in enumerate(graph.derived_waves()) for node in wave}
+    declaration = {node: index for index, node in enumerate(graph.nodes)}
+    predecessors: dict[SprintExecutionNode, list[SprintExecutionNode]] = {
+        node: [] for node in graph.nodes
+    }
+    for edge in graph.edges:
+        predecessor, successor = graph._resolved_edge(edge)
+        predecessors[successor].append(predecessor)
+    ordered = sorted(segments, key=lambda node: (wave_of[node], declaration[node]))
+    for candidate in reversed(ordered):
+        if all(predecessor.ref in completed_refs for predecessor in predecessors[candidate]):
+            return candidate, False
+    return ordered[-1], True
+
+
+def _leaf_trailing_number(leaf_id: str) -> int | None:
+    match = re.search(r"(\d+)$", leaf_id)
+    return int(match.group(1)) if match else None
+
+
+def leaf_placement_facts(master_key: str, placement: LeafPlacement) -> list[dict[str, Any]]:
+    """Shape one master's placement drift as reported facts (never silent, L11-R2/R6)."""
+    facts: list[dict[str, Any]] = [
+        {"kind": "unknown-leaf", "master": master_key, "leafId": leaf}
+        for leaf in placement.unknown_leaf_ids
+    ]
+    facts += [
+        {
+            "kind": "unplaced-leaf",
+            "master": master_key,
+            "leafId": leaf,
+            "derivedSegmentLeafs": list(placement.derived[leaf].leafIds),
+            "derivedAllSegmentsBlocked": placement.derived_all_blocked,
+        }
+        for leaf in placement.unplaced_leaf_ids
+    ]
+    return facts
+
+
+def numbering_drift_hints(graph: SprintExecutionGraph) -> list[dict[str, Any]]:
+    """Report leaf-numbering inversions across derived waves (L11-R8); never refuses.
+
+    A hint fires when a lower-numbered leaf of one master sits in a strictly later
+    derived wave than a higher-numbered leaf of the same master (e.g. L3 in wave 3
+    while L4 is in wave 1). Leaf ids without a trailing number are not comparable
+    and never hint.
+    """
+
+    wave_of = {node: index for index, wave in enumerate(graph.derived_waves()) for node in wave}
+    hints: list[dict[str, Any]] = []
+    for ref in graph.master_refs():
+        numbered = [
+            (leaf, wave_of[node], number)
+            for node in graph.nodes_for(ref)
+            if node.kind == "segment"
+            for leaf in node.leafIds
+            if (number := _leaf_trailing_number(leaf)) is not None
+        ]
+        for lower_leaf, lower_wave, lower_number in numbered:
+            for higher_leaf, higher_wave, higher_number in numbered:
+                if lower_number < higher_number and lower_wave > higher_wave:
+                    hints.append(
+                        {
+                            "kind": "leaf-numbering-inversion",
+                            "master": ref.key,
+                            "lowerNumberLeafId": lower_leaf,
+                            "lowerNumberWave": lower_wave + 1,
+                            "higherNumberLeafId": higher_leaf,
+                            "higherNumberWave": higher_wave + 1,
+                        }
+                    )
+    return hints
 
 
 class SubTaskRef(_Doc):

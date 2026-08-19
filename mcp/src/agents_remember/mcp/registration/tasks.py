@@ -116,7 +116,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
 
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
         'set_section' | 'append_decision' | 'record_route_review' | 'migrate_execution_topology' |
-        'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        'author_execution_graph' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
         title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
@@ -138,7 +138,22 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         fields={masters:[{taskDocumentRef:{repository,path}, executionNature}],
         executionGraph:{nodes:[{repository,path}], edges:[{predecessor:{repository,path},
         successor:{repository,path}, reason}]}}; dry_run previews every affected JSON/Markdown
-        pair, the ordered master classifications, and the derived waves.
+        pair, the ordered master classifications, and the derived waves. It authors lump nodes
+        only — the initial bootstrap.
+        'author_execution_graph' applies one validated atomic batch of structural mutations to a
+        migrated sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
+        {op:'add_node', ref:{repository,path}, kind?:'master'|'segment', leafIds?:[...]},
+        {op:'remove_node', ref, leafId?:sample}, {op:'add_edge', predecessor, successor, reason,
+        judgmentId}, {op:'remove_edge', predecessor, successor, judgmentId}, {op:'move_leaf', ref,
+        leafId, toSegment:sampleLeafId, judgmentId}, or {op:'set_nature', ref, executionNature,
+        judgmentId}. Edge endpoints are a bare {repository,path} (the master's sole node) or
+        {ref, leafId} addressing the segment containing that leaf. Judgment-bearing mutations
+        (edges, segmentation, nature) require a judgmentId row in the sprint's Judgment Register
+        section; the mechanism never invents one. The batch refuses segment nodes on atomic
+        masters, leaf placements overlapping or incomplete against the live subTasks, and unknown
+        leaf ids; unplaced-leaf derived placements and leaf-numbering inversions across waves are
+        reported as facts (the latter never refuse). dry_run previews the rendered diff and
+        wouldLose without writing.
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
         scalar/list updates; 'set_status' takes fields.status. Completed refuses while any declared
         step/substep (or master row) remains unresolved. dry_run=true builds + validates and

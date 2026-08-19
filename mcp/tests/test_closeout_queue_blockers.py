@@ -411,7 +411,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             self.graph,
             incomplete_predecessors={
                 **self.graph.incomplete_predecessors,
-                MASTER_A: (MASTER_B,),
+                self.graph.nodes_by_master[MASTER_A][0]: (self.graph.nodes_by_master[MASTER_B][0],),
             },
         )
         self.assertIn(

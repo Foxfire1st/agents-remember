@@ -20,6 +20,7 @@ from agents_remember.observer.projection import (
     TaskDecisionNode,
     TaskDocNode,
     TaskExecutionGraphNode,
+    TaskExecutionNode,
     TaskSectionNode,
     TaskStepDispositionNode,
     TaskStepNode,
@@ -375,7 +376,12 @@ def _task_doc_node(
             else None
         ),
         executionWaves=(
-            doc.executionGraph.derived_waves() if doc.executionGraph is not None else []
+            [
+                [TaskExecutionNode.model_validate(node.model_dump(mode="json")) for node in wave]
+                for wave in doc.executionGraph.derived_waves()
+            ]
+            if doc.executionGraph is not None
+            else []
         ),
     )
 

@@ -802,39 +802,70 @@
         "executionGraph": {
           "edges": [
             {
+              "judgmentId": "J-sim-1",
               "predecessor": {
-                "path": "sim-master-a/task.json",
-                "repository": "agents-remember"
+                "leafId": "SIM-A-L1",
+                "ref": {
+                  "path": "sim-master-a/task.json",
+                  "repository": "agents-remember"
+                }
               },
               "reason": "the shared framework must land first",
               "successor": {
-                "path": "sim-master-b/task.json",
-                "repository": "agents-remember"
+                "leafId": "SIM-B-L1",
+                "ref": {
+                  "path": "sim-master-b/task.json",
+                  "repository": "agents-remember"
+                }
               }
             }
           ],
           "nodes": [
             {
-              "path": "sim-master-a/task.json",
-              "repository": "agents-remember"
+              "kind": "segment",
+              "leafIds": [
+                "SIM-A-L1"
+              ],
+              "ref": {
+                "path": "sim-master-a/task.json",
+                "repository": "agents-remember"
+              }
             },
             {
-              "path": "sim-master-b/task.json",
-              "repository": "agents-remember"
+              "kind": "segment",
+              "leafIds": [
+                "SIM-B-L1"
+              ],
+              "ref": {
+                "path": "sim-master-b/task.json",
+                "repository": "agents-remember"
+              }
             }
           ]
         },
         "executionWaves": [
           [
             {
-              "path": "sim-master-a/task.json",
-              "repository": "agents-remember"
+              "kind": "segment",
+              "leafIds": [
+                "SIM-A-L1"
+              ],
+              "ref": {
+                "path": "sim-master-a/task.json",
+                "repository": "agents-remember"
+              }
             }
           ],
           [
             {
-              "path": "sim-master-b/task.json",
-              "repository": "agents-remember"
+              "kind": "segment",
+              "leafIds": [
+                "SIM-B-L1"
+              ],
+              "ref": {
+                "path": "sim-master-b/task.json",
+                "repository": "agents-remember"
+              }
             }
           ]
         ],

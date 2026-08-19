@@ -31,7 +31,12 @@ from agents_remember.controlplane.closeout_queue_store import queue_store_paths
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.snapshots_impl._task_documents import read_task_documents
-from agents_remember.tasks import SprintExecutionGraph, TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from pydantic import ValidationError
 from test_worktree_support import git, init_repo
@@ -666,11 +671,27 @@ class ExecutionTopologyTests(unittest.TestCase):
             )
         }
         self.assertEqual(projected["MASTER-A"].executionNature, "organizational")
-        self.assertEqual(projected["SPRINT"].executionWaves, [[MASTER_A], [MASTER_B]])
+        self.assertEqual(
+            [[node.ref for node in wave] for wave in projected["SPRINT"].executionWaves],
+            [[MASTER_A], [MASTER_B]],
+        )
         assert projected["SPRINT"].executionGraph is not None
         self.assertEqual(
             projected["SPRINT"].executionGraph.model_dump(mode="json"),
-            _graph(),
+            {
+                "nodes": [
+                    {"kind": "master", "ref": MASTER_A.model_dump(), "leafIds": []},
+                    {"kind": "master", "ref": MASTER_B.model_dump(), "leafIds": []},
+                ],
+                "edges": [
+                    {
+                        "predecessor": {"ref": MASTER_A.model_dump(), "leafId": None},
+                        "successor": {"ref": MASTER_B.model_dump(), "leafId": None},
+                        "reason": "Shared contract must land first.",
+                        "judgmentId": None,
+                    }
+                ],
+            },
         )
 
     def test_execution_waves_validates_and_returns_one_pinned_sprint_snapshot(self) -> None:
@@ -698,6 +719,24 @@ class ExecutionTopologyTests(unittest.TestCase):
         ):
             self.assertEqual(self.topology.execution_waves(SPRINT), [[MASTER_A], [MASTER_B]])
         self.assertGreaterEqual(sprint_reads, 2)
+
+    def test_migration_authors_lump_nodes_only(self) -> None:
+        self._write_legacy()
+        fields = self._migration_fields()
+        fields["executionGraph"] = {
+            "nodes": [
+                {"kind": "segment", "ref": MASTER_A.model_dump(), "leafIds": ["L1"]},
+                MASTER_B.model_dump(),
+            ],
+            "edges": [],
+        }
+        with self.assertRaisesRegex(TaskDocError, "lump nodes only"):
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
+                operation="migrate_execution_topology",
+                edit=TaskDocEdit(fields=fields),
+            )
 
     def test_migration_refuses_non_exact_membership_and_rolls_back_cross_root_failure(self) -> None:
         self._write_legacy()

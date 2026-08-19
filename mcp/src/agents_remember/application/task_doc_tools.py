@@ -22,7 +22,6 @@ from pydantic import ValidationError
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import AgentsRememberError
-from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
@@ -52,7 +51,6 @@ from agents_remember.tasks.readiness import (
 from agents_remember.worktrees.integration_branch_authority import (
     require_topology_publication_authority,
 )
-from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.route_review import RouteReviewError, build_route_review
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
@@ -69,14 +67,18 @@ from agents_remember.worktrees.worktree_contract import (
 
 from .task_doc_queue_scope import QueueScopeError, governing_queue_scope
 from .task_execution_topology import (
+    ExecutionTopologyAuthoringRequest,
     ExecutionTopologyEditRequest,
     ExecutionTopologyError,
     ExecutionTopologyMigrationRequest,
+    author_execution_graph,
     enforce_execution_topology_edit,
     migrate_execution_topology,
     require_commanded_masters_completed,
 )
-from .worktree_tools import end_ambient_lifecycle_if_anchored
+from .task_reopen import (
+    task_reopen_tool,  # noqa: F401  # facade re-export (moved to task_reopen.py)
+)
 
 VALID_OPERATIONS = (
     "create",
@@ -90,6 +92,7 @@ VALID_OPERATIONS = (
     "append_decision",
     "record_route_review",
     "migrate_execution_topology",
+    "author_execution_graph",
     "set_field",
     "get",
 )
@@ -380,6 +383,23 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
         try:
             return migrate_execution_topology(
                 ExecutionTopologyMigrationRequest(
+                    coordination_root=context.config.coordination_root,
+                    repo_id=context.target.repo_id,
+                    code_repository=repository.path,
+                    memory_repository=repository.memory_root,
+                    task_root=context.task_root,
+                    slug=context.target.slug,
+                    fields=context.fields,
+                    dry_run=context.dry_run,
+                )
+            )
+        except ExecutionTopologyError as exc:
+            raise TaskDocError(str(exc)) from exc
+    if context.operation == "author_execution_graph":
+        repository = context.config.repositories[context.target.repo_id]
+        try:
+            return author_execution_graph(
+                ExecutionTopologyAuthoringRequest(
                     coordination_root=context.config.coordination_root,
                     repo_id=context.target.repo_id,
                     code_repository=repository.path,
@@ -1155,27 +1175,3 @@ def _master_sync_payload(
         payload["diff"] = rendered["diff"]
         payload["wouldLose"] = rendered["wouldLose"]
     return payload
-
-
-def task_reopen_tool(
-    config: McpRuntimeConfig,
-    *,
-    contract_path: str,
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    """Reopen a completed leaf task under its exact same leaf id (L11).
-
-    Task-domain sibling of ``task_doc``: it resets the leaf's enclosure contract and
-    task document back to planning; recreating the worktrees stays ``worktree_start``'s
-    job. The response keeps the worktree-command shape (contract state fields), so it
-    validates against a ``WorktreeCommandResponse`` subclass in the registry.
-    """
-    confined_contract_path = require_within_coordination(config, contract_path, "contract_path")
-    lifecycle_id = load_contract(confined_contract_path).lifecycle_id
-    result = reopen_task(confined_contract_path, dry_run=dry_run)
-    if not dry_run and result.returncode == 0 and result.payload.get("state") == "reopened":
-        # Reopen retires the completed task's attribution. Ending that exact ambient
-        # anchor makes the next worktree_start mint a fresh lifecycle instead of
-        # silently promoting and restamping the completed lifecycle id.
-        end_ambient_lifecycle_if_anchored(lifecycle_id, outcome="completed")
-    return {**result.payload, "ok": result.returncode == 0, "operation": "task_reopen"}

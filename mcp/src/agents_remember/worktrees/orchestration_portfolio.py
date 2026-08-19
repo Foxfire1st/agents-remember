@@ -19,7 +19,11 @@ from agents_remember.models.closeout_queue import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.closeout_queue_evidence import PRIORITY_RANK
-from agents_remember.worktrees.closeout_queue_graph import QueueGraphContext
+from agents_remember.worktrees.closeout_queue_graph import (
+    QueueGraphContext,
+    candidate_node,
+    master_incomplete_predecessors,
+)
 
 MAX_PORTFOLIO_DECISIONS = 256
 MAX_PORTFOLIO_TEXT = 8192
@@ -119,7 +123,13 @@ def _frontier_ready(
     """
 
     reasons: list[str] = []
-    if graph.incomplete_predecessors.get(candidate.owningMaster):
+    node = candidate_node(graph, candidate.owningMaster, candidate.taskDocumentRef)
+    predecessors = (
+        graph.incomplete_predecessors[node]
+        if node is not None
+        else master_incomplete_predecessors(graph, candidate.owningMaster)
+    )
+    if predecessors:
         reasons.append("predecessor-incomplete")
     if candidate.grade is None:
         reasons.append("explicit-grade-required")
@@ -151,10 +161,20 @@ def recompute_frontier(
                 taskDocumentRef=candidate.taskDocumentRef,
                 owningMaster=candidate.owningMaster,
                 priority=grade.priority,
-                nodeOrder=graph.node_order[candidate.owningMaster],
+                nodeOrder=_candidate_order(graph, candidate),
             )
         )
     return frontier
+
+
+def _candidate_order(graph: QueueGraphContext, candidate: CloseoutCandidateRecord) -> int:
+    node = candidate_node(graph, candidate.owningMaster, candidate.taskDocumentRef)
+    if node is not None:
+        return graph.node_order[node]
+    orders = [
+        graph.node_order[owned] for owned in graph.nodes_by_master.get(candidate.owningMaster, ())
+    ]
+    return min(orders, default=-1)
 
 
 def choose(frontier: list[FrontierCandidate]) -> FrontierCandidate:
@@ -203,6 +223,8 @@ def manager_slice(
     return ManagerSlice(
         masterRef=master_ref,
         executionNature=execution_nature,
-        incompletePredecessors=list(graph.incomplete_predecessors.get(master_ref, ())),
+        incompletePredecessors=list(
+            dict.fromkeys(node.ref for node in master_incomplete_predecessors(graph, master_ref))
+        ),
         candidates=views,
     )

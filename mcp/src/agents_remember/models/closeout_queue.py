@@ -392,6 +392,21 @@ class CloseoutQueueCandidateView(_StrictModel):
     grade: SchedulingGrade | None = None
 
 
+class LeafPlacementFact(_StrictModel):
+    """One unplaced/unknown leaf scheduling fact from the graph read path (L11-R2/R6).
+
+    ``derivedSegmentLeafs``/``derivedAllSegmentsBlocked`` are set for ``unplaced-leaf``
+    facts (the leaf schedules as if appended to that segment); an ``unknown-leaf`` fact
+    names a graph-placed leaf the master's live plan no longer carries.
+    """
+
+    kind: Literal["unplaced-leaf", "unknown-leaf"]
+    master: str = Field(max_length=MAX_QUEUE_TEXT)
+    leafId: str = Field(max_length=MAX_QUEUE_SHORT_TEXT)
+    derivedSegmentLeafs: list[str] = Field(default_factory=list)
+    derivedAllSegmentsBlocked: bool | None = None
+
+
 class CloseoutQueueResponse(ToolResponse):
     operation: Literal["closeout_queue"] = "closeout_queue"
     action: QueueAction
@@ -400,6 +415,7 @@ class CloseoutQueueResponse(ToolResponse):
     sprintTaskDocumentRef: TaskDocumentRef
     revision: int = Field(ge=0)
     graphRevision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    leafPlacementFacts: list[LeafPlacementFact] = Field(default_factory=list)
     activeBlocker: ActiveAtomicBlocker | None = None
     ready: list[CloseoutQueueCandidateView] = Field(default_factory=list)
     waiting: list[CloseoutQueueCandidateView] = Field(default_factory=list)

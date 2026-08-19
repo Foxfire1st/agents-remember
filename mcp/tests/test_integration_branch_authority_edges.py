@@ -25,7 +25,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import read_task_doc, write_task_doc
+from agents_remember.tasks import SprintExecutionNode, read_task_doc, write_task_doc
 from agents_remember.worktrees import lifecycle_operations
 from agents_remember.worktrees.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.closeout_queue_lifecycle import (
@@ -398,7 +398,12 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     update={
                         "orchestrates": [*sprint.orchestrates, "org-master"],
                         "executionGraph": sprint.executionGraph.model_copy(
-                            update={"nodes": [*sprint.executionGraph.nodes, org_ref]}
+                            update={
+                                "nodes": [
+                                    *sprint.executionGraph.nodes,
+                                    SprintExecutionNode(ref=org_ref),
+                                ]
+                            }
                         ),
                     }
                 ),
@@ -517,7 +522,12 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     update={
                         "orchestrates": [*sprint.orchestrates, "alias-atomic"],
                         "executionGraph": sprint.executionGraph.model_copy(
-                            update={"nodes": [*sprint.executionGraph.nodes, alias_ref]}
+                            update={
+                                "nodes": [
+                                    *sprint.executionGraph.nodes,
+                                    SprintExecutionNode(ref=alias_ref),
+                                ]
+                            }
                         ),
                     }
                 ),
