@@ -53,9 +53,16 @@ class RegisterScaffoldTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def _create_sprint(self, fields: dict[str, object] | None = None) -> dict[str, object]:
+    def _create_sprint(
+        self,
+        fields: dict[str, object] | None = None,
+        *,
+        master_nature: str | None = None,
+    ) -> dict[str, object]:
         # Doctrine: the commanded master document exists before the sprint adopts it.
-        write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
+        write_task_doc(
+            self.tasks / "master-a", _master(identity="MASTER-A", execution_nature=master_nature)
+        )
         base: dict[str, object] = {
             "id": "SPRINT",
             "slug": "sprint",
@@ -200,6 +207,30 @@ class RegisterScaffoldTests(unittest.TestCase):
         headings = {section.heading.strip().casefold() for section in doc.sections}
         self.assertNotIn(JUDGMENT_REGISTER_SECTION, headings)
         self.assertNotIn(PRIORITY_REGISTER_SECTION, headings)
+
+    def test_sprint_cannot_drop_its_graph_via_replace(self) -> None:
+        # L13-R5f: an authored graph is retired only through the authoring seam;
+        # a replace that drops executionGraph refuses.
+        self._create_sprint(
+            {
+                "executionGraph": {
+                    "nodes": [{"repository": REPOSITORY, "path": "master-a/task.json"}],
+                    "edges": [],
+                }
+            },
+            master_nature="atomic",
+        )
+        doc = self._read_sprint()
+        data = doc.model_dump(by_alias=True)
+        data["executionGraph"] = None
+        with self.assertRaisesRegex(TaskDocError, "cannot remove its executionGraph"):
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
+                operation="replace",
+                edit=TaskDocEdit(fields=data),
+            )
+        self.assertIsNotNone(self._read_sprint().executionGraph)
 
 
 if __name__ == "__main__":

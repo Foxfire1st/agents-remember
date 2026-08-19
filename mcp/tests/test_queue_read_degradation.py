@@ -12,12 +12,15 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from agents_remember.models.closeout_queue import CloseoutQueueRequest
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc, write_task_doc
+from agents_remember.tasks.document_refs import TaskDocumentRefError
 from agents_remember.worktrees.closeout_queue import QueueActor, closeout_queue_tool
 from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from test_closeout_queue import JUDGMENT_HEADING, MASTER_B, NOW, SPRINT, QueueFixture
+from test_closeout_queue import JUDGMENT_HEADING, MASTER_B, NOW, REPO, SPRINT, QueueFixture
 
 
 class QueueReadDegradationTests(unittest.TestCase):
@@ -105,6 +108,63 @@ class QueueReadDegradationTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "dag")
         self.assertEqual(payload["registers"], {"judgmentRegister": "ok", "priorityRegister": "ok"})
         self.assertIsNone(payload["laneOwner"])
+
+    def test_status_on_a_missing_or_non_sprint_document_fails_as_argument_fault(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name))
+        missing = TaskDocumentRef(repository=REPO, path="missing/task.json")
+        with self.assertRaises(CloseoutQueueError) as raised:
+            closeout_queue_tool(
+                fixture.cfg,
+                CloseoutQueueRequest(action="status", sprint_task_document_ref=missing),
+                actor=QueueActor(role="orchestrator", task_document_ref=SPRINT),
+                now=NOW,
+            )
+        self.assertIn("task-document-not-found", str(raised.exception))
+
+        plain_master = TaskDocumentRef(repository=REPO, path="master-a/task.json")
+        with self.assertRaises(CloseoutQueueError) as raised:
+            closeout_queue_tool(
+                fixture.cfg,
+                CloseoutQueueRequest(action="status", sprint_task_document_ref=plain_master),
+                actor=QueueActor(role="orchestrator", task_document_ref=SPRINT),
+                now=NOW,
+            )
+        self.assertIn("closeout-queue-sprint-required", str(raised.exception))
+
+    def test_status_fails_closed_when_mode_resolution_moves(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name))
+        self._remove_graph(fixture)
+        with (
+            mock.patch(
+                "agents_remember.worktrees.closeout_queue.resolve_scheduling_mode",
+                side_effect=TaskDocumentRefError("task-document-not-found", "sprint moved"),
+            ),
+            self.assertRaises(CloseoutQueueError) as raised,
+        ):
+            self._status(fixture)
+        self.assertIn("task-document-not-found", str(raised.exception))
+
+    def test_degraded_scope_authorization(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
+        self._remove_graph(fixture)
+        # A commanded master's manager may read the degraded projection.
+        payload = closeout_queue_tool(
+            fixture.cfg,
+            CloseoutQueueRequest(action="status", sprint_task_document_ref=SPRINT),
+            actor=QueueActor(role="manager", task_document_ref=MASTER_B),
+            now=NOW,
+        )
+        self.assertEqual(payload["state"], "degraded")
+        # An uncommanded caller is refused.
+        outsider = TaskDocumentRef(repository=REPO, path="master-z/task.json")
+        with self.assertRaises(CloseoutQueueError) as raised:
+            closeout_queue_tool(
+                fixture.cfg,
+                CloseoutQueueRequest(action="status", sprint_task_document_ref=SPRINT),
+                actor=QueueActor(role="manager", task_document_ref=outsider),
+                now=NOW,
+            )
+        self.assertIn("closeout-queue-caller-refused", str(raised.exception))
 
 
 if __name__ == "__main__":

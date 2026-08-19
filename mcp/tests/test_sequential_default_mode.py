@@ -12,12 +12,17 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
+from agents_remember.application.structural.agent_tools import _manager_series_bootstrap_refusal
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.modules import start_contract
+from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start_contract import (
     MasterSeriesContractSpec,
@@ -31,7 +36,11 @@ from agents_remember.worktrees.scheduling_mode import (
     series_lane_holders,
 )
 from agents_remember.worktrees.task_resolver import series_contract_path
-from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    write_contract,
+)
 from test_worktree_support import git, init_repo
 
 REPO = "repo-a"
@@ -244,6 +253,101 @@ class SequentialLaneTests(unittest.TestCase):
             self.assertRaises(TaskDocumentRefError),
         ):
             ensure_master_series_contract(self.fixture.spec("master-a"))
+
+    def test_lane_block_is_rechecked_under_the_bootstrap_lock(self) -> None:
+        # The lane is checked once before the lock and again under it (the second
+        # check wins the race): a block surfacing only under the lock still returns
+        # the ordering payload.
+        ensure_master_series_contract(self.fixture.spec("master-a"))
+        blocked = ensure_master_series_contract(self.fixture.spec("master-b"))
+        assert isinstance(blocked, WorktreeCommandResult)
+        with mock.patch.object(
+            start_contract,
+            "_sequential_lane_block",
+            side_effect=[None, blocked],
+        ):
+            result = ensure_master_series_contract(self.fixture.spec("master-b"))
+        assert isinstance(result, WorktreeCommandResult)
+        self.assertEqual(result.payload["state"], "sequential-lane-owned")
+
+    def test_standalone_master_bootstrap_has_no_lane_contention(self) -> None:
+        # A standalone master is trivially sequential: no sprint, no lane.
+        master_ref = TaskDocumentRef(repository=REPO, path="solo/task.json")
+        write_task_doc(self.fixture.tasks / "solo", _master(master_ref, None))
+        created = ensure_master_series_contract(
+            MasterSeriesContractSpec(
+                coordination_root=self.fixture.coord,
+                repo_name=REPO,
+                code_repo=self.fixture.code,
+                memory_root=None,
+                task_root=self.fixture.tasks / "solo",
+                task_name="solo",
+                parent_task_name="",
+                protected_branch="main",
+            )
+        )
+        self.assertNotIsInstance(created, WorktreeCommandResult)
+        assert isinstance(created, WorktreeContract)
+        self.assertEqual(created.code_work_branch, "ar/solo")
+
+    def test_parent_series_contract_passes_the_blocked_payload_through(
+        self,
+    ) -> None:  # _parent_series_contract returns the lane block, and _build_start_contract
+        # passes it through unchanged.
+        ensure_master_series_contract(self.fixture.spec("master-a"))
+        write_task_doc(
+            self.fixture.tasks / "master-b",
+            _master(MASTER_B, None).model_copy(
+                update={"subTasks": [SubTaskRef(number="LEAF-1", name="leaf", file="leaf-1.md")]}
+            ),
+        )
+        write_task_doc(
+            self.fixture.tasks / "master-b",
+            TaskDocument.model_validate(
+                {
+                    "id": "LEAF-1",
+                    "slug": "leaf-1",
+                    "title": "leaf",
+                    "kind": "subTask",
+                    "status": "planning",
+                    "repo": REPO,
+                    "createdAt": NOW,
+                    "steps": [{"id": "S1", "title": "work", "status": "done"}],
+                }
+            ),
+        )
+        context = SimpleNamespace(
+            coordination_root=self.fixture.coord,
+            code_repository_name=REPO,
+            code_repository_root=self.fixture.code,
+            memory_mode="disabled",
+        )
+        args = WorktreeArgs(task_name="master-b", worktree_name="leaf-1", dry_run=True)
+        result = start_contract._parent_series_contract(context, args, "disabled")
+        assert isinstance(result, WorktreeCommandResult)
+        self.assertEqual(result.payload["state"], "sequential-lane-owned")
+        built = start_contract._build_start_contract(context, args)
+        assert isinstance(built, WorktreeCommandResult)
+        self.assertEqual(built.payload["state"], "sequential-lane-owned")
+
+    def test_manager_dispatch_reports_the_lane_block_as_a_structural_outcome(self) -> None:
+        # L13-R1: dispatching the second master's manager reports the lane owner and
+        # the legal next operations instead of refusing or racing.
+        ensure_master_series_contract(self.fixture.spec("master-a"))
+        topology = TaskDocumentTopology(self.fixture.coord)
+        resolved = topology.resolve(MASTER_B)
+        config = SimpleNamespace(
+            coordination_root=self.fixture.coord,
+            repositories={
+                REPO: SimpleNamespace(repo_id=REPO, path=self.fixture.code, memory_root=None)
+            },
+        )
+        outcome = _manager_series_bootstrap_refusal(cast(McpRuntimeConfig, config), resolved)
+        assert outcome is not None
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.status, "sequential-lane-owned")
+        assert outcome.detail is not None
+        self.assertIn(MASTER_A.key, outcome.detail)
 
 
 if __name__ == "__main__":
