@@ -37,6 +37,15 @@ TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 DocKind = Literal["light", "subTask", "master"]
 RouteReviewVerdict = Literal["pass", "pass-with-notes", "block"]
 
+# The structural task altitude per role. The SprintSeat schema validates against
+# SPRINT_ROLES; ``document_refs`` re-exports all three for its altitude checks, so the
+# canonical home is here (importing from document_refs would cycle).
+SPRINT_ROLES = frozenset(
+    {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
+)
+MASTER_ROLES = frozenset({"manager"})
+LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+
 
 class _Doc(BaseModel):
     """Strict base: unknown keys are a schema error; field name or alias accepts."""
@@ -526,13 +535,55 @@ def numbering_drift_hints(graph: SprintExecutionGraph) -> list[dict[str, Any]]:
 
 
 class SubTaskRef(_Doc):
-    """One slice in a master's series index; ``status`` drives the ✅/🔨/⬜ marker."""
+    """One slice in a master's series index; ``status`` drives the ✅/🔨/⬜ marker.
+
+    On an orchestration sprint the row may carry a typed ``masterRef`` (L14-R1): the
+    exact commanded master document it tracks, rendered as a real markdown link. Leaf
+    rows on an ordinary master never set it; optional so legacy rows parse unchanged.
+    """
 
     number: str
     name: str
     file: str = ""
     status: DocStatus = "planning"
     scope: str = ""
+    masterRef: TaskDocumentRef | None = None
+
+
+SprintSeatState = Literal["planned", "active", "retired"]
+
+
+class SprintSeat(_Doc):
+    """One first-class seat of an orchestration sprint (L14-R3).
+
+    Mirrors the manager-seat precedent on master docs: the sprint document owns the
+    seat record, so seat task documents leave the sprint's task index (existing ones
+    stay on disk as historical records). ``identity`` is a correlatable session or
+    catalog id — provenance for correlation, never an authority source.
+    """
+
+    role: str
+    label: str = ""
+    identity: str | None = None
+    state: SprintSeatState = "planned"
+
+    @field_validator("role")
+    @classmethod
+    def _check_sprint_role(cls, value: str) -> str:
+        role = value.strip()
+        if role not in SPRINT_ROLES:
+            raise ValueError(f"sprint seat role must be one of {sorted(SPRINT_ROLES)}")
+        return role
+
+    @field_validator("identity")
+    @classmethod
+    def _trim_identity(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("sprint seat identity must not be blank")
+        return trimmed
 
 
 class Section(_Doc):
@@ -596,6 +647,9 @@ class TaskDocument(_Doc):
     # (its task folder / doc id / title; the dashboard matches forgivingly). Additive: there is no
     # new task kind, docs without the field are untouched, and masters named nowhere stay top-level.
     orchestrates: list[str] = Field(default_factory=list)
+    # The sprint's first-class seats (L14-R3): role + label + correlatable identity + state.
+    # Legal only on an orchestration sprint; roles are unique among non-retired seats.
+    seats: list[SprintSeat] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_kind_fields(self) -> Self:
@@ -616,6 +670,8 @@ class TaskDocument(_Doc):
                 raise ValueError(f"a {self.kind} document has no subTasks (master-only)")
             if self.orchestrates:
                 raise ValueError(f"a {self.kind} document has no orchestrates (master-only)")
+            if self.seats:
+                raise ValueError(f"a {self.kind} document has no seats (sprint-only)")
             if any(section.kind != "freeform" for section in self.sections):
                 raise ValueError(f"a {self.kind} document allows only freeform sections")
             if self.codeExamplesNote is not None and self.codeExamples:
@@ -628,6 +684,7 @@ class TaskDocument(_Doc):
                     f"a {self.kind} document has no executionNature or executionGraph (master-only)"
                 )
         self._check_execution_fields()
+        self._check_sprint_rows_and_seats()
         self._normalize_integration_branch()
         return self
 
@@ -638,6 +695,22 @@ class TaskDocument(_Doc):
             raise ValueError("an orchestration sprint has no executionNature")
         if not self.orchestrates and self.executionGraph is not None:
             raise ValueError("executionGraph belongs only to an orchestration sprint")
+
+    def _check_sprint_rows_and_seats(self) -> None:
+        """Typed sprint linkage is sprint-only (L14): masterRef rows and seats require command."""
+        if any(row.masterRef is not None for row in self.subTasks) and (
+            self.kind != "master" or not self.orchestrates
+        ):
+            raise ValueError(
+                "a subTasks row with masterRef belongs only to an orchestration sprint"
+            )
+        if not self.seats:
+            return
+        if self.kind != "master" or not self.orchestrates:
+            raise ValueError("seats belong only to an orchestration sprint")
+        live_roles = [seat.role for seat in self.seats if seat.state != "retired"]
+        if len(set(live_roles)) != len(live_roles):
+            raise ValueError("sprint seat roles must be unique among planned/active seats")
 
     def _normalize_integration_branch(self) -> None:
         if self.integrationBranch is None:

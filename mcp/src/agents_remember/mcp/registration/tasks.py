@@ -122,7 +122,8 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
 
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
         'set_section' | 'append_decision' | 'record_route_review' |
-        'author_execution_graph' | 'set_field' | 'get'. Locate the doc by task_name (also resolves the
+        'author_execution_graph' | 'attach_master' | 'detach_master' | 'linkage_report' |
+        'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
         title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
@@ -159,6 +160,20 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         leaf ids; unplaced-leaf derived placements and leaf-numbering inversions across waves are
         reported as facts (the latter never refuse). dry_run previews the rendered diff and
         wouldLose without writing.
+        'attach_master' (orchestration sprint) attaches one master as a single validated atomic
+        batch: fields={masterRef:{repository,path}, number, name?, scope?, status?,
+        executionNature?, judgmentId?} write the typed subTask row (masterRef, rendered as a real
+        link), the orchestrates slug, and — only when the sprint has an executionGraph — the lump
+        graph node (graph-less sprints report graphNode:'deferred-no-graph-default' and keep the
+        atomic-sequential default). A nature-less master requires executionNature plus a
+        judgmentId from the sprint Judgment Register; disagreeing with an existing nature refuses.
+        Validation precedes the one batch write, so a partial attach is structurally impossible.
+        'detach_master' takes fields={masterRef} and removes the typed row, the membership slug,
+        and the graph node; it refuses while any edge touches the node and never deletes files.
+        'linkage_report' (sprint) is the read-only drift report: seat-doc rows, slug-only
+        membership, row/membership mismatches, and uncommanded masters named in sprint decisions
+        surface as facts, never as hard errors; 'get' on a sprint carries the same facts as
+        linkageFacts.
         'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
         scalar/list updates; 'set_status' takes fields.status. Completed refuses while any declared
         step/substep (or master row) remains unresolved. dry_run=true builds + validates and

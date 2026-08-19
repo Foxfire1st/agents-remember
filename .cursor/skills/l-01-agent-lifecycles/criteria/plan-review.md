@@ -43,7 +43,11 @@ win/urgency rationale, affected dependents, evidence, author, and confidence is 
 ### PR-4 — Order-respects-edges
 
 **Validate the canonical graph and derive its waves mechanically.** Its node set must equal the
-sprint's `orchestrates` membership and the classified master set. Every predecessor edge must be
+sprint's `orchestrates` membership and the classified master set, and every sprint subTasks row's
+`masterRef` must resolve to a commanded master — typed rows, `orchestrates`, and graph nodes
+agree exactly (`task_doc.linkage_report` / `linkageFacts` on `task_doc.get` re-derives the drift
+mechanically; a finding it already reports is still a plan finding, not an excuse). Every
+predecessor edge must be
 supported by the relation evidence, no cycle may exist, and the displayed waves must equal the
 stable topological derivation rather than a persisted/manual position. An atomic blocker must wait
 for every predecessor, expose no intermediate state, and release successors only after its one

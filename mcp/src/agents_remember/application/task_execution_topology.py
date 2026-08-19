@@ -363,6 +363,22 @@ def _verify_authoring_judgments(
             "task-execution-graph-judgment-required: mutations "
             f"{statically_required!r} require a judgmentId from the sprint Judgment Register"
         )
+    verify_sprint_judgment_ids(topology, sprint_ref, claimed)
+
+
+def verify_sprint_judgment_ids(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    claimed: list[tuple[str, str]],
+) -> None:
+    """Verify ``(operation, judgmentId)`` claims against the sprint's Judgment Register.
+
+    Shared by the graph-authoring batch and the sprint linkage operations (L14): the
+    sprint ref must already be canonicalized by the caller. An empty claim list is a
+    no-op; otherwise a missing/malformed register or an unknown or wrongly-authored
+    row refuses fail-closed.
+    """
+
     if not claimed:
         return
     # The sprint ref was canonicalized and resolved by the caller just above.

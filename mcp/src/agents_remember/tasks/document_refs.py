@@ -13,6 +13,9 @@ from typing import Literal, cast
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document import (
+    LEAF_ROLES,
+    MASTER_ROLES,
+    SPRINT_ROLES,
     LeafPlacement,
     SprintExecutionGraph,
     SprintExecutionNode,
@@ -23,11 +26,9 @@ from agents_remember.tasks.store import read_task_doc
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
 
-SPRINT_ROLES = frozenset(
-    {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
-)
-MASTER_ROLES = frozenset({"manager"})
-LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+# SPRINT_ROLES / MASTER_ROLES / LEAF_ROLES keep their canonical home in
+# ``tasks.document`` (the SprintSeat schema validates against them); this module
+# re-exports them for the altitude checks below and existing importers.
 
 
 class TaskDocumentRefError(ValueError):
@@ -284,7 +285,63 @@ class TaskDocumentTopology:
                     f"atomic master {node.ref.key} admits lump nodes only; refused segment "
                     f"node with leafIds={node.leafIds!r}",
                 )
+        self.validate_sprint_linkage(sprint_ref, overrides=candidates)
         return commanded
+
+    def validate_sprint_linkage(
+        self,
+        sprint_ref: TaskDocumentRef,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> None:
+        """Hard-fail NEW-shape sprint↔master linkage drift (L14-R5).
+
+        Every subTasks row carrying a typed ``masterRef`` must resolve to exactly one
+        master document the sprint commands (orchestrates membership), no two rows may
+        type the same master, and the target may not itself orchestrate. Legacy rows
+        (seat-doc ``file``, no ``masterRef``) are not checked here — they are reported
+        as drift facts by ``linkage_report`` instead (L14-R7 backward tolerance).
+        """
+
+        candidates = overrides or {}
+        sprint = self._resolve_with_overrides(sprint_ref, candidates)
+        linked = [row for row in sprint.document.subTasks if row.masterRef is not None]
+        if not linked:
+            return
+        if sprint.document.kind != "master" or not sprint.document.orchestrates:
+            raise TaskDocumentRefError(
+                "task-sprint-linkage-sprint-required",
+                f"typed masterRef rows require an orchestration sprint: {sprint_ref.key}",
+            )
+        commanded_refs = {
+            master.ref for master in self._commanded_masters_exact(sprint, candidates)
+        }
+        seen: set[TaskDocumentRef] = set()
+        for row in linked:
+            ref = cast(TaskDocumentRef, row.masterRef)
+            if ref.repository != sprint.ref.repository:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-cross-repo",
+                    f"row {row.number!r} links outside the sprint repository: {ref.key}",
+                )
+            resolved = self._resolve_with_overrides(ref, candidates)
+            if resolved.document.kind != "master" or resolved.document.orchestrates:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-target-not-a-master",
+                    f"row {row.number!r} masterRef must name a commanded master document, "
+                    f"got {ref.key}",
+                )
+            if ref in seen:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-row-duplicate",
+                    f"multiple rows link the same master {ref.key}",
+                )
+            seen.add(ref)
+            if ref not in commanded_refs:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-membership-invalid",
+                    f"row {row.number!r} links {ref.key}, which orchestrates does not command",
+                )
 
     def execution_leaf_placement(
         self,

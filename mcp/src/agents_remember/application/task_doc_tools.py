@@ -70,6 +70,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+from . import task_sprint_linkage
 from .task_doc_queue_scope import QueueScopeError, governing_queue_scope
 from .task_execution_topology import (
     ExecutionTopologyAuthoringRequest,
@@ -97,6 +98,8 @@ VALID_OPERATIONS = (
     "author_execution_graph",
     "set_field",
     "get",
+    # L14: sprint↔master linkage (application/task_sprint_linkage.py).
+    *task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS,
 )
 
 # set_field may only touch these (scalars + flat string lists); structural edits
@@ -375,12 +378,34 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
     if context.operation == "get":
         json_path = _existing_json(context.task_root, context.target.slug)
         doc = read_task_doc(json_path)
-        return _result(
+        result = _result(
             context.operation,
             doc,
             json_path,
             markdown_path_for(context.task_root, doc),
         )
+        # L14-R5: a sprint's read surface carries its linkage drift facts.
+        facts = task_sprint_linkage.linkage_facts_for_get(
+            context.config.coordination_root, context.target.repo_id, json_path, doc
+        )
+        if facts is not None:
+            result["linkageFacts"] = facts
+        return result
+    if context.operation in task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS:
+        try:
+            return task_sprint_linkage.sprint_linkage_operation(
+                context.operation,
+                task_sprint_linkage.SprintLinkageCall(
+                    config=context.config,
+                    repo_id=context.target.repo_id,
+                    task_root=context.task_root,
+                    slug=context.target.slug,
+                    fields=context.fields,
+                    dry_run=context.dry_run,
+                ),
+            )
+        except task_sprint_linkage.SprintLinkageError as exc:
+            raise TaskDocError(str(exc)) from exc
     if context.operation == "author_execution_graph":
         repository = context.config.repositories[context.target.repo_id]
         try:
@@ -915,28 +940,12 @@ def _enforce_completed_master_rows(
         original=original,
         targeted_number=targeted_number,
     ):
-        _validate_completed_master_row(task_root, ref)
-
-
-def _validate_completed_master_row(task_root: Path, ref: SubTaskRef) -> None:
-    asserted = (task_root / Path(ref.file).with_suffix(".json")) if ref.file else None
-    try:
-        resolved = resolve_terminal_leaf_doc(
-            task_root,
-            ref.number,
-            asserted_path=asserted,
-        )
-    except TerminalLeafResolutionError as exc:
-        raise TaskDocError(f"cannot mark master row {ref.number!r} Completed: {exc}") from exc
-    if resolved is None:
-        raise TaskDocError(
-            f"cannot mark master row {ref.number!r} Completed: no leaf task document exists"
-        )
-    _path, leaf = resolved
-    try:
-        _raise_for_completion_blockers(leaf)
-    except TaskDocError as exc:
-        raise TaskDocError(f"cannot mark master row {ref.number!r} Completed: {exc}") from exc
+        try:
+            # Lives with the sprint linkage module (L14): a typed masterRef row
+            # completes against the linked master document, not a leaf doc.
+            task_sprint_linkage.validate_completed_master_row(task_root, ref)
+        except task_sprint_linkage.SprintLinkageError as exc:
+            raise TaskDocError(str(exc)) from exc
 
 
 def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:

@@ -41,7 +41,10 @@ commanded master's `executionNature`.
    that must not stall the sprint stays outside its graph and uses a standalone single-master path
    if it succeeds.
 6. **Adoption is explicit.** The strategist writes this draft but does not edit task docs. The
-   orchestrator adopts it through previewed `task_doc` operations and records the architect ruling.
+   orchestrator adopts it through previewed `task_doc` operations and records the architect ruling:
+   one `task_doc.attach_master` call per commanded master (the typed `masterRef` subTasks row,
+   `orchestrates` membership, graph node, and nature assertion as one atomic batch), then
+   `task_doc.author_execution_graph` for the edges.
    A sprint adopted without an `executionGraph` runs the atomic-sequential default;
    `task_doc.author_execution_graph` bootstraps or edits the graph — it is never a runtime
    fallback.
@@ -95,17 +98,23 @@ commanded master's `executionNature`.
 | Candidate/master | Grade (critical, high, normal, or low) | Affected dependents | Judgment id |
 | ---------------- | ------------------------------------ | ------------------- | ----------- |
 
-## Canonical executionGraph Adoption Payload
+## Canonical Adoption Payload
+One `task_doc.attach_master` call per commanded master (the row number is the sprint's master
+index position), then one `task_doc.author_execution_graph` batch for the edges:
 ```json
 {
-  "nodes": [
-    {"repository": "<repo>", "path": "<master-slug>/task.json"}
-  ],
+  "attach_master": {
+    "masterRef": {"repository": "<repo>", "path": "<master-slug>/task.json"},
+    "number": "<sprint row number>",
+    "executionNature": "organizational | atomic",
+    "judgmentId": "<Judgment Register row>"
+  },
   "edges": [
     {
       "predecessor": {"repository": "<repo>", "path": "<foundation>/task.json"},
       "successor": {"repository": "<repo>", "path": "<dependent>/task.json"},
-      "reason": "<evidence-backed dependency reason>"
+      "reason": "<evidence-backed dependency reason>",
+      "judgmentId": "<Judgment Register row>"
     }
   ]
 }

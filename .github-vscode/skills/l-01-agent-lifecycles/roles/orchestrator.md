@@ -223,7 +223,11 @@ the design: run the bulwark check against the portfolio and the past before disp
   propose a fresh strategist pass through the architect (same approval rule). An out-of-sprint
   master waits for the next sprint unless the architect explicitly changes scope.
 - **Output: the planner master task + the adopted orchestration task** — the run's durable home:
-  subTasks = the coordination leaves (orchestrator seat first, one per manager); body = evidence,
+  subTasks = the sprint's **master index** — one typed row per commanded master carrying
+  `masterRef` (attached through `task_doc.attach_master`, never hand-written); the sprint's seats
+  (architect, orchestrator, strategist, …) live in the sprint document's `seats` structure —
+  identity, label, state — and never as subTasks rows (existing seat task documents stay on disk
+  as historical records); body = evidence,
   priority and classification judgments, conflict decisions, and (once Job O starts) the super
   branch name; `executionGraph` = the exact persisted AON graph and every commanded master carries
   `executionNature`; decision log =
@@ -231,11 +235,15 @@ the design: run the bulwark check against the portfolio and the past before disp
   orchestration task = the sprint scope the run executes. Its durable form is a `kind:"master"`
   task doc carrying a top-level `orchestrates` list naming the master tasks it commands — the
   dashboard derives the orchestration > master > leaf hierarchy (and the rank insignia) from that
-  field. `orchestrates`, `executionGraph.nodes`, and the classified master set must agree exactly;
-  adoption uses previewed task-document operations. A sprint without an `executionGraph` runs the
-  atomic-sequential default (one master fully integrates before the next starts);
-  `task_doc.author_execution_graph` bootstraps a graph onto it (first `add_node` batch) and edits
-  one incrementally afterwards.
+  field. The typed subTasks rows (`masterRef`), `orchestrates`, and `executionGraph.nodes` must
+  agree exactly — `task_doc.linkage_report` (and `linkageFacts` on `task_doc.get`) surfaces any
+  drift as facts;
+  adoption attaches each master with one previewed `task_doc.attach_master` call (row +
+  membership + graph node + nature assertion in a single atomic batch that refuses partial
+  attaches; `detach_master` is its symmetric inverse and never deletes files). A sprint without an
+  `executionGraph` runs the atomic-sequential default (one master fully integrates before the next
+  starts); `task_doc.author_execution_graph` bootstraps a graph onto it (first `add_node` batch)
+  and edits one incrementally afterwards (edges are always its job).
 - **Gate:** the portfolio plan gate — one wholesale architect/developer review of the reshaped
   portfolio + the orchestration task (sprint scope + DAG + dispatch order). **No git surface** —
   not even the super branch exists yet.

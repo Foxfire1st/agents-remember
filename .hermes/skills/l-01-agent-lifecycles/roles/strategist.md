@@ -163,7 +163,11 @@ artifact requires it.
 Method phase 8. Write the draft to the path the brief names (convention:
 `notes/<series>/orchestration-task.md` under the coordination tasks tree, or the series `notes/`
 folder). It is a **draft for adoption**: the architect rules it and the orchestrator adopts it into durable task form — you
-mutate nothing yourself.
+mutate nothing yourself. The adoption payload is mechanical: one `task_doc.attach_master` call
+per commanded master (typed `masterRef` row + `orchestrates` membership + graph node + the
+nature assertion with its ruling `judgmentId` in a single atomic batch) and
+`task_doc.author_execution_graph` for the edges — so the Judgment Register row ids your draft
+assigns are exactly what the attach/edge payloads cite.
 
 ### 5 — Drawing-board rounds
 
