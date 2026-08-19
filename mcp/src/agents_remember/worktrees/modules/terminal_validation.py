@@ -14,6 +14,7 @@ from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
     load_contract,
+    worktree_group_for,
 )
 
 TerminalMode = Literal["cleanup", "abandon"]
@@ -42,8 +43,11 @@ def require_series_children_retired(series: WorktreeContract) -> None:
     if series.kind != "series":
         raise RuntimeError("atomic child terminal census requires a series contract")
     enclosure_root = series.task_root / "enclosures"
-    if series.worktree_group.resolve() != enclosure_root.resolve():
-        raise RuntimeError("atomic series enclosure root does not match its task authority")
+    expected_group = worktree_group_for(
+        series.coordination_root, series.repo_name, series.task_name
+    )
+    if series.worktree_group.resolve() != expected_group.resolve():
+        raise RuntimeError("atomic series worktree group does not match its task authority")
     if not enclosure_root.exists():
         return
     blockers: list[str] = []
@@ -64,6 +68,20 @@ def series_reports_is_child_enclosure(series: WorktreeContract) -> bool:
     """Distinguish a leaf named ``reports`` from the series-owned reports directory."""
 
     return (series.task_root / "enclosures" / "reports" / "series-contract.md").is_file()
+
+
+def legacy_series_reports_is_child_enclosure(series: WorktreeContract) -> bool:
+    """True when a colocated series reports directory IS a child leaf enclosure.
+
+    Only a legacy series contract (``worktree_group`` recorded as the task enclosure
+    root) can share one path between its own reports directory and a leaf named
+    ``reports``, and only then must terminal removal preserve it. Current contracts
+    keep series reports under the worktree group, where no child enclosure can live.
+    """
+
+    return series.worktree_group.resolve() == (
+        series.task_root / "enclosures"
+    ).resolve() and series_reports_is_child_enclosure(series)
 
 
 def _child_terminal_blocker(series: WorktreeContract, enclosure: Path) -> str | None:

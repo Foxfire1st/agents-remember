@@ -501,6 +501,14 @@ class AtomicSeriesSealTests(unittest.TestCase):
         )
         for index, remove in enumerate(removers):
             reports = self.series.worktree_group / "reports"
+            self.assertEqual(
+                reports,
+                self.series.coordination_root
+                / "worktrees"
+                / self.series.repo_name
+                / "master-b-ar"
+                / "reports",
+            )
             reports.mkdir(parents=True, exist_ok=True)
             (reports / f"series-{index}.txt").write_text("series-owned\n", encoding="utf-8")
 
@@ -520,7 +528,7 @@ class AtomicSeriesSealTests(unittest.TestCase):
         leaf = fixture.contracts[MASTER_B]
         self.assertEqual(
             leaf.contract_path,
-            series.worktree_group / "reports" / "series-contract.md",
+            series.task_root / "enclosures" / "reports" / "series-contract.md",
         )
         before = leaf.contract_path.read_bytes()
 
@@ -553,7 +561,7 @@ class AtomicSeriesSealTests(unittest.TestCase):
             lambda: _removed_directories(series, dry_run=False),
         ):
             result = remove()
-            self.assertEqual(result["reports"]["reason"], "child-enclosure")
+            self.assertEqual(result["reports"]["reason"], "already-absent")
             self.assertEqual(
                 terminal_result_blockers(
                     providers={},

@@ -28,7 +28,7 @@ from agents_remember.worktrees.modules.guidance import carryover_done, status_pa
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
-    series_reports_is_child_enclosure,
+    legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
 )
@@ -547,7 +547,7 @@ def _removed_directories(
             "preserved": True,
             "reason": "child-enclosure",
         }
-        if contract.kind == "series" and series_reports_is_child_enclosure(contract)
+        if contract.kind == "series" and legacy_series_reports_is_child_enclosure(contract)
         else worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
     )
     if contract.kind == "series":

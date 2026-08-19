@@ -53,7 +53,11 @@ from agents_remember.worktrees.organizational_completion_repair import (
 )
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    worktree_group_for,
+)
 
 STALE_HEARTBEAT_SECONDS = 30.0
 COMMAND_EVIDENCE_LIMIT = 320
@@ -557,8 +561,11 @@ def _require_configured_task_identity(
     if contract.contract_path.resolve() != expected_contract.resolve():
         raise RuntimeError("task contract path is not canonical for its task identity")
     if contract.kind == "series":
-        if contract.worktree_group.resolve() != (task_root / "enclosures").resolve():
-            raise RuntimeError("series contract worktree group is not its task enclosure root")
+        expected_group = worktree_group_for(
+            coordination_root, contract.repo_name, contract.task_name
+        )
+        if contract.worktree_group.resolve() != expected_group.resolve():
+            raise RuntimeError("series contract worktree group is not its task worktree group")
         return
     worktree_root = (coordination_root / "worktrees" / contract.repo_name).resolve()
     group = contract.worktree_group.resolve()

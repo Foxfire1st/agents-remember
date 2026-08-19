@@ -44,7 +44,7 @@ from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
-    series_reports_is_child_enclosure,
+    legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
 )
@@ -525,7 +525,7 @@ def _abandon_directories(
                     "preserved": True,
                     "reason": "child-enclosure",
                 }
-                if series_reports_is_child_enclosure(contract)
+                if legacy_series_reports_is_child_enclosure(contract)
                 else worktree_services().provider_lifecycle.remove_tree(
                     reports,
                     dry_run=dry_run,

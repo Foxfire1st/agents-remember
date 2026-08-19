@@ -421,7 +421,7 @@ def default_series_contract(
         task_root=task_root,
         contract_path=contract_path,
         task_artifact=task_root / "task.md",
-        worktree_group=task_root / "enclosures",
+        worktree_group=worktree_group_for(task.coordination_root, task.repo_name, task.name),
         code_repo_path=code.repo_path,
         code_source_branch=code.source_branch,
         code_work_branch=code.work_branch,

@@ -27,29 +27,21 @@ class TerminalChildCensusCoverageTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "requires a series"):
                 terminal_validation.require_series_children_retired(fixture.leaf_contract)
 
-            with self.assertRaisesRegex(RuntimeError, "enclosure root"):
+            with self.assertRaisesRegex(RuntimeError, "worktree group"):
                 terminal_validation.require_series_children_retired(
                     replace(series, worktree_group=root / "wrong")
                 )
 
             missing_root = root / "missing-task"
             terminal_validation.require_series_children_retired(
-                replace(
-                    series,
-                    task_root=missing_root,
-                    worktree_group=missing_root / "enclosures",
-                )
+                replace(series, task_root=missing_root)
             )
 
             empty_root = root / "empty-task"
             reports = empty_root / "enclosures" / "reports"
             reports.mkdir(parents=True, exist_ok=True)
             terminal_validation.require_series_children_retired(
-                replace(
-                    series,
-                    task_root=empty_root,
-                    worktree_group=empty_root / "enclosures",
-                )
+                replace(series, task_root=empty_root)
             )
 
     def test_child_blockers_cover_invalid_foreign_and_live_resources(self) -> None:

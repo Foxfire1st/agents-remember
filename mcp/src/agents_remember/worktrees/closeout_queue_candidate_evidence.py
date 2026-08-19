@@ -36,7 +36,11 @@ from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
 from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.task_resolver import series_contract_path, slugify
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    worktree_group_for,
+)
 
 from .closeout_queue_errors import CloseoutQueueError
 
@@ -296,7 +300,10 @@ def _atomic_contract_matches_master(
         and contract.coordination_root.resolve() == authority.coordination_root
         and contract.task_root.resolve() == expected_root
         and contract.contract_path.resolve() == series_contract_path(expected_root).resolve()
-        and contract.worktree_group.resolve() == (expected_root / "enclosures").resolve()
+        and contract.worktree_group.resolve()
+        == worktree_group_for(
+            authority.coordination_root, authority.repo_name, master.path.parent.name
+        ).resolve()
         and contract.code_source_branch == authority.source_branch
         and contract.code_work_branch == expected_work_branch
         and contract.parent_task_name == expected_sprint_name

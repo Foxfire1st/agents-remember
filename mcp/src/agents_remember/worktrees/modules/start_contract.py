@@ -56,6 +56,7 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     default_series_contract,
     load_contract,
+    worktree_group_for,
     write_contract,
 )
 
@@ -318,7 +319,9 @@ def _same_master_task_edge(
     existing: WorktreeContract, spec: MasterSeriesContractSpec, path: Path
 ) -> bool:
     expected_task_artifact = spec.task_root / "task.md"
-    expected_worktree_group = spec.task_root / "enclosures"
+    expected_worktree_group = worktree_group_for(
+        spec.coordination_root, spec.repo_name, spec.task_name
+    )
     return all(
         (
             existing.task_id == slugify(spec.task_name).upper(),

@@ -92,7 +92,7 @@ class ContractSite:
 
     @property
     def worktree_group(self) -> Path:
-        return self.task_root / "enclosures" if self.is_series else self.group_root
+        return self.group_root
 
     @property
     def code_worktree(self) -> Path:

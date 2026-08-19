@@ -31,6 +31,10 @@ sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.worktrees import integration_ref_transaction, leaf_refs
+from agents_remember.worktrees.lifecycle_operation_store import (
+    operation_record_path,
+    operation_report_path,
+)
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import guidance as guidance_module
 from agents_remember.worktrees.modules import integrate as integrate_module
@@ -39,7 +43,9 @@ from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules import start_contract as start_contract_module
 from agents_remember.worktrees.modules import sync as sync_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.clean_quality_executor import clean_sandbox_root
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     ContractError,
@@ -49,6 +55,7 @@ from agents_remember.worktrees.worktree_contract import (
     amend_contract,
     default_contract,
     default_series_contract,
+    worktree_group_for,
     write_contract,
 )
 from test_worktree_support import closed_external_contract_fixture, git, init_repo
@@ -190,6 +197,83 @@ class ContractMemoryModeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.payload["state"], "invalid-request")
         self.assertIn("workflow_kind must be one of", str(result.payload["summary"]))
+
+
+class SeriesWorktreeGroupLocationTests(unittest.TestCase):
+    """L10: series reports live under the master worktree group, not the task enclosures.
+
+    The series operation record/log, the worker temp root feeding the citation
+    source-index cache, and the Dagger test sandbox all derive from
+    ``contract.worktree_group``, so rooting the group at
+    ``worktrees/<repo>/<master>-ar`` lets terminal cleanup sweep them. The leaf
+    enclosure contract stays at ``tasks/<task>/enclosures/<leaf-id>`` unchanged.
+    """
+
+    def task(self) -> ContractTask:
+        return ContractTask(
+            name="Edge Task",
+            repo_name="repo-a",
+            coordination_root=Path("/tmp/ar-coordination"),
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        )
+
+    def code_plan(self) -> RepoBranchPlan:
+        return RepoBranchPlan(
+            repo_path=Path("/tmp/repo-a"),
+            source_branch="main",
+            work_branch="ar/edge-task",
+            base_commit="abc123",
+        )
+
+    def test_series_worktree_group_is_the_master_worktree_group(self) -> None:
+        task = self.task()
+        series = default_series_contract(task, code=self.code_plan())
+
+        self.assertEqual(
+            series.worktree_group,
+            worktree_group_for(task.coordination_root, task.repo_name, task.name),
+        )
+        self.assertEqual(
+            series.worktree_group,
+            task.coordination_root / "worktrees" / "repo-a" / "edge-task-ar",
+        )
+        self.assertNotEqual(series.worktree_group, series.task_root / "enclosures")
+        self.assertEqual(series.contract_path, series.task_root / "series-contract.md")
+
+    def test_series_report_paths_land_inside_the_worktree_group(self) -> None:
+        series = default_series_contract(self.task(), code=self.code_plan())
+        reports = series.worktree_group / "reports"
+
+        self.assertEqual(
+            operation_record_path(series.worktree_group, "closeout"),
+            reports / "closeout-operation.json",
+        )
+        self.assertEqual(
+            operation_report_path(series.worktree_group, "closeout"),
+            reports / "closeout-operation.log",
+        )
+        self.assertEqual(clean_sandbox_root(series.worktree_group), reports / "test-sandbox")
+
+    def test_leaf_enclosure_stays_under_the_task_enclosures_root(self) -> None:
+        task = self.task()
+        leaf = default_contract(
+            task,
+            leaf=LeafIdentity(worktree_name="edge-task"),
+            code=self.code_plan(),
+        )
+
+        self.assertEqual(leaf.contract_path, leaf_enclosure_path(leaf.task_root, "edge-task"))
+        self.assertEqual(
+            leaf.contract_path,
+            task.coordination_root
+            / "tasks"
+            / "repo-a"
+            / "edge-task"
+            / "enclosures"
+            / "edge-task"
+            / "series-contract.md",
+        )
 
 
 class DeclaredLeafCandidateTests(unittest.TestCase):
