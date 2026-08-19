@@ -220,8 +220,17 @@ def test_task_document_topology_parent_fail_closed_paths(tmp_path: Path) -> None
     topology.resolve = Mock(return_value=resolved)
 
     topology._sprint_parents = Mock(return_value=())
+    # L13-R5e: a nature-less standalone master resolves as a master under the
+    # atomic-sequential default — no parent edge, no refusal.
+    assert topology.altitude(master) == "master"
+    assert topology.parent(master) is None
+    # Only an explicit organizational standalone master still fails closed.
+    master_doc.executionNature = "organizational"
     with pytest.raises(refs.TaskDocumentRefError, match="not commanded"):
         topology.altitude(master)
+    with pytest.raises(refs.TaskDocumentRefError, match="cannot resolve one parent"):
+        topology.parent(master)
+    master_doc.executionNature = None
     topology._sprint_parents = Mock(
         return_value=(
             SimpleNamespace(ref=sprint),
