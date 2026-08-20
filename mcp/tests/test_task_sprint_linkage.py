@@ -12,13 +12,20 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
+import agents_remember.application.task_sprint_linkage as sprint_linkage
 from agents_remember.application.task_doc_tools import (
     VALID_OPERATIONS,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
     task_doc_tool,
+)
+from agents_remember.application.task_sprint_linkage import (
+    _AttachMasterPayload,
+    collect_linkage_facts,
+    linkage_facts_for_get,
 )
 from agents_remember.mcp.registration import tasks as registration_tasks
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -32,7 +39,10 @@ from agents_remember.tasks import (
     render_markdown,
     write_task_doc,
 )
-from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.document_refs import (
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
 from pydantic import ValidationError
 from test_task_execution_topology import (
     MASTER_A,
@@ -691,6 +701,362 @@ class SprintLinkageTests(unittest.TestCase):
         source = Path(registration_tasks.__file__).read_text(encoding="utf-8")
         for operation in ("'attach_master'", "'detach_master'", "'linkage_report'"):
             self.assertIn(operation, source)
+
+
+class SprintLinkageEdgeTests(unittest.TestCase):
+    """Refusal and edge paths of the linkage module (diff-coverage repair)."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.coord = Path(self.temp.name)
+        self.tasks = self.coord / "tasks" / REPOSITORY
+        self.tasks.mkdir(parents=True)
+        self.code = self.coord / "code"
+        init_repo(self.code)
+        git(self.code, "branch", "super", "main")
+        self.cfg = _config(self.coord, self.code)
+        self.topology = TaskDocumentTopology(self.coord)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _write_master(self, ref: TaskDocumentRef, *, nature: str | None = None) -> None:
+        folder = Path(ref.path).parent.name
+        write_task_doc(self.tasks / folder, _master(identity=folder, execution_nature=nature))
+
+    def _write_sprint(
+        self,
+        *,
+        graph: dict[str, Any] | None = None,
+        rows: list[SubTaskRef] | None = None,
+        orchestrates: list[str] | None = None,
+    ) -> None:
+        write_task_doc(
+            self.tasks / "sprint",
+            _master(
+                identity="SPRINT",
+                orchestrates=(
+                    orchestrates if orchestrates is not None else ["master-a", "master-b"]
+                ),
+                execution_graph=graph,
+            ).model_copy(
+                update={
+                    "integrationBranch": "super",
+                    "sections": [_register_section("J-1", "J-2")],
+                    "subTasks": rows or [],
+                }
+            ),
+        )
+
+    def _graph_ful_sprint(self) -> None:
+        self._write_master(MASTER_A, nature="organizational")
+        self._write_master(MASTER_B, nature="atomic")
+        self._write_sprint(
+            graph={"nodes": [MASTER_A.model_dump(), MASTER_B.model_dump()], "edges": []}
+        )
+
+    def _op(
+        self,
+        operation: str,
+        fields: dict[str, Any],
+        *,
+        dry_run: bool = False,
+        slug: str | None = None,
+    ) -> dict[str, Any]:
+        return task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id=REPOSITORY, task_name="sprint", slug=slug),
+            operation=operation,
+            edit=TaskDocEdit(fields=fields),
+            dry_run=dry_run,
+        )
+
+    def _attach(self, fields: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        return self._op("attach_master", fields, **kwargs)
+
+    def _detach(self, fields: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        return self._op("detach_master", fields, **kwargs)
+
+    def _snapshot(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()}
+
+    def _sprint(self) -> TaskDocument:
+        return read_task_doc(self.tasks / "sprint" / "task.json")
+
+    def test_payload_trimming_rules(self) -> None:
+        base: dict[str, Any] = {"masterRef": MASTER_C.model_dump(), "number": "M3"}
+        payload = _AttachMasterPayload.model_validate({**base, "judgmentId": None})
+        self.assertIsNone(payload.judgmentId)
+        with self.assertRaisesRegex(ValidationError, "nonblank row number"):
+            _AttachMasterPayload.model_validate({**base, "number": "  "})
+        payload = _AttachMasterPayload.model_validate({**base, "name": None})
+        self.assertIsNone(payload.name)
+        with self.assertRaisesRegex(ValidationError, "row name must not be blank"):
+            _AttachMasterPayload.model_validate({**base, "name": " "})
+
+    def test_attach_writes_scope_and_custom_name(self) -> None:
+        self._graph_ful_sprint()
+        self._write_master(MASTER_C, nature="atomic")
+        self._attach(
+            {
+                "masterRef": MASTER_C.model_dump(),
+                "number": "M3",
+                "name": "C master",
+                "scope": "Frontier",
+                "judgmentId": None,
+            }
+        )
+        row = next(row for row in self._sprint().subTasks if row.number == "M3")
+        self.assertEqual(row.name, "C master")
+        self.assertEqual(row.scope, "Frontier")
+
+    def test_attach_target_resolution_refusals(self) -> None:
+        self._graph_ful_sprint()
+        write_task_doc(self.tasks / "leaf-x", _seat_doc("01_leaf", []))
+        before = self._snapshot()
+        with self.assertRaisesRegex(TaskDocError, "task-document-not-found"):
+            self._attach(
+                {
+                    "masterRef": {"repository": REPOSITORY, "path": "ghost/task.json"},
+                    "number": "M3",
+                }
+            )
+        with self.assertRaisesRegex(TaskDocError, "target-not-a-master"):
+            self._attach(
+                {
+                    "masterRef": {"repository": REPOSITORY, "path": "leaf-x/01_leaf.json"},
+                    "number": "M3",
+                }
+            )
+        self.assertEqual(before, self._snapshot())
+
+    def test_attach_already_attached_variants(self) -> None:
+        self._graph_ful_sprint()
+        self._write_master(MASTER_C, nature="atomic")
+        self._attach({"masterRef": MASTER_C.model_dump(), "number": "M3"})
+        with self.assertRaisesRegex(TaskDocError, "a typed row already links"):
+            self._attach({"masterRef": MASTER_C.model_dump(), "number": "M4"})
+        # Drift shape: the graph already places the master while orchestrates/rows do not.
+        self._write_sprint(
+            graph={
+                "nodes": [
+                    MASTER_A.model_dump(),
+                    MASTER_B.model_dump(),
+                    MASTER_C.model_dump(),
+                ],
+                "edges": [],
+            },
+            rows=[],
+        )
+        with self.assertRaisesRegex(TaskDocError, "executionGraph already places"):
+            self._attach({"masterRef": MASTER_C.model_dump(), "number": "M4"})
+        # Alias membership without a typed row: refused by the orchestrates check.
+        self._write_sprint(
+            graph={"nodes": [MASTER_A.model_dump(), MASTER_B.model_dump()], "edges": []},
+            rows=[],
+        )
+        with self.assertRaisesRegex(TaskDocError, "orchestrates already commands"):
+            self._attach({"masterRef": MASTER_A.model_dump(), "number": "M4"})
+
+    def test_attach_requires_an_existing_document_and_confinement(self) -> None:
+        self._graph_ful_sprint()
+        self._write_master(MASTER_C, nature="atomic")
+        with self.assertRaisesRegex(TaskDocError, "task document not found"):
+            self._attach({"masterRef": MASTER_C.model_dump(), "number": "M3"}, slug="missing")
+        outside = self.coord / "outside"
+        write_task_doc(outside, _master(identity="SPRINT", orchestrates=["master-a"]))
+        with self.assertRaisesRegex(TaskDocError, "outside tasks/agents-remember"):
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(
+                    repo_id=REPOSITORY,
+                    contract_path=(outside / "series-contract.md").as_posix(),
+                ),
+                operation="attach_master",
+                edit=TaskDocEdit(fields={"masterRef": MASTER_C.model_dump(), "number": "M3"}),
+            )
+
+    def test_detach_cross_repo_and_duplicate_rows(self) -> None:
+        self._graph_ful_sprint()
+        with self.assertRaisesRegex(TaskDocError, "cross-repo"):
+            self._detach({"masterRef": {"repository": "other-repo", "path": "master-c/task.json"}})
+        self._write_sprint(
+            graph={"nodes": [MASTER_A.model_dump(), MASTER_B.model_dump()], "edges": []},
+            rows=[
+                SubTaskRef(number="M1", name="a", masterRef=MASTER_A),
+                SubTaskRef(number="M1b", name="a again", masterRef=MASTER_A),
+            ],
+        )
+        with self.assertRaisesRegex(TaskDocError, "row-duplicate"):
+            self._detach({"masterRef": MASTER_A.model_dump()})
+
+    def test_detach_tolerates_a_deleted_master_document(self) -> None:
+        self._write_master(MASTER_A, nature="organizational")
+        self._write_master(MASTER_C)
+        self._write_sprint(
+            graph=None,
+            orchestrates=["master-a", "master-c"],
+            rows=[
+                SubTaskRef(number="M1", name="a", masterRef=MASTER_A),
+                SubTaskRef(number="M3", name="c", masterRef=MASTER_C),
+            ],
+        )
+        (self.tasks / "master-c" / "task.json").unlink()
+        result = self._detach({"masterRef": MASTER_C.model_dump()})
+        self.assertEqual(result["masterResolved"], False)
+        self.assertEqual(result["removedOrchestrates"], ["master-c"])
+        self.assertEqual(self._sprint().orchestrates, ["master-a"])
+
+    def test_detach_propagates_resolution_errors(self) -> None:
+        self._write_master(MASTER_A, nature="organizational")
+        write_task_doc(
+            self.tasks / "master-c",
+            _master(identity="master-c").model_copy(update={"repo": "other-repo"}),
+        )
+        self._write_sprint(
+            graph=None,
+            orchestrates=["master-a", "master-c"],
+            rows=[
+                SubTaskRef(number="M1", name="a", masterRef=MASTER_A),
+                SubTaskRef(number="M3", name="c", masterRef=MASTER_C),
+            ],
+        )
+        with self.assertRaisesRegex(TaskDocError, "task-document-repo-mismatch"):
+            self._detach({"masterRef": MASTER_C.model_dump()})
+
+    def test_attach_validates_the_candidate_against_existing_drift(self) -> None:
+        self._write_master(MASTER_A, nature="organizational")
+        self._write_master(MASTER_B, nature="atomic")
+        self._write_master(MASTER_C, nature="atomic")
+        self._write_sprint(
+            graph={"nodes": [MASTER_A.model_dump(), MASTER_B.model_dump()], "edges": []},
+            orchestrates=["master-a", "master-b", "master-zzz"],
+        )
+        before = self._snapshot()
+        with self.assertRaisesRegex(TaskDocError, "membership-invalid"):
+            self._attach({"masterRef": MASTER_C.model_dump(), "number": "M3"})
+        self.assertEqual(before, self._snapshot())
+
+    def test_attach_wraps_publication_authority_failures(self) -> None:
+        self._graph_ful_sprint()
+        self._write_master(MASTER_C, nature="atomic")
+        with (
+            mock.patch.object(
+                sprint_linkage,
+                "require_topology_migration_authority",
+                side_effect=RuntimeError("no authority"),
+            ),
+            self.assertRaisesRegex(TaskDocError, "no authority"),
+        ):
+            self._attach({"masterRef": MASTER_C.model_dump(), "number": "M3"}, dry_run=True)
+
+    def test_linkage_facts_unit_edges(self) -> None:
+        self._graph_ful_sprint()
+        outside_path = self.coord / "outside" / "task.json"
+        self.assertIsNone(
+            linkage_facts_for_get(self.coord, REPOSITORY, outside_path, self._sprint())
+        )
+        ghost = TaskDocumentRef(repository=REPOSITORY, path="ghost/task.json")
+        facts = collect_linkage_facts(self.topology, ghost)
+        self.assertEqual([fact["kind"] for fact in facts], ["sprint-scan-failed"])
+
+    def test_report_seat_row_edge_shapes(self) -> None:
+        self._graph_ful_sprint()
+        write_task_doc(
+            self.tasks / "sprint",
+            _seat_doc("06_manage-master-a", ["../notes/x.md", "../master-a/task.json"]),
+        )
+        write_task_doc(
+            self.tasks / "sprint",
+            _seat_doc("07_manage-master-y", ["../notes/x.md"]),
+        )
+        self._write_sprint(
+            graph={"nodes": [MASTER_A.model_dump(), MASTER_B.model_dump()], "edges": []},
+            rows=[
+                SubTaskRef(number="M1", name="a", masterRef=MASTER_A),
+                SubTaskRef(number="M2", name="b", masterRef=MASTER_B),
+                SubTaskRef(number="M3", name="plain", file="plain.md"),
+                SubTaskRef(number="M4", name="z", file="05_manage-master-z.md"),
+                SubTaskRef(number="M5", name="a-seat", file="06_manage-master-a.md"),
+                SubTaskRef(number="M6", name="y-seat", file="07_manage-master-y.md"),
+            ],
+        )
+        facts = self._op("linkage_report", {})["linkageFacts"]
+        self.assertEqual([fact["kind"] for fact in facts], ["seat-doc-row"] * 3)
+        by_number = {fact["number"]: fact for fact in facts}
+        self.assertNotIn("master", by_number["M4"])  # seat doc absent
+        self.assertEqual(by_number["M5"]["master"], MASTER_A.key)  # later reference wins
+        self.assertNotIn("master", by_number["M6"])  # no master reference
+
+    def test_validate_sprint_linkage_refusal_branches(self) -> None:
+        self._write_master(MASTER_A, nature="organizational")
+        self._write_master(MASTER_B, nature="atomic")
+        other_repo_row = SubTaskRef(
+            number="M1",
+            name="x",
+            masterRef=TaskDocumentRef(repository="other-repo", path="master-a/task.json"),
+        )
+        self._write_sprint(orchestrates=["master-a"], rows=[other_repo_row])
+        with self.assertRaisesRegex(TaskDocumentRefError, "outside the sprint repository"):
+            self.topology.validate_sprint_linkage(SPRINT)
+        write_task_doc(
+            self.tasks / "other-sprint",
+            _master(identity="OTHER", orchestrates=["master-a"]),
+        )
+        sprint_row = SubTaskRef(
+            number="M1",
+            name="x",
+            masterRef=TaskDocumentRef(repository=REPOSITORY, path="other-sprint/task.json"),
+        )
+        self._write_sprint(orchestrates=["master-a"], rows=[sprint_row])
+        with self.assertRaisesRegex(TaskDocumentRefError, "must name a commanded master document"):
+            self.topology.validate_sprint_linkage(SPRINT)
+        self._write_sprint(
+            orchestrates=["master-a"],
+            rows=[
+                SubTaskRef(number="M1", name="a", masterRef=MASTER_A),
+                SubTaskRef(number="M2", name="a again", masterRef=MASTER_A),
+            ],
+        )
+        with self.assertRaisesRegex(TaskDocumentRefError, "multiple rows link"):
+            self.topology.validate_sprint_linkage(SPRINT)
+        self._write_sprint(
+            orchestrates=["master-a"],
+            rows=[SubTaskRef(number="M1", name="b", masterRef=MASTER_B)],
+        )
+        with self.assertRaisesRegex(TaskDocumentRefError, "orchestrates does not command"):
+            self.topology.validate_sprint_linkage(SPRINT)
+
+    def test_completed_linked_row_requires_a_readable_master(self) -> None:
+        self._write_master(MASTER_A, nature="organizational")
+        self._write_sprint(
+            graph=None,
+            orchestrates=["master-a", "master-c"],
+            rows=[SubTaskRef(number="M3", name="c", masterRef=MASTER_C)],
+        )
+        with self.assertRaisesRegex(TaskDocError, "cannot read the linked master"):
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
+                operation="set_subtask",
+                edit=TaskDocEdit(subtask={"number": "M3", "status": "Completed"}),
+            )
+
+    def test_seats_on_leaf_docs_and_explicit_none_identity(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "has no seats"):
+            TaskDocument.model_validate(
+                {
+                    "id": "L1",
+                    "slug": "l1",
+                    "title": "leaf",
+                    "kind": "subTask",
+                    "repo": REPOSITORY,
+                    "createdAt": "2026-08-19T00:00:00+00:00",
+                    "seats": [{"role": "architect"}],
+                }
+            )
+        seat = SprintSeat.model_validate({"role": "architect", "identity": None})
+        self.assertIsNone(seat.identity)
 
 
 if __name__ == "__main__":

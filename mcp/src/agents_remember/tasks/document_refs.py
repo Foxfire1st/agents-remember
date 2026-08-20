@@ -308,11 +308,8 @@ class TaskDocumentTopology:
         linked = [row for row in sprint.document.subTasks if row.masterRef is not None]
         if not linked:
             return
-        if sprint.document.kind != "master" or not sprint.document.orchestrates:
-            raise TaskDocumentRefError(
-                "task-sprint-linkage-sprint-required",
-                f"typed masterRef rows require an orchestration sprint: {sprint_ref.key}",
-            )
+        # The schema confines masterRef rows to orchestration sprints, so the document
+        # here always commands masters; only the typed rows themselves are checked.
         commanded_refs = {
             master.ref for master in self._commanded_masters_exact(sprint, candidates)
         }

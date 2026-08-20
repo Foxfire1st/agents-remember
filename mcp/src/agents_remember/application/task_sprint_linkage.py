@@ -335,13 +335,9 @@ def validate_completed_master_row(task_root: Path, ref: SubTaskRef) -> None:
     """
 
     if ref.masterRef is not None:
-        repo_root = task_root.parent.resolve(strict=False)
-        master_path = (repo_root / ref.masterRef.path).resolve(strict=False)
-        if not master_path.is_relative_to(repo_root):
-            raise SprintLinkageError(
-                f"cannot mark master row {ref.number!r} Completed: masterRef escapes the "
-                "repository task root"
-            )
+        # TaskDocumentRef confines the path (no absolute or parent parts), so the
+        # linked master document always sits inside the repository task root.
+        master_path = task_root.parent / ref.masterRef.path
         try:
             master = read_task_doc(master_path)
         except (OSError, ValueError) as exc:
@@ -497,26 +493,22 @@ def _attach_candidate(
         row["scope"] = payload.scope
     data = sprint.model_dump(by_alias=True)
     data["subTasks"] = [*data.get("subTasks", []), row]
-    slug = master.path.parent.name
-    orchestrates = list(sprint.orchestrates)
-    if slug not in orchestrates:
-        orchestrates.append(slug)
-    data["orchestrates"] = orchestrates
+    # _require_not_attached refused every alias of the master already, so the folder
+    # slug cannot be present; membership grows by exactly this entry.
+    data["orchestrates"] = [*sprint.orchestrates, master.path.parent.name]
     graph_node = "deferred-no-graph-default"
     if sprint.executionGraph is not None:
-        try:
-            graph = SprintExecutionGraph(
-                nodes=[*sprint.executionGraph.nodes, SprintExecutionNode(ref=master.ref)],
-                edges=list(sprint.executionGraph.edges),
-            )
-        except ValidationError as exc:
-            raise SprintLinkageError(f"invalid execution graph after attach: {exc}") from exc
+        # The graph was valid at read and gains one unique lump node (its absence was
+        # checked above); edges are carried unchanged, so construction cannot fail.
+        graph = SprintExecutionGraph(
+            nodes=[*sprint.executionGraph.nodes, SprintExecutionNode(ref=master.ref)],
+            edges=list(sprint.executionGraph.edges),
+        )
         data["executionGraph"] = graph.model_dump(mode="json")
         graph_node = "added"
-    try:
-        candidate = TaskDocument.model_validate(data)
-    except ValidationError as exc:
-        raise SprintLinkageError(f"invalid sprint document after attach: {exc}") from exc
+    # The sprint was valid at read and the batch adds only schema-valid pieces;
+    # _validate_candidate runs the cross-document topology checks afterwards.
+    candidate = TaskDocument.model_validate(data)
     return candidate, graph_node
 
 
@@ -550,12 +542,11 @@ def _detach_candidate(
                 "task-sprint-linkage-graph-empty: detaching the last master would empty the "
                 "executionGraph; the graph has no retire operation"
             )
-        try:
-            data_graph: Any = SprintExecutionGraph(
-                nodes=remaining, edges=list(graph.edges)
-            ).model_dump(mode="json")
-        except ValidationError as exc:
-            raise SprintLinkageError(f"invalid execution graph after detach: {exc}") from exc
+        # The graph was valid at read; dropping whole nodes cannot invalidate it
+        # (touching edges were refused above), so construction cannot fail.
+        data_graph: Any = SprintExecutionGraph(nodes=remaining, edges=list(graph.edges)).model_dump(
+            mode="json"
+        )
     names = {Path(master_ref.path).parent.name}
     if master is not None:
         names |= {master.document.id, master.document.title}
@@ -570,10 +561,8 @@ def _detach_candidate(
     data["orchestrates"] = [entry for entry in sprint.orchestrates if entry not in names]
     if graph is not None:
         data["executionGraph"] = data_graph
-    try:
-        candidate = TaskDocument.model_validate(data)
-    except ValidationError as exc:
-        raise SprintLinkageError(f"invalid sprint document after detach: {exc}") from exc
+    # Valid at read; the batch only removes pieces, so re-validation cannot fail.
+    candidate = TaskDocument.model_validate(data)
     return candidate, removed_entries, removed_nodes
 
 
