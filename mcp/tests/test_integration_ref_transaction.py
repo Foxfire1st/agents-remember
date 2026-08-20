@@ -20,15 +20,15 @@ from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.worktrees import integration_ref_transaction, lifecycle_operations
-from agents_remember.worktrees.integration_ref_transaction import (
+from agents_remember.worktrees.integration import integration_ref_transaction, lifecycle_operations
+from agents_remember.worktrees.integration.integration_ref_transaction import (
     CheckoutRefresh,
     IntegratedCommits,
     merge_integrated_commits,
     prepare_integration_ref_move,
     refresh_recovered_checkout,
 )
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -294,6 +294,58 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                         closed.code_commit,
                         closed.memory_content_commit,
                         duplicate_ledger,
+                    ),
+                    memory_source_commit=closed.memory_base_commit,
+                )
+
+    def test_integrated_ledger_refuses_a_code_commit_with_no_landed_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            # A foreign code commit the ledger never maps resolves to None, and the
+            # mismatch refusal names the exact requirement.
+            with self.assertRaisesRegex(
+                RuntimeError, "does not map landed code commit to landed memory content"
+            ):
+                integration_ref_transaction.require_integrated_ledger_mapping(
+                    closed,
+                    IntegratedCommits(
+                        "d" * 40,
+                        closed.memory_content_commit,
+                        closed.ledger_commit,
+                    ),
+                    memory_source_commit=closed.memory_base_commit,
+                )
+
+    def test_integrated_ledger_refuses_unreachable_memory_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = _authority_fixture(root, external_memory=True)
+            closed = _closed_external_leaf_worktrees(fixture, root)
+            assert closed.memory_repo_path is not None
+            # The real landed ledger content (which maps the code to the landed memory
+            # content) re-committed under a parent chain that excludes the memory
+            # content commit: the content is right, the ancestry is not.
+            tree = _git(closed.memory_repo_path, "rev-parse", f"{closed.ledger_commit}^{{tree}}")
+            forged_ledger = _git(
+                closed.memory_repo_path,
+                "commit-tree",
+                tree,
+                "-p",
+                closed.memory_base_commit,
+                "-m",
+                "forged ledger without the memory content ancestor",
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "not reachable from the landed ledger commit"
+            ):
+                integration_ref_transaction.require_integrated_ledger_mapping(
+                    closed,
+                    IntegratedCommits(
+                        closed.code_commit,
+                        closed.memory_content_commit,
+                        forged_ledger,
                     ),
                     memory_source_commit=closed.memory_base_commit,
                 )

@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agents_remember.models.closeout_queue import CloseoutQueueRequest
+from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError
-from agents_remember.worktrees.closeout_queue import QueueActor, closeout_queue_tool
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue import QueueActor, closeout_queue_tool
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from test_closeout_queue import JUDGMENT_HEADING, MASTER_B, NOW, REPO, SPRINT, QueueFixture
 
 
@@ -136,7 +136,7 @@ class QueueReadDegradationTests(unittest.TestCase):
         self._remove_graph(fixture)
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.resolve_scheduling_mode",
+                "agents_remember.worktrees.queue.closeout_queue.resolve_scheduling_mode",
                 side_effect=TaskDocumentRefError("task-document-not-found", "sprint moved"),
             ),
             self.assertRaises(CloseoutQueueError) as raised,
@@ -165,7 +165,3 @@ class QueueReadDegradationTests(unittest.TestCase):
                 now=NOW,
             )
         self.assertIn("closeout-queue-caller-refused", str(raised.exception))
-
-
-if __name__ == "__main__":
-    unittest.main()

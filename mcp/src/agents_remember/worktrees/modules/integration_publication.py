@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agents_remember.controlplane.enforcement import GateGuard
-from agents_remember.worktrees.integration_ref_transaction import (
+from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationSources,
 )

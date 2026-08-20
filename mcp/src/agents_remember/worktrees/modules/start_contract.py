@@ -19,7 +19,7 @@ from agents_remember.tasks.leaf_doc import (
     plan_leaf_doc_lifecycle_restamp,
 )
 from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
     integration_surfaces,
     repository_default_branch,

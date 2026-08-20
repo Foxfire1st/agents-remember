@@ -47,8 +47,8 @@ from agents_remember.application.provider_tools import (
     GrepaiTraceQuery,
     ProviderQueryScope,
 )
-from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocTarget
-from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.task_docs.task_doc_tools import TaskDocEdit, TaskDocTarget
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.terminal_tools import RetiredSpawnInputs
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
@@ -446,7 +446,9 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
             ledger="ledger commit message",
         ),
     )
-    with mock.patch("agents_remember.worktrees.lifecycle_operations.launch_detached_worker"):
+    with mock.patch(
+        "agents_remember.worktrees.integration.lifecycle_operations.launch_detached_worker"
+    ):
         payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -466,7 +468,9 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         dry_run=True,
     )
     _run_git(config.workspace_root / REPO, ["checkout", "ar/demo-task"])
-    with mock.patch("agents_remember.worktrees.lifecycle_operations.launch_detached_worker"):
+    with mock.patch(
+        "agents_remember.worktrees.integration.lifecycle_operations.launch_detached_worker"
+    ):
         payloads["worktree_integrate"] = tools.worktree_integrate_payload(
             config, contract_path, dry_run=False
         )

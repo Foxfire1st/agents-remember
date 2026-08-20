@@ -52,7 +52,9 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.worktrees.git_worktree_manager import contract_context
-from agents_remember.worktrees.integration_branch_authority import require_ordinary_worktree
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_ordinary_worktree,
+)
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import load_contract
 

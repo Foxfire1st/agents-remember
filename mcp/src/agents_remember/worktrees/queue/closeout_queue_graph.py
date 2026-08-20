@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_GRAPH_EDGES,
     MAX_CLOSEOUT_MASTERS,

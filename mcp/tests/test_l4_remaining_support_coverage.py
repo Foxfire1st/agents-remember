@@ -11,13 +11,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
-from agents_remember.application import (
-    memory_tools,
-    task_doc_tools,
-    task_execution_topology,
-)
+from agents_remember.application import memory_tools
 from agents_remember.application.lifecycle_operation_worker import OperationRuntime
 from agents_remember.application.structural import agent_tools
+from agents_remember.application.task_docs import task_doc_tools, task_execution_topology
 from agents_remember.controlplane import closeout_queue_store
 from agents_remember.kernel import memory_init
 from agents_remember.memory import baseline, carryover
@@ -27,17 +24,9 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import document_refs
-from agents_remember.worktrees import (
-    atomic_series_seal,
-    closeout_preview,
-    closeout_queue_candidate_evidence,
-    closeout_recovery,
-    integration_quality_checkout,
-    lifecycle_operations,
-    series_closeout,
-    source_lineage,
-)
-from agents_remember.worktrees.integration_ref_transaction import IntegratedCommits
+from agents_remember.worktrees import atomic_series_seal, series_closeout, source_lineage
+from agents_remember.worktrees.integration import integration_quality_checkout, lifecycle_operations
+from agents_remember.worktrees.integration.integration_ref_transaction import IntegratedCommits
 from agents_remember.worktrees.modules import (
     abandon,
     cleanup,
@@ -49,6 +38,11 @@ from agents_remember.worktrees.modules import (
     terminal_validation,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.queue import (
+    closeout_preview,
+    closeout_queue_candidate_evidence,
+    closeout_recovery,
+)
 from integration_branch_authority_test_support import _authority_fixture
 
 
@@ -965,14 +959,14 @@ class TerminalAndCloseoutRemainderTests(unittest.TestCase):
             missing = replace(fixture.leaf_contract, memory_worktree=None)
             with (
                 mock.patch(
-                    "agents_remember.worktrees.integration_branch_authority.require_ordinary_worktree"
+                    "agents_remember.worktrees.integration.integration_branch_authority.require_ordinary_worktree"
                 ),
                 self.assertRaisesRegex(RuntimeError, "missing its target path"),
             ):
                 git.ensure_worktree(missing, side="memory", dry_run=False)
             with (
                 mock.patch(
-                    "agents_remember.worktrees.integration_branch_authority.require_ordinary_worktree"
+                    "agents_remember.worktrees.integration.integration_branch_authority.require_ordinary_worktree"
                 ),
                 self.assertRaisesRegex(RuntimeError, "requires an external-memory contract"),
             ):
@@ -1113,7 +1107,3 @@ class TerminalAndCloseoutRemainderTests(unittest.TestCase):
                     cast(Any, SimpleNamespace()),
                     handover_warning=None,
                 )
-
-
-if __name__ == "__main__":
-    unittest.main()

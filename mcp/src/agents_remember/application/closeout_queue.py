@@ -6,12 +6,12 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.ambient_seat import AmbientSeatError, resolve_ambient_seat
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     CloseoutQueueRequest,
     QueueActor,
 )
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.queue.closeout_queue import (
     closeout_queue_tool as apply_closeout_queue,
 )
 

@@ -8,7 +8,7 @@ from agents_remember.application.context_packet import ContextPacketRequest, bui
 from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.application.runtime.skills import skills_install_tool
-from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 

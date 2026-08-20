@@ -9,10 +9,12 @@ from unittest import mock
 
 import test_organizational_completion_integration as fixture_mod
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees import integration_quality as quality
-from agents_remember.worktrees import integration_ref_transaction as ref_transaction
-from agents_remember.worktrees import organizational_completion_integration as completion
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration import integration_quality as quality
+from agents_remember.worktrees.integration import integration_ref_transaction as ref_transaction
+from agents_remember.worktrees.integration import (
+    organizational_completion_integration as completion,
+)
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

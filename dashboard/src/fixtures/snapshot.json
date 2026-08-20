@@ -272,6 +272,18 @@
               "sourceBranch": "ar/enforcement-master",
               "state": "unavailable",
               "syncContractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md"
+            },
+            {
+              "ahead": 0,
+              "behind": 0,
+              "contractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md",
+              "descendantBranch": "ar/enforcement-leaf",
+              "detail": "leaf tracks super directly",
+              "relation": "super-to-leaf",
+              "side": "code",
+              "sourceBranch": "ar/super-integration",
+              "state": "current",
+              "syncContractPath": "/tasks/enforcement/enclosures/leaf/series-contract.md"
             }
           ],
           "recoveries": [
@@ -973,6 +985,44 @@
                   "judgmentId": "J-sim-1"
                 }
               ]
+            },
+            {
+              "nodeId": "agents-remember/sim-master-a/task.json#landed",
+              "kind": "segment",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "masterTitle": "Sim Master A",
+              "leafIds": [
+                "SIM-A-L1"
+              ],
+              "leafTitles": [
+                "Shared framework"
+              ],
+              "waveIndex": 1,
+              "frontierState": "landed",
+              "executionNature": "organizational",
+              "predecessors": []
+            },
+            {
+              "nodeId": "agents-remember/sim-master-b/task.json#lump",
+              "kind": "lump",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "masterTitle": "Sim Master B",
+              "leafIds": [
+                "SIM-B-L1"
+              ],
+              "leafTitles": [
+                "Dependent work"
+              ],
+              "waveIndex": 2,
+              "frontierState": "ready",
+              "executionNature": "atomic",
+              "predecessors": []
             }
           ]
         }

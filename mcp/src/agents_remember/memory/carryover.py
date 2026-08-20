@@ -39,7 +39,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops imp
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     GIT_BLOB_SET_ALGORITHM,
 )
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     RepositoryCheckoutRequest,
     require_ordinary_repository_checkout,
     require_ordinary_worktree,

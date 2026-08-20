@@ -501,7 +501,3 @@ class ExecutionTopologySegmentValidationTests(unittest.TestCase):
         }
         self.assertEqual(reports[MASTER_A].unknown_leaf_ids, ("L3",))
         self.assertEqual(reports[MASTER_A].unplaced_leaf_ids, ())
-
-
-if __name__ == "__main__":
-    unittest.main()

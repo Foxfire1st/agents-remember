@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocError,
@@ -309,7 +309,3 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                 )
 
         self.assertEqual(master_path.read_bytes(), before)
-
-
-if __name__ == "__main__":
-    unittest.main()

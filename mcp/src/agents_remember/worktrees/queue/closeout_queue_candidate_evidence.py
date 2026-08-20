@@ -12,16 +12,16 @@ from pydantic import ValidationError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.closeout_queue import EvidenceFact, RouteReviewFact
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     IntegrationOperationAuthority,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.models.queue.closeout_queue import EvidenceFact, RouteReviewFact
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

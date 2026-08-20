@@ -19,12 +19,12 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
-from agents_remember.worktrees import closeout_queue_lifecycle as queue_lifecycle
 from agents_remember.worktrees import reopen as reopen_module
 from agents_remember.worktrees import series_closeout
 from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.integration_branch_authority import require_terminal_worktree
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_terminal_worktree,
+)
 from agents_remember.worktrees.modules import abandon as abandon_module
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import start as start_module
@@ -41,6 +41,8 @@ from agents_remember.worktrees.modules.terminal_validation import (
     terminal_preflight,
     terminal_result_blockers,
 )
+from agents_remember.worktrees.queue import closeout_queue_lifecycle as queue_lifecycle
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from test_closeout_queue import LEAF_B, MASTER_B, SPRINT, QueueFixture
 from test_worktree_support import git
@@ -767,7 +769,3 @@ class AtomicSeriesSealTests(unittest.TestCase):
             )
 
         self.assertEqual(contract.contract_path.read_bytes(), before)
-
-
-if __name__ == "__main__":
-    unittest.main()

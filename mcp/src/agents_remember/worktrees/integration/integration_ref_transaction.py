@@ -13,11 +13,11 @@ from agents_remember.kernel.memory_ledger import (
     find_unique_mapping,
     parse_ledger_text,
 )
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
     integration_targets,
 )
-from agents_remember.worktrees.integration_operation_authority import (
+from agents_remember.worktrees.integration.integration_operation_authority import (
     require_authorized_integration_commits,
     require_current_integration_sources,
 )

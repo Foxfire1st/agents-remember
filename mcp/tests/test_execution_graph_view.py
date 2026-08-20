@@ -263,7 +263,3 @@ class ExecutionGraphViewBuilderTests(unittest.TestCase):
         self.assertEqual(
             node_identity(graph.nodes, first_segment), "repo-a/master-a/task.json#seg1"
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

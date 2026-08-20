@@ -22,7 +22,7 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     CloseoutQueueState,
     SchedulingGradeInput,
 )
@@ -34,7 +34,7 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     CloseoutQueueRequest,
     QueueActor,
@@ -42,7 +42,7 @@ from agents_remember.worktrees.closeout_queue import (
     _project_candidates,
     closeout_queue_tool,
 )
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     claim_queue_candidate_for_closeout,
     release_queue_candidate_after_reversible_operation,
 )
@@ -752,7 +752,7 @@ class CloseoutQueueTests(unittest.TestCase):
         with self.assertRaisesRegex(CloseoutQueueError, "does not prove one exact"):
             fixture.mutate("release-blocker", blocker=MASTER_B)
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue_blocker.require_atomic_master_landed"
+            "agents_remember.worktrees.queue.closeout_queue_blocker.require_atomic_master_landed"
         ) as landed:
             released = fixture.mutate("release-blocker", blocker=MASTER_B)
         landed.assert_called_once()
@@ -1086,7 +1086,7 @@ class CloseoutQueueTests(unittest.TestCase):
                 candidates[ref.key] = base.model_copy(update={"taskDocumentRef": ref})
             state = base_state.model_copy(update={"candidates": candidates})
             with mock.patch(
-                "agents_remember.worktrees.closeout_queue._candidate_blockers",
+                "agents_remember.worktrees.queue.closeout_queue._candidate_blockers",
                 return_value=[],
             ) as blockers:
                 projected = _project_candidates(

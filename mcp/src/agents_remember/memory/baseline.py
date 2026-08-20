@@ -24,7 +24,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     memory_repository_default_branch,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader

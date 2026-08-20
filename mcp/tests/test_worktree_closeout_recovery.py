@@ -10,9 +10,9 @@ from typing import cast
 from unittest import mock
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
-from agents_remember.worktrees import closeout_recovery as closeout_recovery_journal
 from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.queue import closeout_recovery as closeout_recovery_journal
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from test_worktree_support import git, open_external_contract_fixture
 

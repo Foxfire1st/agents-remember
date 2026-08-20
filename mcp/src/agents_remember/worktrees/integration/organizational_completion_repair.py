@@ -10,15 +10,24 @@ from pathlib import Path
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.models.closeout_queue import CloseoutQueueState
 from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
     LifecycleOperationRecord,
     OrganizationalCompletionRepairEvidence,
 )
+from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.closeout_queue import CloseoutQueueError, now_iso
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
+from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+    operation_state_fingerprint,
+)
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
+from agents_remember.worktrees.modules.git import branch_commit
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError, now_iso
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     QueueBinding,
     _graph_context,
     _initial_state,
@@ -27,13 +36,6 @@ from agents_remember.worktrees.closeout_queue_lifecycle import (
     _required_operation_key,
     contract_queue_binding,
 )
-from agents_remember.worktrees.integration_branch_authority import integration_targets
-from agents_remember.worktrees.lifecycle_operation_identity import operation_state_fingerprint
-from agents_remember.worktrees.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
-from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,

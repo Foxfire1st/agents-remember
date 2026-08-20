@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     VALID_OPERATIONS,
     TaskDocCall,
     TaskDocEdit,
@@ -980,7 +980,3 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
                     }
                 ]
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

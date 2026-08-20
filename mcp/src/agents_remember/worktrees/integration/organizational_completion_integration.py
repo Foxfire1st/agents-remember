@@ -8,10 +8,21 @@ from typing import Any, TypeVar
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.models.closeout_queue import CloseoutCandidateRecord, CloseoutQueueState
 from agents_remember.models.lifecycles.operation import IntegrationQualityCertification
+from agents_remember.models.queue.closeout_queue import CloseoutCandidateRecord, CloseoutQueueState
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
+from agents_remember.worktrees.integration.organizational_completion import (
+    OrganizationalCompletionContext,
+    OrganizationalCompletionPlan,
+    organizational_completion_plan,
+    publish_organizational_master_completion,
+    require_published_organizational_master_completion,
+)
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     _active_lane_owner,
     _candidate_blockers,
@@ -21,8 +32,8 @@ from agents_remember.worktrees.closeout_queue import (
     _waiting_reasons,
     now_iso,
 )
-from agents_remember.worktrees.closeout_queue_candidate_evidence import commit_tree
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.worktrees.queue.closeout_queue_candidate_evidence import commit_tree
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     _integration_boundary_context,
     _integration_commit_blockers,
     _IntegrationBoundaryContext,
@@ -30,17 +41,6 @@ from agents_remember.worktrees.closeout_queue_lifecycle import (
     _require_integration_boundary_candidate,
     contract_queue_binding,
     integration_queue_completion_evidence,
-)
-from agents_remember.worktrees.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
-from agents_remember.worktrees.organizational_completion import (
-    OrganizationalCompletionContext,
-    OrganizationalCompletionPlan,
-    organizational_completion_plan,
-    publish_organizational_master_completion,
-    require_published_organizational_master_completion,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 

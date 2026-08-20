@@ -15,7 +15,8 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.code_quality import check as quality_check
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
-from agents_remember.worktrees.modules import closeout_staged_quality, code_quality_gate
+from agents_remember.worktrees.modules import code_quality_gate
+from agents_remember.worktrees.queue import closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

@@ -278,7 +278,3 @@ class ExecutionGraphTitlesReadTests(unittest.TestCase):
             # both the absent and the invalid master fall back to empty title maps
             self.assertEqual(titles.master_titles, {})
             self.assertEqual(titles.leaf_titles, {})
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -8,7 +8,7 @@ itself (``tasks.TaskDocument``) is the persisted contract and is deliberately
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -57,6 +57,32 @@ class TaskDocResponse(ToolResponse):
     removedSubtask: str | None = None
     deletedFiles: list[str] | None = None
     wouldDeleteFiles: list[str] | None = None
+    # Sprint-linkage and execution-graph authoring surfaces (260815-DAG L14/L13). The special
+    # ops (attach_master, detach_master, linkage_report, author_execution_graph) return raw
+    # operation payloads that carry these keys; without declaration the extra=forbid envelope
+    # REJECTED the real payloads after their writes, exactly the remove_subtask bug class
+    # above. Present only on those ops; every other operation leaves them None (excluded by
+    # exclude_none).
+    # attach_master: the sprint row and graph node the master gained.
+    subtaskNumber: str | None = None
+    state: str | None = None
+    sprintTaskDocumentRef: dict[str, Any] | None = None
+    masterRef: dict[str, Any] | None = None
+    graphNode: str | None = None
+    executionNatureAsserted: bool | None = None
+    documents: list[dict[str, Any]] | None = None
+    # detach_master: what the detachment removed and whether the master doc still resolved.
+    removedOrchestrates: list[str] | None = None
+    removedGraphNodes: int | None = None
+    masterResolved: bool | None = None
+    # linkage_report + get on a sprint: the read-only drift facts.
+    linkageFacts: list[dict[str, Any]] | None = None
+    # author_execution_graph: what the batch applied and the derived scheduling view.
+    bootstrapped: bool | None = None
+    appliedMutations: list[dict[str, Any]] | None = None
+    executionWaves: list[list[dict[str, Any]]] | None = None
+    leafPlacementFacts: list[dict[str, Any]] | None = None
+    numberingHints: list[dict[str, Any]] | None = None
 
 
 class TaskReopenResponse(WorktreeCommandResponse):

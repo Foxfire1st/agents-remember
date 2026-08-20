@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -21,7 +21,7 @@ from agents_remember.application.task_doc_tools import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
-from agents_remember.worktrees.closeout_queue_evidence import (
+from agents_remember.worktrees.queue.closeout_queue_evidence import (
     JUDGMENT_REGISTER_HEADING,
     JUDGMENT_REGISTER_SECTION,
     PRIORITY_REGISTER_HEADING,
@@ -231,7 +231,3 @@ class RegisterScaffoldTests(unittest.TestCase):
                 edit=TaskDocEdit(fields=data),
             )
         self.assertIsNotNone(self._read_sprint().executionGraph)
-
-
-if __name__ == "__main__":
-    unittest.main()

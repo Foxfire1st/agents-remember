@@ -9,7 +9,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.application import closeout_queue as public_queue
-from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocTarget, task_doc_tool
+from agents_remember.application.task_docs.task_doc_tools import (
+    TaskDocEdit,
+    TaskDocTarget,
+    task_doc_tool,
+)
 from agents_remember.controlplane.closeout_queue_store import (
     QUEUE_OWNERSHIP,
     CloseoutQueueStore,
@@ -17,12 +21,12 @@ from agents_remember.controlplane.closeout_queue_store import (
     queue_store_paths,
 )
 from agents_remember.controlplane.durable_store import CompactionOwnerError
-from agents_remember.models.closeout_queue import CloseoutQueueState
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
 )
+from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.models.task_document_ref import (
     MAX_TASK_DOCUMENT_PATH_LENGTH,
     MAX_TASK_REPOSITORY_LENGTH,
@@ -36,23 +40,23 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
+from agents_remember.worktrees.integration.lifecycle_operations import start_or_observe_operation
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     CloseoutQueueRequest,
     QueueActor,
     _graph_context,
 )
-from agents_remember.worktrees.closeout_queue_graph import incomplete_predecessor_map
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.worktrees.queue.closeout_queue_graph import incomplete_predecessor_map
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     certify_queue_candidate_closeout,
     claim_queue_candidate_for_closeout,
     claim_queue_candidate_for_integration,
 )
-from agents_remember.worktrees.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
-from agents_remember.worktrees.lifecycle_operations import start_or_observe_operation
 from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.worktree_contract import write_contract
 from pydantic import ValidationError
@@ -640,7 +644,12 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
             )
         self.assertEqual(read_task_doc(fixture.tasks / "sprint" / "task.json").status, "inProgress")
         self.assertTrue(pending_path.is_file())
-        fixture.status()
+        with mock.patch.object(
+            CloseoutQueueStore,
+            "_publish",
+            new=fail_after_task_publication,
+        ):
+            fixture.status()  # recovery republish through the closure -> original_publish
         self.assertFalse(
             CloseoutQueueState.model_validate_json(state_path.read_text(encoding="utf-8")).closed
         )
@@ -803,7 +812,3 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
             self.assertRaises(CompactionOwnerError),
         ):
             fixture.status()
-
-
-if __name__ == "__main__":
-    unittest.main()

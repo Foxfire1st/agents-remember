@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     DEFAULT_TASK_DOC_CALL,
     NO_EDIT,
     TaskDocCall,

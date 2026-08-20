@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     LANE_OCCUPYING_STATES,
     ActiveAtomicBlocker,
     CloseoutQueueRequest,

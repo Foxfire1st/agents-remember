@@ -26,21 +26,16 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SprintExecutionNode, read_task_doc, write_task_doc
-from agents_remember.worktrees import lifecycle_operations
-from agents_remember.worktrees.closeout_queue import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    certify_queue_candidate_closeout,
-    claim_queue_candidate_for_closeout,
-)
-from agents_remember.worktrees.integration_branch_authority import integration_surfaces
-from agents_remember.worktrees.integration_ref_transaction import (
+from agents_remember.worktrees.integration import lifecycle_operations
+from agents_remember.worktrees.integration.integration_branch_authority import integration_surfaces
+from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationRefSnapshot,
     IntegrationSources,
     merge_integrated_commits,
     prepare_integration_ref_move,
 )
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -52,6 +47,11 @@ from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.git import branch_exists, ensure_worktree
 from agents_remember.worktrees.modules.integrate import integrate_result
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    certify_queue_candidate_closeout,
+    claim_queue_candidate_for_closeout,
+)
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,

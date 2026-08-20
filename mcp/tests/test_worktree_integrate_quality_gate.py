@@ -27,8 +27,8 @@ from agents_remember.tasks import (
     TaskDocument,
     write_task_doc,
 )
-from agents_remember.worktrees import integration_quality as quality_mod
-from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
+from agents_remember.worktrees.integration import integration_quality as quality_mod
+from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.code_quality_gate import (

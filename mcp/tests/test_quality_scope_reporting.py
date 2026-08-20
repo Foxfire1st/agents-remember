@@ -673,7 +673,7 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn("Panda include [./src/**/*.{ts,tsx}]", line)
         self.assertIn("bundled module graph intentionally uncounted", line)
         self.assertIn(
-            "units=1 Panda source glob; 3 TypeScript projects; 426 TypeScript inputs", line
+            "units=1 Panda source glob; 3 TypeScript projects; 434 TypeScript inputs", line
         )
         self.assertIn("9 explicit Vite inputs", line)
         for name in (

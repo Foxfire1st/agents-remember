@@ -133,7 +133,7 @@ def ensure_worktree(
 ) -> str:
     """Create one exact contract-owned ordinary worktree after live authority validation."""
 
-    from agents_remember.worktrees.integration_branch_authority import (  # noqa: PLC0415
+    from agents_remember.worktrees.integration.integration_branch_authority import (  # noqa: PLC0415
         require_ordinary_worktree,
     )
 

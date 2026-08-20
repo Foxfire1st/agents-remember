@@ -15,7 +15,7 @@ from agents_remember.controlplane.closeout_queue_store import (
     QueueTransaction,
     queue_store_paths,
 )
-from agents_remember.models.closeout_queue import CloseoutQueueState
+from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 NOW = "2026-08-15T00:00:00+00:00"
@@ -251,7 +251,3 @@ class CloseoutQueueStoreTests(unittest.TestCase):
                 owning_master=OTHER_SPRINT,
                 topology_stable=True,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -22,14 +22,19 @@ from agents_remember.application.structural import gate_tools as gates
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.tasks import write_task_doc
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     CloseoutQueueRequest,
 )
-from agents_remember.worktrees.closeout_queue_lifecycle import claim_queue_candidate_for_closeout
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    claim_queue_candidate_for_closeout,
+)
 from test_closeout_queue import (
     LEAF_A,
+    LEAF_B,
     MASTER_A,
+    MASTER_B,
     SPRINT,
     QueueFixture,
     _grade,
@@ -69,6 +74,7 @@ class AmbientCloseoutQueueTests(unittest.TestCase):
             ("grade", values.get("grade")),
             ("admission", values.get("admission")),
             ("blocker_judgment_id", values.get("blocker_judgment_id")),
+            ("rationale", values.get("rationale")),
         ):
             if value is not None:
                 payload[key] = value
@@ -129,6 +135,26 @@ class AmbientCloseoutQueueTests(unittest.TestCase):
         self.assertIsNotNone(claimed)
         assert claimed is not None
         self.assertEqual(claimed.state, "closeout-in-flight")
+
+    def test_ambient_declared_caller_acquires_an_atomic_blocker(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name) / "blocker", edge=True, atomic_b=True)
+        orchestrator = DeclaredCaller(role="orchestrator", task_document_ref=SPRINT)
+        fixture.declare(MASTER_A)
+        queued = fixture.declare(MASTER_B)
+        self.assertEqual(
+            queued["waiting"][0]["reasons"],
+            [f"predecessor-incomplete: {MASTER_A.key}", "atomic-blocker-required"],
+        )
+        completed = fixture.master_docs[MASTER_A].model_copy(update={"status": "Completed"})
+        write_task_doc(fixture.tasks / "master-a", completed)
+        acquired = self._ambient(
+            fixture,
+            "acquire-blocker",
+            orchestrator,
+            blocker=MASTER_B,
+            rationale="Sequential framework block.",
+        )
+        self.assertEqual(acquired["ready"][0]["taskDocumentRef"], LEAF_B.model_dump())
 
     def test_ambient_declared_identity_is_validated_like_a_seat(self) -> None:
         fixture = QueueFixture(Path(self.temp.name) / "validated")

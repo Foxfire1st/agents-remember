@@ -52,13 +52,13 @@ from agents_remember.tasks.serving_preflight import (
     TopologyServingBuildError,
     require_serving_topology_schema,
 )
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_evidence import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_topology_migration_authority,
+)
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_evidence import (
     JUDGMENT_REGISTER_SECTION,
     planning_authorities,
-)
-from agents_remember.worktrees.integration_branch_authority import (
-    require_topology_migration_authority,
 )
 
 

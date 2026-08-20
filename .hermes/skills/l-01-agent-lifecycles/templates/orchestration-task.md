@@ -98,7 +98,7 @@ commanded master's `executionNature`.
 | Candidate/master | Grade (critical, high, normal, or low) | Affected dependents | Judgment id |
 | ---------------- | ------------------------------------ | ------------------- | ----------- |
 
-## Canonical Adoption Payload
+## Canonical executionGraph Adoption Payload
 One `task_doc.attach_master` call per commanded master (the row number is the sprint's master
 index position), then one `task_doc.author_execution_graph` batch for the edges:
 ```json

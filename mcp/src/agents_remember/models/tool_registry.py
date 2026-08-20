@@ -26,7 +26,6 @@ from agents_remember.models.benchmarks import (
     CodexBenchmarkPrepareResponse,
     CodexBenchmarkRunResponse,
 )
-from agents_remember.models.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
 from agents_remember.models.direct_landing import DirectLandingResponse
@@ -71,6 +70,7 @@ from agents_remember.models.providers import (
     ProviderStatusResponse,
     ProviderWatchersResponse,
 )
+from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse

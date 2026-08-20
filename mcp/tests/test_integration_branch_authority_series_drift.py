@@ -8,8 +8,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
-from agents_remember.worktrees import lifecycle_operations
-from agents_remember.worktrees.lifecycle_operation_store import operation_record_path
+from agents_remember.worktrees.integration import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle_operation_store import operation_record_path
 from agents_remember.worktrees.worktree_contract import write_contract
 from integration_branch_authority_test_support import (
     _acquire_atomic_blocker,

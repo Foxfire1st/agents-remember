@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from agents_remember.models.closeout_queue import CloseoutQueueState
+from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.projection import (
     AtomicBlockerNode,

@@ -29,7 +29,7 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.memory import carryover as memory_carryover
-from agents_remember.worktrees.integration_ref_transaction import (
+from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationSources,
     prepare_integration_ref_move,
@@ -984,11 +984,11 @@ class WorktreeSupport3(WorktreeSupportTests):
             )
             with (
                 mock.patch(
-                    "agents_remember.worktrees.integration_ref_transaction."
+                    "agents_remember.worktrees.integration.integration_ref_transaction."
                     "require_authorized_integration_commits"
                 ),
                 mock.patch(
-                    "agents_remember.worktrees.integration_ref_transaction.integration_targets",
+                    "agents_remember.worktrees.integration.integration_ref_transaction.integration_targets",
                     return_value=(SimpleNamespace(side="code", branch="main"),),
                 ),
                 self.assertRaisesRegex(RuntimeError, "not a fast-forward"),

@@ -172,6 +172,17 @@ class EditableInstallDetectionTests(unittest.TestCase):
         )
         self.assertTrue(_is_editable_install(dist))
 
+    def test_callable_read_text_is_invoked_with_the_metadata_filename(self) -> None:
+        seen: list[str] = []
+
+        def read_direct_url(filename: str) -> str:
+            seen.append(filename)
+            return json.dumps({"url": "file:///x", "dir_info": {"editable": True}})
+
+        dist = self._fake(self._dist_info(), read_direct_url)
+        self.assertTrue(_is_editable_install(dist))
+        self.assertEqual(seen, ["direct_url.json"])
+
     def test_non_editable_direct_url_without_pth_is_not_editable(self) -> None:
         dist = self._fake(self._dist_info(), json.dumps({"dir_info": {"editable": False}}))
         self.assertFalse(_is_editable_install(dist))

@@ -21,21 +21,20 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees import (
+from agents_remember.worktrees import series_closeout, source_lineage
+from agents_remember.worktrees.integration import (
     integration_branch_authority,
     integration_branch_repository,
     integration_operation_authority,
     lifecycle_operations,
-    series_closeout,
-    source_lineage,
 )
-from agents_remember.worktrees.integration_branch_types import (
+from agents_remember.worktrees.integration.integration_branch_types import (
     IntegrationSurface,
     IntegrationSurfaceKind,
     _BranchScope,
     _RepositorySide,
 )
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

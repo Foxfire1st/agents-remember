@@ -7,13 +7,16 @@ from types import SimpleNamespace
 from unittest import mock
 
 import test_organizational_completion_integration as fixture_mod
-from agents_remember.models.closeout_queue import AppliedQueueRequest
 from agents_remember.models.lifecycles.operation import IntegrationQualityCertification
-from agents_remember.worktrees import integration_quality as quality
-from agents_remember.worktrees import organizational_completion_integration as integration
-from agents_remember.worktrees import organizational_completion_repair as repair
-from agents_remember.worktrees.closeout_queue import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.models.queue.closeout_queue import AppliedQueueRequest
+from agents_remember.worktrees.integration import integration_quality as quality
+from agents_remember.worktrees.integration import (
+    organizational_completion_integration as integration,
+)
+from agents_remember.worktrees.integration import organizational_completion_repair as repair
+from agents_remember.worktrees.modules.code_quality_gate import QualityGatePlan
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     _integration_boundary_context,
     _integration_completion_event,
     _operation_owner,
@@ -21,7 +24,6 @@ from agents_remember.worktrees.closeout_queue_lifecycle import (
     contract_queue_binding,
     integration_queue_completion_evidence,
 )
-from agents_remember.worktrees.modules.code_quality_gate import QualityGatePlan
 from agents_remember.worktrees.worktree_contract import write_contract
 
 

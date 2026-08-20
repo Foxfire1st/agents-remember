@@ -16,16 +16,15 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
-from agents_remember.worktrees import closeout_recovery
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules import (
     closeout_memory_quality,
-    closeout_staged_quality,
     code_quality_gate,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import commit_if_dirty, commit_verified_staged
+from agents_remember.worktrees.queue import closeout_recovery, closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     RepoBranchPlan,
@@ -327,6 +326,9 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             contract = dirty_open_external_contract_fixture(Path(tmp))
             git(contract.code_worktree, "add", "-A")
             git(contract.code_worktree, "commit", "-m", "land leaf before master closeout")
+            assert contract.memory_worktree is not None
+            git(contract.memory_worktree, "add", "-A")
+            git(contract.memory_worktree, "commit", "-m", "land leaf memory before master closeout")
             series = replace(contract, kind="series", leaf_id="")
             args = replace(
                 WorktreeArgs.from_namespace(closeout_args(series)),

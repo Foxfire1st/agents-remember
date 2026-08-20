@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
-from agents_remember.application.task_doc_tools import task_reopen_tool
+from agents_remember.application.task_docs.task_doc_tools import task_reopen_tool
 from agents_remember.application.worktree_tools import (
     StartExecution,
     TaskBases,

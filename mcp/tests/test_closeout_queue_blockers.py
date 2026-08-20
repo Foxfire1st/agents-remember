@@ -11,17 +11,17 @@ from agents_remember.controlplane.closeout_queue_store import (
     CloseoutQueueStore,
     QueueTransaction,
 )
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     ActiveAtomicBlocker,
     CloseoutQueueRequest,
     CloseoutQueueState,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees import closeout_queue as queue
-from agents_remember.worktrees.closeout_queue_blocker import _acquire_blocker
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_graph import acquisition_facts
+from agents_remember.worktrees.queue import closeout_queue as queue
+from agents_remember.worktrees.queue.closeout_queue_blocker import _acquire_blocker
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_graph import acquisition_facts
 from test_closeout_queue import LEAF_A, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
 
 
@@ -433,10 +433,6 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class BlockerLifetimeExclusivityTests(unittest.TestCase):
     """L13-R3: an in-flight atomic block owns the sprint landing lane for life."""
 
@@ -484,11 +480,11 @@ class BlockerLifetimeExclusivityTests(unittest.TestCase):
         graph = replace(self.graph, masters={**self.graph.masters, MASTER_A: atomic_a})
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue_blocker._require_unsealed_blocker_series",
+                "agents_remember.worktrees.queue.closeout_queue_blocker._require_unsealed_blocker_series",
                 return_value=mock.sentinel.series,
             ),
             mock.patch(
-                "agents_remember.worktrees.closeout_queue_blocker.require_source_bases_current"
+                "agents_remember.worktrees.queue.closeout_queue_blocker.require_source_bases_current"
             ),
             self.assertRaises(CloseoutQueueError) as raised,
         ):

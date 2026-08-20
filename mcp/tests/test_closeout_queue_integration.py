@@ -11,30 +11,20 @@ from unittest import mock
 from agents_remember.application import lifecycle_operation_worker
 from agents_remember.application.closeout_queue import CloseoutQueueError
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore, queue_store_paths
-from agents_remember.models.closeout_queue import CloseoutQueueState
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.tasks import read_task_doc, write_task_doc
-from agents_remember.worktrees import closeout_queue as queue_module
-from agents_remember.worktrees import closeout_queue_lifecycle as queue_lifecycle
-from agents_remember.worktrees import integration_operation_authority
-from agents_remember.worktrees.closeout_queue import QueueActor
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    certify_queue_candidate_closeout,
-    claim_queue_candidate_for_closeout,
-    claim_queue_candidate_for_integration,
-    complete_queue_candidate_integration,
-    require_queue_candidate_for_integration,
-)
-from agents_remember.worktrees.integration_ref_transaction import IntegrationSources
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration import integration_operation_authority
+from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationSources
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle_operations import (
     cancel_operation,
     start_or_observe_operation,
 )
@@ -43,6 +33,16 @@ from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules import sync as sync_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.queue import closeout_queue as queue_module
+from agents_remember.worktrees.queue import closeout_queue_lifecycle as queue_lifecycle
+from agents_remember.worktrees.queue.closeout_queue import QueueActor
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    certify_queue_candidate_closeout,
+    claim_queue_candidate_for_closeout,
+    claim_queue_candidate_for_integration,
+    complete_queue_candidate_integration,
+    require_queue_candidate_for_integration,
+)
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -498,12 +498,12 @@ class CloseoutQueueIntegrationBoundaryTests(unittest.TestCase):
         claim_queue_candidate_for_closeout(contract, record.operationKey)
         with (
             mock.patch(
-                "agents_remember.worktrees.lifecycle_operations."
+                "agents_remember.worktrees.integration.lifecycle_operations."
                 "release_queue_candidate_after_reversible_operation",
                 side_effect=CloseoutQueueError("queue-release-blocked", "topology invalid"),
             ),
             mock.patch(
-                "agents_remember.worktrees.lifecycle_operations._terminate_worker_group"
+                "agents_remember.worktrees.integration.lifecycle_operations._terminate_worker_group"
             ) as terminate,
             self.assertRaisesRegex(CloseoutQueueError, "queue-release-blocked"),
         ):
@@ -877,7 +877,3 @@ def _assert_candidate_absent(test: unittest.TestCase, fixture: QueueFixture) -> 
         test.assertFalse(
             any(item["taskDocumentRef"] == LEAF_A.model_dump() for item in projected[lane])
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -13,13 +13,13 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
 )
 from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
-from agents_remember.worktrees.integration_branch_repository import (
+from agents_remember.worktrees.integration.integration_branch_repository import (
     branch_worktree_owners,
     canonical_local_branch,
     memory_repository_default_branch,
     repository_default_branch,
 )
-from agents_remember.worktrees.integration_branch_types import (
+from agents_remember.worktrees.integration.integration_branch_types import (
     IntegrationSurface,
     IntegrationSurfaceKind,
     IntegrationSurfaceSide,

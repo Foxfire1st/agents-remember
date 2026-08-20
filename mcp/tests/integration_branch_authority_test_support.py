@@ -23,13 +23,13 @@ from agents_remember.tasks import (
     read_task_doc,
     write_task_doc,
 )
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.modules import start_contract
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueRequest,
     QueueActor,
     closeout_queue_tool,
 )
-from agents_remember.worktrees.modules import start_contract
-from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

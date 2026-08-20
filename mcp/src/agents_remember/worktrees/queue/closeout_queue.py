@@ -20,7 +20,7 @@ from agents_remember.controlplane.integration_authority_lock import integration_
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     LANE_OCCUPYING_STATES,
     ActiveAtomicBlocker,
     CandidateAdmissionFacts,
@@ -42,7 +42,7 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.worktrees.atomic_series_seal import require_series_path_accepting_leaves
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

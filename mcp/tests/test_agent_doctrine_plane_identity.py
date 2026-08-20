@@ -68,24 +68,9 @@ def _doctrine(path: str) -> str:
     return SOURCE_SKILL.joinpath(path).read_text(encoding="utf-8")
 
 
-def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership() -> None:
-    lifecycle = _doctrine("SKILL.md")
-    architect = _doctrine("roles/architect.md")
-    strategist = _doctrine("roles/strategist.md")
-    orchestrator = _doctrine("roles/orchestrator.md")
-    manager = _doctrine("roles/manager.md")
-    reviewer = _doctrine("roles/reviewer.md")
-    worker = _doctrine("roles/worker.md")
-    orchestration_task = _doctrine("templates/orchestration-task.md")
-    manager_brief = _doctrine("templates/manager-brief.md")
-    handover = _doctrine("templates/master-handover-packet.md")
-    verdict = _doctrine("templates/verdict.md")
-    worker_brief = _doctrine("templates/worker-brief.md")
-    plan_review = _doctrine("criteria/plan-review.md")
-    doctrine_review = _doctrine("criteria/doctrine.md")
-
+def _assert_architect_doctrine(text: str) -> None:
     assert all(
-        term in architect
+        term in text
         for term in (
             "executionGraph",
             "executionNature",
@@ -97,8 +82,11 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "recommend skipping only when a ruled plan is complete",
         )
     )
+
+
+def _assert_strategist_doctrine(text: str) -> None:
     assert all(
-        term in strategist
+        term in text
         for term in (
             "Detection/judgment split",
             "`organizational`",
@@ -112,8 +100,11 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "supplied by the orchestrator through the architect for a runtime reshape",
         )
     )
+
+
+def _assert_orchestrator_doctrine(text: str) -> None:
     assert all(
-        term in orchestrator
+        term in text
         for term in (
             "Execution loop — recompute after every material event",
             "graph's stable node order as a deterministic",
@@ -131,8 +122,11 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "plan-review reviewer seats are architect children",
         )
     )
+
+
+def _assert_manager_doctrine(text: str) -> None:
     assert all(
-        term in manager
+        term in text
         for term in (
             "Declare closeout readiness; do not rank the portfolio",
             "An `organizational` leaf lands directly",
@@ -141,20 +135,22 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "only after the orchestrator released",
         )
     )
-    assert "organizational leaf requires super → leaf" in lifecycle
-    assert "atomic path requires super → master → leaf" in lifecycle
-    assert "| Portfolio plan | the architect |" in lifecycle
+
+
+def _assert_reviewer_doctrine(text: str) -> None:
     assert all(
-        term in reviewer
+        term in text
         for term in (
             "exact proposed final super candidate containing prior landed leaf contributions",
             "owning or reopened leaf",
             "integration branches are not repair workbenches",
         )
     )
-    assert "proposed final organizational super candidate before it lands" in worker
+
+
+def _assert_orchestration_task_doctrine(text: str) -> None:
     assert all(
-        term in orchestration_task
+        term in text
         for term in (
             "Mechanical Fact Inventory",
             "Judgment Register (canonical judgment authority)",
@@ -169,8 +165,11 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "sprint decision log and Judgment Register",
         )
     )
+
+
+def _assert_manager_brief_doctrine(text: str) -> None:
     assert all(
-        term in manager_brief
+        term in text
         for term in (
             "Execution nature:",
             "Closeout-ready report:",
@@ -180,19 +179,48 @@ def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership()
             "contributions",
         )
     )
+
+
+def test_execution_topology_doctrine_assigns_fact_judgment_and_queue_ownership() -> None:
+    _assert_architect_doctrine(_doctrine("roles/architect.md"))
+    _assert_strategist_doctrine(_doctrine("roles/strategist.md"))
+    _assert_orchestrator_doctrine(_doctrine("roles/orchestrator.md"))
+    _assert_manager_doctrine(_doctrine("roles/manager.md"))
+    _assert_reviewer_doctrine(_doctrine("roles/reviewer.md"))
+    _assert_orchestration_task_doctrine(_doctrine("templates/orchestration-task.md"))
+    _assert_manager_brief_doctrine(_doctrine("templates/manager-brief.md"))
+
+    lifecycle = _doctrine("SKILL.md")
+    assert "organizational leaf requires super → leaf" in lifecycle
+    assert "atomic path requires super → master → leaf" in lifecycle
+    assert "| Portfolio plan | the architect |" in lifecycle
+    assert "proposed final organizational super candidate before it lands" in _doctrine(
+        "roles/worker.md"
+    )
+
+    handover = _doctrine("templates/master-handover-packet.md")
     assert "prior landed leaf commits plus the proposed final leaf" in handover
     assert "exact proposed final super candidate" in handover
     assert "before final organizational leaf moves super" in handover
+
+    verdict = _doctrine("templates/verdict.md")
     assert "exact proposed organizational super candidate including final leaf" in verdict
     assert "owning or reopened leaf, or new scoped fix leaf" in verdict
     assert "proposed final organizational super candidate or atomic landing" in verdict
-    assert "proposed final organizational super candidate before it lands" in worker_brief
+    assert "architect for the plan review" in verdict
+
+    assert "proposed final organizational super candidate before it lands" in _doctrine(
+        "templates/worker-brief.md"
+    )
+
+    plan_review = _doctrine("criteria/plan-review.md")
     assert "PR-6 — Detection/judgment boundary and runtime ownership" in plan_review
     assert "owner = architect" in plan_review
     assert "orchestrator on a sanctioned strategist skip" in plan_review
+
+    doctrine_review = _doctrine("criteria/doctrine.md")
     assert "D-4 — Topology and authority sweep" in doctrine_review
     assert "D-5 — Detection is not judgment" in doctrine_review
-    assert "architect for the plan review" in verdict
 
 
 def test_agent_doctrine_contains_no_retired_fixed_master_branch_topology() -> None:

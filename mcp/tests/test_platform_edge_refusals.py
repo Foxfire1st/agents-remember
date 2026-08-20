@@ -30,9 +30,10 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.application import gate_tools as gates
-from agents_remember.application import provider_tools, task_doc_tools
+from agents_remember.application import provider_tools
 from agents_remember.application.gate_tools import GateWait, InboxWatch
-from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocError
+from agents_remember.application.task_docs import task_doc_tools
+from agents_remember.application.task_docs.task_doc_tools import TaskDocEdit, TaskDocError
 from agents_remember.benchmarks.runner_modules import execution as benchmark_execution
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord, GateVerdict

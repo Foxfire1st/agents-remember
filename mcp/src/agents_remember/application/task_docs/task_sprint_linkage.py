@@ -69,7 +69,7 @@ from agents_remember.tasks.serving_preflight import (
     TopologyServingBuildError,
     require_serving_topology_schema,
 )
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     require_topology_migration_authority,
 )
 

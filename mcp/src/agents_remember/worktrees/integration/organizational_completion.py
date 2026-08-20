@@ -16,11 +16,11 @@ from agents_remember.kernel.memory_ledger import (
     find_unique_mapping,
     parse_ledger_text,
 )
-from agents_remember.models.closeout_queue import CloseoutCandidateRecord
+from agents_remember.models.queue.closeout_queue import CloseoutCandidateRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, completion_blockers, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
-from agents_remember.worktrees.integration_branch_authority import integration_targets
+from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity, require_git
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (

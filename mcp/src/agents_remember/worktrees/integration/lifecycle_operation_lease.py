@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

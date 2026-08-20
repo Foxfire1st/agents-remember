@@ -9,18 +9,18 @@ from unittest import mock
 import test_organizational_completion_integration as fixture_mod
 from agents_remember.application import lifecycle_operation_worker
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees import (
+from agents_remember.worktrees.integration import (
     organizational_completion_integration as completion_integration,
 )
-from agents_remember.worktrees import (
-    organizational_completion_repair as repair,
+from agents_remember.worktrees.integration import organizational_completion_repair as repair
+from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+    operation_state_fingerprint,
 )
-from agents_remember.worktrees.closeout_queue import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     _operation_owner,
     contract_queue_binding,
 )
-from agents_remember.worktrees.lifecycle_operation_identity import operation_state_fingerprint
 from test_closeout_queue import NOW
 
 

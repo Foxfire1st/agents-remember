@@ -39,6 +39,11 @@ class MemoryQualityRunRegistryTests(unittest.TestCase):
         self.assertTrue(envelope["ok"])
         self.assertIsNone(runs.poll_quality_run("missing-run"))
 
+    def test_poll_until_settled_raises_when_the_run_never_settles(self) -> None:
+        runs._registry["never"] = runs._QualityRun(run_id="never", key="k", status="running")
+        with self.assertRaisesRegex(AssertionError, "did not settle"):
+            self._poll_until_settled("never")
+
     def test_failed_run_reports_the_error(self) -> None:
         def _boom() -> dict:
             raise RuntimeError("probe failure")
@@ -108,6 +113,7 @@ class MemoryQualityApplicationWrapperTests(unittest.TestCase):
 
         def fake_run(config, **kwargs):
             captured["kwargs"] = kwargs
+            time.sleep(0.2)  # slow enough for the first poll to see "running"
             return {"operation": "memory_quality_check", "ok": True, "checks": {}}
 
         with mock.patch.object(
@@ -121,11 +127,12 @@ class MemoryQualityApplicationWrapperTests(unittest.TestCase):
             run_id = started["runId"]
             deadline = time.monotonic() + 5
             envelope = None
-            while time.monotonic() < deadline:
+            while (envelope is None or envelope["status"] == "running") and (
+                time.monotonic() < deadline
+            ):
                 envelope = memory_tools.poll_memory_quality_check_run("r", run_id)
-                if envelope["status"] != "running":
-                    break
-                time.sleep(0.01)
+                if envelope["status"] == "running":
+                    time.sleep(0.01)
             assert envelope is not None
             self.assertEqual(envelope["status"], "completed")
             self.assertTrue(envelope["ok"])

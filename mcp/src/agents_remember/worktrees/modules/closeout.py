@@ -19,22 +19,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.observer.events import now_iso
-from agents_remember.worktrees.closeout_preview import (
-    closeout_order,
-    closeout_summary,
-    proposed_closeout_commits,
-)
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    certify_queue_candidate_closeout,
-    claim_queue_candidate_for_closeout,
-)
-from agents_remember.worktrees.closeout_recovery import (
-    MemoryCloseoutOutcome,
-    accepted_code_commit,
-    prove_closeout_recovery_commits,
-    resume_external_commits,
-)
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_series_contract_authority,
 )
@@ -42,9 +27,6 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.closeout_memory_quality import (
     combine_memory_quality,
     run_memory_quality_phase,
-)
-from agents_remember.worktrees.modules.closeout_staged_quality import (
-    gate_staged_code as _gate_staged_code,
 )
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
@@ -93,6 +75,24 @@ from agents_remember.worktrees.modules.onboarding import (
     route_overview_metadata_refresh_plan,
     validate_onboarding_refresh_plan,
     validate_route_overview_refresh_plan,
+)
+from agents_remember.worktrees.queue.closeout_preview import (
+    closeout_order,
+    closeout_summary,
+    proposed_closeout_commits,
+)
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    certify_queue_candidate_closeout,
+    claim_queue_candidate_for_closeout,
+)
+from agents_remember.worktrees.queue.closeout_recovery import (
+    MemoryCloseoutOutcome,
+    accepted_code_commit,
+    prove_closeout_recovery_commits,
+    resume_external_commits,
+)
+from agents_remember.worktrees.queue.closeout_staged_quality import (
+    gate_staged_code as _gate_staged_code,
 )
 from agents_remember.worktrees.route_review import (
     code_candidate_tree,
@@ -609,10 +609,7 @@ def _resumed_external_outcome(
         code_commit=code_commit,
         memory_commit=recovery_memory_commit,
     )
-    return MemoryCloseoutOutcome(
-        memory_commit=memory_commit,
-        ledger_commit=ledger_commit,
-    )
+    return MemoryCloseoutOutcome(memory_commit=memory_commit, ledger_commit=ledger_commit)
 
 
 def _external_closeout_commits(
@@ -661,9 +658,7 @@ def _external_closeout_commits(
     elif existing_mapping is not None:
         memory_commit = existing_mapping.memory_commit
         if not is_ancestor(
-            contract.memory_worktree,
-            memory_commit,
-            head_commit(contract.memory_worktree),
+            contract.memory_worktree, memory_commit, head_commit(contract.memory_worktree)
         ):
             raise RuntimeError(
                 "closeout recovery ledger mapping names memory content that is not reachable "
@@ -1067,6 +1062,42 @@ def _closeout_contract(args: WorktreeArgs) -> tuple[Path, WorktreeContract]:
     return contract_path, contract
 
 
+def _closeout_quality_facts(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    *,
+    resuming: bool,
+    code_would_commit: bool,
+    worklist: dict[str, list[str]],
+) -> tuple[_CloseoutAttestations, dict[str, Any], dict[str, Any], bool]:
+    """The attestations and reversible memory/code gate facts for one closeout."""
+
+    if resuming:
+        attestations = _CloseoutAttestations()
+        code_quality_gate: dict[str, Any] = {
+            "status": "recovered-post-claim",
+            "passed": True,
+            "reason": "the accepted candidate resumes after its durable approval claim",
+        }
+        memory_quality_before_refresh: dict[str, Any] = {}
+        strict_code_quality_required = contract.kind == "leaf" and requires_strict_code_quality(
+            contract.code_worktree,
+            code_would_commit=code_would_commit,
+            required_when_missing=requires_integrated_acceptance(contract.repo_name),
+        )
+    else:
+        attestations = _closeout_attestations(contract, worklist)
+        code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
+            _closeout_quality_preflight(contract, args, code_would_commit=code_would_commit)
+        )
+    return (
+        attestations,
+        code_quality_gate,
+        memory_quality_before_refresh,
+        strict_code_quality_required,
+    )
+
+
 def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     """Run closeout for real, in the order the preview promised.
 
@@ -1094,24 +1125,15 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         _refuse_unsatisfied_closeout_gate(contract, args)
     worklist = closeout_changed_paths(contract)
     code_would_commit = code_change_present(contract)
-    if resuming:
-        attestations = _CloseoutAttestations()
-        code_quality_gate = {
-            "status": "recovered-post-claim",
-            "passed": True,
-            "reason": "the accepted candidate resumes after its durable approval claim",
-        }
-        memory_quality_before_refresh = {}
-        strict_code_quality_required = contract.kind == "leaf" and requires_strict_code_quality(
-            contract.code_worktree,
+    attestations, code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
+        _closeout_quality_facts(
+            contract,
+            args,
+            resuming=resuming,
             code_would_commit=code_would_commit,
-            required_when_missing=requires_integrated_acceptance(contract.repo_name),
+            worklist=worklist,
         )
-    else:
-        attestations = _closeout_attestations(contract, worklist)
-        code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
-            _closeout_quality_preflight(contract, args, code_would_commit=code_would_commit)
-        )
+    )
     accepted_candidate_tree = cast(str, args.candidate_tree)
     refuse_series_workbench_commit(contract)
     _revalidate_reviewed_candidate(contract, route_review, accepted_candidate_tree)

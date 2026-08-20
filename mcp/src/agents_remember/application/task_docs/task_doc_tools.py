@@ -43,13 +43,13 @@ from agents_remember.tasks.readiness import (
     completed_master_rows_to_validate,
     missing_unresolved_master_rows,
 )
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_evidence import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_topology_publication_authority,
+)
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_evidence import (
     register_scaffold_sections,
     require_register_sections_valid,
-)
-from agents_remember.worktrees.integration_branch_authority import (
-    require_topology_publication_authority,
 )
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
@@ -103,7 +103,7 @@ VALID_OPERATIONS = (
     "author_execution_graph",
     "set_field",
     "get",
-    # L14: sprint↔master linkage (application/task_sprint_linkage.py).
+    # L14: sprint↔master linkage (application/task_docs/task_sprint_linkage.py).
     *task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS,
 )
 
@@ -389,6 +389,31 @@ def _task_topology_stable(original: TaskDocument | None, candidate: TaskDocument
     ]
 
 
+def _sprint_doc_identity(context: _TaskDocSpecialContext) -> dict[str, Any]:
+    """The sprint document's identity surface, merged into special-op results.
+
+    The sprint-linkage and execution-graph authoring ops publish inside their own
+    functions and return raw operation payloads; the envelope still requires the
+    standard task_doc identity (taskId/slug/kind/status/docPath/renderedPath/
+    lifecycleId/stepsDone/stepsTotal), so the caller merges it in afterwards -- the
+    op succeeded, so the sprint doc exists at task_root/slug.
+    """
+
+    json_path = _existing_json(context.task_root, context.target.slug)
+    doc = read_task_doc(json_path)
+    return {
+        "taskId": doc.id,
+        "slug": doc.slug,
+        "kind": doc.kind,
+        "status": doc.status,
+        "lifecycleId": doc.lifecycleId,
+        "docPath": json_path.as_posix(),
+        "renderedPath": markdown_path_for(context.task_root, doc).as_posix(),
+        "stepsDone": step_done(doc),
+        "stepsTotal": step_total(doc),
+    }
+
+
 def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, Any] | None:
     if context.operation == "get":
         json_path = _existing_json(context.task_root, context.target.slug)
@@ -408,7 +433,7 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
         return result
     if context.operation in task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS:
         try:
-            return task_sprint_linkage.sprint_linkage_operation(
+            result = task_sprint_linkage.sprint_linkage_operation(
                 context.operation,
                 task_sprint_linkage.SprintLinkageCall(
                     config=context.config,
@@ -421,10 +446,11 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
             )
         except task_sprint_linkage.SprintLinkageError as exc:
             raise TaskDocError(str(exc)) from exc
+        return {**_sprint_doc_identity(context), **result}
     if context.operation == "author_execution_graph":
         repository = context.config.repositories[context.target.repo_id]
         try:
-            return author_execution_graph(
+            result = author_execution_graph(
                 ExecutionTopologyAuthoringRequest(
                     coordination_root=context.config.coordination_root,
                     repo_id=context.target.repo_id,
@@ -438,6 +464,7 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
             )
         except ExecutionTopologyError as exc:
             raise TaskDocError(str(exc)) from exc
+        return {**_sprint_doc_identity(context), **result}
     if context.operation == "remove_subtask":
         return _remove_subtask(
             context,

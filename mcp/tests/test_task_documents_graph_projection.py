@@ -217,7 +217,3 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
             list(indexed),
             [TaskDocumentRef(repository=REPO, path="master-a/task.json")],
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

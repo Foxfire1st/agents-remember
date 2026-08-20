@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocError,
@@ -29,13 +29,6 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
-from agents_remember.worktrees.closeout_queue import (
-    CloseoutQueueRequest,
-    _ActionContext,
-    _declaration_identity,
-)
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_graph import QueueGraphContext
 from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
@@ -46,6 +39,13 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     require_git,
 )
+from agents_remember.worktrees.queue.closeout_queue import (
+    CloseoutQueueRequest,
+    _ActionContext,
+    _declaration_identity,
+)
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_graph import QueueGraphContext
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

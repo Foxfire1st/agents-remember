@@ -9,9 +9,9 @@ from unittest import mock
 
 from agents_remember.tasks.document import Section
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.closeout_queue import _graph_context
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_evidence import (
+from agents_remember.worktrees.queue.closeout_queue import _graph_context
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_evidence import (
     JUDGMENT_REGISTER_HEADER,
     JUDGMENT_REGISTER_SECTION,
     PRIORITY_REGISTER_HEADER,
@@ -480,7 +480,3 @@ class CloseoutQueueEvidenceTests(unittest.TestCase):
             self.assertRaisesRegex(CloseoutQueueError, "does not exist"),
         ):
             _evidence_fact(local)
-
-
-if __name__ == "__main__":
-    unittest.main()

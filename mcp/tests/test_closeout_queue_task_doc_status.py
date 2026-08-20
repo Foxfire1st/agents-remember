@@ -4,17 +4,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.application.task_execution_topology import ExecutionTopologyError
+from agents_remember.application.task_docs.task_execution_topology import ExecutionTopologyError
 from agents_remember.controlplane.closeout_queue_store import (
     CloseoutQueueStoreError,
     queue_store_paths,
 )
-from agents_remember.models.closeout_queue import CloseoutQueueState
+from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.tasks import read_task_doc, write_task_doc
 from test_closeout_queue import LEAF_A, MASTER_A, REPO, SPRINT, QueueFixture
 
@@ -72,7 +72,3 @@ class CloseoutQueueTaskDocStatusTests(unittest.TestCase):
         write_task_doc(fixture.tasks / "master-a", fixture.master_docs[MASTER_A])
         declared = fixture.declare(MASTER_A)
         self.assertEqual(declared["ready"][0]["taskDocumentRef"], LEAF_A.model_dump())
-
-
-if __name__ == "__main__":
-    unittest.main()

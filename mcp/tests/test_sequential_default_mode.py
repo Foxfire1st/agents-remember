@@ -348,7 +348,3 @@ class SequentialLaneTests(unittest.TestCase):
         self.assertEqual(outcome.status, "sequential-lane-owned")
         assert outcome.detail is not None
         self.assertIn(MASTER_A.key, outcome.detail)
-
-
-if __name__ == "__main__":
-    unittest.main()

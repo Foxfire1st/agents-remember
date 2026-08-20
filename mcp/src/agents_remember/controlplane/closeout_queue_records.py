@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from agents_remember.controlplane.durable_store import DurableRecord
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     MAX_QUEUE_SHORT_TEXT,
     MAX_QUEUE_TEXT,
     CloseoutQueueState,

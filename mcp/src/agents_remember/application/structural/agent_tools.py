@@ -54,7 +54,9 @@ from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
 )
-from agents_remember.worktrees.integration_branch_authority import repository_default_branch
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    repository_default_branch,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start_contract import (
     MasterSeriesContractSpec,

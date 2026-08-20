@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 import pytest
 from _global_state import preserve_owned_mutable_state
 from agents_remember.application import lifecycle_operation_worker, worktree_tools
-from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.controlplane.records import (
     GateVerdict,
     create_gate,
@@ -29,13 +29,13 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
-from agents_remember.worktrees import lifecycle_operations
-from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle_operations import (
     cancel_operation,
     latest_operation_projection,
     observe_operation,
@@ -265,16 +265,12 @@ def test_contract_lifecycle_lease_excludes_cross_kind_and_terminal_mutation(
     contract = _contract(tmp_path)
     start_or_observe_operation(_input(contract), launcher=lambda *_: None)
 
-    with (
-        pytest.raises(RuntimeError, match=r"integrate cannot proceed.*closeout"),
-        contract_lifecycle_lease(contract, operation_kind="integrate"),
-    ):
-        raise AssertionError("cross-kind lease unexpectedly opened")
-    with (
-        pytest.raises(RuntimeError, match=r"terminal mutation cannot proceed.*closeout"),
-        contract_lifecycle_lease(contract, operation_kind=None),
-    ):
-        raise AssertionError("terminal lease unexpectedly opened")
+    lease = contract_lifecycle_lease(contract, operation_kind="integrate")
+    with pytest.raises(RuntimeError, match=r"integrate cannot proceed.*closeout"):
+        lease.__enter__()
+    lease = contract_lifecycle_lease(contract, operation_kind=None)
+    with pytest.raises(RuntimeError, match=r"terminal mutation cannot proceed.*closeout"):
+        lease.__enter__()
     with contract_lifecycle_lease(contract, operation_kind="closeout"):
         pass
 
@@ -504,7 +500,7 @@ def test_cancel_before_boundary_is_task_addressed_and_kills_private_worker_group
     )
 
     with (
-        patch("agents_remember.worktrees.lifecycle_operations.os.killpg") as kill,
+        patch("agents_remember.worktrees.integration.lifecycle_operations.os.killpg") as kill,
         ThreadPoolExecutor(max_workers=2) as pool,
     ):
         projections = list(

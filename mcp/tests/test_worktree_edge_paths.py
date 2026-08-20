@@ -30,8 +30,9 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.models.worktree import SourceLineageProjection
-from agents_remember.worktrees import integration_ref_transaction, leaf_refs
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees import leaf_refs
+from agents_remember.worktrees.integration import integration_ref_transaction
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     operation_record_path,
     operation_report_path,
 )

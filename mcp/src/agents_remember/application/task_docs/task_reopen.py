@@ -14,7 +14,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.worktree_contract import load_contract
 
-from .worktree_tools import end_ambient_lifecycle_if_anchored
+from ..worktree_tools import end_ambient_lifecycle_if_anchored
 
 
 def task_reopen_tool(

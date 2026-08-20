@@ -84,7 +84,3 @@ class CloseoutQueueProjectionTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertEqual(read_closeout_queues(fixture.coord, now=self.now), [])
-
-
-if __name__ == "__main__":
-    unittest.main()

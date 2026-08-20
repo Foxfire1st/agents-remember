@@ -5,7 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   activeConversationStore,
@@ -58,6 +58,14 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
   beforeEach(() => {
     sessionStore.getState().hydrate(FLEET.map(fromTerminalSessionInfo));
     sessionCockpitStore.setState({ focusedSessionId: null });
+  });
+
+  afterEach(async () => {
+    // RTL auto-cleanup unmounts the tree, but the conversation timeline's virtualizer
+    // debounces scroll (150 ms): a real-timer test that fired wheel/scroll can leave that
+    // callback pending past jsdom teardown, where React has no `window` to schedule
+    // against. Flush it while jsdom is still alive.
+    await new Promise((resolve) => setTimeout(resolve, 200));
   });
 
   it("defaults a controlled seat to the structured surface; the PTY is a default-off read-only diagnostic (R2/R7)", async () => {

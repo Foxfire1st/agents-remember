@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application import task_doc_tools as task_doc_tools_module
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs import task_doc_tools as task_doc_tools_module
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocError,
@@ -593,6 +593,22 @@ class MasterApplicationTests(unittest.TestCase):
         preview = self._op("remove_subtask", subtask={"number": "3"}, dry_run=True)
         self.assertTrue(preview["wouldDeleteFiles"])
         TaskDocResponse.model_validate(preview)
+
+    def test_get_on_a_sprint_carries_declared_linkage_facts(self) -> None:
+        # Same envelope bug class as remove_subtask above: task_doc.get on a sprint
+        # appends linkageFacts to the standard identity payload, and the extra=forbid
+        # TaskDocResponse envelope must declare it or the read rejects after serving.
+        # The commanded master must exist for sprint create validation; then get on
+        # the sprint appends linkageFacts to the identity payload.
+        task_root = self.coord / "tasks" / "agents-remember" / "series-a"
+        write_task_doc(
+            task_root,
+            _master(id="SERIES-A", slug="task", title="Series A"),
+        )
+        self._create(orchestrates=["series-a"], integrationBranch="super")
+        payload = self._op("get")
+        self.assertIn("linkageFacts", payload)
+        TaskDocResponse.model_validate(payload)  # would raise ValidationError before the fix
 
 
 class TerminalLeafResolutionTests(unittest.TestCase):

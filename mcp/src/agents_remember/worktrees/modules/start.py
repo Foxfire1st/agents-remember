@@ -16,8 +16,7 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.tasks.leaf_doc import restamp_leaf_doc_lifecycle
 from agents_remember.tasks.store import write_task_docs
-from agents_remember.worktrees.closeout_queue_lifecycle import publish_queue_bound_task_facts
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_parent_series_accepting_leaves,
 )
@@ -42,6 +41,7 @@ from agents_remember.worktrees.modules.start_contract import (
 )
 from agents_remember.worktrees.modules.start_result import started_result
 from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from agents_remember.worktrees.reopen import reopen_required_start_result
 from agents_remember.worktrees.services import ProviderSetupRequestSpec, worktree_services
 from agents_remember.worktrees.source_lineage import (

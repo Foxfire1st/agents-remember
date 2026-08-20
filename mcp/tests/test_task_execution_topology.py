@@ -11,9 +11,9 @@ from unittest import mock
 
 import agents_remember.tasks.document_refs as task_document_refs
 import agents_remember.tasks.store as task_store
-from agents_remember.application import task_doc_queue_scope
-from agents_remember.application.task_doc_queue_scope import QueuePublicationScope
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs import task_doc_queue_scope
+from agents_remember.application.task_docs.task_doc_queue_scope import QueuePublicationScope
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocError,
@@ -22,7 +22,7 @@ from agents_remember.application.task_doc_tools import (
     _TaskDocPublication,
     task_doc_tool,
 )
-from agents_remember.application.task_execution_topology import (
+from agents_remember.application.task_docs.task_execution_topology import (
     ExecutionTopologyError,
     ExecutionTopologyInventoryRequest,
     inventory_execution_topology,
@@ -263,7 +263,7 @@ class ExecutionTopologyTests(unittest.TestCase):
     def test_inventory_refuses_when_branch_enumeration_fails(self) -> None:
         with (
             mock.patch(
-                "agents_remember.application.task_execution_topology.run_git",
+                "agents_remember.application.task_docs.task_execution_topology.run_git",
                 return_value=SimpleNamespace(returncode=1, stdout="", stderr="boom"),
             ),
             self.assertRaisesRegex(ExecutionTopologyError, "cannot enumerate branches"),
@@ -356,7 +356,7 @@ class ExecutionTopologyTests(unittest.TestCase):
         )
         with (
             mock.patch(
-                "agents_remember.application.task_doc_tools.governing_queue_scope",
+                "agents_remember.application.task_docs.task_doc_tools.governing_queue_scope",
                 return_value=QueuePublicationScope(SPRINT, None),
             ),
             self.assertRaisesRegex(TaskDocError, "no owning master"),
@@ -367,7 +367,7 @@ class ExecutionTopologyTests(unittest.TestCase):
         publication = replace(publication, publisher=publisher)
         with (
             mock.patch(
-                "agents_remember.application.task_doc_tools.governing_queue_scope",
+                "agents_remember.application.task_docs.task_doc_tools.governing_queue_scope",
                 side_effect=task_doc_queue_scope.QueueScopeError("broken queue scope"),
             ),
             self.assertRaisesRegex(TaskDocError, "broken queue scope"),
@@ -933,7 +933,3 @@ class ExecutionTopologyTests(unittest.TestCase):
                 operation="author_execution_graph",
                 edit=TaskDocEdit(fields=self._bootstrap_fields()),
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

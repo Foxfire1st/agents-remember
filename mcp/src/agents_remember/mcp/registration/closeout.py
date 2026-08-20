@@ -25,13 +25,13 @@ from ..tools import (
 
 def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register landing tools through cohesive bounded registration groups."""
-    _register_direct_landing_tool(server, config)
+    _register_direct_landing_tools(server, config)
     _register_closeout_command_tools(server, config)
     _register_integration_command_tools(server, config)
     _register_reclamation_command_tools(server, config)
 
 
-def _register_direct_landing_tool(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def direct_landing(
         contract_path: str,

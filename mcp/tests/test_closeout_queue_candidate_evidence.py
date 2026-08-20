@@ -14,14 +14,14 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees import closeout_queue_candidate_evidence as evidence
-from agents_remember.worktrees.closeout_queue import _graph_context
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
 from agents_remember.worktrees.modules.git import repository_identity
+from agents_remember.worktrees.queue import closeout_queue_candidate_evidence as evidence
+from agents_remember.worktrees.queue.closeout_queue import _graph_context
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from test_closeout_queue import MASTER_A, MASTER_B, SPRINT, QueueFixture
 
@@ -490,6 +490,41 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             ):
                 self.assertFalse(evidence._atomic_operation_landed(completed, authority))
 
+    def test_atomic_landing_proof_translates_landed_probe_failures(self) -> None:
+        series = self._series_contract()
+        authority = self._landing_authority()
+        completed = replace(
+            series,
+            human_review_status="approved",
+            approved_for_commit=True,
+            closeout_status="completed",
+            code_commit="a" * 40,
+            memory_content_commit="b" * 40,
+            ledger_commit="c" * 40,
+            integration_status="completed",
+            integrated_code_commit="a" * 40,
+            integrated_memory_content_commit="b" * 40,
+            integrated_ledger_commit="c" * 40,
+        )
+        with (
+            mock.patch.object(evidence, "load_contract", return_value=completed),
+            mock.patch.object(evidence, "branch_commit", side_effect=["a" * 40, "c" * 40]),
+            mock.patch.object(evidence, "load_named_ref_ledger", return_value=[]),
+            mock.patch.object(
+                evidence,
+                "find_mapping",
+                return_value=SimpleNamespace(memory_commit="b" * 40),
+            ),
+            mock.patch.object(evidence, "is_ancestor", return_value=True),
+            mock.patch.object(
+                evidence,
+                "_atomic_code_landed",
+                side_effect=RuntimeError("no exact landed git state"),
+            ),
+            self.assertRaisesRegex(CloseoutQueueError, "no valid exact landing"),
+        ):
+            evidence.require_atomic_master_landed(self.master, authority)
+
     def test_public_atomic_landing_proof_translates_invalid_and_false_predicates(self) -> None:
         authority = self._landing_authority()
         with (
@@ -540,7 +575,3 @@ class CloseoutQueueCandidateEvidenceTests(unittest.TestCase):
             self.assertRaisesRegex(CloseoutQueueError, "cannot be read"),
         ):
             evidence._task_evidence(task_root, "evidence.md")
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -17,14 +17,9 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentRefError,
     TaskDocumentTopology,
 )
-from agents_remember.worktrees.closeout_queue import (
-    CloseoutQueueError,
-    _graph_context,
-    _initial_state,
-    now_iso,
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    branch_worktree_owners,
 )
-from agents_remember.worktrees.closeout_recovery import MemoryCloseoutOutcome
-from agents_remember.worktrees.integration_branch_authority import branch_worktree_owners
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     is_ancestor,
@@ -32,6 +27,13 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     worktree_dirty,
 )
+from agents_remember.worktrees.queue.closeout_queue import (
+    CloseoutQueueError,
+    _graph_context,
+    _initial_state,
+    now_iso,
+)
+from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract

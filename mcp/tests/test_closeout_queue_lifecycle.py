@@ -7,11 +7,11 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.models.closeout_queue import CloseoutCandidateRecord
+from agents_remember.models.queue.closeout_queue import CloseoutCandidateRecord
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.worktrees import closeout_queue_lifecycle as lifecycle
-from agents_remember.worktrees.closeout_queue import _graph_context, _initial_state
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue import closeout_queue_lifecycle as lifecycle
+from agents_remember.worktrees.queue.closeout_queue import _graph_context, _initial_state
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from test_closeout_queue import LEAF_A, MASTER_A, NOW, SPRINT, QueueFixture
 
@@ -298,6 +298,72 @@ class CloseoutQueueLifecycleUnitTests(unittest.TestCase):
         ):
             lifecycle._certify_closeout(self._context(claimed, contract=closed), claimed)
 
+    def test_graph_less_sprint_without_a_stored_binding_resolves_to_none(self) -> None:
+        no_graph = replace(
+            self.graph.sprint,
+            document=self.graph.sprint.document.model_copy(update={"executionGraph": None}),
+        )
+        with (
+            mock.patch.object(lifecycle, "_stored_queue_binding", return_value=None),
+            mock.patch.object(
+                lifecycle,
+                "_live_parent_refs",
+                return_value=lifecycle._LiveParents(MASTER_A, SPRINT),
+            ),
+            mock.patch.object(TaskDocumentTopology, "resolve", return_value=no_graph),
+        ):
+            self.assertIsNone(lifecycle.contract_queue_binding(self.contract))
+
+    def test_integration_entry_without_a_queue_binding_is_a_plain_publication(self) -> None:
+        with mock.patch.object(lifecycle, "contract_queue_binding", return_value=None):
+            self.assertIsNone(
+                lifecycle.require_queue_candidate_for_integration(
+                    self.contract,
+                    operation_key=OPERATION_KEY,
+                    code_commit="a" * 40,
+                    memory_content_commit="b" * 40,
+                    ledger_commit="c" * 40,
+                )
+            )
+            called: list[bool] = []
+
+            def publication() -> str:
+                called.append(True)
+                return "published"
+
+            result = lifecycle.publish_queue_candidate_integration_under_authority(
+                self.contract,
+                publication,
+                operation_key=OPERATION_KEY,
+                commits=("a" * 40, "b" * 40, "c" * 40),
+            )
+        self.assertEqual(result, "published")
+        self.assertEqual(called, [True])
+
+    def test_integration_boundary_refuses_a_blocked_candidate(self) -> None:
+        owner = lifecycle._operation_owner(OPERATION_KEY)
+        claimed = self.selected.model_copy(
+            update={
+                "state": "integration-in-flight",
+                "inFlightOwnerFingerprint": owner,
+                "closeoutCodeCommit": "a" * 40,
+                "closeoutMemoryContentCommit": "b" * 40,
+                "closeoutLedgerCommit": "c" * 40,
+            }
+        )
+        self._write_candidate_state(claimed)
+        with (
+            mock.patch.object(lifecycle, "commit_tree", return_value="f" * 40),
+            self.assertRaisesRegex(CloseoutQueueError, "closeout-candidate-integration-blocked"),
+        ):
+            lifecycle.require_queue_candidate_for_integration(
+                self.contract,
+                operation_key=OPERATION_KEY,
+                code_commit="d" * 40,
+                memory_content_commit="e" * 40,
+                ledger_commit="f" * 40,
+            )
+
     def test_claim_integration_is_idempotent_and_refuses_uncertified_or_stale(self) -> None:
         certified = self.selected.model_copy(
             update={
@@ -494,7 +560,3 @@ class CloseoutQueueLifecycleUnitTests(unittest.TestCase):
                 operation_key=OPERATION_KEY,
                 operation_kind="unknown",
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

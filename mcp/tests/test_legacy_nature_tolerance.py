@@ -20,10 +20,7 @@ from unittest import mock
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.worktrees import integration_branch_authority as authority
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    require_atomic_series_terminal_release,
-)
+from agents_remember.worktrees.integration import integration_branch_authority as authority
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.start_contract import (
     _commanding_sprint_document,
@@ -31,6 +28,9 @@ from agents_remember.worktrees.modules.start_contract import (
     _parent_series_contract,
 )
 from agents_remember.worktrees.modules.start_result import started_result
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    require_atomic_series_terminal_release,
+)
 from agents_remember.worktrees.scheduling_mode import (
     resolve_scheduling_mode,
     sequential_lane_owner,
@@ -377,7 +377,3 @@ class LegacyNatureToleranceTests(unittest.TestCase):
         write_task_doc(self.tasks / "org", _master(master_ref, "organizational"))
         with self.assertRaisesRegex(RuntimeError, "cannot resolve one parent"):
             _declared_integration_source_branch(self._context(), self.tasks / "org")
-
-
-if __name__ == "__main__":
-    unittest.main()

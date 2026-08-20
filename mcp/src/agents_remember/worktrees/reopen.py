@@ -47,10 +47,11 @@ from agents_remember.tasks.store import (
     write_task_docs,
 )
 
-from .closeout_queue_errors import CloseoutQueueError
-from .closeout_queue_lifecycle import publish_queue_bound_task_facts
-from .integration_branch_authority import require_parent_series_accepting_leaves
-from .integration_ref_transaction import IntegratedCommits, require_integrated_ledger_mapping
+from .integration.integration_branch_authority import require_parent_series_accepting_leaves
+from .integration.integration_ref_transaction import (
+    IntegratedCommits,
+    require_integrated_ledger_mapping,
+)
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -58,6 +59,8 @@ from .modules.guidance import (
     status_payload,
 )
 from .modules.models import WorktreeCommandResult
+from .queue.closeout_queue_errors import CloseoutQueueError
+from .queue.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
 from .worktree_contract import (
     ContractCells,
@@ -175,12 +178,10 @@ def reopen_required_start_result(contract: WorktreeContract) -> WorktreeCommandR
     )
 
 
-def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeCommandResult:
-    contract = load_contract(contract_path)
-    refusal = _reopen_preflight_refusal(contract)
-    if refusal is not None:
-        return refusal
-    updated = amend_contract(
+def _reopened_contract(contract: WorktreeContract) -> WorktreeContract:
+    """The contract with every review/closeout/integration cell reset (task reopen)."""
+
+    return amend_contract(
         replace(
             contract,
             approved_for_commit=False,
@@ -206,6 +207,14 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             cleanup="reopened",
         ),
     )
+
+
+def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeCommandResult:
+    contract = load_contract(contract_path)
+    refusal = _reopen_preflight_refusal(contract)
+    if refusal is not None:
+        return refusal
+    updated = _reopened_contract(contract)
     try:
         _, doc_reset = _plan_leaf_doc_reset(contract, dry_run=dry_run)
     except ReopenTaskDocumentError as exc:

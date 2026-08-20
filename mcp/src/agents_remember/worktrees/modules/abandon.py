@@ -22,13 +22,10 @@ from typing import TypeAlias
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    AtomicSeriesTerminalPermit,
-    publish_atomic_series_terminal_under_authority,
-    require_atomic_series_terminal_release,
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_terminal_worktree,
 )
-from agents_remember.worktrees.integration_branch_authority import require_terminal_worktree
-from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     ENCLOSURE_REPORTS_DIRECTORY,
@@ -47,6 +44,11 @@ from agents_remember.worktrees.modules.terminal_validation import (
     legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
+)
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    AtomicSeriesTerminalPermit,
+    publish_atomic_series_terminal_under_authority,
+    require_atomic_series_terminal_release,
 )
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (

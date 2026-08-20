@@ -14,9 +14,9 @@ from agents_remember.mcp.tools.lifecycle_finalize import lifecycle_finalize_task
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.tasks import CompletionBlocker, TaskDocument, read_task_doc, write_task_doc
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

@@ -19,13 +19,13 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from agents_remember.worktrees.task_resolver import archive_completed_root_task
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 

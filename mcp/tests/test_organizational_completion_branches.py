@@ -12,10 +12,12 @@ from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees import lifecycle_operations
-from agents_remember.worktrees import organizational_completion as completion
-from agents_remember.worktrees import organizational_completion_integration as integration
-from agents_remember.worktrees.closeout_queue_lifecycle import contract_queue_binding
+from agents_remember.worktrees.integration import lifecycle_operations
+from agents_remember.worktrees.integration import organizational_completion as completion
+from agents_remember.worktrees.integration import (
+    organizational_completion_integration as integration,
+)
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import contract_queue_binding
 from agents_remember.worktrees.worktree_contract import write_contract
 from test_closeout_queue import LEAF_A, NOW, SPRINT
 from test_worktree_support import git

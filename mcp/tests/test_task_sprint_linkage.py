@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-import agents_remember.application.task_sprint_linkage as sprint_linkage
-from agents_remember.application.task_doc_tools import (
+import agents_remember.application.task_docs.task_sprint_linkage as sprint_linkage
+from agents_remember.application.task_docs.task_doc_tools import (
     VALID_OPERATIONS,
     TaskDocCall,
     TaskDocEdit,
@@ -23,7 +23,7 @@ from agents_remember.application.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.application.task_sprint_linkage import (
+from agents_remember.application.task_docs.task_sprint_linkage import (
     _AttachMasterPayload,
     collect_linkage_facts,
     linkage_facts_for_get,
@@ -522,7 +522,7 @@ class SprintLinkageTests(unittest.TestCase):
         self._write_master(MASTER_C)
         with (
             mock.patch(
-                "agents_remember.application.task_sprint_linkage.require_serving_topology_schema",
+                "agents_remember.application.task_docs.task_sprint_linkage.require_serving_topology_schema",
                 side_effect=TopologyServingBuildError(
                     "task-execution-topology-serving-build-unsupported: probe"
                 ),
@@ -1110,7 +1110,3 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             )
         seat = SprintSeat.model_validate({"role": "architect", "identity": None})
         self.assertIsNone(seat.identity)
-
-
-if __name__ == "__main__":
-    unittest.main()

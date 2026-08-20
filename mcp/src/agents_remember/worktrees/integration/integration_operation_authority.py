@@ -7,8 +7,8 @@ from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
     LifecycleOperationRecord,
 )
-from agents_remember.worktrees.integration_branch_authority import integration_targets
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

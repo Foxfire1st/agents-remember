@@ -9,8 +9,14 @@ from dataclasses import dataclass
 
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.models.lifecycles.operation import IntegrationQualityCertification
-from agents_remember.worktrees.integration_quality_checkout import (
+from agents_remember.worktrees.integration.integration_quality_checkout import (
     integration_quality_checkout,
+)
+from agents_remember.worktrees.integration.organizational_completion import (
+    OrganizationalCompletionPlan,
+)
+from agents_remember.worktrees.integration.organizational_completion_integration import (
+    preview_organizational_completion,
 )
 from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
@@ -21,10 +27,6 @@ from agents_remember.worktrees.modules.code_quality_gate import (
     requires_integrated_acceptance,
     requires_strict_code_quality,
     run_strict_code_quality_gate,
-)
-from agents_remember.worktrees.organizational_completion import OrganizationalCompletionPlan
-from agents_remember.worktrees.organizational_completion_integration import (
-    preview_organizational_completion,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 

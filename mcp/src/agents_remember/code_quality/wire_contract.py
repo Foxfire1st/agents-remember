@@ -288,7 +288,7 @@ def dump_returning_names(trees: Mapping[str, ast.AST]) -> Producers:
 def validating_names(trees: Mapping[str, ast.AST]) -> frozenset[str]:
     """Names of functions that hand a parameter to ``model_validate``.
 
-    ``application/task_doc_tools.py`` re-validates through a local ``_validate(data)``
+    ``application/task_docs/task_doc_tools.py`` re-validates through a local ``_validate(data)``
     rather than inline; without this its nine-site round-trip would read as an escape.
     """
     names: set[str] = set()

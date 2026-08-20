@@ -10,44 +10,45 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.application import lifecycle_operation_worker
-from agents_remember.controlplane.closeout_queue_store import (
-    CloseoutQueueStore,
-    QueueTransaction,
-)
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore, QueueTransaction
 from agents_remember.kernel.memory_ledger import ledger_to_text, parse_ledger_text
 from agents_remember.memory import carryover as carryover_mod
-from agents_remember.models.closeout_queue import CloseoutQueueRequest
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
 )
+from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.tasks import read_task_doc, render_markdown, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees import integration_quality as quality_mod
-from agents_remember.worktrees import organizational_completion as organizational_mod
-from agents_remember.worktrees import organizational_completion_integration as completion_mod
-from agents_remember.worktrees.closeout_queue import (
-    CloseoutQueueError,
-    QueueActor,
-    closeout_queue_tool,
+from agents_remember.worktrees.integration import integration_quality as quality_mod
+from agents_remember.worktrees.integration import organizational_completion as organizational_mod
+from agents_remember.worktrees.integration import (
+    organizational_completion_integration as completion_mod,
 )
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    certify_queue_candidate_closeout,
-    claim_queue_candidate_for_closeout,
-)
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle_operations import (
     cancel_operation,
     start_or_observe_operation,
+)
+from agents_remember.worktrees.integration.organizational_completion import (
+    OrganizationalCompletionError,
 )
 from agents_remember.worktrees.modules import clean_quality_executor, code_quality_gate
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules import sync as sync_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.organizational_completion import OrganizationalCompletionError
+from agents_remember.worktrees.queue.closeout_queue import (
+    CloseoutQueueError,
+    QueueActor,
+    closeout_queue_tool,
+)
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    certify_queue_candidate_closeout,
+    claim_queue_candidate_for_closeout,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     amend_contract,
@@ -443,8 +444,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             self.assertEqual(kwargs["plan"].executor, "dagger")
             self.assertEqual(kwargs["invocation"], "master-integration")
             self.assertEqual(
-                kwargs["attestation"]["completionFingerprint"],
-                expected_completion.fingerprint,
+                kwargs["attestation"]["completionFingerprint"], expected_completion.fingerprint
             )
             return _full_gate(final)
 
@@ -664,8 +664,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             memory_before,
         )
         self.assertEqual(
-            self._candidate_projection(LEAF_A)["candidateState"],
-            "integration-in-flight",
+            self._candidate_projection(LEAF_A)["candidateState"], "integration-in-flight"
         )
         cancelled = cancel_operation(contract.contract_path, "integrate")
         self.assertEqual(cancelled.status, "cancelled")
@@ -702,8 +701,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         reset = load_contract(contract.contract_path)
         self.assertEqual((reset.closeout_status, reset.code_commit), ("not-started", ""))
         self.assertEqual(
-            self._candidate_projection(LEAF_A)["candidateState"],
-            "integration-in-flight",
+            self._candidate_projection(LEAF_A)["candidateState"], "integration-in-flight"
         )
         self.assertEqual(
             git(contract.code_repo_path, "rev-parse", contract.code_source_branch), code_before
@@ -716,10 +714,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         cancelled = cancel_operation(contract.contract_path, "integrate")
         self.assertEqual(cancelled.status, "cancelled")
         self.assertEqual(self.fixture.status()["inFlight"], [])
-        self.assertEqual(
-            cancel_operation(contract.contract_path, "integrate").status,
-            "cancelled",
-        )
+        self.assertEqual(cancel_operation(contract.contract_path, "integrate").status, "cancelled")
 
     def test_quality_repair_refuses_a_partial_reset_generation(self) -> None:
         contract = self._certified_contract(final=True)
@@ -755,8 +750,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(CloseoutQueueError, "operation-state-mismatch"):
             cancel_operation(contract.contract_path, "integrate")
         self.assertEqual(
-            self._candidate_projection(LEAF_A)["candidateState"],
-            "integration-in-flight",
+            self._candidate_projection(LEAF_A)["candidateState"], "integration-in-flight"
         )
         self.assertEqual(
             git(contract.code_repo_path, "rev-parse", contract.code_source_branch), code_tip
@@ -987,8 +981,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         manifest["attestation"] = expected_attestation
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         selected = clean_quality_executor.published_report_path(
-            reports,
-            "clean-quality-results.json",
+            reports, "clean-quality-results.json"
         )
         selected.unlink()
         with self.assertRaisesRegex(RuntimeError, "published Dagger report is incomplete"):

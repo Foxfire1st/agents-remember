@@ -56,7 +56,7 @@ class ApplicationBoundaryRuleTests(unittest.TestCase):
 
     def test_application_wire_kernel_and_same_adapter_imports_are_allowed(self) -> None:
         source = (
-            "from agents_remember.application.task_doc_tools import task_doc_tool\n"
+            "from agents_remember.application.task_docs.task_doc_tools import task_doc_tool\n"
             "from agents_remember.errors import AuthorityError\n"
             "from agents_remember.kernel.atomic_write import atomic_write_text\n"
             "from agents_remember.models.base import ResponseEnvelope\n"

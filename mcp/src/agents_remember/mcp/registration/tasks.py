@@ -5,7 +5,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocTarget,
@@ -104,25 +104,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         )
 
 
-def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    @server.tool()
-    def task_doc(
-        repo_id: str,
-        operation: str,
-        task_name: str | None = None,
-        contract_path: str | None = None,
-        slug: str | None = None,
-        *,
-        fields: dict[str, Any] | None = None,
-        step: dict[str, Any] | None = None,
-        decision: dict[str, Any] | None = None,
-        subtask: dict[str, Any] | None = None,
-        section: dict[str, Any] | None = None,
-        review: dict[str, Any] | None = None,
-        dry_run: bool = False,
-        branch_addressed: bool = False,
-    ) -> dict[str, Any]:
-        """Author the JSON-primary task document (ar-task-document/v1) and re-render its
+_TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-document/v1) and re-render its
         markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
@@ -186,6 +168,26 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         scalar/list updates; 'set_status' takes fields.status. Completed refuses while any declared
         step/substep (or master row) remains unresolved. dry_run=true builds + validates and
         returns rendered/diff/wouldLose WITHOUT writing — the preview before adopting a hand .md."""
+
+
+def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    @server.tool(description=_TASK_DOC_TOOL_DESCRIPTION)
+    def task_doc(
+        repo_id: str,
+        operation: str,
+        task_name: str | None = None,
+        contract_path: str | None = None,
+        slug: str | None = None,
+        *,
+        fields: dict[str, Any] | None = None,
+        step: dict[str, Any] | None = None,
+        decision: dict[str, Any] | None = None,
+        subtask: dict[str, Any] | None = None,
+        section: dict[str, Any] | None = None,
+        review: dict[str, Any] | None = None,
+        dry_run: bool = False,
+        branch_addressed: bool = False,
+    ) -> dict[str, Any]:
         return task_doc_payload(
             config,
             TaskDocTarget(

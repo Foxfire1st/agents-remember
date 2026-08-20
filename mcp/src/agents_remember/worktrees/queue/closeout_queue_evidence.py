@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     MAX_QUEUE_SHORT_TEXT,
     MAX_QUEUE_TEXT,
     EvidenceFact,

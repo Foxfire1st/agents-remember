@@ -16,29 +16,24 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    claim_queue_candidate_for_integration,
-    complete_queue_candidate_integration,
-    record_queue_candidate_integration_completion,
-)
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     integration_targets,
     require_ordinary_worktree,
     require_series_contract_authority,
 )
-from agents_remember.worktrees.integration_operation_authority import (
+from agents_remember.worktrees.integration.integration_operation_authority import (
     require_current_integration_sources,
     require_plane_integration_operation,
 )
-from agents_remember.worktrees.integration_quality import (
+from agents_remember.worktrees.integration.integration_quality import (
     IntegrationQualityFailure,
     organizational_quality_failure_payload,
     run_integration_quality_gate,
 )
-from agents_remember.worktrees.integration_quality import (
+from agents_remember.worktrees.integration.integration_quality import (
     quality_gate_preview as _quality_gate_preview,
 )
-from agents_remember.worktrees.integration_ref_transaction import (
+from agents_remember.worktrees.integration.integration_ref_transaction import (
     CheckoutRefresh,
     IntegratedCommits,
     IntegrationRefRace,
@@ -48,6 +43,16 @@ from agents_remember.worktrees.integration_ref_transaction import (
     recover_integration_ref,
     refresh_recovered_checkout,
     require_integrated_ledger_mapping,
+)
+from agents_remember.worktrees.integration.organizational_completion_integration import (
+    IntegrationBoundaryFacts,
+    organizational_completion_scope_block,
+    preview_organizational_completion,
+    publish_queue_candidate_integration_result_under_authority,
+    recorded_organizational_quality_certification,
+)
+from agents_remember.worktrees.integration.organizational_completion_repair import (
+    record_organizational_completion_repair,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
@@ -67,15 +72,10 @@ from agents_remember.worktrees.modules.integration_publication import (
     IntegrationPublication,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.organizational_completion_integration import (
-    IntegrationBoundaryFacts,
-    organizational_completion_scope_block,
-    preview_organizational_completion,
-    publish_queue_candidate_integration_result_under_authority,
-    recorded_organizational_quality_certification,
-)
-from agents_remember.worktrees.organizational_completion_repair import (
-    record_organizational_completion_repair,
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    claim_queue_candidate_for_integration,
+    complete_queue_candidate_integration,
+    record_queue_candidate_integration_completion,
 )
 from agents_remember.worktrees.series_closeout import (
     atomic_series_ledger_prefix,

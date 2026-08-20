@@ -22,22 +22,18 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentRefError,
     TaskDocumentTopology,
 )
-from agents_remember.worktrees import (
-    closeout_queue_lifecycle,
-)
-from agents_remember.worktrees import (
-    integration_branch_authority as authority,
-)
-from agents_remember.worktrees.integration_branch_types import (
+from agents_remember.worktrees.integration import integration_branch_authority as authority
+from agents_remember.worktrees.integration.integration_branch_types import (
     IntegrationSurface,
     _BranchScope,
     _MasterAuthority,
     _RepositorySide,
 )
-from agents_remember.worktrees.integration_ref_transaction import IntegratedCommits
+from agents_remember.worktrees.integration.integration_ref_transaction import IntegratedCommits
 from agents_remember.worktrees.modules import integrate, start_contract
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.queue import closeout_queue_lifecycle
 from integration_branch_authority_test_support import _authority_fixture
 
 
@@ -1192,7 +1188,3 @@ class IntegrationRecoveryRemainderTests(unittest.TestCase):
                     ),
                     blocker,
                 )
-
-
-if __name__ == "__main__":
-    unittest.main()

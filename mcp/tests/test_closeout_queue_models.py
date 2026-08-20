@@ -4,7 +4,7 @@ import hashlib
 import unittest
 
 from agents_remember.controlplane.closeout_queue_records import CloseoutQueuePendingTransaction
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     ActiveAtomicBlocker,
     AppliedQueueRequest,
     CandidateAdmissionFacts,
@@ -16,7 +16,7 @@ from agents_remember.models.closeout_queue import (
     SchedulingGradeInput,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.worktrees import (
+from agents_remember.worktrees.queue import (
     closeout_queue_candidate_evidence,
     closeout_queue_evidence,
 )

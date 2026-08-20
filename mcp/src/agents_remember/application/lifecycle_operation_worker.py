@@ -38,10 +38,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
     OrganizationalCompletionRepairEvidence,
 )
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    release_queue_candidate_after_reversible_operation,
-)
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -49,6 +46,9 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.integrate import integrate_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    release_queue_candidate_after_reversible_operation,
+)
 from agents_remember.worktrees.worktree_contract import load_contract
 
 HEARTBEAT_SECONDS = 5.0

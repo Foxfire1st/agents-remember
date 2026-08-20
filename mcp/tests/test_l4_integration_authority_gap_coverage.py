@@ -11,8 +11,8 @@ from unittest import mock
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees import integration_branch_authority as authority
-from agents_remember.worktrees.integration_branch_types import (
+from agents_remember.worktrees.integration import integration_branch_authority as authority
+from agents_remember.worktrees.integration.integration_branch_types import (
     IntegrationSurfaceSide,
     ProposedWorkBranches,
     RepositoryCheckoutRequest,

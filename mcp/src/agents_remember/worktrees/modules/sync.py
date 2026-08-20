@@ -20,7 +20,7 @@ from agents_remember.controlplane.integration_authority_lock import integration_
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import fetch_remote, upstream_ref
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, parse_ledger_text
-from agents_remember.worktrees.integration_branch_authority import require_sync_worktree
+from agents_remember.worktrees.integration.integration_branch_authority import require_sync_worktree
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_commit,

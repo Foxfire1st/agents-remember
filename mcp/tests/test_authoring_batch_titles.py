@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from agents_remember.application.task_execution_topology import _authoring_batch_titles
+from agents_remember.application.task_docs.task_execution_topology import _authoring_batch_titles
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
 
@@ -83,7 +83,3 @@ class AuthoringBatchTitlesTests(unittest.TestCase):
             (MASTER_A, Path("master-a"), _master()),
         ]
         self.assertIsNone(_authoring_batch_titles(documents))
-
-
-if __name__ == "__main__":
-    unittest.main()

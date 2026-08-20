@@ -19,19 +19,19 @@ from agents_remember.controlplane.closeout_queue_store import (
     QueueTransaction,
 )
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.models.closeout_queue import (
-    CloseoutCandidateRecord,
-    CloseoutQueueState,
-    QueueEventAction,
-)
 from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
     IntegrationQueueCompletionEvidence,
 )
+from agents_remember.models.queue.closeout_queue import (
+    CloseoutCandidateRecord,
+    CloseoutQueueState,
+    QueueEventAction,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

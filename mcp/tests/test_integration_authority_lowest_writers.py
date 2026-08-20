@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agents_remember.worktrees import git_worktree_manager, integration_ref_transaction
+from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.integration import integration_ref_transaction
 from agents_remember.worktrees.modules import start_contract
 from test_integration_branch_authority import _authority_fixture
 from test_source_lineage import _commit_on, _git

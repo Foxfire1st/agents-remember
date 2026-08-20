@@ -30,17 +30,18 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
-from agents_remember.worktrees.closeout_queue_lifecycle import (
-    prepare_queue_candidate_conflict_resolution,
-    release_queue_candidate_after_reversible_operation,
+from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
+from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+    operation_state_fingerprint,
 )
-from agents_remember.worktrees.integration_branch_authority import integration_targets
-from agents_remember.worktrees.lifecycle_operation_identity import operation_state_fingerprint
-from agents_remember.worktrees.lifecycle_operation_lease import contract_lifecycle_lease
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
     operation_report_path,
+)
+from agents_remember.worktrees.integration.organizational_completion_repair import (
+    prepare_organizational_completion_repair,
 )
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -48,8 +49,9 @@ from agents_remember.worktrees.modules.git import (
     repository_identity,
 )
 from agents_remember.worktrees.modules.start_contract import memory_mode_for_repository
-from agents_remember.worktrees.organizational_completion_repair import (
-    prepare_organizational_completion_repair,
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    prepare_queue_candidate_conflict_resolution,
+    release_queue_candidate_after_reversible_operation,
 )
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path

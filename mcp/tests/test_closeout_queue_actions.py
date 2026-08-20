@@ -9,7 +9,7 @@ from typing import Any, cast
 from unittest import mock
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     CandidateAdmissionFacts,
     CloseoutQueueRequest,
     CloseoutQueueState,
@@ -17,7 +17,7 @@ from agents_remember.models.closeout_queue import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.closeout_queue import (
+from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     ContractError,
     QueueActor,
@@ -47,15 +47,15 @@ from agents_remember.worktrees.closeout_queue import (
     _required_candidate_ref,
     closeout_queue_tool,
 )
-from agents_remember.worktrees.closeout_queue_blocker import (
+from agents_remember.worktrees.queue.closeout_queue_blocker import (
     _abort_blocker,
     _acquire_blocker,
     _release_blocker,
 )
-from agents_remember.worktrees.closeout_queue_candidate_evidence import (
+from agents_remember.worktrees.queue.closeout_queue_candidate_evidence import (
     operation_owner_fingerprint,
 )
-from agents_remember.worktrees.closeout_queue_errors import queue_task_ref
+from agents_remember.worktrees.queue.closeout_queue_errors import queue_task_ref
 from test_closeout_queue import (
     LEAF_A,
     MASTER_A,
@@ -207,11 +207,11 @@ class CloseoutQueueActionTests(unittest.TestCase):
         )
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.TaskDocumentTopology",
+                "agents_remember.worktrees.queue.closeout_queue.TaskDocumentTopology",
                 return_value=topology,
             ),
             mock.patch(
-                "agents_remember.worktrees.closeout_queue._graph_context",
+                "agents_remember.worktrees.queue.closeout_queue._graph_context",
                 side_effect=[graph, completed_graph],
             ),
             self.assertRaisesRegex(CloseoutQueueError, "sprint-completed"),
@@ -308,7 +308,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             )
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.load_contract",
+                "agents_remember.worktrees.queue.closeout_queue.load_contract",
                 side_effect=ContractError("unreadable"),
             ),
             self.assertRaisesRegex(CloseoutQueueError, "contract-invalid"),
@@ -316,7 +316,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             _declaration_identity(context)
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.load_contract",
+                "agents_remember.worktrees.queue.closeout_queue.load_contract",
                 return_value=replace(contract, kind="series"),
             ),
             self.assertRaisesRegex(CloseoutQueueError, "leaf-required"),
@@ -324,7 +324,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             _declaration_identity(context)
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.load_contract",
+                "agents_remember.worktrees.queue.closeout_queue.load_contract",
                 return_value=replace(contract, closeout_status="completed"),
             ),
             self.assertRaisesRegex(CloseoutQueueError, "too-late"),
@@ -457,7 +457,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
         )
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue_blocker.require_source_bases_current",
+                "agents_remember.worktrees.queue.closeout_queue_blocker.require_source_bases_current",
                 side_effect=CloseoutQueueError(
                     "closeout-candidate-code-source-moved", "code source moved"
                 ),
@@ -510,13 +510,13 @@ class CloseoutQueueActionTests(unittest.TestCase):
         blank_release = release.model_copy(update={"rationale": " "})
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue_blocker.require_atomic_master_landed"
+                "agents_remember.worktrees.queue.closeout_queue_blocker.require_atomic_master_landed"
             ),
             self.assertRaisesRegex(CloseoutQueueError, "rationale-required"),
         ):
             _release_blocker(completed_graph, held, blank_release, fixture.cfg)
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue_blocker.require_atomic_master_landed"
+            "agents_remember.worktrees.queue.closeout_queue_blocker.require_atomic_master_landed"
         ) as landing_check:
             self.assertIsNone(
                 _release_blocker(completed_graph, held, release, fixture.cfg).activeBlocker
@@ -532,7 +532,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             blocker_judgment_id="ABORT-1",
         )
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue_blocker.canonical_blocker_abort"
+            "agents_remember.worktrees.queue.closeout_queue_blocker.canonical_blocker_abort"
         ) as abort_check:
             self.assertIsNone(_abort_blocker(graph, held, abort).activeBlocker)
         abort_check.assert_called_once_with(
@@ -605,7 +605,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
         manager = QueueActor(role="manager", task_document_ref=MASTER_A)
         orchestrator = QueueActor(role="orchestrator", task_document_ref=SPRINT)
         with mock.patch(
-            "agents_remember.worktrees.closeout_queue._owned_lifecycle_operation",
+            "agents_remember.worktrees.queue.closeout_queue._owned_lifecycle_operation",
             return_value=None,
         ):
             self.assertEqual(_lifecycle_operation_legal(graph, candidate, manager), [])
@@ -628,7 +628,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             with (
                 self.subTest(status=status, crossed=crossed),
                 mock.patch(
-                    "agents_remember.worktrees.closeout_queue._owned_lifecycle_operation",
+                    "agents_remember.worktrees.queue.closeout_queue._owned_lifecycle_operation",
                     return_value=record,
                 ),
             ):
@@ -659,7 +659,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             store = mock.Mock()
             store.read.return_value = record
             with mock.patch(
-                "agents_remember.worktrees.closeout_queue.LifecycleOperationStore",
+                "agents_remember.worktrees.queue.closeout_queue.LifecycleOperationStore",
                 return_value=store,
             ):
                 return _owned_lifecycle_operation(candidate)
@@ -702,7 +702,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
         topology, _graph, _state = self._context(fixture)
         with (
             mock.patch(
-                "agents_remember.worktrees.closeout_queue.resolve_terminal_leaf_doc",
+                "agents_remember.worktrees.queue.closeout_queue.resolve_terminal_leaf_doc",
                 return_value=None,
             ),
             self.assertRaisesRegex(CloseoutQueueError, "task-document-missing"),
@@ -720,7 +720,3 @@ class CloseoutQueueActionTests(unittest.TestCase):
                 QueueActor(role="orchestrator", task_document_ref=SPRINT),
             ),
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

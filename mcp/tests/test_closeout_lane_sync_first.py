@@ -22,26 +22,26 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.worktrees import closeout_queue as queue
-from agents_remember.worktrees import closeout_queue_lifecycle as lifecycle
 from agents_remember.worktrees import series_closeout
-from agents_remember.worktrees.closeout_queue_blocker import _stale_sibling_facts
-from agents_remember.worktrees.closeout_queue_candidate_evidence import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
+from agents_remember.worktrees.integration.lifecycle_operations import start_or_observe_operation
+from agents_remember.worktrees.modules import integrate as integrate_mod
+from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.queue import closeout_queue as queue
+from agents_remember.worktrees.queue import closeout_queue_lifecycle as lifecycle
+from agents_remember.worktrees.queue.closeout_queue_blocker import _stale_sibling_facts
+from agents_remember.worktrees.queue.closeout_queue_candidate_evidence import (
     require_source_bases_current,
 )
-from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.closeout_queue_lifecycle import (
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     _boundary_recovery,
     certify_queue_candidate_closeout,
     claim_queue_candidate_for_closeout,
 )
-from agents_remember.worktrees.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
-from agents_remember.worktrees.lifecycle_operations import start_or_observe_operation
-from agents_remember.worktrees.modules import integrate as integrate_mod
-from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from test_closeout_queue import LEAF_A, LEAF_B, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
@@ -283,7 +283,3 @@ class CloseoutLaneSerializationTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "cannot resolve atomic terminal authority"),
         ):
             lifecycle.require_atomic_series_terminal_release(contract)
-
-
-if __name__ == "__main__":
-    unittest.main()

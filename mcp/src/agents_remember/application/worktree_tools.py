@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
-from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
@@ -30,7 +30,7 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
-from agents_remember.worktrees.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle_operations import (
     cancel_operation,
     latest_operation_projection,
     observe_operation,

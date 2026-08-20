@@ -425,7 +425,3 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                     external_fixture.master_contract,
                     "code",
                 )
-
-
-if __name__ == "__main__":
-    unittest.main()

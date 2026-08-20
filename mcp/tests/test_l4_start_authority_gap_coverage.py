@@ -283,7 +283,3 @@ class StartAuthorityCoverageTests(unittest.TestCase):
                     ),
                     external_fixture.master_contract.memory_base_commit,
                 )
-
-
-if __name__ == "__main__":
-    unittest.main()

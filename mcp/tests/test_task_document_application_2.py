@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.application.task_doc_route_review import (
+from agents_remember.application.task_docs.task_doc_route_review import (
     _record_route_review_bound,
     _require_route_review_binding,
     _RouteReviewBinding,
 )
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -243,6 +244,15 @@ def _organizational_leaf_contract(
 
 
 class ApplicationTests2(ApplicationTests):
+    def test_route_review_contract_initializes_a_fresh_coordination_tree(self) -> None:
+        # A fresh coord exercises the git-init path (the shared class fixture already
+        # carries the repo, so the init block never runs there).
+        with tempfile.TemporaryDirectory() as tmp:
+            fresh = Path(tmp)
+            contract = _route_review_contract(fresh)
+            self.assertTrue((fresh / "repo" / ".git").exists())
+            self.assertEqual(contract.code_repo_path, fresh / "repo")
+
     def test_master_closeout_does_not_require_leaf_route_review(self) -> None:
         contract = _route_review_contract(self.coord)
         (contract.code_worktree / "changed.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -442,7 +452,7 @@ class ApplicationTests2(ApplicationTests):
             _record_route_review(bare, {}, contract, contract.task_root, contract.task_artifact)
         with (
             mock.patch(
-                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_docs.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=None,
             ),
             self.assertRaisesRegex(TaskDocError, "exact task document"),
@@ -450,11 +460,11 @@ class ApplicationTests2(ApplicationTests):
             _record_route_review(bare, valid, contract, contract.task_root, contract.task_artifact)
         with (
             mock.patch(
-                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_docs.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=(contract.task_artifact, bare),
             ),
             mock.patch(
-                "agents_remember.application.task_doc_route_review.build_route_review",
+                "agents_remember.application.task_docs.task_doc_route_review.build_route_review",
                 side_effect=RouteReviewError("route-review-invalid", "invalid review"),
             ),
             self.assertRaisesRegex(TaskDocError, "invalid review"),
@@ -821,6 +831,25 @@ class ApplicationTests2(ApplicationTests):
         result = self._create()  # no lifecycleId in fields
         self.assertEqual(result["lifecycleId"], "LC-CONTRACT")
 
+    def test_organizational_leaf_contract_reuses_an_existing_super_branch(self) -> None:
+        _organizational_leaf_contract(
+            self.coord,
+            task_name="reuse-a",
+            leaf_id="RA",
+            leaf_slug="01_reuse_a",
+            lifecycle_id="LC-REUSE-A",
+        )
+        # A second call on the same coord finds the super branch already present,
+        # exercising the branch-exists path inside the helper.
+        second = _organizational_leaf_contract(
+            self.coord,
+            task_name="reuse-b",
+            leaf_id="RB",
+            leaf_slug="02_reuse_b",
+            lifecycle_id="LC-REUSE-B",
+        )
+        self.assertEqual(second.code_source_branch, "super")
+
     def test_create_refuses_light_and_defaults_master_without_contract(self) -> None:
         base = {
             "id": "K1",
@@ -959,11 +988,11 @@ class RouteReviewBindingSurfaceTests(ApplicationTests):
             _record_route_review_bound(leaf, None, binding)
         with (
             mock.patch(
-                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_docs.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=(contract.task_artifact, leaf),
             ),
             mock.patch(
-                "agents_remember.application.task_doc_route_review.build_route_review",
+                "agents_remember.application.task_docs.task_doc_route_review.build_route_review",
                 side_effect=RouteReviewError("route-review-invalid", "invalid review"),
             ),
             self.assertRaisesRegex(TaskDocError, "invalid review"),
@@ -999,7 +1028,7 @@ class RouteReviewBindingSurfaceTests(ApplicationTests):
             )
         with (
             mock.patch(
-                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_docs.task_doc_route_review.resolve_terminal_leaf_doc",
                 side_effect=TerminalLeafResolutionError("no-terminal-leaf", "no terminal leaf"),
             ),
             self.assertRaisesRegex(TaskDocError, "no terminal leaf"),
@@ -1009,7 +1038,7 @@ class RouteReviewBindingSurfaceTests(ApplicationTests):
             )
         with (
             mock.patch(
-                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_docs.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=None,
             ),
             self.assertRaisesRegex(TaskDocError, "exact task document"),
@@ -1036,11 +1065,11 @@ class RouteReviewBindingSurfaceTests(ApplicationTests):
         }
         with (
             mock.patch(
-                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_docs.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=(contract.task_artifact, leaf),
             ),
             mock.patch(
-                "agents_remember.application.task_doc_route_review.build_route_review",
+                "agents_remember.application.task_docs.task_doc_route_review.build_route_review",
                 return_value=RouteReviewRecord.model_validate(valid),
             ),
         ):

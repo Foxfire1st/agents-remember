@@ -17,7 +17,7 @@ from agents_remember.controlplane.closeout_queue_records import (
 )
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     AppliedQueueRequest,
     CloseoutQueueState,
     QueueEventAction,

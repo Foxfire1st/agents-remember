@@ -28,15 +28,13 @@ from agents_remember.tasks import (
     read_task_doc,
     write_task_doc,
 )
-from agents_remember.worktrees import (
-    integration_branch_authority as branch_authority,
-)
-from agents_remember.worktrees import (
+from agents_remember.worktrees.integration import integration_branch_authority as branch_authority
+from agents_remember.worktrees.integration import (
     integration_operation_authority,
     integration_ref_transaction,
     lifecycle_operations,
 )
-from agents_remember.worktrees.integration_branch_authority import (
+from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
     canonical_local_branch,
     integration_surfaces,
@@ -46,17 +44,17 @@ from agents_remember.worktrees.integration_branch_authority import (
     require_source_branch_write,
     require_sync_worktree,
 )
-from agents_remember.worktrees.integration_operation_authority import (
+from agents_remember.worktrees.integration.integration_operation_authority import (
     require_current_integration_sources,
     require_plane_integration_operation,
 )
-from agents_remember.worktrees.integration_ref_transaction import (
+from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationRefRace,
     merge_integrated_commits,
     prepare_integration_ref_move,
 )
-from agents_remember.worktrees.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -556,7 +554,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
         failed = SimpleNamespace(returncode=128, stdout="", stderr="permission denied")
         with (
             mock.patch(
-                "agents_remember.worktrees.integration_branch_repository.run_git",
+                "agents_remember.worktrees.integration.integration_branch_repository.run_git",
                 return_value=failed,
             ),
             self.assertRaisesRegex(RuntimeError, "cannot resolve local branch authority"),

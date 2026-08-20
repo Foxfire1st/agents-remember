@@ -60,9 +60,9 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_mod
-from agents_remember.worktrees.modules import closeout_staged_quality
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import HANDOVER_GATE_KIND
+from agents_remember.worktrees.queue import closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import write_contract
 from pydantic import ValidationError
 from test_worktree_support import closeout_args, dirty_open_external_contract_fixture

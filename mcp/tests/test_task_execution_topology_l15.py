@@ -15,14 +15,14 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.application.task_execution_topology import (
+from agents_remember.application.task_docs.task_execution_topology import (
     ExecutionTopologyEditRequest,
     ExecutionTopologyError,
     _apply_move_leaf,
@@ -59,8 +59,22 @@ from test_worktree_support import git, init_repo
 
 class ExecutionGraphSchemaL15Tests(unittest.TestCase):
     def test_edge_without_a_judgment_id_parses_to_none(self) -> None:
-        edge = SprintExecutionEdge(predecessor=MASTER_A, successor=MASTER_B, reason="x")
+        # judgmentId=None is passed EXPLICITLY: an omitted field never runs the
+        # field validator, so the None branch of _trim_nonblank_judgment_id would
+        # stay uncovered.
+        edge = SprintExecutionEdge(
+            predecessor=MASTER_A, successor=MASTER_B, reason="x", judgmentId=None
+        )
         self.assertIsNone(edge.judgmentId)
+
+    def test_edge_blank_judgment_id_after_strip_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "judgmentId must not be blank"):
+            SprintExecutionEdge(
+                predecessor=MASTER_A,
+                successor=MASTER_B,
+                reason="x",
+                judgmentId="   ",
+            )
 
     def test_cycle_refusal_names_the_cycle_members(self) -> None:
         with self.assertRaisesRegex(
@@ -329,7 +343,7 @@ class ExecutionTopologyL15Tests(unittest.TestCase):
         write_task_doc(self.tasks / "master-a", _master(identity="MASTER-A"))
         with (
             mock.patch(
-                "agents_remember.application.task_execution_topology.require_serving_topology_schema",
+                "agents_remember.application.task_docs.task_execution_topology.require_serving_topology_schema",
                 side_effect=TopologyServingBuildError(
                     "task-execution-topology-serving-build-unsupported: probe"
                 ),
@@ -377,7 +391,7 @@ class ExecutionTopologyL15Tests(unittest.TestCase):
         before = {path: path.read_bytes() for path in self.tasks.rglob("*") if path.is_file()}
         with (
             mock.patch(
-                "agents_remember.application.task_execution_topology.require_serving_topology_schema",
+                "agents_remember.application.task_docs.task_execution_topology.require_serving_topology_schema",
                 side_effect=TopologyServingBuildError(
                     "task-execution-topology-serving-build-unsupported: probe"
                 ),

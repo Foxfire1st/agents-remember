@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.models.closeout_queue import (
+from agents_remember.models.queue.closeout_queue import (
     MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_GRAPH_EDGES,
     MAX_CLOSEOUT_MASTERS,
@@ -15,8 +15,8 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SprintExecutionGraph, SprintExecutionNode, write_task_doc
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.worktrees import closeout_queue_graph as graph_module
-from agents_remember.worktrees.closeout_queue import CloseoutQueueError
+from agents_remember.worktrees.queue import closeout_queue_graph as graph_module
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from test_closeout_queue import MASTER_A, MASTER_B, SPRINT, QueueFixture
 
 
@@ -289,7 +289,3 @@ class CloseoutQueueSegmentGraphTests(unittest.TestCase):
             graph_module.predecessor_waiting_reasons(context, MASTER_A, leaf_a2),
             [f"predecessor-incomplete: {MASTER_B.key} (leafs: LEAF-B1)"],
         )
-
-
-if __name__ == "__main__":
-    unittest.main()
