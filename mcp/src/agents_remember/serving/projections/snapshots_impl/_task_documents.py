@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from agents_remember.observer.projection import (
     TaskCodeExampleNode,
     TaskDecisionNode,
     TaskDocNode,
+    TaskDocumentRef,
     TaskExecutionGraphNode,
     TaskExecutionNode,
     TaskSeatNode,
@@ -27,6 +30,13 @@ from agents_remember.observer.projection import (
     TaskStepNode,
     TaskSubStepNode,
     TaskSubTaskRefNode,
+)
+from agents_remember.observer.projection_graph import (
+    GraphNodeLike,
+    GraphPredecessorFacts,
+    MasterGraphFacts,
+    TaskExecutionGraphView,
+    build_execution_graph_view,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
     SERIES_DOCUMENT_SUMMARY_LIMIT,
@@ -39,7 +49,9 @@ from agents_remember.serving.projections.snapshots_impl._common import (
 )
 from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
+    SprintExecutionGraph,
     TaskDocument,
+    build_graph_titles,
     current_step,
     series_done,
     series_total,
@@ -66,16 +78,26 @@ def read_task_documents(
     if not tasks_root.is_dir():
         return []
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    nodes: list[TaskDocNode] = []
-    for path, payload in _bounded_task_document_payloads(
+    docs = _bounded_task_document_payloads(
         _iter_task_document_payloads(tasks_root, now=now),
         limit=TASK_DOCUMENT_SUMMARY_LIMIT,
-    ):
+    )
+    master_docs = _master_docs_by_ref(docs)
+    nodes: list[TaskDocNode] = []
+    for path, payload in docs:
         try:
             doc = TaskDocument.model_validate(payload)
         except ValueError:
             continue
-        nodes.append(_task_doc_node(doc, path, lifecycle_maps, now, include_body=False))
+        nodes.append(
+            _task_doc_node(
+                doc,
+                path,
+                lifecycle_maps,
+                now,
+                _TaskDocProjectionOptions(include_body=False, master_docs=master_docs),
+            )
+        )
     return nodes
 
 
@@ -109,7 +131,17 @@ def read_task_document_body(  # pragma: no cover
     except ValueError:
         return None
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    return _task_doc_node(doc, resolved, lifecycle_maps, now, include_body=True)
+    docs = _bounded_task_document_payloads(
+        _iter_task_document_payloads(tasks_root, now=now),
+        limit=TASK_DOCUMENT_SUMMARY_LIMIT,
+    )
+    return _task_doc_node(
+        doc,
+        resolved,
+        lifecycle_maps,
+        now,
+        _TaskDocProjectionOptions(include_body=True, master_docs=_master_docs_by_ref(docs)),
+    )
 
 
 def _task_document_lifecycle_maps(enclosures: list[EnclosureNode]) -> _TaskDocumentLifecycleMaps:
@@ -292,13 +324,177 @@ def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
     ]
 
 
+def _execution_graph_view(
+    graph: SprintExecutionGraph,
+    master_docs: Mapping[TaskDocumentRef, TaskDocument],
+) -> TaskExecutionGraphView:
+    """Walk one persisted graph and build its render-ready per-node view.
+
+    The observer's graph-view builder is primitives-only (layering: the
+    observer package must not import tasks), so this serving-layer seam does
+    the tasks-domain work -- derived waves, resolved edge endpoints, joined
+    titles, and per-master facts -- and feeds the builder plain data.
+    """
+
+    titles = build_graph_titles(graph, master_docs)
+    facts = {
+        ref: MasterGraphFacts(
+            status=doc.status,
+            executionNature=doc.executionNature,
+            leaf_statuses={row.number: row.status for row in doc.subTasks},
+        )
+        for ref, doc in master_docs.items()
+    }
+    predecessor_edges: dict[GraphNodeLike, list[GraphPredecessorFacts]] = {
+        node: [] for node in graph.nodes
+    }
+    for edge in graph.edges:
+        predecessor = graph.resolve_endpoint(edge.predecessor)
+        successor = graph.resolve_endpoint(edge.successor)
+        predecessor_edges[successor].append(
+            GraphPredecessorFacts(
+                predecessor=predecessor,
+                reason=edge.reason,
+                judgmentId=edge.judgmentId,
+            )
+        )
+    return build_execution_graph_view(
+        graph.nodes,
+        graph.derived_waves(),
+        predecessor_edges,
+        facts,
+        titles,
+    )
+
+
+def _master_docs_by_ref(
+    docs: list[tuple[Path, dict[str, object]]],
+) -> dict[TaskDocumentRef, TaskDocument]:
+    """Index every valid master document by its task-document reference.
+
+    The render-ready sprint graph view (L12-R4) joins master titles, leaf
+    titles, natures, and statuses from the commanded master documents; this map
+    is that join table. Root documents (``task.json``) are never evicted by the
+    bounded payload window, so a sprint's commanded masters are always present.
+    """
+
+    masters: dict[TaskDocumentRef, TaskDocument] = {}
+    for path, payload in docs:
+        if payload.get("kind") != "master":
+            continue
+        try:
+            doc = TaskDocument.model_validate(payload)
+        except ValueError:
+            continue
+        repository = doc.repo
+        # Task payloads are always depth-3 under the tasks root (``_iter_task_json``), so the
+        # repo-relative path is ``parents[1]``-relative by construction; no fallback needed.
+        relative = path.relative_to(path.parents[1]).as_posix()
+        ref = TaskDocumentRef(repository=repository, path=relative)
+        masters[ref] = doc
+    return masters
+
+
+@dataclass(frozen=True)
+class _TaskDocProjectionOptions:
+    """Keyword-only extras for one task-document projection.
+
+    ``include_body`` controls the reader-body fields; ``master_docs`` is the
+    title/status/nature join table the render-ready sprint graph view (L12-R4)
+    needs. Bundled so the projection call stays within the argument budget.
+    """
+
+    include_body: bool = False
+    master_docs: Mapping[TaskDocumentRef, TaskDocument] | None = None
+
+
+@dataclass(frozen=True)
+class _TaskDocReaderFields:
+    """The reader-body fields of one task-document projection.
+
+    Every field is gated by ``include_body``; bundling them keeps the
+    projection call within the complexity budget.
+    """
+
+    objective: str
+    requirements: list[str]
+    design: str | None
+    codeExamples: list[TaskCodeExampleNode]
+    decisions: list[TaskDecisionNode]
+    openQuestions: list[str]
+    references: list[str]
+    sections: list[TaskSectionNode]
+
+
+def _reader_fields(doc: TaskDocument, *, include_body: bool) -> _TaskDocReaderFields:
+    """The include_body-gated reader content of one task-document projection."""
+    if not include_body:
+        return _TaskDocReaderFields(
+            objective="",
+            requirements=[],
+            design=None,
+            codeExamples=[],
+            decisions=[],
+            openQuestions=[],
+            references=[],
+            sections=[],
+        )
+    return _TaskDocReaderFields(
+        objective=doc.objective,
+        requirements=list(doc.requirements),
+        design=doc.design,
+        codeExamples=[
+            TaskCodeExampleNode(
+                id=example.id,
+                title=example.title,
+                distinctChange=example.distinctChange,
+                why=example.why,
+                language=example.language,
+                snippet=example.snippet,
+            )
+            for example in doc.codeExamples
+        ],
+        decisions=[
+            TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
+            for item in doc.decisions
+        ],
+        openQuestions=list(doc.openQuestions),
+        references=list(doc.references),
+        sections=[
+            TaskSectionNode(kind=section.kind, heading=section.heading, body=section.body)
+            for section in doc.sections
+        ],
+    )
+
+
+def _execution_graph_fields(
+    doc: TaskDocument,
+    master_docs: Mapping[TaskDocumentRef, TaskDocument] | None,
+) -> tuple[
+    TaskExecutionGraphNode | None, list[list[TaskExecutionNode]], TaskExecutionGraphView | None
+]:
+    """The sprint-only execution-graph fields of one projection (L12-R4).
+
+    A non-sprint doc projects ``(None, [], None)``.
+    """
+    if doc.executionGraph is None:
+        return None, [], None
+    return (
+        TaskExecutionGraphNode.model_validate(doc.executionGraph.model_dump(mode="json")),
+        [
+            [TaskExecutionNode.model_validate(node.model_dump(mode="json")) for node in wave]
+            for wave in doc.executionGraph.derived_waves()
+        ],
+        _execution_graph_view(doc.executionGraph, master_docs or {}),
+    )
+
+
 def _task_doc_node(
     doc: TaskDocument,
     path: Path,
     maps: _TaskDocumentLifecycleMaps,
     now: datetime,
-    *,
-    include_body: bool,
+    options: _TaskDocProjectionOptions,
 ) -> TaskDocNode:
     """Project one task document, carrying the resolved lifecycle id and (for a master) its index.
 
@@ -312,6 +508,10 @@ def _task_doc_node(
     base_dir = path.parent
     parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
     body_revision = _task_doc_body_revision(doc)
+    reader = _reader_fields(doc, include_body=options.include_body)
+    execution_graph, execution_waves, execution_graph_view = _execution_graph_fields(
+        doc, options.master_docs
+    )
     return TaskDocNode(
         id=doc.id,
         lifecycleId=lifecycle_id,
@@ -327,30 +527,14 @@ def _task_doc_node(
         createdAt=doc.createdAt,
         ageSeconds=_file_age_seconds(path, now),
         steps=_task_step_nodes(doc),
-        objective=doc.objective if include_body else "",
-        requirements=list(doc.requirements) if include_body else [],
-        design=doc.design if include_body else None,
-        codeExamples=[
-            TaskCodeExampleNode(
-                id=example.id,
-                title=example.title,
-                distinctChange=example.distinctChange,
-                why=example.why,
-                language=example.language,
-                snippet=example.snippet,
-            )
-            for example in doc.codeExamples
-        ]
-        if include_body
-        else [],
-        decisions=[
-            TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
-            for item in doc.decisions
-        ]
-        if include_body
-        else [],
-        openQuestions=list(doc.openQuestions) if include_body else [],
-        references=list(doc.references) if include_body else [],
+        objective=reader.objective,
+        requirements=reader.requirements,
+        design=reader.design,
+        codeExamples=reader.codeExamples,
+        decisions=reader.decisions,
+        openQuestions=reader.openQuestions,
+        references=reader.references,
+        sections=reader.sections,
         subTasks=[
             TaskSubTaskRefNode(
                 number=ref.number,
@@ -363,12 +547,6 @@ def _task_doc_node(
             )
             for ref in doc.subTasks
         ],
-        sections=[
-            TaskSectionNode(kind=section.kind, heading=section.heading, body=section.body)
-            for section in doc.sections
-        ]
-        if include_body
-        else [],
         masterLifecycleId=parent_lifecycle,
         orchestrates=list(doc.orchestrates),
         seats=[
@@ -381,19 +559,9 @@ def _task_doc_node(
             for seat in doc.seats
         ],
         executionNature=doc.executionNature,
-        executionGraph=(
-            TaskExecutionGraphNode.model_validate(doc.executionGraph.model_dump(mode="json"))
-            if doc.executionGraph is not None
-            else None
-        ),
-        executionWaves=(
-            [
-                [TaskExecutionNode.model_validate(node.model_dump(mode="json")) for node in wave]
-                for wave in doc.executionGraph.derived_waves()
-            ]
-            if doc.executionGraph is not None
-            else []
-        ),
+        executionGraph=execution_graph,
+        executionWaves=execution_waves,
+        executionGraphView=execution_graph_view,
     )
 
 

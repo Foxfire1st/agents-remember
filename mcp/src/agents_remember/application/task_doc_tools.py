@@ -24,11 +24,13 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
+    SprintGraphTitles,
     SubTaskRef,
     TaskDocument,
     completion_blockers,
     json_path_for,
     markdown_path_for,
+    read_graph_titles,
     read_task_doc,
     render_markdown,
     step_done,
@@ -292,7 +294,11 @@ def _publish_task_doc_set(context: _TaskDocPublication) -> list[tuple[Path, Path
             return (
                 context.publisher()
                 if context.publisher is not None
-                else write_task_docs(context.task_root, context.documents)
+                else write_task_docs(
+                    context.task_root,
+                    context.documents,
+                    graph_titles=_batch_graph_titles(context.task_root, context.documents),
+                )
             )
 
     try:
@@ -996,7 +1002,11 @@ def _remove_subtask(
     deleted: list[str] = []
 
     def publication() -> list[tuple[Path, Path]]:
-        written = write_task_docs(context.task_root, [updated])
+        written = write_task_docs(
+            context.task_root,
+            [updated],
+            graph_titles=_graph_titles_for(context.task_root, updated),
+        )
         if not keep_file:
             for path in leaf_files:
                 if path.exists():
@@ -1089,8 +1099,27 @@ def _preview(
     return result
 
 
+def _graph_titles_for(task_root: Path, doc: TaskDocument) -> SprintGraphTitles | None:
+    """Joined master/leaf titles for a sprint doc's execution-graph render.
+
+    Reads the commanded master documents under ``tasks/``; the sprint's own
+    ``task.md`` labels its mermaid boxes with real titles when they exist.
+    """
+
+    if doc.executionGraph is None:
+        return None
+    return read_graph_titles(task_root.parents[1], doc.executionGraph)
+
+
+def _batch_graph_titles(task_root: Path, docs: list[TaskDocument]) -> SprintGraphTitles | None:
+    for doc in docs:
+        if doc.executionGraph is not None:
+            return _graph_titles_for(task_root, doc)
+    return None
+
+
 def _render_preview(task_root: Path, doc: TaskDocument) -> dict[str, Any]:
-    rendered = render_markdown(doc)
+    rendered = render_markdown(doc, graph_titles=_graph_titles_for(task_root, doc))
     markdown_path = markdown_path_for(task_root, doc)
     existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
     diff = "".join(

@@ -10,7 +10,11 @@ import {
   type TaskDocumentBodyState,
 } from "../../data/useTaskDocumentBody";
 import { orderedByCreation } from "../../data/taskHierarchy";
-import { qualifiedLeafKey, taskDocSelectionKey } from "../../data/taskIdentity";
+import {
+  qualifiedLeafKey,
+  taskDocSelectionKey,
+  taskDocumentRefForDoc,
+} from "../../data/taskIdentity";
 import type {
   ProviderNode,
   SubTaskRow,
@@ -21,6 +25,8 @@ import type {
   TaskSectionNode,
   TaskStepNode,
 } from "../../types/projection";
+import { CloseoutQueue } from "../CloseoutQueue";
+import { SprintGraphView } from "../sprint-graph/SprintGraphView";
 import { DocChangeSetBar } from "./changeSetBar";
 import {
   dirName,
@@ -176,6 +182,8 @@ export function MasterOverview({
           />
         </Section>
       ) : null}
+      {/* The sprint execution graph + its closeout queue, reachable from the sprint page (L12-R5). */}
+      <SprintGraphSection doc={doc} />
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
@@ -206,6 +214,20 @@ export function MasterOverview({
   );
 }
 
+// The sprint execution graph section: the wave-grid view plus this sprint's closeout queue,
+// mounted together so the sprint page is the one reachable surface for both (L12-R5). Returns
+// nothing for a doc without a render-ready graph view (a non-sprint master).
+function SprintGraphSection({ doc }: { doc: MasterDocView }) {
+  if (!doc.executionGraphView) return null;
+  return (
+    <>
+      <Section title="Execution graph">
+        <SprintGraphView graphView={doc.executionGraphView} />
+      </Section>
+      <CloseoutQueue sprintRef={taskDocumentRefForDoc(doc)} />
+    </>
+  );
+}
 export function MasterTokenSummary({ total }: { total: number | undefined }) {
   if (total === undefined) return null;
   return (

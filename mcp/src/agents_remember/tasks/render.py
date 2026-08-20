@@ -14,11 +14,14 @@ normalization that would corrupt blank lines inside code fences).
 
 from __future__ import annotations
 
+import re
+
 from .document import (
     CodeExample,
     Decision,
     RouteReviewRecord,
     Section,
+    SprintExecutionEndpoint,
     SprintExecutionGraph,
     SprintExecutionNode,
     SprintSeat,
@@ -26,14 +29,16 @@ from .document import (
     StepDisposition,
     SubTaskRef,
     TaskDocument,
+    TaskDocumentRef,
 )
+from .execution_graph_titles import SprintGraphTitles
 
 _MASTER_INDEX_HEADING = "Master Index"
 
 
-def render_markdown(doc: TaskDocument) -> str:
+def render_markdown(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
     if doc.kind == "master":
-        return _render_master(doc)
+        return _render_master(doc, graph_titles=graph_titles)
     title = f"# Task: {doc.title}"
     if doc.kind == "subTask":
         title = f"{title} (Sub-task {doc.id})"
@@ -58,7 +63,7 @@ def render_markdown(doc: TaskDocument) -> str:
 _MARKER: dict[str, str] = {"Completed": "✅", "inProgress": "🔨", "planning": "⬜"}
 
 
-def _render_master(doc: TaskDocument) -> str:
+def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
     """Render a series ``master``: header + the ordered ``sections`` plan.
 
     Each section is freeform prose (a verbatim ``body``) or a structured block --
@@ -69,7 +74,9 @@ def _render_master(doc: TaskDocument) -> str:
     """
     parts: list[str] = [f"# Task: {doc.title}", "", *_header_lines(doc)]
     if doc.executionGraph is not None:
-        parts += _section("Execution Graph", _execution_graph_lines(doc.executionGraph))
+        parts += _section(
+            "Execution Graph", _execution_graph_lines(doc.executionGraph, graph_titles)
+        )
     for section in doc.sections:
         parts += _section(section.heading, _master_body(doc, section))
     if (
@@ -163,7 +170,18 @@ def _seat_lines(seats: list[SprintSeat]) -> list[str]:
     return lines
 
 
-def _execution_graph_lines(graph: SprintExecutionGraph) -> list[str]:
+def _execution_graph_lines(
+    graph: SprintExecutionGraph, titles: SprintGraphTitles | None = None
+) -> list[str]:
+    """The ``## Execution Graph`` section body: mermaid diagram + machine lists.
+
+    The deterministic mermaid ``flowchart TD`` renders one subgraph per master
+    box (labeled with the master title), one node per leaf (truncated title),
+    atomic masters as single lump nodes, and labeled edges -- ordered by
+    derived wave then node order so re-renders are byte-stable (L12-R1). The
+    compact machine-readable list form (Nodes / Dependencies / Derived Waves)
+    stays alongside the diagram.
+    """
     nodes = [f"- {_graph_node_label(node)}" for node in graph.nodes]
     edges = [
         f"- {_graph_node_label(graph.resolve_endpoint(edge.predecessor))} → "
@@ -175,6 +193,12 @@ def _execution_graph_lines(graph: SprintExecutionGraph) -> list[str]:
         for index, wave in enumerate(graph.derived_waves(), start=1)
     ]
     return [
+        "```mermaid",
+        "flowchart TD",
+        *_mermaid_node_lines(graph, titles),
+        *_mermaid_edge_lines(graph),
+        "```",
+        "",
         "### Nodes",
         "",
         *nodes,
@@ -195,6 +219,117 @@ def _graph_node_label(node: SprintExecutionNode) -> str:
         return f"`{node.ref.key}`"
     leafs = ", ".join(f"`{leaf}`" for leaf in node.leafIds)
     return f"`{node.ref.key}` (leafs: {leafs})"
+
+
+_MERMAID_MASTER_TITLE_MAX = 80
+_MERMAID_LEAF_TITLE_MAX = 56
+_MERMAID_REASON_MAX = 120
+
+
+def _mermaid_label(text: str, limit: int) -> str:
+    """One mermaid-quoted label: whitespace-collapsed, truncated, entity-escaped.
+
+    Quotes and pipes are escaped as HTML character references so a reason or
+    title containing them cannot break the ``-->|label|`` or ``["label"]``
+    syntax; the rendered meaning is preserved.
+    """
+
+    cleaned = " ".join(text.split())
+    if len(cleaned) > limit:
+        cleaned = cleaned[: limit - 1].rstrip() + "…"
+    return cleaned.replace('"', "&#34;").replace("|", "&#124;")
+
+
+def _mermaid_node_id(index: int) -> str:
+    return f"n{index}"
+
+
+def _mermaid_subgraph_id(first_index: int) -> str:
+    return f"sg{first_index}"
+
+
+def _mermaid_leaf_id(leaf: str) -> str:
+    return "leaf_" + re.sub(r"[^A-Za-z0-9_-]", "_", leaf)
+
+
+def _mermaid_master_order(graph: SprintExecutionGraph) -> list[TaskDocumentRef]:
+    """Masters in emission order: first derived-wave appearance, then declaration.
+
+    A master whose segments span several waves is emitted once, at the wave of
+    its first segment, so its subgraph reads as one box.
+    """
+
+    ordered: list[TaskDocumentRef] = []
+    for wave in graph.derived_waves():
+        for node in wave:
+            if node.ref not in ordered:
+                ordered.append(node.ref)
+    return ordered
+
+
+def _mermaid_node_lines(graph: SprintExecutionGraph, titles: SprintGraphTitles | None) -> list[str]:
+    index_of = {node: index for index, node in enumerate(graph.nodes)}
+    wave_of = {node: index for index, wave in enumerate(graph.derived_waves()) for node in wave}
+    lines: list[str] = []
+    for ref in _mermaid_master_order(graph):
+        master_nodes = graph.nodes_for(ref)
+        master_title = titles.master_titles.get(ref.key, ref.key) if titles else ref.key
+        label = _mermaid_label(master_title, _MERMAID_MASTER_TITLE_MAX)
+        if all(node.kind == "master" for node in master_nodes):
+            lines.append(f'{_mermaid_node_id(index_of[master_nodes[0]])}["{label}"]')
+            continue
+        lines.append(f'subgraph {_mermaid_subgraph_id(index_of[master_nodes[0]])}["{label}"]')
+        lines.extend(_mermaid_segment_lines(master_nodes, wave_of, index_of, titles))
+        lines.append("end")
+    return lines
+
+
+def _mermaid_segment_lines(
+    master_nodes: list[SprintExecutionNode],
+    wave_of: dict[SprintExecutionNode, int],
+    index_of: dict[SprintExecutionNode, int],
+    titles: SprintGraphTitles | None,
+) -> list[str]:
+    """One leaf node line per segment leaf, ordered by wave then declaration."""
+    lines: list[str] = []
+    for segment in sorted(master_nodes, key=lambda node: (wave_of[node], index_of[node])):
+        for leaf in segment.leafIds:
+            leaf_title = titles.leaf_titles.get(leaf, leaf) if titles else leaf
+            leaf_label = _mermaid_label(f"{leaf} — {leaf_title}", _MERMAID_LEAF_TITLE_MAX)
+            lines.append(f'{_mermaid_leaf_id(leaf)}["{leaf_label}"]')
+    return lines
+
+
+def _mermaid_edge_lines(graph: SprintExecutionGraph) -> list[str]:
+    index_of = {node: index for index, node in enumerate(graph.nodes)}
+    lines: list[str] = []
+    for edge in graph.edges:
+        predecessor = graph.resolve_endpoint(edge.predecessor)
+        successor = graph.resolve_endpoint(edge.successor)
+        reason = _mermaid_label(edge.reason, _MERMAID_REASON_MAX)
+        lines.append(
+            f"{_mermaid_endpoint_id(index_of, predecessor, edge.predecessor)} -->|{reason}| "
+            f"{_mermaid_endpoint_id(index_of, successor, edge.successor)}"
+        )
+    return lines
+
+
+def _mermaid_endpoint_id(
+    index_of: dict[SprintExecutionNode, int],
+    resolved: SprintExecutionNode,
+    endpoint: TaskDocumentRef | SprintExecutionEndpoint,
+) -> str:
+    """The diagram id an edge endpoint points at.
+
+    A leaf-sampling endpoint names its exact leaf node; a bare ref resolves to
+    the lump node, or to the master's subgraph when the master is segmented.
+    """
+
+    if isinstance(endpoint, SprintExecutionEndpoint) and endpoint.leafId is not None:
+        return _mermaid_leaf_id(endpoint.leafId)
+    if resolved.kind == "master":
+        return _mermaid_node_id(index_of[resolved])
+    return _mermaid_subgraph_id(index_of[resolved])
 
 
 def _section(heading: str, body: list[str]) -> list[str]:

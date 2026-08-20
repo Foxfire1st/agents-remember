@@ -1,5 +1,6 @@
 import { FlowTab } from "../panels/FlowTab";
 import { Bench } from "./Bench";
+import { SprintGraphPage } from "./sprintGraphPage";
 import { PtyRenderBench } from "./PtyRenderBench";
 import { Reference } from "./Reference";
 
@@ -13,6 +14,7 @@ export default function DevApp() {
   const path = window.location.pathname;
   if (path.startsWith("/dev/reference")) return <Reference />;
   if (path.startsWith("/dev/pty-bench")) return <PtyRenderBench />;
+  if (path.startsWith("/dev/sprint-graph")) return <SprintGraphPage />;
   if (path.startsWith("/dev/bench")) return <Bench />;
   if (path.startsWith("/dev/flows")) {
     return (
@@ -35,6 +37,9 @@ export default function DevApp() {
         </li>
         <li>
           <a href="/dev/flows">/dev/flows</a> — lifecycle flow canvas (router · designer · orchestrator · manager · worker · reviewer · comms)
+        </li>
+        <li>
+          <a href="/dev/sprint-graph">/dev/sprint-graph</a> — sprint execution graph page (L12 mounted-UI evidence)
         </li>
       </ul>
     </div>

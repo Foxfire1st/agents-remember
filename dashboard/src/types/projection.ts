@@ -513,6 +513,7 @@ export interface TaskDocNode {
   design?: string;
   docPath: string;
   executionGraph?: TaskExecutionGraphNode;
+  executionGraphView?: TaskExecutionGraphView;
   executionNature?: "organizational" | "atomic";
   executionWaves: TaskExecutionNode[][];
   id: string;
@@ -557,10 +558,34 @@ export interface TaskExecutionGraphNode {
   nodes: TaskExecutionNode[];
 }
 
+export interface TaskExecutionGraphView {
+  nodes: TaskExecutionNodeView[];
+}
+
 export interface TaskExecutionNode {
   kind: string;
   leafIds: string[];
   ref: TaskDocumentRef;
+}
+
+export interface TaskExecutionNodeView {
+  executionNature?: string;
+  frontierState: "landed" | "ready" | "waiting" | "in-flight";
+  kind: "lump" | "segment";
+  leafIds: string[];
+  leafTitles: string[];
+  masterRef: TaskDocumentRef;
+  masterTitle: string;
+  nodeId: string;
+  predecessors: TaskExecutionPredecessorNode[];
+  waveIndex: number;
+}
+
+export interface TaskExecutionPredecessorNode {
+  judgmentId?: string;
+  predecessorRef: TaskDocumentRef;
+  predecessorTitle: string;
+  reason: string;
 }
 
 export interface TaskSeatNode {

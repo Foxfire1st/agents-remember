@@ -923,7 +923,59 @@
             "status": "planning"
           }
         ],
-        "title": "dependency-aware sprint"
+        "title": "dependency-aware sprint",
+        "executionGraphView": {
+          "nodes": [
+            {
+              "nodeId": "agents-remember/sim-master-a/task.json#seg1",
+              "kind": "segment",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-a/task.json"
+              },
+              "masterTitle": "Sim Master A",
+              "leafIds": [
+                "SIM-A-L1"
+              ],
+              "leafTitles": [
+                "Shared framework"
+              ],
+              "waveIndex": 1,
+              "frontierState": "in-flight",
+              "executionNature": "organizational",
+              "predecessors": []
+            },
+            {
+              "nodeId": "agents-remember/sim-master-b/task.json#seg1",
+              "kind": "segment",
+              "masterRef": {
+                "repository": "agents-remember",
+                "path": "sim-master-b/task.json"
+              },
+              "masterTitle": "Sim Master B",
+              "leafIds": [
+                "SIM-B-L1"
+              ],
+              "leafTitles": [
+                "Dependent work"
+              ],
+              "waveIndex": 2,
+              "frontierState": "waiting",
+              "executionNature": "organizational",
+              "predecessors": [
+                {
+                  "predecessorRef": {
+                    "repository": "agents-remember",
+                    "path": "sim-master-a/task.json"
+                  },
+                  "predecessorTitle": "Sim Master A",
+                  "reason": "the shared framework must land first",
+                  "judgmentId": "J-sim-1"
+                }
+              ]
+            }
+          ]
+        }
       },
       {
         "bodyRevision": "sim-master-a-r1",

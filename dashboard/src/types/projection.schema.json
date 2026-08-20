@@ -2846,6 +2846,17 @@
           ],
           "default": null
         },
+        "executionGraphView": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskExecutionGraphView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "executionNature": {
           "anyOf": [
             {
@@ -3102,6 +3113,21 @@
       "title": "TaskExecutionGraphNode",
       "type": "object"
     },
+    "TaskExecutionGraphView": {
+      "additionalProperties": false,
+      "description": "The render-ready sprint graph, ordered by derived wave then node order.\n\nNodes within a wave keep the persisted declaration order, so a re-render\nwith an unchanged graph is byte-stable.",
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionNodeView"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "title": "TaskExecutionGraphView",
+      "type": "object"
+    },
     "TaskExecutionNode": {
       "additionalProperties": false,
       "description": "One graph node: a whole-master lump or a leaf-segment of one master (L11-R1).",
@@ -3126,6 +3152,124 @@
         "ref"
       ],
       "title": "TaskExecutionNode",
+      "type": "object"
+    },
+    "TaskExecutionNodeView": {
+      "additionalProperties": false,
+      "description": "Render-ready per-node sprint graph model (L12-R4).\n\n``nodeId`` is a stable semantic identity: a lump's master ref key, or the\nref key plus a segment ordinal for a segmented master. ``waveIndex`` is the\n1-based derived wave; ``frontierState`` is derived mechanically from task\nstatuses and the graph edges -- the dashboard styles, never re-derives.",
+      "properties": {
+        "executionNature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executionnature"
+        },
+        "frontierState": {
+          "enum": [
+            "landed",
+            "ready",
+            "waiting",
+            "in-flight"
+          ],
+          "title": "Frontierstate",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "lump",
+            "segment"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "leafIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Leafids",
+          "type": "array"
+        },
+        "leafTitles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Leaftitles",
+          "type": "array"
+        },
+        "masterRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "masterTitle": {
+          "title": "Mastertitle",
+          "type": "string"
+        },
+        "nodeId": {
+          "title": "Nodeid",
+          "type": "string"
+        },
+        "predecessors": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionPredecessorNode"
+          },
+          "title": "Predecessors",
+          "type": "array"
+        },
+        "waveIndex": {
+          "title": "Waveindex",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "nodeId",
+        "kind",
+        "masterRef",
+        "masterTitle",
+        "waveIndex",
+        "frontierState"
+      ],
+      "title": "TaskExecutionNodeView",
+      "type": "object"
+    },
+    "TaskExecutionPredecessorNode": {
+      "additionalProperties": false,
+      "description": "One predecessor edge of a projected graph node with its recorded reason.",
+      "properties": {
+        "judgmentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judgmentid"
+        },
+        "predecessorRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "predecessorTitle": {
+          "title": "Predecessortitle",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "predecessorRef",
+        "predecessorTitle",
+        "reason"
+      ],
+      "title": "TaskExecutionPredecessorNode",
       "type": "object"
     },
     "TaskSeatNode": {

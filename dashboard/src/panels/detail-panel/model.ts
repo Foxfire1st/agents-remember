@@ -184,6 +184,7 @@ export type MasterDocView = Pick<
   | "sections"
   | "decisions"
   | "masterLifecycleId"
+  | "executionGraphView"
 
   | "docPath"
   | "repository"

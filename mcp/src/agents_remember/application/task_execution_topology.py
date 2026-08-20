@@ -28,12 +28,15 @@ from agents_remember.tasks import (
     SprintExecutionEndpoint,
     SprintExecutionGraph,
     SprintExecutionNode,
+    SprintGraphTitles,
     TaskDocument,
+    build_graph_titles,
     completion_blockers,
     json_path_for,
     leaf_placement_facts,
     markdown_path_for,
     numbering_drift_hints,
+    read_graph_titles,
     read_task_doc,
     render_markdown,
     resolve_graph_endpoint,
@@ -301,6 +304,18 @@ def _prepare_authoring(
     )
 
 
+def _authoring_batch_titles(
+    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]],
+) -> SprintGraphTitles | None:
+    """Join titles for the sprint in an authoring batch from its in-memory masters."""
+
+    masters = {ref: document for ref, _root, document in documents}
+    for _ref, _root, document in documents:
+        if document.executionGraph is not None:
+            return build_graph_titles(document.executionGraph, masters)
+    return None
+
+
 def _publish_authoring(
     request: ExecutionTopologyAuthoringRequest,
     topology: TaskDocumentTopology,
@@ -311,7 +326,8 @@ def _publish_authoring(
         with integration_authority_lock(request.coordination_root, request.repo_id):
             _require_authoring_publication_authority(request, prepared.overrides)
             return write_task_doc_batch(
-                [(root, document) for _ref, root, document in prepared.documents]
+                [(root, document) for _ref, root, document in prepared.documents],
+                graph_titles=_authoring_batch_titles(prepared.documents),
             )
 
     queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
@@ -770,7 +786,14 @@ def _validate_topology(
 def _document_preview(
     ref: TaskDocumentRef, task_root: Path, document: TaskDocument
 ) -> dict[str, Any]:
-    rendered = render_markdown(document)
+    rendered = render_markdown(
+        document,
+        graph_titles=(
+            read_graph_titles(task_root.parents[1], document.executionGraph)
+            if document.executionGraph is not None
+            else None
+        ),
+    )
     markdown_path = markdown_path_for(task_root, document)
     existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
     diff = "".join(

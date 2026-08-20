@@ -316,6 +316,16 @@ const VOCABULARIES: Record<
     "task_doc.skip_step",
   ],
   "projection.analytics.taskDocuments[].executionNature": ["organizational", "atomic"],
+  "projection.analytics.taskDocuments[].executionGraphView.nodes[].kind": [
+    "lump",
+    "segment",
+  ],
+  "projection.analytics.taskDocuments[].executionGraphView.nodes[].frontierState": [
+    "landed",
+    "ready",
+    "waiting",
+    "in-flight",
+  ],
   "projection.enclosures[].lifecycleOperation.kind": ["closeout", "integrate"],
   "projection.enclosures[].lifecycleOperation.status": [
     "queued",

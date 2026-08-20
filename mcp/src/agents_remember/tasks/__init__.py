@@ -44,6 +44,11 @@ from .document import (
     step_done,
     step_total,
 )
+from .execution_graph_titles import (
+    SprintGraphTitles,
+    build_graph_titles,
+    read_graph_titles,
+)
 from .readiness import CompletionBlocker, completion_blockers
 from .render import render_markdown
 from .store import (
@@ -74,6 +79,7 @@ __all__ = [
     "SprintExecutionEndpoint",
     "SprintExecutionGraph",
     "SprintExecutionNode",
+    "SprintGraphTitles",
     "SprintSeat",
     "SprintSeatState",
     "Step",
@@ -83,6 +89,7 @@ __all__ = [
     "SubTaskRef",
     "TaskDocument",
     "TaskEnclosureRef",
+    "build_graph_titles",
     "completion_blockers",
     "current_step",
     "derived_leaf_placement",
@@ -91,6 +98,7 @@ __all__ = [
     "leaf_placement_facts",
     "markdown_path_for",
     "numbering_drift_hints",
+    "read_graph_titles",
     "read_task_doc",
     "render_markdown",
     "resolve_graph_endpoint",

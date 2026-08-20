@@ -1,9 +1,10 @@
 import { memo } from "react";
 
 import { css } from "../../styled-system/css";
+import { sameTaskDocumentRef } from "../data/taskIdentity";
 import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
-import type { CloseoutCandidateNode, CloseoutQueueNode } from "../types/projection";
+import type { CloseoutCandidateNode, CloseoutQueueNode, TaskDocumentRef } from "../types/projection";
 
 // Closeout queue — the projected, read-only scheduling surface (L8-R4/R5/R6). One ordered
 // list per sprint: the active atomic blocker first, then every declared candidate with its
@@ -44,7 +45,12 @@ function CandidateRow({ candidate }: { candidate: CloseoutCandidateNode }) {
 function Queue({ queue }: { queue: CloseoutQueueNode }) {
   return (
     <section data-testid="closeout-queue">
-      <h3 className={groupHead}>{queue.sprintRef.path}</h3>
+      <h3 className={groupHead}>
+        {queue.sprintRef.path}
+        <span className={meta}>
+          rev {queue.revision} · graph {queue.graphRevision.slice(0, 8)}
+        </span>
+      </h3>
       {queue.activeBlocker && (
         <div className={`${row} ${blockerRow}`} data-testid="closeout-blocker">
           <span className={name}>blocker: {queue.activeBlocker.master.path}</span>
@@ -60,12 +66,17 @@ function Queue({ queue }: { queue: CloseoutQueueNode }) {
   );
 }
 
-function CloseoutQueueImpl() {
+function CloseoutQueueImpl({ sprintRef }: { sprintRef?: TaskDocumentRef } = {}) {
   const queues = useDashboard((state) => state.closeoutQueues);
-  if (queues.length === 0) return null;
+  // On the sprint page the panel is scoped to the viewed sprint; without a ref it stays the
+  // workspace-wide queue (L12-R5: the panel is mounted, not dead code).
+  const visible = sprintRef
+    ? queues.filter((queue) => sameTaskDocumentRef(queue.sprintRef, sprintRef))
+    : queues;
+  if (visible.length === 0) return null;
   return (
     <Panel title="Closeout queue">
-      {queues.map((queue) => (
+      {visible.map((queue) => (
         <Queue key={`${queue.sprintRef.repository}/${queue.sprintRef.path}`} queue={queue} />
       ))}
     </Panel>

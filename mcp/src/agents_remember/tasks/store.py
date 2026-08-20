@@ -13,6 +13,7 @@ from pathlib import Path
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
 
 from .document import TaskDocument
+from .execution_graph_titles import SprintGraphTitles
 from .render import render_markdown
 
 
@@ -37,18 +38,25 @@ def write_task_doc(task_root: Path, doc: TaskDocument) -> tuple[Path, Path]:
     return write_task_docs(task_root, [doc])[0]
 
 
-def write_task_docs(task_root: Path, docs: list[TaskDocument]) -> list[tuple[Path, Path]]:
+def write_task_docs(
+    task_root: Path,
+    docs: list[TaskDocument],
+    *,
+    graph_titles: SprintGraphTitles | None = None,
+) -> list[tuple[Path, Path]]:
     """Write a prepared document set, restoring every prior file if publication fails.
 
     Each destination replacement is individually atomic. The snapshot-and-restore around
     the set supplies failure atomicity for composite leaf/master transitions: a failure on
     a later destination cannot leave earlier task-document files at the new generation.
     """
-    return write_task_doc_batch([(task_root, doc) for doc in docs])
+    return write_task_doc_batch([(task_root, doc) for doc in docs], graph_titles=graph_titles)
 
 
 def write_task_doc_batch(
     documents: list[tuple[Path, TaskDocument]],
+    *,
+    graph_titles: SprintGraphTitles | None = None,
 ) -> list[tuple[Path, Path]]:
     """Atomically publish task documents that may live under different task roots."""
 
@@ -64,7 +72,15 @@ def write_task_doc_batch(
         seen.update({json_path, markdown_path})
         payload = doc.model_dump_json(by_alias=True, exclude_none=True, indent=2)
         writes.append((json_path, f"{payload}\n"))
-        writes.append((markdown_path, render_markdown(doc)))
+        writes.append(
+            (
+                markdown_path,
+                render_markdown(
+                    doc,
+                    graph_titles=graph_titles if doc.executionGraph is not None else None,
+                ),
+            )
+        )
         paths.append((json_path, markdown_path))
     originals = {path: path.read_bytes() if path.exists() else None for path, _text in writes}
     try:

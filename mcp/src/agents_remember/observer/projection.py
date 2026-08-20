@@ -35,6 +35,7 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
+from agents_remember.observer.projection_graph import TaskExecutionGraphView
 
 AttentionSeverity: TypeAlias = Literal["alarm", "warn", "info"]
 AttentionLane: TypeAlias = Literal["repo", "worktree", "lifecycle"]
@@ -792,6 +793,9 @@ class TaskDocNode(BaseModel):
     # Sprint-only persisted graph plus mechanically derived topological waves.
     executionGraph: TaskExecutionGraphNode | None = None
     executionWaves: list[list[TaskExecutionNode]] = Field(default_factory=list)
+    # Render-ready per-node sprint graph (L12-R4): the dashboard renders this view directly and
+    # never joins raw refs to titles or re-derives waves/frontier state from the persisted graph.
+    executionGraphView: TaskExecutionGraphView | None = None
 
 
 class SeriesSubTaskNode(BaseModel):
