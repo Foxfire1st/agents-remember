@@ -17,6 +17,7 @@ from unittest import mock
 import agents_remember.application.task_sprint_linkage as sprint_linkage
 from agents_remember.application.task_doc_tools import (
     VALID_OPERATIONS,
+    TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -172,7 +173,7 @@ class SprintLinkageTests(unittest.TestCase):
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
             operation=operation,
             edit=TaskDocEdit(fields=fields),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
     def _attach(self, fields: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
@@ -768,7 +769,7 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint", slug=slug),
             operation=operation,
             edit=TaskDocEdit(fields=fields),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
     def _attach(self, fields: dict[str, Any], **kwargs: Any) -> dict[str, Any]:

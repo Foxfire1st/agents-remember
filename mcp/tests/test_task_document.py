@@ -22,6 +22,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember.tasks.store as task_store
 from agents_remember.application.task_doc_tools import (
+    TaskDocCall,
     TaskDocEdit,
     TaskDocTarget,
     task_doc_tool,
@@ -759,7 +760,7 @@ class ApplicationTests(unittest.TestCase):
             TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation=operation,
             edit=TaskDocEdit(fields=fields, step=step, decision=decision),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
 

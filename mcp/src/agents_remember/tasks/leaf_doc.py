@@ -87,7 +87,11 @@ def resolve_terminal_leaf_doc(
     root = task_root.resolve(strict=False)
     want = leaf_id.strip()
     if not want:
-        raise TerminalLeafResolutionError("terminal leaf resolution requires a nonblank leaf id")
+        raise TerminalLeafResolutionError(
+            "terminal leaf resolution requires a nonblank leaf id: the leaf has no stamped "
+            "contract binding -- re-stamp the series contract (series-contract.md) or use "
+            "branch-addressed mode for direct execution"
+        )
 
     asserted = _terminal_asserted_path(root, asserted_path)
     matches = _terminal_matches(root, want, asserted)

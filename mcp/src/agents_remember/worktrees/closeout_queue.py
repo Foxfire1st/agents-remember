@@ -547,13 +547,26 @@ def _declaration_identity(
     request = context.request
     if request.contract_path is None:
         raise CloseoutQueueError(
-            "closeout-candidate-contract-required", "declare requires contract_path"
+            "closeout-candidate-contract-required",
+            "declare requires contract_path: bind the leaf worktree contract "
+            "(enclosures/<leaf>/series-contract.md), or use the direct landing "
+            "operation for sanctioned branch-addressed execution",
         )
     path = require_within_coordination(context.config, request.contract_path, "contract_path")
-    contract = load_contract(path)
+    try:
+        contract = load_contract(path)
+    except ContractError as exc:
+        raise CloseoutQueueError(
+            "closeout-candidate-contract-invalid",
+            f"declare could not read the leaf contract at {path}: {exc}",
+        ) from exc
     if contract.kind != "leaf":
         raise CloseoutQueueError(
-            "closeout-candidate-leaf-required", "only leaf contracts can declare candidates"
+            "closeout-candidate-leaf-required",
+            "closeout candidate declaration requires the leaf worktree contract; "
+            f"{path} is a {contract.kind} contract -- re-stamp the leaf enclosure "
+            "(enclosures/<leaf>/series-contract.md), or use the direct landing "
+            "operation for branch-addressed execution",
         )
     if contract.closeout_status != "not-started" or contract.integration_status != "not-started":
         raise CloseoutQueueError(

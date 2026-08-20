@@ -11,6 +11,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.application_requests import LifecycleGateRequest
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.structural.gates import (
     StructuralGateDecisionRequest,
     StructuralLifecycleGateRequest,
@@ -32,18 +33,56 @@ class StructuralGateRuntime:
 _DEFAULT_GATE_RUNTIME = StructuralGateRuntime()
 
 
+@dataclass(frozen=True)
+class DeclaredGateCaller:
+    """Duck-typed caller for ambient structural calls with no plane seat.
+
+    Carries only the two binding fields the structural gate tools read; the
+    same topology-based authorization validates it exactly like a hosted seat.
+    """
+
+    binding_role: str
+    binding_task_document_ref: TaskDocumentRef
+
+
 def _context(
     config: McpRuntimeConfig,
     *,
     environ: dict[str, str] | None,
+    declared: DeclaredCaller | None = None,
 ) -> tuple[TaskDocumentTopology, StructuralSeatResolver, Any]:
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     topology = TaskDocumentTopology(config.coordination_root)
-    return (
-        topology,
-        StructuralSeatResolver(catalog, topology),
-        resolve_ambient_seat(catalog, environ=environ),
-    )
+    try:
+        caller = resolve_ambient_seat(catalog, environ=environ)
+    except AmbientSeatError as exc:
+        if exc.status != "ambient-seat-unavailable":
+            raise
+        if declared is None:
+            raise AmbientSeatError(
+                "structural-caller-required",
+                "ambient structural callers must declare caller (role + task_document_ref)",
+            ) from exc
+        caller = DeclaredGateCaller(
+            binding_role=declared.role,
+            binding_task_document_ref=declared.task_document_ref,
+        )
+    _refuse_declared_conflict(caller, declared)
+    return topology, StructuralSeatResolver(catalog, topology), caller
+
+
+def _refuse_declared_conflict(caller: Any, declared: DeclaredCaller | None) -> None:
+    """Refuse a request-carried caller that contradicts the hosted seat."""
+    if declared is None:
+        return
+    if (
+        declared.role != caller.binding_role
+        or declared.task_document_ref != caller.binding_task_document_ref
+    ):
+        raise AmbientSeatError(
+            "structural-caller-conflict",
+            "declared caller conflicts with the plane-injected hosted seat",
+        )
 
 
 def _failure(operation: str, status: str, detail: str) -> dict[str, Any]:
@@ -79,10 +118,12 @@ def structural_lifecycle_gate_tool(
     request: StructuralLifecycleGateRequest,
     runtime: StructuralGateRuntime = _DEFAULT_GATE_RUNTIME,
 ) -> dict[str, Any]:
-    """Raise one gate on the caller's ambient structural seat."""
+    """Raise one gate on the caller's structural document (seat or declared)."""
 
     try:
-        topology, _resolver, caller = _context(config, environ=runtime.environ)
+        topology, _resolver, caller = _context(
+            config, environ=runtime.environ, declared=getattr(request, "caller", None)
+        )
         document = caller.binding_task_document_ref
         assert document is not None
         resolved = topology.resolve(document)
@@ -135,7 +176,9 @@ def structural_gate_decide_tool(
     """Decide the one open gate on an authorized child document and kind."""
 
     try:
-        topology, resolver, caller = _context(config, environ=runtime.environ)
+        topology, resolver, caller = _context(
+            config, environ=runtime.environ, declared=getattr(request, "caller", None)
+        )
         resolved = topology.resolve(request.task_document_ref)
         _authorize_gate_target(resolver, caller, resolved.ref)
     except (AmbientSeatError, StructuralSeatError, TaskDocumentRefError) as exc:
@@ -191,12 +234,13 @@ def structural_gate_list_tool(
     config: McpRuntimeConfig,
     *,
     environ: dict[str, str] | None = None,
+    caller: DeclaredCaller | None = None,
 ) -> dict[str, Any]:
     """List gate state in the caller's document scope without private correlations."""
 
     try:
-        topology, _resolver, caller = _context(config, environ=environ)
-        caller_document = caller.binding_task_document_ref
+        topology, _resolver, seat = _context(config, environ=environ, declared=caller)
+        caller_document = seat.binding_task_document_ref
         assert caller_document is not None
         documents = (caller_document, *topology.children(caller_document))
         identities = {
@@ -232,6 +276,6 @@ def structural_gate_list_tool(
         "operation": "gate_list",
         "status": "listed",
         "taskDocumentRef": caller_document.model_dump(),
-        "role": caller.binding_role,
+        "role": seat.binding_role,
         "gates": summaries,
     }

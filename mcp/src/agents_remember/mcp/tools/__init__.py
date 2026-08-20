@@ -19,6 +19,7 @@ from .core import (
     server_info_payload,
     skills_install_payload,
 )
+from .direct_landing import direct_landing_payload
 from .gates import (
     gate_create_payload,
     gate_decide_payload,
@@ -121,6 +122,7 @@ __all__ = [
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",
     "context_packet_payload",
+    "direct_landing_payload",
     "dispatch_agent_payload",
     "drift_check_payload",
     "gate_create_payload",

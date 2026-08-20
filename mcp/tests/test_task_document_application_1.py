@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.task_doc_tools import (
+    TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -346,7 +347,7 @@ class ApplicationTests1(ApplicationTests):
                     "objective": "Preview me.",
                 }
             ),
-            dry_run=True,
+            call=TaskDocCall(dry_run=True),
         )
         self.assertTrue(result["dryRun"])
         self.assertIn("Preview me.", str(result["rendered"]))
@@ -365,7 +366,7 @@ class ApplicationTests1(ApplicationTests):
             TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation="set_field",
             edit=TaskDocEdit(fields={"objective": "changed"}),
-            dry_run=True,
+            call=TaskDocCall(dry_run=True),
         )
         self.assertIn("changed", str(result["rendered"]))  # the would-be render reflects the edit
         # …but disk is untouched
@@ -381,7 +382,7 @@ class ApplicationTests1(ApplicationTests):
             TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation="set_field",
             edit=TaskDocEdit(fields={"objective": "orig"}),
-            dry_run=True,
+            call=TaskDocCall(dry_run=True),
         )
         self.assertFalse(clean["wouldLose"])
         self.assertEqual(clean["diff"], "")
@@ -395,7 +396,7 @@ class ApplicationTests1(ApplicationTests):
             TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation="set_field",
             edit=TaskDocEdit(fields={"objective": "orig"}),
-            dry_run=True,
+            call=TaskDocCall(dry_run=True),
         )
         self.assertTrue(lossy["wouldLose"])
         self.assertIn("keep me", str(lossy["diff"]))

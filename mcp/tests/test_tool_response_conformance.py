@@ -37,6 +37,7 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
+from agents_remember.application.direct_landing import DirectLandingRequest
 from agents_remember.application.gate_tools import GateRaise, GateWait
 from agents_remember.application.lifecycle_operation_worker import run_worker
 from agents_remember.application.memory_tools import CarryoverSelection, CitationOperationScope
@@ -479,6 +480,18 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     # Reopen the fully landed demo-task leaf (closeout+integrate+cleanup completed above) —
     # after the finalize preview so its landed-commit proof still saw the completed contract.
     payloads["task_reopen"] = tools.task_reopen_payload(config, contract_path, dry_run=False)
+    # Representative direct-landing payload: the real builder refuses cleanly on the
+    # fail-closed policy gate (directExecutionEnabled defaults off), which still exercises
+    # the full payload → application path and validates the response model.
+    payloads["direct_landing"] = tools.direct_landing_payload(
+        config,
+        DirectLandingRequest(
+            contract_path="/fixture/series-contract.md",
+            code_commit="a" * 40,
+            intent_note="representative landing preview",
+            dry_run=True,
+        ),
+    )
     return payloads
 
 

@@ -50,6 +50,7 @@ def build_route_review(
     task_root: Path,
     payload: dict[str, Any],
     *,
+    branch_addressed: bool = False,
     now: datetime | None = None,
 ) -> RouteReviewRecord:
     """Validate reviewer-authored evidence and stamp the current tree/time in the plane."""
@@ -61,7 +62,7 @@ def build_route_review(
             "record_route_review accepts only verdict, verdictRef, and routes; "
             f"the plane owns candidateTree and reviewedAt (unknown: {sorted(unknown)})",
         )
-    if contract.kind != "leaf":
+    if contract.kind != "leaf" and not (branch_addressed and contract.kind == "series"):
         raise RouteReviewError("route-review-invalid-altitude", "route review belongs to a leaf")
     try:
         record = RouteReviewRecord.model_validate(

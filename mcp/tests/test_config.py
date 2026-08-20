@@ -74,6 +74,19 @@ class LifecycleSettingsDerivationTests(unittest.TestCase):
 
 
 class McpConfigTests(unittest.TestCase):
+    def test_direct_execution_enabled_parses_and_rejects_non_boolean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / "mcp-settings.json"
+            payload = settings_payload(root)
+            payload["directExecutionEnabled"] = True
+            write_json(path, payload)
+            self.assertTrue(load_config(path).direct_execution_enabled)
+            payload["directExecutionEnabled"] = "yes"
+            write_json(path, payload)
+            with self.assertRaisesRegex(ConfigError, "directExecutionEnabled must be a boolean"):
+                load_config(path)
+
     def test_two_repository_ids_cannot_share_one_git_common_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

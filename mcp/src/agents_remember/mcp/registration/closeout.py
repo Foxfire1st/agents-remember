@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.direct_landing import DirectLandingRequest
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
@@ -12,6 +13,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.operation import IntegrateStrategy
 
 from ..tools import (
+    direct_landing_payload,
     worktree_abandon_payload,
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
@@ -23,9 +25,50 @@ from ..tools import (
 
 def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register landing tools through cohesive bounded registration groups."""
+    _register_direct_landing_tool(server, config)
     _register_closeout_command_tools(server, config)
     _register_integration_command_tools(server, config)
     _register_reclamation_command_tools(server, config)
+
+
+def _register_direct_landing_tool(server: FastMCP, config: McpRuntimeConfig) -> None:
+    @server.tool()
+    def direct_landing(
+        contract_path: str,
+        code_commit: str,
+        *,
+        memory_commit_message: str = "",
+        ledger_commit_message: str = "",
+        intent_note: str = "",
+        candidate_tree: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Verify one series code commit and atomically land its memory + ledger row.
+
+        The direct landing is the branch-addressed counterpart of the worktree closeout
+        commit phase for sanctioned direct execution: it binds the task-root series
+        contract (series-contract.md), verifies the exact code commit is the current
+        series branch HEAD, commits external-memory content, and prepends the
+        code-to-memory ledger row with the same ledger semantics as the worktree path.
+        All steps are pre-validated before any mutation and run under the integration
+        authority lock. Policy-gated: directExecutionEnabled must be set in the MCP
+        authority settings. The code commit is verified, never created. Pass
+        candidate_tree (the staged candidate the owner gated through the Dagger
+        --source/--repository-bundle contract) to keep the gate strictly pre-commit:
+        a moved branch after the gate is refused before any memory or ledger commit.
+        MUTATING (memory + ledger commits); preview with dry_run=true."""
+        return direct_landing_payload(
+            config,
+            DirectLandingRequest(
+                contract_path=contract_path,
+                code_commit=code_commit,
+                memory_commit_message=memory_commit_message,
+                ledger_commit_message=ledger_commit_message,
+                intent_note=intent_note,
+                candidate_tree=candidate_tree,
+                dry_run=dry_run,
+            ),
+        )
 
 
 def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

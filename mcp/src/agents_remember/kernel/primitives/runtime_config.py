@@ -131,6 +131,10 @@ class McpRuntimeConfig:
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
+    # Policy gate for sanctioned direct execution (branch-addressed
+    # series-contract bindings and the direct landing operation): explicit
+    # opt-ins that refuse unless this is enabled. Fail-closed default.
+    direct_execution_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
     provider_degradation: ProviderDegradationSettings = field(
@@ -272,6 +276,9 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
+    direct_execution_enabled = parse_direct_execution_enabled(
+        data.get("directExecutionEnabled", False)
+    )
     dashboard = parse_dashboard_settings(data.get("dashboard"))
     try:
         provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
@@ -294,6 +301,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         providers=providers,
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
+        direct_execution_enabled=direct_execution_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
         provider_degradation=provider_degradation,
@@ -484,6 +492,12 @@ def provider_runtime_name(provider_id: str) -> str:
         return names[provider_id]
     except KeyError as error:
         raise ConfigError(f"unsupported provider id: {provider_id}") from error
+
+
+def parse_direct_execution_enabled(raw: object) -> bool:
+    if not isinstance(raw, bool):
+        raise ConfigError("directExecutionEnabled must be a boolean")
+    return raw
 
 
 def parse_benchmarks_enabled(raw: object) -> bool:
@@ -745,6 +759,7 @@ def _checkout_runtime_config(
         repositories={"agents-remember": repository},
         providers={},
         benchmarks_enabled=False,
+        direct_execution_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),
         retirement=RetirementSettings(

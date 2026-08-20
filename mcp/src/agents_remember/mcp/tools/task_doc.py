@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.application.task_doc_tools import (
+    DEFAULT_TASK_DOC_CALL,
     NO_EDIT,
+    TaskDocCall,
     TaskDocEdit,
     TaskDocTarget,
     task_doc_tool,
@@ -22,11 +24,11 @@ def task_doc_payload(
     *,
     operation: str,
     edit: TaskDocEdit = NO_EDIT,
-    dry_run: bool = False,
+    call: TaskDocCall = DEFAULT_TASK_DOC_CALL,
 ) -> dict[str, Any]:
     return _tool_payload(
         "task_doc",
-        task_doc_tool(config, target, operation=operation, edit=edit, dry_run=dry_run),
+        task_doc_tool(config, target, operation=operation, edit=edit, call=call),
     )
 
 

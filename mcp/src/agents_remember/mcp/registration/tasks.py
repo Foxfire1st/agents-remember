@@ -5,7 +5,11 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
-from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocTarget
+from agents_remember.application.task_doc_tools import (
+    TaskDocCall,
+    TaskDocEdit,
+    TaskDocTarget,
+)
 from agents_remember.application.worktree_tools import FinalizeTaskDocs
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
@@ -31,8 +35,9 @@ def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) ->
         and Judgment Register rows; ordering
         is critical/high/normal/low, graph-node order, then leaf identity. Atomic blocker release
         requires canonical master completion; abort requires an exact strategist/orchestrator
-        judgment. The caller is derived from the plane-owned hosted seat, never request data. The
-        bounded canonical sprint artifact validates Git, full route-review records and evidence,
+        judgment. The caller is the plane-injected hosted seat when one exists; an ambient caller
+        with no plane seat declares caller (role + task_document_ref) instead. The bounded canonical
+        sprint artifact validates Git, full route-review records and evidence,
         memory mode/readiness, ledger, transitive lineage, graph, predecessor, blocker,
         task-completion, and admission facts without inventing judgment. Public responses and
         artifacts never expose lifecycle operation keys; task-addressed closeout/integration
@@ -115,6 +120,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         section: dict[str, Any] | None = None,
         review: dict[str, Any] | None = None,
         dry_run: bool = False,
+        branch_addressed: bool = False,
     ) -> dict[str, Any]:
         """Author the JSON-primary task document (ar-task-document/v1) and re-render its
         markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
@@ -143,6 +149,8 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
         evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
         evidence path must be a real task-relative file. It overwrites the prior candidate's review.
+        For sanctioned direct execution (no leaf worktree), pass branch_addressed=true to bind the
+        task-root series contract and stamp the candidate tree from the branch HEAD (policy-gated).
         'author_execution_graph' applies one validated atomic batch of structural mutations to a
         sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
         {op:'add_node', ref:{repository,path}, kind?:'master'|'segment', leafIds?:[...]},
@@ -195,7 +203,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
                 section=section,
                 review=review,
             ),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run, branch_addressed=branch_addressed),
         )
 
 

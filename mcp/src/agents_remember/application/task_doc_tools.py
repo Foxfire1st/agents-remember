@@ -17,11 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from pydantic import ValidationError
-
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
@@ -39,10 +36,6 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.tasks.leaf_doc import (
-    TerminalLeafResolutionError,
-    resolve_terminal_leaf_doc,
-)
 from agents_remember.tasks.master_sync import MasterSyncError, MasterSyncPlan, plan_master_sync
 from agents_remember.tasks.readiness import (
     completed_master_rows_to_validate,
@@ -56,7 +49,6 @@ from agents_remember.worktrees.closeout_queue_evidence import (
 from agents_remember.worktrees.integration_branch_authority import (
     require_topology_publication_authority,
 )
-from agents_remember.worktrees.route_review import RouteReviewError, build_route_review
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
     is_enclosure_contract,
@@ -72,6 +64,17 @@ from agents_remember.worktrees.worktree_contract import (
 
 from . import task_sprint_linkage
 from .task_doc_queue_scope import QueueScopeError, governing_queue_scope
+from .task_doc_route_review import (
+    DEFAULT_TASK_DOC_CALL,
+    TaskDocCall,
+    TaskDocError,
+    _enforce_branch_addressed_policy,
+    _enforce_route_review_authority,
+    _record_route_review,  # noqa: F401  # facade re-export (moved to task_doc_route_review.py)
+    _record_route_review_bound,
+    _RouteReviewBinding,
+    _validate,
+)
 from .task_execution_topology import (
     ExecutionTopologyAuthoringRequest,
     ExecutionTopologyEditRequest,
@@ -124,10 +127,6 @@ _MUTABLE_FIELDS = frozenset(
         "executionGraph",
     }
 )
-
-
-class TaskDocError(AgentsRememberError):
-    """Raised when a task-document operation cannot be completed."""
 
 
 @dataclass(frozen=True)
@@ -193,12 +192,13 @@ def task_doc_tool(
     *,
     operation: str,
     edit: TaskDocEdit = NO_EDIT,
-    dry_run: bool = False,
+    call: TaskDocCall = DEFAULT_TASK_DOC_CALL,
 ) -> dict[str, Any]:
     if operation not in VALID_OPERATIONS:
         raise TaskDocError(
             f"unknown operation {operation!r}; expected one of {', '.join(VALID_OPERATIONS)}"
         )
+    _enforce_branch_addressed_policy(config, operation, call.branch_addressed)
     task_root, contract = _resolve(config, target.repo_id, target.task_name, target.contract_path)
     payload_fields = edit.fields or {}
     slug = target.slug
@@ -211,7 +211,7 @@ def task_doc_tool(
             operation=operation,
             edit=edit,
             fields=payload_fields,
-            dry_run=dry_run,
+            dry_run=call.dry_run,
         )
     )
     if special is not None:
@@ -227,7 +227,16 @@ def task_doc_tool(
     elif operation == "record_route_review":
         json_path = _existing_json(task_root, slug)
         original = read_task_doc(json_path)
-        doc = _record_route_review(original, edit.review, contract, task_root, json_path)
+        doc = _record_route_review_bound(
+            original,
+            edit.review,
+            _RouteReviewBinding(
+                contract=contract,
+                task_root=task_root,
+                selected_path=json_path,
+                branch_addressed=call.branch_addressed,
+            ),
+        )
     else:
         original = read_task_doc(_existing_json(task_root, slug))
         doc = _apply(operation, original, edit, contract=contract)
@@ -261,7 +270,7 @@ def task_doc_tool(
     docs: list[TaskDocument] = [doc]
     if master_sync.changed and master_sync.master is not None:
         docs.append(master_sync.master)
-    if dry_run:
+    if call.dry_run:
         preview_context = _TaskDocPublication(config, target, task_root, original, doc, docs)
         with integration_authority_lock(config.coordination_root, target.repo_id):
             _validate_task_doc_publication_authority(preview_context)
@@ -503,40 +512,6 @@ def _replace(
             "replace cannot change the task document path; keep the same slug/kind or create a new document"
         )
     return doc
-
-
-def _record_route_review(
-    doc: TaskDocument,
-    payload: dict[str, Any] | None,
-    contract: WorktreeContract | None,
-    task_root: Path,
-    selected_path: Path,
-) -> TaskDocument:
-    if doc.kind == "master":
-        raise TaskDocError("record_route_review is valid only for a leaf task document")
-    if contract is None:
-        raise TaskDocError("record_route_review requires the leaf worktree contract")
-    if payload is None:
-        raise TaskDocError("record_route_review requires a review object")
-    try:
-        resolved = resolve_terminal_leaf_doc(
-            task_root,
-            contract.leaf_id,
-            asserted_path=selected_path,
-        )
-    except TerminalLeafResolutionError as exc:
-        raise TaskDocError(str(exc)) from exc
-    if resolved is None or resolved[0].resolve() != selected_path.resolve():
-        raise TaskDocError(
-            "record_route_review target is not the exact task document bound to the leaf contract"
-        )
-    try:
-        review = build_route_review(contract, task_root, payload)
-    except (RouteReviewError, ValidationError) as exc:
-        raise TaskDocError(str(exc)) from exc
-    data = doc.model_dump(by_alias=True)
-    data["routeReview"] = review.model_dump(mode="json")
-    return _validate(data)
 
 
 def _build_doc(
@@ -831,28 +806,6 @@ def _enforce_disposition_authority(
         )
 
 
-def _enforce_route_review_authority(
-    operation: str,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> None:
-    candidate_review = candidate.routeReview.model_dump_json() if candidate.routeReview else None
-    original_review = (
-        original.routeReview.model_dump_json()
-        if original is not None and original.routeReview is not None
-        else None
-    )
-    if operation == "create" and candidate_review is not None:
-        raise TaskDocError(
-            "create cannot author route-review evidence; use task_doc.record_route_review"
-        )
-    if operation == "replace" and candidate_review != original_review:
-        raise TaskDocError(
-            "replace cannot add, remove, or change route-review evidence; "
-            "use task_doc.record_route_review"
-        )
-
-
 def _step_unit_counts(doc: TaskDocument) -> Counter[tuple[str, str | None]]:
     counts: Counter[tuple[str, str | None]] = Counter()
     for step in doc.steps:
@@ -1075,13 +1028,6 @@ def _leaf_doc_files(task_root: Path, ref: dict[str, Any]) -> list[Path]:
         return []
     markdown = task_root / file_name
     return [markdown.with_suffix(".json"), markdown]
-
-
-def _validate(data: dict[str, Any]) -> TaskDocument:
-    try:
-        return TaskDocument.model_validate(data)
-    except ValidationError as exc:
-        raise TaskDocError(f"invalid task document: {exc}") from exc
 
 
 def _result(

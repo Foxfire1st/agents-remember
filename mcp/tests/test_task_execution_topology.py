@@ -14,6 +14,7 @@ import agents_remember.tasks.store as task_store
 from agents_remember.application import task_doc_queue_scope
 from agents_remember.application.task_doc_queue_scope import QueuePublicationScope
 from agents_remember.application.task_doc_tools import (
+    TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -460,7 +461,7 @@ class ExecutionTopologyTests(unittest.TestCase):
             TaskDocTarget(repo_id=REPOSITORY, task_name=task_name),
             operation=operation,
             edit=TaskDocEdit(fields=fields),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
     def _bootstrap(self, *, dry_run: bool = False) -> dict[str, Any]:
@@ -469,7 +470,7 @@ class ExecutionTopologyTests(unittest.TestCase):
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
             operation="author_execution_graph",
             edit=TaskDocEdit(fields=self._bootstrap_fields()),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
     def test_legacy_documents_are_readable_but_topology_use_requires_migration(self) -> None:

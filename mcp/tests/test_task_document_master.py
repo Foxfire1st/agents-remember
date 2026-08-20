@@ -7,6 +7,7 @@ from typing import Any
 
 from agents_remember.application import task_doc_tools as task_doc_tools_module
 from agents_remember.application.task_doc_tools import (
+    TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -58,7 +59,7 @@ class MasterApplicationTests(unittest.TestCase):
             TaskDocTarget(repo_id="agents-remember", task_name="series"),
             operation=operation,
             edit=TaskDocEdit(**kw),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
     def _complete_row(self, number: str) -> None:

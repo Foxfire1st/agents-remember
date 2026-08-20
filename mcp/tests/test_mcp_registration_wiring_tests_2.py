@@ -229,7 +229,9 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertEqual(target.slug, "efa")
 
         self.assertEqual(recorder.kwargs["operation"], "set_step")
-        self.assertIs(recorder.kwargs["dry_run"], True)
+        call = recorder.kwargs["call"]
+        self.assertIs(call.dry_run, True)
+        self.assertIs(call.branch_addressed, False)
         edit = recorder.kwargs["edit"]
         self.assertEqual(edit.step, {"id": "1", "title": "do it", "status": "done"})
         self.assertEqual(edit.fields, {"status": "in-progress"})
@@ -249,6 +251,40 @@ class RegistrationWiringTests2(RegistrationWiringTests):
             [edit.fields, edit.step, edit.decision, edit.subtask, edit.section],
             [None, None, None, None, None],
         )
+
+    def test_task_doc_forwards_branch_addressed_opt_in(self) -> None:
+        recorder = self.invoke(
+            "task_doc",
+            "agents_remember.mcp.registration.tasks.task_doc_payload",
+            {
+                "repo_id": "agents-remember",
+                "operation": "record_route_review",
+                "task_name": "260731-EFA",
+                "branch_addressed": True,
+            },
+        )
+
+        call = recorder.kwargs["call"]
+        self.assertIs(call.branch_addressed, True)
+
+    def test_direct_landing_forwards_the_landing_request(self) -> None:
+        recorder = self.invoke(
+            "direct_landing",
+            "agents_remember.mcp.registration.closeout.direct_landing_payload",
+            {
+                "contract_path": "/tmp/series-contract.md",
+                "code_commit": "a" * 40,
+                "intent_note": "owner approved",
+                "dry_run": True,
+            },
+        )
+
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.contract_path, "/tmp/series-contract.md")
+        self.assertEqual(request.code_commit, "a" * 40)
+        self.assertEqual(request.intent_note, "owner approved")
+        self.assertIs(request.dry_run, True)
 
     def test_codex_benchmark_prepare_defaults_to_a_preview(self) -> None:
         """ "Defaults to dry_run=true because a real prepare clones repos" -- the default
@@ -439,10 +475,66 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertIsNone(request.evidence_refs)
         self.assertEqual(recorder.kwargs, {})
 
-    def test_gate_list_defaults_to_the_ambient_lifecycle(self) -> None:
+    def test_gate_list_defaults_to_no_declared_caller(self) -> None:
         recorder = self.invoke(
             "gate_list", "agents_remember.mcp.registration.gates.structural_gate_list_payload"
         )
 
         self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(recorder.kwargs, {})
+        self.assertEqual(recorder.kwargs, {"caller": None})
+
+    def test_gate_list_forwards_a_declared_caller(self) -> None:
+        recorder = self.invoke(
+            "gate_list",
+            "agents_remember.mcp.registration.gates.structural_gate_list_payload",
+            {
+                "caller": {
+                    "role": "orchestrator",
+                    "task_document_ref": {"repository": "repo-a", "path": "sprint/task.json"},
+                }
+            },
+        )
+
+        self.assertEqual(recorder.args, (self.config,))
+        caller = recorder.kwargs["caller"]
+        self.assertEqual(caller.role, "orchestrator")
+        self.assertEqual(caller.task_document_ref.path, "sprint/task.json")
+
+    def test_lifecycle_gate_forwards_a_declared_caller(self) -> None:
+        recorder = self.invoke(
+            "lifecycle_gate",
+            "agents_remember.mcp.registration.gates.structural_lifecycle_gate_payload",
+            {
+                "kind": "plan-approval",
+                "caller": {
+                    "role": "manager",
+                    "task_document_ref": {"repository": "repo-a", "path": "master/task.json"},
+                },
+            },
+        )
+
+        caller = recorder.args[1].caller
+        self.assertEqual(caller.role, "manager")
+        self.assertEqual(caller.task_document_ref.path, "master/task.json")
+
+    def test_gate_decide_forwards_a_declared_caller(self) -> None:
+        recorder = self.invoke(
+            "gate_decide",
+            "agents_remember.mcp.registration.gates.structural_gate_decide_payload",
+            {
+                "task_document_ref": {
+                    "repository": "repo-a",
+                    "path": "master/leaf.json",
+                },
+                "kind": "closeout-approval",
+                "decision": "approve",
+                "caller": {
+                    "role": "orchestrator",
+                    "task_document_ref": {"repository": "repo-a", "path": "sprint/task.json"},
+                },
+            },
+        )
+
+        caller = recorder.args[1].caller
+        self.assertEqual(caller.role, "orchestrator")
+        self.assertEqual(caller.task_document_ref.path, "sprint/task.json")

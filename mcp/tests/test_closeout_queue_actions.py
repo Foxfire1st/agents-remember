@@ -19,6 +19,7 @@ from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.closeout_queue import (
     CloseoutQueueError,
+    ContractError,
     QueueActor,
     _ActionContext,
     _active_lane_owner,
@@ -305,6 +306,14 @@ class CloseoutQueueActionTests(unittest.TestCase):
             _declaration_identity(
                 _ActionContext(fixture.cfg, topology, graph, missing, "declare", NOW)
             )
+        with (
+            mock.patch(
+                "agents_remember.worktrees.closeout_queue.load_contract",
+                side_effect=ContractError("unreadable"),
+            ),
+            self.assertRaisesRegex(CloseoutQueueError, "contract-invalid"),
+        ):
+            _declaration_identity(context)
         with (
             mock.patch(
                 "agents_remember.worktrees.closeout_queue.load_contract",

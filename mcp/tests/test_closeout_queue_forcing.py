@@ -18,6 +18,7 @@ from agents_remember.controlplane.closeout_queue_store import (
 )
 from agents_remember.controlplane.durable_store import CompactionOwnerError
 from agents_remember.models.closeout_queue import CloseoutQueueState
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
@@ -644,7 +645,7 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
             CloseoutQueueState.model_validate_json(state_path.read_text(encoding="utf-8")).closed
         )
 
-    def test_plane_owned_actor_is_not_request_data_and_writer_census_is_enforced(self) -> None:
+    def test_plane_owned_actor_is_authoritative_and_ambient_caller_must_declare(self) -> None:
         fixture = QueueFixture(self.root / "actor")
         with self.assertRaisesRegex(ValidationError, "Extra inputs"):
             CloseoutQueueRequest.model_validate(
@@ -655,6 +656,9 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
                 }
             )
         request = CloseoutQueueRequest(action="status", sprint_task_document_ref=SPRINT)
+        # Ambient callers (no plane identity) must declare their caller; the
+        # declaration is then validated by the same queue authorization a seat
+        # would face (L16-R2).
         with (
             mock.patch.object(
                 public_queue,
@@ -663,9 +667,54 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
                     "ambient-seat-unavailable", "no hosted identity"
                 ),
             ),
-            self.assertRaisesRegex(public_queue.CloseoutQueueError, "no hosted identity"),
+            self.assertRaisesRegex(
+                public_queue.CloseoutQueueError, "closeout-queue-caller-required"
+            ),
         ):
             public_queue.closeout_queue_tool(fixture.cfg, request)
+        declared = DeclaredCaller(
+            role="orchestrator",
+            task_document_ref=SPRINT,
+        )
+        with mock.patch.object(
+            public_queue,
+            "resolve_ambient_seat",
+            side_effect=public_queue.AmbientSeatError(
+                "ambient-seat-unavailable", "no hosted identity"
+            ),
+        ):
+            ambient = public_queue.closeout_queue_tool(
+                fixture.cfg,
+                CloseoutQueueRequest(
+                    action="status",
+                    sprint_task_document_ref=SPRINT,
+                    caller=declared,
+                ),
+            )
+        self.assertEqual(ambient["sprintTaskDocumentRef"], SPRINT.model_dump())
+        # A hosted seat is authoritative: a request-carried caller that
+        # contradicts the plane identity is refused.
+        with (
+            mock.patch.object(
+                public_queue,
+                "resolve_ambient_seat",
+                return_value=SimpleNamespace(
+                    binding_role="orchestrator",
+                    binding_task_document_ref=SPRINT,
+                ),
+            ),
+            self.assertRaisesRegex(
+                public_queue.CloseoutQueueError, "closeout-queue-caller-conflict"
+            ),
+        ):
+            public_queue.closeout_queue_tool(
+                fixture.cfg,
+                CloseoutQueueRequest(
+                    action="status",
+                    sprint_task_document_ref=SPRINT,
+                    caller=DeclaredCaller(role="manager", task_document_ref=MASTER_A),
+                ),
+            )
         with (
             mock.patch.object(
                 public_queue,

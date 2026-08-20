@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 QueueCandidateState = Literal[
@@ -83,6 +84,10 @@ class CloseoutQueueRequest(BaseModel):
     grade: SchedulingGradeInput | None = None
     blocker_judgment_id: str | None = Field(default=None, max_length=MAX_QUEUE_SHORT_TEXT)
     rationale: str = Field(default="", max_length=MAX_QUEUE_TEXT)
+    # Ambient caller identity: honored only when no plane-injected seat exists.
+    # The consuming mechanism validates the declared role/document
+    # against the same policy a hosted seat would face.
+    caller: DeclaredCaller | None = None
 
     @model_validator(mode="after")
     def _action_payload_is_exact(self) -> CloseoutQueueRequest:

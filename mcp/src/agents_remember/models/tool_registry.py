@@ -29,6 +29,7 @@ from agents_remember.models.benchmarks import (
 from agents_remember.models.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
+from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.lifecycles.responses import (
     LifecycleBlockResponse,
@@ -202,6 +203,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
     "closeout_queue": CloseoutQueueResponse,
+    "direct_landing": DirectLandingResponse,
     "lifecycle_gate": LifecycleGateResponse,
     "lifecycle_gate_internal": InternalLifecycleGateResponse,
     "gate_create": GateCreateResponse,

@@ -13,6 +13,7 @@ from typing import Any
 
 from agents_remember.application.task_doc_tools import (
     VALID_OPERATIONS,
+    TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -124,7 +125,7 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint"),
             operation="author_execution_graph",
             edit=TaskDocEdit(fields={"mutations": mutations}),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
     def _snapshot(self) -> dict[Path, bytes]:

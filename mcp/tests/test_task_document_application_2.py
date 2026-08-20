@@ -6,6 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+from agents_remember.application.task_doc_route_review import (
+    _record_route_review_bound,
+    _require_route_review_binding,
+    _RouteReviewBinding,
+)
 from agents_remember.application.task_doc_tools import (
     TaskDocEdit,
     TaskDocError,
@@ -15,6 +20,7 @@ from agents_remember.application.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.tasks import RouteReviewRecord, TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
     build_route_review,
@@ -436,7 +442,7 @@ class ApplicationTests2(ApplicationTests):
             _record_route_review(bare, {}, contract, contract.task_root, contract.task_artifact)
         with (
             mock.patch(
-                "agents_remember.application.task_doc_tools.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=None,
             ),
             self.assertRaisesRegex(TaskDocError, "exact task document"),
@@ -444,11 +450,11 @@ class ApplicationTests2(ApplicationTests):
             _record_route_review(bare, valid, contract, contract.task_root, contract.task_artifact)
         with (
             mock.patch(
-                "agents_remember.application.task_doc_tools.resolve_terminal_leaf_doc",
+                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
                 return_value=(contract.task_artifact, bare),
             ),
             mock.patch(
-                "agents_remember.application.task_doc_tools.build_route_review",
+                "agents_remember.application.task_doc_route_review.build_route_review",
                 side_effect=RouteReviewError("route-review-invalid", "invalid review"),
             ),
             self.assertRaisesRegex(TaskDocError, "invalid review"),
@@ -911,3 +917,141 @@ class ApplicationTests2(ApplicationTests):
             self._call("set_step", step={"title": "no id"})
         with self.assertRaises(TaskDocError):
             self._call("set_step", step={"id": "S9.a", "title": "x", "parent": "ghost"})
+
+
+class RouteReviewBindingSurfaceTests(ApplicationTests):
+    """Branch surface of task_doc_route_review.py (gate round 2 rail 3).
+
+    Covers the binding refusals and the bound-form success that the
+    task_doc-level tests only reach through mocks, so every changed branch in
+    the extracted route-review module runs in the suite.
+    """
+
+    def _contract(self):
+        return _route_review_contract(self.coord)
+
+    def _leaf(self, contract):
+        doc = _doc(
+            id=contract.leaf_id,
+            slug=contract.leaf_id,
+            kind="subTask",
+            repo=contract.repo_name,
+            enclosures=[
+                {
+                    "leafId": contract.leaf_id,
+                    "enclosurePath": contract.contract_path.as_posix(),
+                }
+            ],
+        )
+        write_task_doc(contract.task_root, doc)
+        return doc
+
+    def test_bound_form_refuses_master_payload_none_and_build_error(self) -> None:
+        contract = self._contract()
+        leaf = self._leaf(contract)
+        binding = _RouteReviewBinding(
+            contract=contract, task_root=contract.task_root, selected_path=contract.task_artifact
+        )
+        master = leaf.model_copy(update={"kind": "master"})
+        with self.assertRaisesRegex(TaskDocError, "only for a leaf"):
+            _record_route_review_bound(master, {"verdict": "pass"}, binding)
+        with self.assertRaisesRegex(TaskDocError, "requires a review object"):
+            _record_route_review_bound(leaf, None, binding)
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                return_value=(contract.task_artifact, leaf),
+            ),
+            mock.patch(
+                "agents_remember.application.task_doc_route_review.build_route_review",
+                side_effect=RouteReviewError("route-review-invalid", "invalid review"),
+            ),
+            self.assertRaisesRegex(TaskDocError, "invalid review"),
+        ):
+            _record_route_review_bound(leaf, {"verdict": "pass"}, binding)
+
+    def test_require_binding_refuses_each_contract_kind_and_resolution_failure(self) -> None:
+        contract = self._contract()
+        series = replace(contract, kind="series", leaf_id="")
+        root = contract.task_root
+        leaf_path = root / "leaf.json"
+        with self.assertRaisesRegex(TaskDocError, "requires the leaf worktree contract"):
+            _require_route_review_binding(
+                _RouteReviewBinding(contract=series, task_root=root, selected_path=leaf_path)
+            )
+        with self.assertRaisesRegex(TaskDocError, "branch_addressed mode requires"):
+            _require_route_review_binding(
+                _RouteReviewBinding(
+                    contract=contract,
+                    task_root=root,
+                    selected_path=leaf_path,
+                    branch_addressed=True,
+                )
+            )
+        with self.assertRaisesRegex(TaskDocError, "outside the task root"):
+            _require_route_review_binding(
+                _RouteReviewBinding(
+                    contract=series,
+                    task_root=root,
+                    selected_path=root.parent / "escape" / "leaf.json",
+                    branch_addressed=True,
+                )
+            )
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                side_effect=TerminalLeafResolutionError("no-terminal-leaf", "no terminal leaf"),
+            ),
+            self.assertRaisesRegex(TaskDocError, "no terminal leaf"),
+        ):
+            _require_route_review_binding(
+                _RouteReviewBinding(contract=contract, task_root=root, selected_path=leaf_path)
+            )
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(TaskDocError, "exact task document"),
+        ):
+            _require_route_review_binding(
+                _RouteReviewBinding(contract=contract, task_root=root, selected_path=leaf_path)
+            )
+
+    def test_legacy_success_records_route_review(self) -> None:
+        contract = self._contract()
+        leaf = self._leaf(contract)
+        valid = {
+            "candidateTree": "a" * 40,
+            "verdict": "pass",
+            "verdictRef": "notes/reports/verdict.md",
+            "reviewedAt": "2026-08-13T00:00:00+00:00",
+            "routes": [
+                {
+                    "route": "worktrees",
+                    "verdict": "pass",
+                    "evidenceRef": "notes/reports/route-evidence.md",
+                }
+            ],
+        }
+        with (
+            mock.patch(
+                "agents_remember.application.task_doc_route_review.resolve_terminal_leaf_doc",
+                return_value=(contract.task_artifact, leaf),
+            ),
+            mock.patch(
+                "agents_remember.application.task_doc_route_review.build_route_review",
+                return_value=RouteReviewRecord.model_validate(valid),
+            ),
+        ):
+            recorded = _record_route_review(
+                leaf,
+                valid,
+                contract,
+                contract.task_root,
+                contract.task_artifact,
+            )
+        review = recorded.routeReview
+        self.assertIsNotNone(review)
+        assert review is not None
+        self.assertEqual(review.verdict, "pass")

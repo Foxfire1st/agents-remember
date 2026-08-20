@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from agents_remember.application.task_doc_tools import (
+    TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
@@ -60,7 +61,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="sprint"),
                     operation="set_field",
                     edit=TaskDocEdit(fields={"integrationBranch": contract.code_work_branch}),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertEqual((fixture.tasks / "sprint" / "task.json").read_bytes(), before)
@@ -84,7 +85,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="master-b"),
                     operation="set_field",
                     edit=TaskDocEdit(fields={"executionNature": "organizational"}),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertEqual((fixture.tasks / "master-b" / "task.json").read_bytes(), before)
@@ -114,7 +115,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="sprint"),
                     operation="replace",
                     edit=TaskDocEdit(fields=data),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertEqual(sprint_path.read_bytes(), before)
@@ -146,7 +147,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="sprint"),
                     operation="replace",
                     edit=TaskDocEdit(fields=data),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertEqual(sprint_path.read_bytes(), before)
@@ -192,7 +193,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                             TaskDocTarget(repo_id=REPO, task_name="sprint"),
                             operation="set_field",
                             edit=TaskDocEdit(fields={"statusNote": "authority probe"}),
-                            dry_run=dry_run,
+                            call=TaskDocCall(dry_run=dry_run),
                         )
 
                 self.assertEqual(sprint_path.read_bytes(), sprint_before)
@@ -223,7 +224,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="master-a", slug="leaf-a"),
                     operation="create",
                     edit=TaskDocEdit(fields=fields),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertFalse(leaf_path.exists())
@@ -262,7 +263,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="orphan"),
                     operation="create",
                     edit=TaskDocEdit(fields=document.model_dump(by_alias=True)),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertFalse((fixture.tasks / "orphan" / "task.json").exists())
@@ -304,7 +305,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                     TaskDocTarget(repo_id=REPO, task_name="master-b"),
                     operation="remove_subtask",
                     edit=TaskDocEdit(subtask={"number": "LEAF-B", "keep_file": True}),
-                    dry_run=dry_run,
+                    call=TaskDocCall(dry_run=dry_run),
                 )
 
         self.assertEqual(master_path.read_bytes(), before)
