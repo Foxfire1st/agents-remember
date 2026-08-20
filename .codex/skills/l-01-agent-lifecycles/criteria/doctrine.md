@@ -57,6 +57,19 @@ derived waves, readiness, lineage, and route/seam evidence. Execution nature, de
 priority, and material reprioritization require an explicit role judgment with durable rationale.
 Stable tie-breaking must be named as tie-breaking, not described as a priority decision.
 
+### D-6 — Source-comment requirement identifiers *(added 260815-DAG-L15)*
+
+**Requirement identifiers in source comments are allowed when they name a durable product
+requirement; provenance prose is not.** The repo carries `L<leaf>-R<n>` / `L<leaf>-S<n>`
+identifiers at scale (83 comment lines across 22 modules at 260815-DAG-L15); the written Source
+Comment Scope rule ("no task, leaf, decision-item, review, requirement, or audit identifiers in
+source comments", memory `system/coding-guidelines.md` rule 1) and this practice contradict
+(260815-DAG-L12 F3, 260815-DAG-L16 F4). The reconciled convention: a bounded
+`L<leaf>-R<n>` / `L<leaf>-S<n>` identifier naming a durable leaf requirement or step is allowed
+and is the preferred way to tie a comment to its contract. Task, chat, review, decision-item, or
+report provenance and paths stay out of source comments — workflow history lives in Git history,
+task artifacts, and onboarding, not comments.
+
 ## Exploratory Mandate
 
 Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): attack

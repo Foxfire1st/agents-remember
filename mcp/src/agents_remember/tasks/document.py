@@ -17,7 +17,7 @@ the observer never projects them as a lifecycle node.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Self
 
 from pydantic import (
@@ -406,8 +406,85 @@ class SprintExecutionGraph(_Doc):
                         next_ready.append(successor)
             ready = next_ready
         if visited != len(self.nodes):
-            raise ValueError("execution-graph must be acyclic")
+            residual = [node for node in self.nodes if indegree[node] > 0]
+            cycle = _find_cycle_members(self, residual)
+            raise ValueError(
+                "execution-graph must be acyclic; cycle members: "
+                + " -> ".join(node.ref.key for node in cycle)
+            )
         return waves
+
+
+def _find_cycle_members(
+    graph: SprintExecutionGraph, residual: list[SprintExecutionNode]
+) -> list[SprintExecutionNode]:
+    """Return the exact members of one directed cycle among the residual nodes.
+
+    Kahn's algorithm leaves cycle members AND nodes downstream of a cycle in
+    ``residual``; this extracts one cycle deterministically: DFS seeded from the
+    residual node in declaration order, returning the stack slice between the
+    repeated node.
+    """
+
+    if not residual:
+        return residual
+    by_index, adjacency = _residual_adjacency(graph)
+    residual_set = set(residual)
+    search = _CycleSearch()
+    for node in sorted(residual, key=by_index.__getitem__):
+        if node in search.visited:
+            continue
+        found = _dfs_cycle_members(node, adjacency, residual_set, by_index, search)
+        if found is not None:
+            return found
+    return residual
+
+
+def _residual_adjacency(
+    graph: SprintExecutionGraph,
+) -> tuple[
+    dict[SprintExecutionNode, int],
+    dict[SprintExecutionNode, list[SprintExecutionNode]],
+]:
+    by_index = {node: index for index, node in enumerate(graph.nodes)}
+    adjacency: dict[SprintExecutionNode, list[SprintExecutionNode]] = {
+        node: [] for node in graph.nodes
+    }
+    for edge in graph.edges:
+        predecessor, successor = graph._resolved_edge(edge)
+        adjacency[predecessor].append(successor)
+    return by_index, adjacency
+
+
+def _dfs_cycle_members(
+    node: SprintExecutionNode,
+    adjacency: dict[SprintExecutionNode, list[SprintExecutionNode]],
+    residual: set[SprintExecutionNode],
+    by_index: dict[SprintExecutionNode, int],
+    search: _CycleSearch,
+) -> list[SprintExecutionNode] | None:
+    search.stack.append(node)
+    search.on_stack.add(node)
+    for successor in sorted(adjacency[node], key=by_index.__getitem__):
+        if successor in search.on_stack:
+            return search.stack[search.stack.index(successor) :]
+        if successor in residual and successor not in search.visited:
+            found = _dfs_cycle_members(successor, adjacency, residual, by_index, search)
+            if found is not None:
+                return found
+    search.stack.pop()
+    search.on_stack.discard(node)
+    search.visited.add(node)
+    return None
+
+
+@dataclass
+class _CycleSearch:
+    """Mutable DFS traversal state shared across one cycle search."""
+
+    stack: list[SprintExecutionNode] = field(default_factory=list)
+    on_stack: set[SprintExecutionNode] = field(default_factory=set)
+    visited: set[SprintExecutionNode] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

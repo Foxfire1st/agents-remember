@@ -71,6 +71,22 @@ reprioritization to the orchestrator, substantial graph/classification reshapes 
 strategist pass through the architect, and master-local readiness reporting to managers. A manager
 that ranks other masters, or an algorithm that silently invents priority, blocks the plan.
 
+### PR-8 — Review independence and evidence-type matching *(added 260815-DAG-L15)*
+
+**The reviewer of a plan is never its author, and every requirement verdict matches its evidence class.**
+
+1. **No self-review.** The plan's builder/author seat may not review it; a distinct reviewer seat
+   runs the review, and a self-signed requirement is a blocking finding. Catching class:
+   260815-DAG — L7/L8/L9 route reviews were orchestrator self-reviews (review reports r2 F7,
+   r6 F12).
+2. **Evidence matches the requirement's type.** A rendering/visibility requirement needs
+   mounted-UI proof (a component reachable from the shell, a test-id, a story, or a scenario —
+   projecting a field is NOT rendering); a scheduling/ordering requirement needs operation-level
+   proof (drive the queue/scheduler operation and observe the order); a data-model requirement
+   needs artifact-level proof (the persisted/parsed shape). Evidence of the wrong class is
+   verdict-laundering, never a pass. Catching class: 260815-DAG — L8-R3 was passed on
+   projection-only evidence (review reports r2 F7, r4 F6, r6 F8/F9).
+
 ## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
 
 Run under the exploratory mandate; a candidate is proposed for promotion into the standing list

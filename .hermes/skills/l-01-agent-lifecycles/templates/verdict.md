@@ -22,6 +22,10 @@ and the loop-review adaptation below.
    binding table in `roles/reviewer.md` assigns this review type, `../criteria/`) — one row per
    standing criterion even when it found nothing, candidate rows when run — and carry any proposed
    catalog amendments (the promotion ratchet) in that section.
+7. **The reviewer seat is distinct from the author seat, and every requirement verdict cites
+   evidence of the requirement's class** (rendering → mounted-UI proof, scheduling →
+   operation-level proof, data model → artifact-level proof). A self-review or a wrong-class
+   verdict is a verdict-laundering finding.
 
 ## Leaf Route-Review Variant (every code-changing leaf)
 
@@ -31,7 +35,8 @@ and the loop-review adaptation below.
 | Field           | Value                                              |
 | --------------- | -------------------------------------------------- |
 | scope           | <leaf code candidate; the plane binds its tree>    |
-| reviewer seat   | <leaf task_doc path> + reviewer                    |
+| reviewer seat   | <leaf task_doc path> + reviewer (must differ from author seat) |
+| author seat     | <implementer seat that authored the change set>    |
 | recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                   |
 | decider         | owning manager (architect in flat/solo mode)       |
 | artifact path   | notes/reports/<leaf-id>-route-review-verdict.md    |

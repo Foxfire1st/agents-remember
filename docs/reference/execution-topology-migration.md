@@ -63,7 +63,33 @@ Classification rule (preserves current behavior):
 - Malformed canonical registers degrade reads to facts; the write path
   (`task_doc.set_section`/`replace`/`create`) validates the register shape.
 
-## 4. Rollback
+## 4. Served-build preflight (blocks the rc7 failure class)
+
+The 3.0.0rc7 cutover failure — the deployed build could not parse
+`executionNature`/`executionGraph` and the tree had to be restored from a snapshot —
+is prevented mechanically: every graph authoring/migration write
+(`author_execution_graph`, `attach_master`/`detach_master`, and
+`set_field`/`replace`/`create` edits that emit topology fields) runs the served-build
+preflight and refuses with upgrade guidance when the serving runtime predates the
+topology schema (`task-execution-topology-serving-build-unsupported`).
+
+The preflight checks two legs:
+
+1. **Model self-probe**: the process running the tool (the MCP server serving the
+   tree) must declare `executionNature`/`executionGraph` on `TaskDocument`.
+2. **Installed distribution**: when the resolved `agents-remember-mcp` distribution
+   is a non-editable wheel older than the documented floor (`3.0.0rc8`), refuse even
+   if the checkout code on `sys.path` is current. An editable install, or a
+   source-tree `*.egg-info` (the checkout dev layout), proves the checkout code
+   serves and passes.
+
+Operator contract: run authoring through the **deployed serving server** (in-process
+invocation), never from a checkout CLI whose server is a different build — the
+preflight cannot see another venv. Refresh the served runtime (e.g. replace the rc7
+venv) before authoring, exactly as the original cutover required as a post-deploy
+step.
+
+## 5. Rollback
 
 Rollback restores a snapshot — it does not re-enable a compatibility path.
 
@@ -76,10 +102,12 @@ Rollback restores a snapshot — it does not re-enable a compatibility path.
 A branch that was already recorded `atomic` is only reclassified by an accepted
 strategist/orchestrator ruling, never by the authoring mechanism itself.
 
-## 5. Release notes
+## 6. Release notes
 
 - Persistent sprints and commanded masters are explicitly typed (`executionNature`)
   and graph-joined (`executionGraph`).
+- Graph authoring/migration writes run a served-build preflight and refuse with
+  upgrade guidance when the serving runtime predates the topology schema.
 - A missing graph selects the atomic-sequential default, not a refusal; a missing
   nature under an authored graph remains a hard refusal.
 - Rollback is snapshot-based; no dual-reader or feature-switch fallback remains.

@@ -15,10 +15,20 @@ time; the exploratory mandate and the promotion ratchet keep the catalog alive.
 was refreshed" is verified against the artifact itself, not trusted — claim by claim, no sampling
 of the load-bearing ones.
 
+  A claim that "the tree contains only intended changes" is refuted against BOTH content and mode
+  rows: `git status --short` plus `git diff HEAD --numstat` for content, and `git diff HEAD
+  --summary` for mode-only changes — exec-bit drops on hooks/scripts are behaviorally meaningful
+  (git skips non-executable hooks) and silent to content diffs. Run the check in the same
+  filesystem view as the claimed change set (a 9P/Windows client can show mode rows the WSL-side
+  tree does not carry).
+
 - Catching evidence, three separate engagements (260703-L8): review 3 caught a **hand-aligned
   test** behind a wiring claim; cycle 6's closeout gate caught **"refreshed" overviews that were
   history-only**; review 4 caught the **OWNER's own canvas overclaim** (L8 decision log, cycle-7
-  entry) — builder reports and owner claims fail the same way.
+  entry) — builder reports and owner claims fail the same way. Fourth engagement
+  (260815-DAG-L12): 10 files carried mode-only changes (100755→100644, incl.
+  `.githooks/pre-commit`) absent from the worker's file list, contradicting "the tree contains
+  only intended changes".
 
 ### RV-2 — CLASS-completeness *(promoted to standing at 260703-L18 — 2 catches)*
 

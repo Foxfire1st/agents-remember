@@ -44,6 +44,7 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentRefError,
     TaskDocumentTopology,
 )
+from agents_remember.tasks.serving_preflight import TopologyServingBuildError
 from pydantic import ValidationError
 from test_task_execution_topology import (
     MASTER_A,
@@ -516,6 +517,50 @@ class SprintLinkageTests(unittest.TestCase):
         self.assertIn(("slug-only-membership", MASTER_A.key), pairs)
         self.assertIn(("slug-only-membership", MASTER_B.key), pairs)
 
+    def test_attach_wraps_a_serving_build_preflight_refusal(self) -> None:
+        self._graph_ful_sprint()
+        self._write_master(MASTER_C)
+        with (
+            mock.patch(
+                "agents_remember.application.task_sprint_linkage.require_serving_topology_schema",
+                side_effect=TopologyServingBuildError(
+                    "task-execution-topology-serving-build-unsupported: probe"
+                ),
+            ),
+            self.assertRaisesRegex(TaskDocError, "serving-build-unsupported"),
+        ):
+            self._attach(
+                {
+                    "masterRef": MASTER_C.model_dump(),
+                    "number": "M3",
+                    "judgmentId": "J-1",
+                }
+            )
+
+    def test_report_does_not_flag_a_sprint_as_uncommanded_master(self) -> None:
+        """L15-R8 F8: orchestrates-bearing docs are sprints, never uncommanded-master candidates."""
+        self._write_master(MASTER_A, nature="organizational")
+        self._write_master(MASTER_B, nature="atomic")
+        write_task_doc(
+            self.tasks / "other-sprint",
+            _master(identity="OTHER", orchestrates=["master-a"]),
+        )
+        self._write_sprint(
+            rows=[SubTaskRef(number="M1", name="master-a", masterRef=MASTER_A)],
+            decisions=[
+                {
+                    "at": "2026-08-15T02:15:00+00:00",
+                    "decision": "Attach other-sprint as a bounded commanded repair master.",
+                    "rationale": "Sprints are coordination documents, not commanded masters.",
+                }
+            ],
+        )
+        facts = self._report()["linkageFacts"]
+        kinds = {(fact["kind"], fact.get("master")) for fact in facts}
+        self.assertNotIn(("uncommanded-master", "agents-remember/other-sprint/task.json"), kinds)
+        # The commanded master with no row still surfaces as membership-without-row.
+        self.assertIn(("membership-without-row", MASTER_B.key), kinds)
+
     def test_get_surfaces_linkage_facts_for_sprints_only(self) -> None:
         self._graph_ful_sprint()
         self._write_master(MASTER_C, nature="atomic")
@@ -983,11 +1028,18 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             ],
         )
         facts = self._op("linkage_report", {})["linkageFacts"]
-        self.assertEqual([fact["kind"] for fact in facts], ["seat-doc-row"] * 3)
+        # L15-R8 F8: rows whose seat doc is absent or carries no master reference
+        # are reported as seat-doc-row-unresolved, not as master-less seat-doc-row.
+        self.assertEqual(
+            [fact["kind"] for fact in facts],
+            ["seat-doc-row-unresolved", "seat-doc-row", "seat-doc-row-unresolved"],
+        )
         by_number = {fact["number"]: fact for fact in facts}
-        self.assertNotIn("master", by_number["M4"])  # seat doc absent
+        self.assertEqual(by_number["M4"]["kind"], "seat-doc-row-unresolved")  # seat doc absent
         self.assertEqual(by_number["M5"]["master"], MASTER_A.key)  # later reference wins
-        self.assertNotIn("master", by_number["M6"])  # no master reference
+        self.assertEqual(by_number["M6"]["kind"], "seat-doc-row-unresolved")  # no master reference
+        self.assertNotIn("master", by_number["M4"])
+        self.assertNotIn("master", by_number["M6"])
 
     def test_validate_sprint_linkage_refusal_branches(self) -> None:
         self._write_master(MASTER_A, nature="organizational")

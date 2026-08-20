@@ -21,6 +21,8 @@ from ..tools import (
     memory_carryover_plan_payload,
     memory_init_payload,
     memory_quality_check_payload,
+    memory_quality_check_poll_payload,
+    memory_quality_check_start_payload,
     route_index_refresh_payload,
 )
 
@@ -62,6 +64,9 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         checks: list[str] | None = None,
         detail_limit: int = 50,
         contract_path: str | None = None,
+        *,
+        wait: bool = True,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         """Closeout memory-quality gate: runs drift-integrity and style checks over onboarding.
         It never changes code or memory. A full contract-scoped call atomically replaces the one
@@ -70,7 +75,20 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         neither. ok=false means findings exist (e.g. dirty-source
         drift), not that the tool failed. `curatorActionableCount` is the repair loop gate; final
         commit stamps remain closeout-owned. Pass `checks` to run a subset; default runs all. Pass
-        `contract_path` to check that leaf's memory worktree instead of the official memory repo."""
+        `contract_path` to check that leaf's memory worktree instead of the official memory repo.
+        The full check can exceed the MCP request window: pass `wait=false` to start it
+        asynchronously and poll with the returned `runId` (the poll returns the identical
+        result; `run-not-found` means the run was evicted or the server restarted — rerun)."""
+        if run_id is not None:
+            return memory_quality_check_poll_payload(repo_id, run_id)
+        if not wait:
+            return memory_quality_check_start_payload(
+                config,
+                repo_id,
+                checks=checks,
+                detail_limit=detail_limit,
+                contract_path=contract_path,
+            )
         return memory_quality_check_payload(
             config,
             repo_id,

@@ -243,7 +243,9 @@ class ExecutionGraphAuthoringTests(unittest.TestCase):
             "successor": MASTER_A.model_dump(),
             "reason": "B first",
         }
-        with self.assertRaisesRegex(TaskDocError, "invalid execution-graph authoring"):
+        # F5 (L15-R8): a missing judgmentId is the typed judgment-required refusal,
+        # not a raw pydantic parse failure.
+        with self.assertRaisesRegex(TaskDocError, "task-execution-graph-judgment-required"):
             self._author([edge])
         with self.assertRaisesRegex(TaskDocError, "judgment-unknown"):
             self._author([{**edge, "judgmentId": "J-missing"}])

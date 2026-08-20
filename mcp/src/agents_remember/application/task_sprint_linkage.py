@@ -65,6 +65,10 @@ from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
 )
+from agents_remember.tasks.serving_preflight import (
+    TopologyServingBuildError,
+    require_serving_topology_schema,
+)
 from agents_remember.worktrees.integration_branch_authority import (
     require_topology_migration_authority,
 )
@@ -76,6 +80,16 @@ from .task_execution_topology import (
 )
 
 SPRINT_LINKAGE_OPERATIONS = ("attach_master", "detach_master", "linkage_report")
+
+
+def _require_serving_topology_schema() -> None:
+    """Wrap the served-build preflight in the linkage error family (L15-R4)."""
+
+    try:
+        require_serving_topology_schema()
+    except TopologyServingBuildError as exc:
+        raise SprintLinkageError(str(exc)) from exc
+
 
 _SEAT_DOC_FILE = re.compile(r"^(\d+_manage-|00_.*-seat)")
 _SEAT_MASTER_REFERENCE = re.compile(r"\.\./([^/]+)/task\.json$")
@@ -183,6 +197,7 @@ def sprint_linkage_operation(operation: str, call: SprintLinkageCall) -> dict[st
 def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
     """Attach one master to a sprint as a single validated atomic batch (L14-R4)."""
 
+    _require_serving_topology_schema()
     payload = _parse_payload(_AttachMasterPayload, request.fields, "attach_master")
     topology, sprint_ref, sprint = _sprint_context(request, "attach_master")
     master = _resolve_attach_target(topology, sprint_ref, payload.masterRef)
@@ -215,7 +230,7 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "executionNatureAsserted": candidate_master is not None,
     }
     if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
+        with integration_authority_lock(request.coordination_root, request.repo_id, create=False):
             _require_publication_authority(request, overrides)
         result["dryRun"] = True
         result["documents"] = [
@@ -229,6 +244,7 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
 def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
     """Detach one master from a sprint; refuses while graph edges touch its node."""
 
+    _require_serving_topology_schema()
     payload = _parse_payload(_DetachMasterPayload, request.fields, "detach_master")
     topology, sprint_ref, sprint = _sprint_context(request, "detach_master")
     master_ref = payload.masterRef
@@ -266,7 +282,7 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "masterResolved": master is not None,
     }
     if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
+        with integration_authority_lock(request.coordination_root, request.repo_id, create=False):
             _require_publication_authority(request, overrides)
         result["dryRun"] = True
         result["documents"] = [
@@ -314,7 +330,7 @@ def collect_linkage_facts(
         masters = [
             master
             for master in topology.repository_masters(sprint_ref.repository)
-            if master.ref != sprint_ref
+            if master.ref != sprint_ref and not master.document.orchestrates
         ]
     except (TaskDocumentRefError, OSError, ValueError) as exc:
         return [{"kind": "sprint-scan-failed", "detail": str(exc)}]
@@ -747,10 +763,27 @@ def _row_facts(
         master_ref = row.masterRef
         if master_ref is None and _SEAT_DOC_FILE.match(row.file or ""):
             master_ref = _correlate_seat_row(sprint, row)
-            fact: dict[str, Any] = {"kind": "seat-doc-row", "number": row.number, "file": row.file}
-            if master_ref is not None:
-                fact["master"] = master_ref.key
-            facts.append(fact)
+            if master_ref is None:
+                # The seat doc exists but carries no ../<master>/task.json
+                # reference: report the correlation miss so a later
+                # membership-without-row fact for its master reads as a miss,
+                # not a genuinely missing row (L15-R8 F8).
+                facts.append(
+                    {
+                        "kind": "seat-doc-row-unresolved",
+                        "number": row.number,
+                        "file": row.file,
+                    }
+                )
+            else:
+                facts.append(
+                    {
+                        "kind": "seat-doc-row",
+                        "number": row.number,
+                        "file": row.file,
+                        "master": master_ref.key,
+                    }
+                )
         if master_ref is None:
             continue
         referenced.setdefault(master_ref, row)

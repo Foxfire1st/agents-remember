@@ -80,6 +80,24 @@ acceptance — escaped bugs become permanent tests. (Each catalog carries the fu
 candidate → standing at ≥2 catches; standing → spot-check after N dry engagements; mechanizable →
 graduates into a gate.)
 
+## Review Independence and Evidence-Type Matching *(added 260815-DAG-L15)*
+
+**The reviewer seat is never the author seat.** A leaf's builder/implementer — and the seat that
+authored the plan under review — cannot also be its independent reviewer; a self-review is
+returned to the decider as a verdict-laundering finding, never accepted (260815-DAG: L7/L8/L9
+route reviews were orchestrator self-reviews). Every requirement verdict must cite evidence of
+the requirement's class:
+
+| Requirement type | Required evidence |
+| --- | --- |
+| Rendering / visibility | Mounted-UI proof: component reachable from the shell, a test-id, a story, or a scenario. Projection of fields is NOT rendering. |
+| Scheduling / ordering | Operation-level proof: drive the queue/scheduler operation and observe the order it produces. |
+| Data model / persisted shape | Artifact-level proof: the parsed/validated/serialized persisted shape. |
+| Doctrine / enforcement | Code anchor: the file + mechanism that enforces the claimed rule (D-1). |
+
+Evidence of the wrong class for a requirement is a finding, never a pass (260815-DAG: L8-R3 was
+passed on projection-only evidence).
+
 ## The Three Review Lenses
 
 Fan out sub-agents (each writing a durable report) across three lenses. For a leaf code-change

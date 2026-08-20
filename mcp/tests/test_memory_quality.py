@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -15,6 +16,7 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
+from agents_remember.mcp import tools as mcp_tools
 from agents_remember.mcp.tools import memory_quality_check_payload
 from agents_remember.memory_quality.check import (
     BEFORE_METADATA_REFRESH_CHECKS,
@@ -341,6 +343,34 @@ class MemoryQualityTests(unittest.TestCase):
                 payload["findings"][0]["check"],
                 "style.update_history.history_order",
             )
+
+    def test_start_and_poll_payload_builders_wrap_the_async_envelopes(self) -> None:
+        with mock.patch(
+            "agents_remember.mcp.tools.memory.start_memory_quality_check_run",
+            return_value={
+                "ok": True,
+                "operation": "memory_quality_check",
+                "repoId": "agents-remember",
+                "status": "started",
+                "runId": "abc",
+            },
+        ):
+            payload = mcp_tools.memory_quality_check_start_payload(mock.Mock(), "agents-remember")
+            self.assertEqual(payload["status"], "started")
+            self.assertEqual(payload["runId"], "abc")
+        with mock.patch(
+            "agents_remember.mcp.tools.memory.poll_memory_quality_check_run",
+            return_value={
+                "ok": False,
+                "operation": "memory_quality_check",
+                "repoId": "agents-remember",
+                "status": "run-not-found",
+                "runId": "abc",
+            },
+        ):
+            payload = mcp_tools.memory_quality_check_poll_payload("agents-remember", "abc")
+            self.assertEqual(payload["status"], "run-not-found")
+            self.assertEqual(payload["runId"], "abc")
 
     def test_memory_quality_check_payload_runs_drift_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -313,6 +313,26 @@ class RegistrationWiringTests1(RegistrationWiringTests):
             recorder.kwargs, {"checks": None, "detail_limit": 50, "contract_path": None}
         )
 
+    def test_memory_quality_check_wait_false_starts_a_background_run(self) -> None:
+        recorder = self.invoke(
+            "memory_quality_check",
+            "agents_remember.mcp.registration.memory.memory_quality_check_start_payload",
+            {"repo_id": "agents-remember", "wait": False},
+        )
+        self.assertEqual(recorder.args, (self.config, "agents-remember"))
+        self.assertEqual(
+            recorder.kwargs, {"checks": None, "detail_limit": 50, "contract_path": None}
+        )
+
+    def test_memory_quality_check_run_id_polls_the_run(self) -> None:
+        recorder = self.invoke(
+            "memory_quality_check",
+            "agents_remember.mcp.registration.memory.memory_quality_check_poll_payload",
+            {"repo_id": "agents-remember", "run_id": "abc123"},
+        )
+        self.assertEqual(recorder.args, ("agents-remember", "abc123"))
+        self.assertEqual(recorder.kwargs, {})
+
     def test_memory_quality_check_forwards_a_named_subset(self) -> None:
         recorder = self.invoke(
             "memory_quality_check",

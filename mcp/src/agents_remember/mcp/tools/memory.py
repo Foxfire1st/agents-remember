@@ -20,7 +20,9 @@ from agents_remember.application.memory_tools import (
     memory_carryover_plan_tool,
     memory_init_tool,
     memory_quality_check_tool,
+    poll_memory_quality_check_run,
     route_index_refresh_tool,
+    start_memory_quality_check_run,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
@@ -63,6 +65,37 @@ def memory_quality_check_payload(
             detail_limit=detail_limit,
             contract_path=contract_path,
         ),
+    )
+
+
+def memory_quality_check_start_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    *,
+    checks: list[str] | None = None,
+    detail_limit: int = 50,
+    contract_path: str | None = None,
+) -> dict[str, Any]:
+    """Start the check asynchronously (L15-R7); the response carries the ``runId`` to poll."""
+
+    return _tool_payload(
+        "memory_quality_check",
+        start_memory_quality_check_run(
+            config,
+            repo_id=repo_id,
+            checks=checks,
+            detail_limit=detail_limit,
+            contract_path=contract_path,
+        ),
+    )
+
+
+def memory_quality_check_poll_payload(repo_id: str, run_id: str) -> dict[str, Any]:
+    """Poll one started check; returns the identical full result when completed (L15-R7)."""
+
+    return _tool_payload(
+        "memory_quality_check",
+        poll_memory_quality_check_run(repo_id, run_id),
     )
 
 

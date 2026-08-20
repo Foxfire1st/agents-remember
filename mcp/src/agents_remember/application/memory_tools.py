@@ -6,6 +6,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.memory_quality_runs import (
+    poll_quality_run,
+    start_quality_run,
+)
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
@@ -226,6 +230,86 @@ def memory_quality_check_tool(
     checks: list[str] | None = None,
     detail_limit: int = 50,
     contract_path: str | None = None,
+) -> dict[str, Any]:
+    """Run the memory-quality check synchronously (L15-R7).
+
+    The full contract-scoped check can exceed the MCP client's request window;
+    the async path lives in ``start_memory_quality_check_run`` /
+    ``poll_memory_quality_check_run`` and returns the identical result.
+    """
+
+    return _run_quality_check(
+        config,
+        repo_id=repo_id,
+        checks=checks,
+        detail_limit=detail_limit,
+        contract_path=contract_path,
+    )
+
+
+def start_memory_quality_check_run(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    checks: list[str] | None = None,
+    detail_limit: int = 50,
+    contract_path: str | None = None,
+) -> dict[str, Any]:
+    """Start the check on a background thread; poll with the returned ``runId`` (L15-R7)."""
+
+    key = _quality_run_key(repo_id, contract_path, checks)
+    run_id, status = start_quality_run(
+        key,
+        lambda: _run_quality_check(
+            config,
+            repo_id=repo_id,
+            checks=checks,
+            detail_limit=detail_limit,
+            contract_path=contract_path,
+        ),
+    )
+    return {
+        "ok": True,
+        "operation": "memory_quality_check",
+        "repoId": repo_id,
+        "status": status,
+        "runId": run_id,
+    }
+
+
+def poll_memory_quality_check_run(repo_id: str, run_id: str) -> dict[str, Any]:
+    """Poll one background run started by ``start_memory_quality_check_run``.
+
+    The completed envelope carries the full check payload (including its own
+    ``ok`` findings status); running/failed carry ``ok=True`` (the poll itself
+    succeeded); an unknown/evicted run reports ``ok=False`` with rerun guidance.
+    """
+
+    envelope = poll_quality_run(run_id)
+    if envelope is None:
+        return {
+            "ok": False,
+            "operation": "memory_quality_check",
+            "repoId": repo_id,
+            "status": "run-not-found",
+            "runId": run_id,
+        }
+    if envelope["status"] in {"running", "failed"}:
+        return {"ok": True, **envelope}
+    return envelope
+
+
+def _quality_run_key(repo_id: str, contract_path: str | None, checks: list[str] | None) -> str:
+    return f"{repo_id}:{contract_path or 'official'}:{','.join(checks or ())}"
+
+
+def _run_quality_check(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    checks: list[str] | None,
+    detail_limit: int,
+    contract_path: str | None,
 ) -> dict[str, Any]:
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
     write_curator_report = scope.curator_report_path is not None and not checks

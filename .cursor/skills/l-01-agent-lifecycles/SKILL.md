@@ -212,7 +212,12 @@ verdict. One reviewer may not silently collapse several routes into a generic di
 change proceeds to curator, closeout, integration, or handover without this verdict. A fix returns
 to the same builder and the same route reviewer delta-verifies it; touching a new major route adds
 that route to the review partition. This mandatory post-code gate also applies to direct/solo work:
-independence requires another agent, never builder self-review.
+independence requires another agent, never builder self-review. The reviewer seat is also never
+the author/implementer seat itself (no self-review of one's own leaf), and every requirement
+verdict must cite evidence of the requirement's class: rendering/visibility requirements need
+mounted-UI proof, scheduling/ordering requirements need operation-level proof, and data-model
+requirements need artifact-level proof — evidence of the wrong class is verdict laundering, not
+a pass.
 
 The chair persists the passing or blocking result through
 `task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})` after the

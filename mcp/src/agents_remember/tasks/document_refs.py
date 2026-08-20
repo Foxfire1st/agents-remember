@@ -39,6 +39,26 @@ class TaskDocumentRefError(ValueError):
         super().__init__(detail)
 
 
+def refuse_segment_nodes_on_atomic_masters(
+    nodes: list[SprintExecutionNode],
+    nature_by_ref: Mapping[TaskDocumentRef, str | None],
+) -> None:
+    """Refuse segment nodes on atomic masters (atomic masters are lump-only).
+
+    Shared by ``TaskDocumentTopology.validate_execution_topology`` and the graph
+    authoring draft check so the node-kind rule has one home and one refusal
+    dialect.
+    """
+
+    for node in nodes:
+        if node.kind == "segment" and nature_by_ref.get(node.ref) == "atomic":
+            raise TaskDocumentRefError(
+                "task-execution-graph-node-kind-invalid",
+                f"atomic master {node.ref.key} admits lump nodes only; refused segment "
+                f"node with leafIds={node.leafIds!r}",
+            )
+
+
 @dataclass(frozen=True)
 class ResolvedTaskDocument:
     ref: TaskDocumentRef
@@ -278,13 +298,7 @@ class TaskDocumentTopology:
                     "set one with task_doc.author_execution_graph (set_nature)",
                 )
             nature_by_ref[master.ref] = master.document.executionNature
-        for node in graph.nodes:
-            if node.kind == "segment" and nature_by_ref[node.ref] == "atomic":
-                raise TaskDocumentRefError(
-                    "task-execution-graph-node-kind-invalid",
-                    f"atomic master {node.ref.key} admits lump nodes only; refused segment "
-                    f"node with leafIds={node.leafIds!r}",
-                )
+        refuse_segment_nodes_on_atomic_masters(graph.nodes, nature_by_ref)
         self.validate_sprint_linkage(sprint_ref, overrides=candidates)
         return commanded
 

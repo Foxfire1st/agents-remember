@@ -31,6 +31,10 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     operation: Literal["memory_quality_check"] = "memory_quality_check"
     repoId: str | None = None
     onboardingRoot: str | None = None
+    # Async run envelope (L15-R7): wait=false starts a background run and the
+    # caller polls with runId; the completed envelope carries the full result.
+    status: Literal["started", "running", "completed", "failed", "run-not-found"] | None = None
+    runId: str | None = None
     checks: dict[str, Any] | list[dict[str, Any]] | None = None
     reportPath: str | None = Field(
         default=None,

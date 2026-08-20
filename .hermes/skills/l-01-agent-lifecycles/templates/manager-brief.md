@@ -54,7 +54,10 @@ master's leaf loop to the master-exit seam, then hand over.
   Partition the changed surface into material major routes from architectural ownership,
   governing route overviews, and the import/call graph. The reviewer chair fans out one
   independent reviewer per route and returns a verdict with a complete route-coverage table;
-  direct/builder-verified tiers may reduce loop machinery, never remove this gate.
+  direct/builder-verified tiers may reduce loop machinery, never remove this gate. The reviewer
+  seat must be distinct from the leaf's builder seat, and every requirement verdict must cite
+  evidence of the requirement's class (rendering -> mounted-UI proof, scheduling ->
+  operation-level proof, data model -> artifact-level proof).
 - Quality altitude ladder: leaf closeout runs the repository-prescribed change-set-scoped
   acceptance exactly once; leaf integration lands that certified commit without a rerun. The
   repository-prescribed full check runs exactly once per master at its completion boundary:

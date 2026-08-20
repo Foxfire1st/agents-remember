@@ -46,6 +46,11 @@ from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
     TaskDocumentTopology,
+    refuse_segment_nodes_on_atomic_masters,
+)
+from agents_remember.tasks.serving_preflight import (
+    TopologyServingBuildError,
+    require_serving_topology_schema,
 )
 from agents_remember.worktrees.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.closeout_queue_evidence import (
@@ -119,14 +124,17 @@ class _AddEdgeMutation(_AuthoringMutationBase):
     predecessor: TaskDocumentRef | SprintExecutionEndpoint
     successor: TaskDocumentRef | SprintExecutionEndpoint
     reason: str
-    judgmentId: str
+    # Optional at parse so a missing judgmentId surfaces the typed
+    # task-execution-graph-judgment-required refusal (L15-R8 F5), not a raw
+    # pydantic "Field required" like the segment ops already produced.
+    judgmentId: str | None = None
 
 
 class _RemoveEdgeMutation(_AuthoringMutationBase):
     op: Literal["remove_edge"]
     predecessor: TaskDocumentRef | SprintExecutionEndpoint
     successor: TaskDocumentRef | SprintExecutionEndpoint
-    judgmentId: str
+    judgmentId: str | None = None
 
 
 class _MoveLeafMutation(_AuthoringMutationBase):
@@ -135,14 +143,14 @@ class _MoveLeafMutation(_AuthoringMutationBase):
     leafId: str
     # A leaf id sampling the target segment (segments are addressed, never named).
     toSegment: str
-    judgmentId: str
+    judgmentId: str | None = None
 
 
 class _SetNatureMutation(_AuthoringMutationBase):
     op: Literal["set_nature"]
     ref: TaskDocumentRef
     executionNature: MasterExecutionNature
-    judgmentId: str
+    judgmentId: str | None = None
 
 
 _GraphAuthoringMutation = Annotated[
@@ -199,6 +207,10 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
     """
 
     try:
+        require_serving_topology_schema()
+    except TopologyServingBuildError as exc:
+        raise ExecutionTopologyError(str(exc)) from exc
+    try:
         authoring = _ExecutionGraphAuthoring.model_validate(request.fields)
     except ValidationError as exc:
         raise ExecutionTopologyError(f"invalid execution-graph authoring: {exc}") from exc
@@ -238,7 +250,7 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
         "numberingHints": numbering_drift_hints(prepared.graph),
     }
     if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
+        with integration_authority_lock(request.coordination_root, request.repo_id, create=False):
             _require_authoring_publication_authority(request, prepared.overrides)
         result["dryRun"] = True
         result["documents"] = [
@@ -274,6 +286,7 @@ def _prepare_authoring(
     )
     for mutation in authoring.mutations:
         _MUTATION_HANDLERS[mutation.op](draft, mutation, commanded)
+    _require_draft_node_kinds(topology, draft)
     try:
         candidate_graph = SprintExecutionGraph(nodes=draft.nodes, edges=draft.edges)
     except ValidationError as exc:
@@ -563,6 +576,7 @@ def _apply_move_leaf(
             f"task-execution-graph-segment-unknown: no segment of {mutation.ref.key} contains "
             f"leaf {mutation.toSegment!r}"
         )
+    _require_move_does_not_retarget_edge(draft, mutation)
     if source is None:
         # Placing a leaf the master gained after authoring (L11-R2): no source segment.
         draft.nodes[draft.nodes.index(target)] = target.model_copy(
@@ -586,6 +600,30 @@ def _apply_move_leaf(
     )
 
 
+def _require_move_does_not_retarget_edge(draft: _GraphDraft, mutation: _MoveLeafMutation) -> None:
+    """Refuse a move whose leaf samples an edge endpoint (L15-R8 F3).
+
+    Moving such a leaf silently retargets the edge to the destination segment and
+    the resulting acyclicity refusal never names the real cause; name it here.
+    """
+
+    for edge in draft.edges:
+        for endpoint, role in (
+            (edge.predecessor, "predecessor"),
+            (edge.successor, "successor"),
+        ):
+            if not isinstance(endpoint, SprintExecutionEndpoint):
+                continue
+            if endpoint.leafId != mutation.leafId or endpoint.ref != mutation.ref:
+                continue
+            raise ExecutionTopologyError(
+                "task-execution-graph-move-retargets-edge: moving leaf "
+                f"{mutation.leafId!r} of {mutation.ref.key} would retarget the "
+                f"{role} endpoint of an edge that samples that leaf; remove the "
+                "edge first or target the segment explicitly"
+            )
+
+
 def _apply_set_nature(
     draft: _GraphDraft, mutation: _SetNatureMutation, commanded: set[TaskDocumentRef]
 ) -> None:
@@ -605,6 +643,36 @@ _MUTATION_HANDLERS: dict[str, Callable[[_GraphDraft, Any, set[TaskDocumentRef]],
     "move_leaf": _apply_move_leaf,
     "set_nature": _apply_set_nature,
 }
+
+
+def _require_draft_node_kinds(topology: TaskDocumentTopology, draft: _GraphDraft) -> None:
+    """Refuse segment nodes on atomic masters before graph construction (L15-R8 F6).
+
+    Runs before ``SprintExecutionGraph`` validation so the node-kind rule fires
+    with its own named refusal instead of being masked by the lump/segment
+    mutual-exclusion check when a lump node for the same master is present.
+    """
+
+    nature_by_ref: dict[TaskDocumentRef, str | None] = {}
+    for node in draft.nodes:
+        if node.kind != "segment" or node.ref in nature_by_ref:
+            continue
+        nature = draft.natures.get(node.ref)
+        if nature is None:
+            try:
+                resolved = topology.resolve(node.ref)
+            except (TaskDocumentRefError, OSError):
+                # Unresolvable refs are reported by membership validation; record
+                # an explicit None so the node-kind scan never KeyErrors on them
+                # (L15-FIX-1) and the later membership refusal names the ref.
+                nature_by_ref[node.ref] = None
+                continue
+            nature = resolved.document.executionNature
+        nature_by_ref[node.ref] = nature
+    try:
+        refuse_segment_nodes_on_atomic_masters(draft.nodes, nature_by_ref)
+    except TaskDocumentRefError as exc:
+        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
 
 
 def _require_complete_partitions(
@@ -696,6 +764,11 @@ def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> No
 
     if not _execution_topology_edit_required(request):
         return
+    if _edit_emits_topology_schema(request):
+        try:
+            require_serving_topology_schema()
+        except TopologyServingBuildError as exc:
+            raise ExecutionTopologyError(str(exc)) from exc
     topology = TaskDocumentTopology(request.coordination_root)
     json_path = json_path_for(request.task_root, request.candidate)
     ref = _task_document_ref(request, json_path)
@@ -750,6 +823,23 @@ def _execution_topology_edit_required(request: ExecutionTopologyEditRequest) -> 
     if request.operation == "set_field":
         return bool(relevant.intersection(request.fields))
     return True
+
+
+def _edit_emits_topology_schema(request: ExecutionTopologyEditRequest) -> bool:
+    """Whether this edit writes execution-topology schema bytes into the tree.
+
+    A create/replace that carries no topology fields, or a set_field that touches
+    none of them, cannot make the persistent tree unreadable to an older serving
+    build, so it does not need the served-build preflight (L15-R4).
+    """
+
+    if request.candidate.orchestrates or request.candidate.executionGraph is not None:
+        return True
+    if request.candidate.executionNature is not None:
+        return True
+    if request.operation == "set_field":
+        return bool({"executionNature", "executionGraph"}.intersection(request.fields))
+    return False
 
 
 def _task_document_ref(request: ExecutionTopologyEditRequest, json_path: Path) -> TaskDocumentRef:

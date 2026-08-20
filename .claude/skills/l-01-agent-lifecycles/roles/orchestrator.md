@@ -320,6 +320,13 @@ decision log preserves the journey. New leaves are only for genuinely **new** ch
 (a fix leaf ≠ a redo leaf). Spawning a sibling per failed attempt hides what went down, breaks
 task order, and splits the change-set.
 
+**Review independence and evidence type (added 260815-DAG-L15):** never review your own leaf
+or plan implementation as the "independent" route reviewer (260815-DAG: L7/L8/L9 self-reviews),
+and never pass a requirement on evidence of the wrong class — rendering/visibility requirements
+need mounted-UI proof, scheduling requirements need operation-level proof, data-model
+requirements need artifact-level proof. Route reviews come from a distinct reviewer seat; this
+seat reviews only at super-exit, through a spawned reviewer.
+
 **Master exit:** read the manager's handover packet
 (`../templates/master-handover-packet.md`); check the master-exit verdict (evidence, never a
 decision); then decide the one open manager handover gate structurally:
