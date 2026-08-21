@@ -105,6 +105,7 @@ class SpawnAgentSessionResponse(ToolResponse):
     # Spawned-by provenance recorded on the catalog row (the dashboard orchestration-tree seam).
     spawnedBySession: str | None = None
     spawnedByLifecycle: str | None = None
+    spawnedByKind: Literal["plane", "ambient", "unattributed"] | None = None
     # The AR_SPAWN_ROLE recorded on the catalog row (L14: the Chats command-tree grouping key).
     spawnRole: str | None = None
     # The RESOLVED dispatch level (leaf|master|portfolio) and whether the dispatcher supplied it

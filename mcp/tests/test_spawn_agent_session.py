@@ -85,7 +85,11 @@ _RETIRED_FIELDS = (
     "session_commands",
 )
 _OVERRIDE_FIELDS = ("session_id", "host", "paster", "session_log", "which")
-_SPAWNED_BY_FIELDS = {"spawned_by_session": "session_id", "spawned_by_lifecycle": "lifecycle_id"}
+_SPAWNED_BY_FIELDS = {
+    "spawned_by_session": "session_id",
+    "spawned_by_lifecycle": "lifecycle_id",
+    "spawned_by_kind": "caller_kind",
+}
 
 
 def call_spawn(config: Any, **flat: Any) -> dict:
@@ -547,6 +551,18 @@ class SpawnAgentSessionTests(unittest.TestCase):
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertEqual(row.spawned_by_lifecycle, started.id)
+
+    def test_spawn_records_caller_kind_provenance(self) -> None:
+        payload = self._spawn(
+            task_document_ref=LEAF_REF,
+            spawned_by_kind="ambient",
+        )
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertEqual(payload["spawnedByKind"], "ambient")
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertEqual(row.spawned_by_kind, "ambient")
+        self.assertIsNone(row.spawned_by_session)
 
 
 class SpawnKnobApplicationTests(unittest.TestCase):

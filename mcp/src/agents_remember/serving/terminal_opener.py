@@ -174,6 +174,7 @@ class SpawnProvenance:
     replacement_for_task_document_ref: TaskDocumentRef | None = None
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
+    spawned_by_kind: Literal["plane", "ambient", "unattributed"] | None = None
     spawn_level: str | None = None
     spawn_level_source: str | None = None
 
@@ -566,6 +567,7 @@ def _opened_catalog_entry(
         spawned_by_lifecycle=_preserved(
             existing, provenance.spawned_by_lifecycle, "spawned_by_lifecycle"
         ),
+        spawned_by_kind=_preserved(existing, provenance.spawned_by_kind, "spawned_by_kind"),
         spawn_role=spawn_env.get("AR_SPAWN_ROLE"),
         launch_args=tuple(knobs.launch_args) if knobs.launch_args else None,
         prompt_keywords=tuple(knobs.prompt_keywords) if knobs.prompt_keywords else None,

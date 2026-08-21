@@ -31,12 +31,20 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         brief: str,
         label: str | None = None,
     ) -> dict[str, Any]:
-        """Create and durably brief one authorized direct child seat.
+        """Create and durably brief one child seat on a canonical task document plus role.
 
-        The caller is proven from plane-injected process identity. The target is the canonical
-        sprint/master/leaf task document plus role. Harness selection, runtime identity,
-        readiness, exact initial brief pinning, delivery correlation, and retry remain private
-        control-plane work. A queued brief is already durable and needs no model-held retry id.
+        The caller kind decides the mode. A plane-hosted seat (this process carries
+        AR_HOSTED_SESSION_ID) uses the structural path: the caller is proven from
+        plane-injected identity, direct-child scope is authorized, and the target is the
+        canonical sprint/master/leaf document plus role. An ambient caller (no
+        AR_HOSTED_SESSION_ID -- a launcher chat, not a hosted seat) spawns in ambient mode:
+        the occupant is created on the canonical task document with the pinned dispatch
+        brief and the same rollback when the brief cannot persist; there is no parent seat,
+        so seat-authority and child-scope checks do not apply, but the role is still
+        validated against the document's altitude. Harness selection, runtime identity,
+        readiness, exact initial brief pinning, delivery correlation, and retry remain
+        private control-plane work in both modes. A queued brief is already durable and
+        needs no model-held retry id.
         """
         return dispatch_agent_payload(
             config,

@@ -96,6 +96,7 @@ class TerminalCatalogEntry:
     # render the orchestration tree (spawner -> spawned edges) once that surface lands.
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
+    spawned_by_kind: str | None = None
     # The l-01 role this session was spawned AS (``AR_SPAWN_ROLE`` seeded into the spawn env by the
     # dispatching seat -- orchestrator/strategist/manager/worker/reviewer/designer), recorded at first
     # spawn so the Chats command tree (L14) can group command chats without re-reading tmux env.
@@ -208,6 +209,7 @@ class TerminalCatalogEntry:
             ),
             spawned_by_session=_optional_str(data, "spawnedBySession"),
             spawned_by_lifecycle=_optional_str(data, "spawnedByLifecycle"),
+            spawned_by_kind=_optional_str(data, "spawnedByKind"),
             spawn_role=spawn_role,
             launch_args=_string_tuple(data.get("launchArgs")),
             prompt_keywords=_string_tuple(data.get("promptKeywords")),
@@ -294,6 +296,7 @@ class TerminalCatalogEntry:
                     ),
                     "spawnedBySession": self.spawned_by_session,
                     "spawnedByLifecycle": self.spawned_by_lifecycle,
+                    "spawnedByKind": self.spawned_by_kind,
                     "spawnRole": self.spawn_role,
                     "launchArgs": _optional_list(self.launch_args),
                     "promptKeywords": _optional_list(self.prompt_keywords),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from uuid import uuid4
 
 from agents_remember.controlplane.operator_inbox_records import (
@@ -519,6 +519,10 @@ class RetiredSpawnInputs:
     session_commands: list[str] | None = None
 
 
+CallerKind = Literal["plane", "ambient", "unattributed"]
+"""How a spawn was requested: by a plane-hosted seat, by an ambient launcher, or unattributed."""
+
+
 @dataclass(frozen=True)
 class SpawnedBy:
     """The spawner's own provenance: the catalog session and lifecycle that requested the
@@ -526,6 +530,7 @@ class SpawnedBy:
 
     session_id: str | None = None
     lifecycle_id: str | None = None
+    caller_kind: CallerKind | None = None
 
 
 @dataclass(frozen=True)
@@ -847,6 +852,7 @@ def spawn_agent_session_tool(
             spawn_level_source=plan.spawn_level_source,
             spawned_by_session=spawned_by.session_id,
             spawned_by_lifecycle=spawned_by.lifecycle_id or _ambient_lifecycle_id(),
+            spawned_by_kind=spawned_by.caller_kind,
         ),
     )
 
@@ -890,6 +896,7 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "tmuxName": entry.tmux_name,
         "spawnedBySession": entry.spawned_by_session,
         "spawnedByLifecycle": entry.spawned_by_lifecycle,
+        "spawnedByKind": entry.spawned_by_kind,
         "spawnRole": entry.spawn_role,
         # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
         "spawnLevel": entry.spawn_level,

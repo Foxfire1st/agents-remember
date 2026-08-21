@@ -1037,6 +1037,48 @@ class StructuralAgentToolTests(unittest.TestCase):
         self.assertNotIn("private-child-id", str(result))
         self.assertEqual(retire.call_args.kwargs["session_id"], "private-child-id")
 
+    def test_plane_dispatch_refuses_broken_plane_identity_without_downgrading(self) -> None:
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+        ) as spawn:
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="architect",
+                    brief="Design the sprint.",
+                ),
+                StructuralAgentRuntime(
+                    environ={"AR_HOSTED_SESSION_ID": "ghost", "AR_SPAWN_ROLE": "architect"}
+                ),
+            )
+
+        self.assertEqual(result["status"], "ambient-seat-stale")
+        spawn.assert_not_called()
+
+    def test_plane_dispatch_refuses_an_unauthorized_child_role(self) -> None:
+        self.catalog.upsert(_seat("architect", self.sprint, "architect"))
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+        ) as spawn:
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="system-specialist",
+                    brief="Investigate the sprint.",
+                ),
+                StructuralAgentRuntime(
+                    environ={
+                        "AR_HOSTED_SESSION_ID": "architect",
+                        "AR_SPAWN_ROLE": "architect",
+                    }
+                ),
+            )
+
+        self.assertEqual(result["status"], "structural-child-refused")
+        spawn.assert_not_called()
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

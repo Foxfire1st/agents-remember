@@ -310,6 +310,7 @@ class TerminalCatalogEntryWire(WireResponse):
     replacement_for_task_document_ref: TaskDocumentRef | None = None
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
+    spawned_by_kind: str | None = None
     spawn_role: str | None = None
     launch_args: list[str] | None = None
     prompt_keywords: list[str] | None = None

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.observer.ambient import ambient
@@ -19,6 +20,36 @@ class AmbientSeatError(ValueError):
 
     def __str__(self) -> str:
         return self.detail
+
+
+@dataclass(frozen=True)
+class AmbientCaller:
+    """A dispatch caller with no plane-injected hosted-seat identity (launcher chats).
+
+    The launcher has no catalog row and no lifecycle of its own: provenance for its spawns
+    records caller kind ``ambient`` with no spawning session, and the spawn primitive adopts
+    the active ambient lifecycle when one exists.
+    """
+
+    caller_kind: Literal["ambient"] = "ambient"
+
+
+def resolve_ambient_caller(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> AmbientCaller | None:
+    """Return the ambient caller when this process has no plane identity, else ``None``.
+
+    Plane identity present means the caller must go through :func:`resolve_ambient_seat`;
+    ``None`` therefore never means "fall back to ambient" -- the dispatch path refuses when
+    neither resolution produces a caller.
+    """
+
+    process_env = os.environ if environ is None else environ
+    session_id = process_env.get(HOSTED_SESSION_ENV, "").strip()
+    if session_id:
+        return None
+    return AmbientCaller()
 
 
 def resolve_ambient_seat(

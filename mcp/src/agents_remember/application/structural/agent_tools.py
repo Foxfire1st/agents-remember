@@ -21,7 +21,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxPoster,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.errors import AuthorityError
+from agents_remember.errors import AuthorityError, HarnessControlError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -35,12 +35,19 @@ from agents_remember.models.structural.agent import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
-from agents_remember.serving.ambient_seat import AmbientSeatError, resolve_ambient_seat
+from agents_remember.observer.events import now_iso
+from agents_remember.serving.ambient_seat import (
+    AmbientSeatError,
+    resolve_ambient_caller,
+    resolve_ambient_seat,
+)
 from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.operator_inbox_posts import (
     OperatorInboxPostContext,
     post_operator_inbox_entry,
 )
+from agents_remember.serving.retire import SeatClosure, retire_entry
+from agents_remember.serving.seat_events import log_retire_event
 from agents_remember.serving.structural_seats import StructuralSeatError, StructuralSeatResolver
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
@@ -102,13 +109,13 @@ class StructuralMessageTarget:
 @dataclass(frozen=True)
 class StructuralMessageContext:
     catalog: TerminalCatalog
-    sender: TerminalCatalogEntry
-    runtime: StructuralAgentRuntime
+    sender: TerminalCatalogEntry | None = None
+    runtime: StructuralAgentRuntime = _DEFAULT_AGENT_RUNTIME
 
 
 @dataclass(frozen=True)
 class UnbriefedChild:
-    caller: TerminalCatalogEntry
+    caller_id: str | None
     session_id: str
     document: TaskDocumentRef
     role: StructuralRole
@@ -199,8 +206,10 @@ def _post_structural_message(
         poster=InboxPoster(
             created_by="model",
             created_via="cli",
-            sender_agent_id=context.sender.id,
-            sender_role=cast(AgentRole, context.sender.binding_role),
+            sender_agent_id=context.sender.id if context.sender is not None else None,
+            sender_role=(
+                cast(AgentRole, context.sender.binding_role) if context.sender is not None else None
+            ),
         ),
     )
 
@@ -208,12 +217,43 @@ def _post_structural_message(
 def _retire_unbriefed_child(
     config: McpRuntimeConfig,
     *,
-    caller_id: str,
+    caller_id: str | None,
     child_id: str,
     host: TerminalHost | None,
 ) -> str:
-    """Roll back a spawn whose exact initial brief never became durable."""
+    """Roll back a spawn whose exact initial brief never became durable.
 
+    A plane caller retires as the authority-gated actor. An ambient caller has no catalog
+    row to act as the retiring seat; the child it just spawned in this same transaction is
+    retired as a system closure instead -- the child id is the spawn result, never caller
+    input, so an ambient caller cannot retire an arbitrary session.
+    """
+
+    if caller_id is None:
+        catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+        entry = catalog.get(child_id)
+        if entry is None:
+            return "child retirement also failed"
+        if entry.status == "terminated":
+            return "child retired"
+        retire_host = host if host is not None else TerminalHost()
+        try:
+            updated = retire_entry(
+                catalog,
+                retire_host,
+                entry,
+                SeatClosure(
+                    at=now_iso(),
+                    reason="initial dispatch brief persistence failed",
+                    edge="ambient-dispatch-rollback",
+                ),
+            )
+        except (HarnessControlError, OSError):
+            return "child retirement also failed"
+        if updated is None:
+            return "child retirement also failed"
+        log_retire_event(config, updated)
+        return "child retired"
     retired = session_retire_tool(
         config,
         actor_session_id=caller_id,
@@ -229,7 +269,7 @@ def _spawn_dispatch_child(
     request: DispatchAgentRequest,
     runtime: StructuralAgentRuntime,
     *,
-    caller: TerminalCatalogEntry,
+    spawned_by: SpawnedBy,
     document: TaskDocumentRef,
 ) -> dict[str, Any]:
     """Create the exact occupant for one already-authorized structural child seat."""
@@ -243,10 +283,7 @@ def _spawn_dispatch_child(
             env={"AR_SPAWN_ROLE": request.role},
         ),
         retired=RetiredSpawnInputs(),
-        spawned_by=SpawnedBy(
-            session_id=caller.id,
-            lifecycle_id=caller.lifecycle_id,
-        ),
+        spawned_by=spawned_by,
         overrides=runtime.spawn_overrides or SpawnOverrides(host=runtime.host),
     )
 
@@ -282,7 +319,7 @@ def _failed_initial_dispatch(
 
     rollback = _retire_unbriefed_child(
         config,
-        caller_id=child.caller.id,
+        caller_id=child.caller_id,
         child_id=child.session_id,
         host=runtime.host,
     )
@@ -298,6 +335,44 @@ def _failed_initial_dispatch(
     )
 
 
+def _resolve_dispatch_caller(
+    structural: tuple[TerminalCatalog, TaskDocumentTopology, StructuralSeatResolver],
+    runtime: StructuralAgentRuntime,
+    request: DispatchAgentRequest,
+    resolved_document: ResolvedTaskDocument,
+) -> tuple[TerminalCatalogEntry | None, dict[str, Any] | None]:
+    """Resolve the dispatching caller and authorize the dispatch, or return the refusal.
+
+    Returns ``(caller, refusal)`` with exactly one side set: ``caller=None`` with no refusal
+    means the ambient launcher (no plane identity) -- the role is still validated against
+    the document's altitude. Every other outcome is a real plane caller or a refusal; a
+    stale, invalid, mismatched, or unbound plane identity refuses exactly as before instead
+    of silently downgrading to ambient.
+    """
+    catalog, topology, resolver = structural
+    document = resolved_document.ref
+    if resolve_ambient_caller(environ=runtime.environ) is not None:
+        try:
+            topology.validate_role(document, request.role)
+        except TaskDocumentRefError as exc:
+            return None, _caller_error(
+                "dispatch_agent",
+                request.task_document_ref,
+                request.role,
+                StructuralSeatError(exc.status, str(exc)),
+            )
+        return None, None
+    try:
+        caller = resolve_ambient_seat(catalog, environ=runtime.environ)
+    except AmbientSeatError as exc:
+        return None, _caller_error("dispatch_agent", request.task_document_ref, request.role, exc)
+    try:
+        resolver.authorize_child(caller, document=document, role=request.role)
+    except StructuralSeatError as exc:
+        return None, _caller_error("dispatch_agent", request.task_document_ref, request.role, exc)
+    return caller, None
+
+
 def dispatch_agent_tool(
     config: McpRuntimeConfig,
     request: DispatchAgentRequest,
@@ -305,14 +380,11 @@ def dispatch_agent_tool(
 ) -> dict[str, Any]:
     """Spawn and durably brief one authorized child without exposing its occupant id."""
 
-    catalog, topology, resolver = _structural_context(config)
+    structural = _structural_context(config)
+    catalog, topology, _ = structural
     try:
         resolved_document = topology.resolve(request.task_document_ref)
         document = resolved_document.ref
-        caller = resolve_ambient_seat(catalog, environ=runtime.environ)
-        resolver.authorize_child(caller, document=document, role=request.role)
-    except (AmbientSeatError, StructuralSeatError) as exc:
-        return _caller_error("dispatch_agent", request.task_document_ref, request.role, exc)
     except TaskDocumentRefError as exc:
         return _target_payload(
             StructuralOutcome(
@@ -325,11 +397,28 @@ def dispatch_agent_tool(
             )
         )
 
+    caller, refusal = _resolve_dispatch_caller(
+        structural,
+        runtime,
+        request,
+        resolved_document,
+    )
+    if refusal is not None:
+        return refusal
+
     spawned = _admitted_dispatch_spawn(
         config,
         request,
         runtime,
-        caller=caller,
+        spawned_by=(
+            SpawnedBy(
+                session_id=caller.id,
+                lifecycle_id=caller.lifecycle_id,
+                caller_kind="plane",
+            )
+            if caller is not None
+            else SpawnedBy(caller_kind="ambient")
+        ),
         resolved_document=resolved_document,
     )
     if spawned.get("status") != "spawned-unbriefed":
@@ -345,7 +434,9 @@ def dispatch_agent_tool(
         )
 
     target_session_id = cast(str, spawned["session"])
-    child = UnbriefedChild(caller, target_session_id, document, request.role)
+    child = UnbriefedChild(
+        caller.id if caller is not None else None, target_session_id, document, request.role
+    )
     try:
         posted = _post_initial_dispatch_brief(
             config,
@@ -395,7 +486,7 @@ def _admitted_dispatch_spawn(
     request: DispatchAgentRequest,
     runtime: StructuralAgentRuntime,
     *,
-    caller: TerminalCatalogEntry,
+    spawned_by: SpawnedBy,
     resolved_document: ResolvedTaskDocument,
 ) -> dict[str, Any]:
     if request.role == "manager":
@@ -413,7 +504,7 @@ def _admitted_dispatch_spawn(
         config,
         request,
         runtime,
-        caller=caller,
+        spawned_by=spawned_by,
         document=resolved_document.ref,
     )
 
