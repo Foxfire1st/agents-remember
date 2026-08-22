@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import signal
 import subprocess
@@ -22,6 +21,7 @@ from agents_remember.kernel.platform_subprocess import (
 )
 from agents_remember.kernel.primitives.runtime_config import RepositoryScope, load_config
 from agents_remember.models.lifecycles.operation import (
+    CloseoutOperationInput,
     IntegrateOperationInput,
     IntegrationConflictTransaction,
     IntegrationOperationAuthority,
@@ -30,15 +30,37 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
+from agents_remember.worktrees.closeout_input import require_effective_closeout_plan
+from agents_remember.worktrees.integration.closeout_operation_admission import (
+    CloseoutOperationAdmission,
+    prevalidate_closeout_operation_admission,
+    resolve_closeout_operation_admission,
+)
+from agents_remember.worktrees.integration.closeout_recovery_projection import (
+    closeout_generation_retained,
+    derive_closeout_recovery_commits,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
+from agents_remember.worktrees.integration.lifecycle_operation_candidate import (
+    LifecycleOperationCandidate,
+    fingerprint_payload,
+    lifecycle_operation_candidate,
+)
 from agents_remember.worktrees.integration.lifecycle_operation_identity import (
     operation_state_fingerprint,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_lease import (
+    contract_lifecycle_lease,
+    require_lifecycle_operation_compatible,
+)
 from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
     operation_report_path,
+)
+from agents_remember.worktrees.integration.mutation_evidence import (
+    initial_closeout_mutation_evidence,
+    reconcile_closeout_mutations,
 )
 from agents_remember.worktrees.integration.organizational_completion_repair import (
     prepare_organizational_completion_repair,
@@ -53,7 +75,6 @@ from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     prepare_queue_candidate_conflict_resolution,
     release_queue_candidate_after_reversible_operation,
 )
-from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -67,10 +88,9 @@ OperationLauncher = Callable[[WorktreeContract, LifecycleOperationRecord], None]
 
 
 @dataclass(frozen=True)
-class _CandidateIdentity:
-    state: str
-    tree: str | None
-    fingerprint: str
+class _OperationExecution:
+    timestamp: datetime
+    launcher: OperationLauncher
 
 
 def now_iso() -> str:
@@ -78,12 +98,7 @@ def now_iso() -> str:
 
 
 def operation_fingerprint(operation_input: LifecycleOperationInput) -> str:
-    return _fingerprint_payload(operation_input.model_dump(mode="json"))
-
-
-def _fingerprint_payload(value: object) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return fingerprint_payload(operation_input.model_dump(mode="json"))
 
 
 def operation_key(contract_path: Path, kind: LifecycleOperationKind, fingerprint: str) -> str:
@@ -97,65 +112,155 @@ def start_or_observe_operation(
     launcher: OperationLauncher | None = None,
     now: datetime | None = None,
 ) -> LifecycleOperationProjection:
+    if not isinstance(operation_input, IntegrateOperationInput):
+        raise RuntimeError(
+            "closeout operations require lease-bound raw-input admission through "
+            "start_or_observe_closeout_operation"
+        )
     contract = load_contract(Path(operation_input.contractPath))
     _validate_input_identity(contract, operation_input)
     require_configured_contract_repositories(contract, operation_input.configPath)
-    with contract_lifecycle_lease(contract, operation_kind=operation_input.kind):
-        return _start_or_observe_operation(contract, operation_input, launcher=launcher, now=now)
+    with contract_lifecycle_lease(contract):
+        require_lifecycle_operation_compatible(
+            contract,
+            operation_kind=operation_input.kind,
+        )
+        store = _store(contract, "integrate")
+        retained = _retained_integration_recovery_record(store.read(), operation_input)
+        if retained is None:
+            integration_authority = _integration_authority(contract, operation_input)
+            candidate = lifecycle_operation_candidate(
+                operation_input,
+                candidate_state=operation_state_fingerprint(contract),
+                candidate_tree=None,
+                integration_authority=integration_authority,
+            )
+        else:
+            integration_authority = retained.integrationAuthority
+            candidate = LifecycleOperationCandidate(
+                retained.candidateState,
+                retained.candidateTree,
+                retained.fingerprint,
+            )
+        return _start_or_observe_operation(
+            contract,
+            operation_input,
+            candidate=candidate,
+            integration_authority=integration_authority,
+            execution=_operation_execution(launcher, now),
+        )
+
+
+def start_or_observe_closeout_operation(
+    admission: CloseoutOperationAdmission,
+    *,
+    launcher: OperationLauncher | None = None,
+    now: datetime | None = None,
+) -> LifecycleOperationProjection:
+    """Normalize and admit one closeout generation under its lifecycle lease."""
+    contract = load_contract(admission.contract_path)
+    require_configured_contract_repositories(contract, admission.config_path)
+    with contract_lifecycle_lease(contract):
+        current_contract = load_contract(admission.contract_path)
+        require_configured_contract_repositories(current_contract, admission.config_path)
+        validated = prevalidate_closeout_operation_admission(current_contract, admission)
+        _validate_input_identity(current_contract, validated.operation_input)
+        store = _store(current_contract, "closeout")
+        operation_input, candidate = resolve_closeout_operation_admission(
+            current_contract,
+            store.read(),
+            admission,
+            validated,
+        )
+        require_lifecycle_operation_compatible(
+            current_contract,
+            operation_kind="closeout",
+        )
+        return _start_or_observe_operation(
+            current_contract,
+            operation_input,
+            candidate=candidate,
+            integration_authority=None,
+            execution=_operation_execution(launcher, now),
+        )
 
 
 def _start_or_observe_operation(
     contract: WorktreeContract,
     operation_input: LifecycleOperationInput,
     *,
-    launcher: OperationLauncher | None,
-    now: datetime | None,
+    candidate: LifecycleOperationCandidate,
+    integration_authority: IntegrationOperationAuthority | None,
+    execution: _OperationExecution,
 ) -> LifecycleOperationProjection:
     store = _store(contract, operation_input.kind)
-    timestamp = (now or datetime.now(UTC)).replace(microsecond=0)
-    recovering = _irreversible_recovery_record(store.read(), operation_input)
-    if recovering is None:
-        candidate_state = operation_state_fingerprint(contract)
-        candidate_tree = _candidate_tree(contract, operation_input.kind)
-        integration_authority = _integration_authority(contract, operation_input)
-        fingerprint = _fingerprint_payload(
-            {
-                "input": operation_input.model_dump(mode="json"),
-                "candidateState": candidate_state,
-                "candidateTree": candidate_tree,
-                "integrationAuthority": (
-                    integration_authority.model_dump(mode="json")
-                    if integration_authority is not None
-                    else None
-                ),
-            }
-        )
-    else:
-        candidate_state = recovering.candidateState
-        candidate_tree = recovering.candidateTree
-        integration_authority = recovering.integrationAuthority
-        fingerprint = recovering.fingerprint
-    candidate = _queued_record(
+    timestamp = execution.timestamp
+    if operation_input.kind == "closeout":
+        _reconcile_closeout_store(store, now=timestamp, fresh_dead_worker=False)
+    queued = _queued_record(
         contract,
         operation_input,
-        _CandidateIdentity(candidate_state, candidate_tree, fingerprint),
+        candidate,
         integration_authority,
         timestamp,
     )
-    current, created = store.create(candidate)
-    if current.fingerprint != fingerprint:
-        if current.status not in {"completed", "failed", "cancelled"}:
-            raise RuntimeError(
-                f"conflicting {operation_input.kind} operation already exists for task "
-                f"{contract.task_name}; wait for or resolve that task-bound operation"
-            )
-        if current.status == "completed" and current.candidateState == candidate_state:
-            raise RuntimeError(
-                f"conflicting {operation_input.kind} parameters target an already completed "
-                f"task state for {contract.task_name}; the task state has not advanced"
-            )
-        current = store.replace_terminal(candidate)
-        created = True
+    current, created = _create_or_replace_generation(
+        store,
+        queued,
+        contract=contract,
+        operation_input=operation_input,
+        candidate=candidate,
+    )
+    return _recover_launch_and_project(
+        contract,
+        store,
+        current,
+        created=created,
+        execution=execution,
+    )
+
+
+def _create_or_replace_generation(
+    store: LifecycleOperationStore,
+    queued: LifecycleOperationRecord,
+    *,
+    contract: WorktreeContract,
+    operation_input: LifecycleOperationInput,
+    candidate: LifecycleOperationCandidate,
+) -> tuple[LifecycleOperationRecord, bool]:
+    """Create one generation or replace only a terminal, advanced generation."""
+
+    current, created = store.create(queued)
+    if current.fingerprint == candidate.fingerprint:
+        return current, created
+    if current.status not in {"completed", "failed", "cancelled"}:
+        raise RuntimeError(
+            f"conflicting {operation_input.kind} operation already exists for task "
+            f"{contract.task_name}; wait for or resolve that task-bound operation"
+        )
+    if (
+        operation_input.kind == "integrate"
+        and current.status == "completed"
+        and current.candidateState == candidate.state
+    ):
+        raise RuntimeError(
+            f"conflicting {operation_input.kind} parameters target an already completed "
+            f"task state for {contract.task_name}; the task state has not advanced"
+        )
+    return store.replace_terminal(queued), True
+
+
+def _recover_launch_and_project(
+    contract: WorktreeContract,
+    store: LifecycleOperationStore,
+    current: LifecycleOperationRecord,
+    *,
+    created: bool,
+    execution: _OperationExecution,
+) -> LifecycleOperationProjection:
+    """Recover an existing generation if needed, launch once, and project it."""
+
+    timestamp = execution.timestamp
     should_launch = created
     if not created and _should_recover(current, timestamp):
         current, should_launch = store.replace_for_recovery(
@@ -163,24 +268,32 @@ def _start_or_observe_operation(
             expected_attempt=current.attempt,
         )
     if should_launch:
-        _launch_or_fail(contract, current, launcher or launch_detached_worker, store)
+        _launch_or_fail(contract, current, execution.launcher, store)
         current = store.read() or current
     return operation_projection(current, now=timestamp)
 
 
-def _irreversible_recovery_record(
-    current: LifecycleOperationRecord | None,
-    operation_input: LifecycleOperationInput,
-) -> LifecycleOperationRecord | None:
-    """Keep one accepted identity after its own protected-ref movement changed Git facts."""
+def _operation_execution(
+    launcher: OperationLauncher | None,
+    now: datetime | None,
+) -> _OperationExecution:
+    return _OperationExecution(
+        timestamp=(now or datetime.now(UTC)).replace(microsecond=0),
+        launcher=launcher or launch_detached_worker,
+    )
 
-    if (
-        current is None
-        or not current.irreversibleBoundaryEntered
-        or current.input != operation_input
-    ):
+
+def _retained_integration_recovery_record(
+    current: LifecycleOperationRecord | None,
+    operation_input: IntegrateOperationInput,
+) -> LifecycleOperationRecord | None:
+    """Keep one accepted integration identity after its irreversible boundary."""
+
+    if current is None or current.input != operation_input:
         return None
-    if current.status in {"queued", "running", "input-required"}:
+    if not current.irreversibleBoundaryEntered:
+        return None
+    if current.status in {"queued", "running", "input-required", "completed"}:
         return current
     return None
 
@@ -213,7 +326,8 @@ def cancel_operation(
     contract_path: Path, kind: LifecycleOperationKind
 ) -> LifecycleOperationProjection:
     contract = load_contract(contract_path)
-    with contract_lifecycle_lease(contract, operation_kind=kind):
+    with contract_lifecycle_lease(contract):
+        require_lifecycle_operation_compatible(contract, operation_kind=kind)
         return _cancel_operation(contract, kind)
 
 
@@ -221,64 +335,28 @@ def _cancel_operation(
     contract: WorktreeContract, kind: LifecycleOperationKind
 ) -> LifecycleOperationProjection:
     store = _store(contract, kind)
+    if kind == "closeout":
+        _reconcile_closeout_store(
+            store,
+            now=datetime.now(UTC),
+            fresh_dead_worker=True,
+        )
     worker_pid: int | None = None
 
     def request(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
         nonlocal worker_pid
         if record.status in {"completed", "failed", "cancelled"}:
             return record
-        if record.irreversibleBoundaryEntered:
-            raise RuntimeError(
-                f"{kind} has entered its irreversible boundary; cancellation is refused and "
-                "recovery must reconcile or complete the same task-bound operation"
-            )
         worker_pid = record.workerPid
-        conflict = (
-            record.integrationAuthority.conflictTransaction
-            if record.integrationAuthority is not None
-            else None
-        )
-        guidance = "The task-bound operation was cancelled before approval claim."
-        result = record.result
-        organizational_repair = record.organizationalRepair
-        if conflict is not None:
-            guidance = (
-                "The stale certified candidate was retired and closeout was reset. Absorb "
-                "the recorded source delta in this leaf, then declare and close it again."
-            )
-            result = {
-                "state": "conflict-resolution-prepared",
-                "conflictTransaction": conflict.model_dump(mode="json"),
-                "nextOperation": "resolve_leaf_then_redeclare",
-            }
-        elif isinstance(result, dict) and result.get("state") == (
-            "organizational-completion-gate-failed"
-        ):
-            if organizational_repair is None:
-                raise RuntimeError(
-                    "organizational completion cancellation requires its gate-bound "
-                    "durable repair evidence"
-                )
-            guidance = (
-                "The failed final candidate was retired and the same leaf closeout was "
-                "reset. Repair the leaf, then declare and close it again."
-            )
-        return record.model_copy(
-            update={
-                "status": "cancelled",
-                "phase": "cancelled",
-                "cancelRequested": True,
-                "finishedAt": now_iso(),
-                "result": result,
-                "organizationalRepair": organizational_repair,
-                "guidance": guidance,
-                "workerPid": None,
-            }
-        )
+        return _cancelled_record(record, kind)
 
     current = store.update(request)
     try:
-        if current.status == "cancelled" and not current.irreversibleBoundaryEntered:
+        if current.status == "cancelled" and (
+            not closeout_generation_retained(current)
+            if kind == "closeout"
+            else not current.irreversibleBoundaryEntered
+        ):
             _publish_cancellation_repair(contract, current, kind)
     finally:
         # The store has already cleared workerPid. Always signal the captured
@@ -287,6 +365,65 @@ def _cancel_operation(
         if worker_pid is not None:
             _terminate_worker_group(worker_pid)
     return operation_projection(current)
+
+
+def _cancelled_record(
+    record: LifecycleOperationRecord,
+    kind: LifecycleOperationKind,
+) -> LifecycleOperationRecord:
+    if kind == "closeout" and closeout_generation_retained(record):
+        raise RuntimeError(
+            "closeout mutation or finalization evidence retains this generation; "
+            "cancellation is refused and recovery must reconcile or complete the same "
+            "task-bound operation"
+        )
+    if kind == "integrate" and record.irreversibleBoundaryEntered:
+        raise RuntimeError(
+            "integrate has entered its irreversible boundary; cancellation is refused and "
+            "recovery must reconcile or complete the same task-bound operation"
+        )
+    conflict = (
+        record.integrationAuthority.conflictTransaction
+        if record.integrationAuthority is not None
+        else None
+    )
+    guidance = "The task-bound operation was cancelled before approval claim."
+    result = record.result
+    organizational_repair = record.organizationalRepair
+    if conflict is not None:
+        guidance = (
+            "The stale certified candidate was retired and closeout was reset. Absorb "
+            "the recorded source delta in this leaf, then declare and close it again."
+        )
+        result = {
+            "state": "conflict-resolution-prepared",
+            "conflictTransaction": conflict.model_dump(mode="json"),
+            "nextOperation": "resolve_leaf_then_redeclare",
+        }
+    elif isinstance(result, dict) and result.get("state") == (
+        "organizational-completion-gate-failed"
+    ):
+        if organizational_repair is None:
+            raise RuntimeError(
+                "organizational completion cancellation requires its gate-bound "
+                "durable repair evidence"
+            )
+        guidance = (
+            "The failed final candidate was retired and the same leaf closeout was "
+            "reset. Repair the leaf, then declare and close it again."
+        )
+    return record.model_copy(
+        update={
+            "status": "cancelled",
+            "phase": "cancelled",
+            "cancelRequested": True,
+            "finishedAt": now_iso(),
+            "result": result,
+            "organizationalRepair": organizational_repair,
+            "guidance": guidance,
+            "workerPid": None,
+        }
+    )
 
 
 def _publish_cancellation_repair(
@@ -314,6 +451,40 @@ def _publish_cancellation_repair(
     )
 
 
+def _reconcile_closeout_store(
+    store: LifecycleOperationStore,
+    *,
+    now: datetime,
+    fresh_dead_worker: bool,
+) -> None:
+    current = store.read()
+    if current is None or current.operationKind != "closeout":
+        return
+    if current.status in {"queued", "running"}:
+        stale = _recoverable_stale(current, now)
+        worker_dead = current.workerPid is not None and not _worker_process_group_alive(
+            current.workerPid
+        )
+        if not stale and not (fresh_dead_worker and worker_dead):
+            return
+    reconciled = reconcile_closeout_mutations(current)
+    recovery_commits = derive_closeout_recovery_commits(current, mutations=reconciled)
+    if reconciled == current.mutationEvidence and recovery_commits == current.recoveryCommits:
+        return
+    store.update(
+        lambda record: record.model_copy(
+            update={
+                "mutationEvidence": reconciled,
+                "recoveryCommits": recovery_commits,
+                "irreversibleBoundaryEntered": (
+                    record.irreversibleBoundaryEntered
+                    or any(item.state == "commit-proven" for item in reconciled.values())
+                ),
+            }
+        )
+    )
+
+
 def operation_projection(
     record: LifecycleOperationRecord, *, now: datetime | None = None
 ) -> LifecycleOperationProjection:
@@ -335,7 +506,11 @@ def operation_projection(
         guidance=record.guidance,
         cancellable=(
             record.status in {"queued", "running", "input-required"}
-            and not record.irreversibleBoundaryEntered
+            and (
+                not closeout_generation_retained(record)
+                if record.operationKind == "closeout"
+                else not record.irreversibleBoundaryEntered
+            )
         ),
     )
 
@@ -382,7 +557,7 @@ def launch_detached_worker(contract: WorktreeContract, record: LifecycleOperatio
 def _queued_record(
     contract: WorktreeContract,
     operation_input: LifecycleOperationInput,
-    candidate: _CandidateIdentity,
+    candidate: LifecycleOperationCandidate,
     integration_authority: IntegrationOperationAuthority | None,
     timestamp: datetime,
 ) -> LifecycleOperationRecord:
@@ -405,28 +580,17 @@ def _queued_record(
         queuedAt=stamp,
         currentCommand=f"waiting to start {operation_input.kind}",
         reportPath=operation_report_path(contract.worktree_group, operation_input.kind).as_posix(),
+        mutationEvidence=(
+            initial_closeout_mutation_evidence(contract, operation_input.effectiveInput)
+            if isinstance(operation_input, CloseoutOperationInput)
+            else {}
+        ),
     )
 
 
-def _candidate_tree(contract: WorktreeContract, kind: LifecycleOperationKind) -> str | None:
-    """Materialize the closeout request's full candidate in an isolated Git index.
-
-    This captures tracked edits, deletions, and non-ignored untracked files without touching
-    the developer-visible index. The worker compares the same tree at the exact reset-and-stage
-    seam, so a delayed asynchronous start cannot silently absorb later worktree edits.
-    """
-    if kind != "closeout":
-        return None
-    return code_candidate_tree(contract)
-
-
 def _integration_authority(
-    contract: WorktreeContract, operation_input: LifecycleOperationInput
-) -> IntegrationOperationAuthority | None:
-    if operation_input.kind != "integrate":
-        return None
-    if not isinstance(operation_input, IntegrateOperationInput):
-        raise RuntimeError("integrate operation authority requires integrate input")
+    contract: WorktreeContract, operation_input: IntegrateOperationInput
+) -> IntegrationOperationAuthority:
     if contract.closeout_status != "completed" or not contract.code_commit:
         raise RuntimeError("integration authority requires a completed closeout code commit")
     targets = {target.side: target for target in integration_targets(contract)}
@@ -582,10 +746,15 @@ def _require_configured_task_identity(
 
 
 def _requeued(record: LifecycleOperationRecord, timestamp: datetime) -> LifecycleOperationRecord:
+    recovering = (
+        closeout_generation_retained(record)
+        if record.operationKind == "closeout"
+        else record.irreversibleBoundaryEntered
+    )
     return record.model_copy(
         update={
             "status": "queued",
-            "phase": "recovering-after-claim" if record.irreversibleBoundaryEntered else "queued",
+            "phase": "recovering-after-claim" if recovering else "queued",
             "queuedAt": timestamp.isoformat(),
             "heartbeatAt": None,
             "finishedAt": None,
@@ -622,16 +791,31 @@ def _worker_process_group_alive(pid: int) -> bool:
 
 
 def _should_recover(record: LifecycleOperationRecord, now: datetime) -> bool:
+    past_boundary = (
+        closeout_generation_retained(record)
+        if record.operationKind == "closeout"
+        else record.irreversibleBoundaryEntered
+    )
+    if (
+        record.operationKind == "closeout"
+        and not past_boundary
+        and any(
+            evidence.state == "reconciled-unchanged"
+            for evidence in record.mutationEvidence.values()
+        )
+    ):
+        # L1 proves cancellation safety. L2 owns an explicit new mutation attempt.
+        return False
     restored_ref_failure = (
         record.status == "failed"
-        and record.irreversibleBoundaryEntered
+        and past_boundary
         and isinstance(record.result, dict)
         and record.result.get("safeToReplace") is True
     )
     return (
         _recoverable_stale(record, now)
-        or (record.status == "input-required" and record.irreversibleBoundaryEntered)
-        or (record.status in {"failed", "cancelled"} and not record.irreversibleBoundaryEntered)
+        or (record.status == "input-required" and past_boundary)
+        or (record.status in {"failed", "cancelled"} and not past_boundary)
         or restored_ref_failure
     )
 
@@ -647,17 +831,25 @@ def _launch_or_fail(
     except Exception as error:
         stamp = now_iso()
         failure = f"detached worker could not start: {error}"
-        store.update(
-            lambda current: current.model_copy(
+
+        def failed_launch(current: LifecycleOperationRecord) -> LifecycleOperationRecord:
+            retained = current.operationKind == "closeout" and closeout_generation_retained(current)
+            return current.model_copy(
                 update={
-                    "status": "failed",
-                    "phase": "failed",
-                    "finishedAt": stamp,
+                    "status": "input-required" if retained else "failed",
+                    "phase": "contract-finalization" if retained else "failed",
+                    "finishedAt": None if retained else stamp,
                     "failure": failure,
-                    "guidance": "Fix the native runner environment, then start the same task operation again.",
+                    "guidance": (
+                        "Fix the native runner environment, then recover the same exact "
+                        "closeout generation."
+                        if retained
+                        else "Fix the native runner environment, then start the same task operation again."
+                    ),
                 }
             )
-        )
+
+        store.update(failed_launch)
         raise
 
 
@@ -666,8 +858,10 @@ def _validate_input_identity(
 ) -> None:
     if Path(operation_input.contractPath).resolve() != contract.contract_path.resolve():
         raise RuntimeError("lifecycle operation input does not resolve to its loaded contract")
-    if operation_input.kind == "closeout" and not operation_input.approvalNote.strip():
-        raise RuntimeError("closeout apply requires a non-empty approval intent note")
+    if isinstance(operation_input, CloseoutOperationInput):
+        if not operation_input.approvalNote.strip():
+            raise RuntimeError("closeout apply requires a non-empty approval intent note")
+        require_effective_closeout_plan(contract, operation_input.effectiveInput, route="worktree")
 
 
 def _store(contract: WorktreeContract, kind: LifecycleOperationKind) -> LifecycleOperationStore:

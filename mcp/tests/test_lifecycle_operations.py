@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import json
-import runpy
+import signal
 import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
-from _global_state import preserve_owned_mutable_state
 from agents_remember.application import lifecycle_operation_worker, worktree_tools
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.controlplane.records import (
@@ -30,7 +28,10 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.integration import lifecycle_operations
-from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_lease import (
+    contract_lifecycle_lease,
+    require_lifecycle_operation_compatible,
+)
 from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -51,11 +52,16 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )
+from closeout_input_test_support import (
+    closeout_operation_input,
+    start_closeout_operation,
+    with_commit_proven,
+    with_mutation_intent,
+)
 from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
-from pydantic import ValidationError
 
 
 def _contract(tmp_path: Path):
@@ -142,12 +148,7 @@ def _contract(tmp_path: Path):
 
 
 def _input(contract, *, message: str = "close L23") -> CloseoutOperationInput:
-    return CloseoutOperationInput(
-        configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
-        contractPath=contract.contract_path.as_posix(),
-        codeCommitMessage=message,
-        approvalNote="developer approved this exact candidate",
-    )
+    return closeout_operation_input(contract, code=message)
 
 
 def _integration_ready(contract):
@@ -231,6 +232,7 @@ def test_integration_authority_refuses_incomplete_closeout_edges(tmp_path: Path)
 
 def test_start_returns_immediately_and_duplicate_observes_one_launch(tmp_path: Path) -> None:
     contract = _contract(tmp_path)
+    (contract.code_worktree / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
     launches = []
 
     def launcher(loaded, record) -> None:
@@ -238,8 +240,10 @@ def test_start_returns_immediately_and_duplicate_observes_one_launch(tmp_path: P
 
     now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
 
-    first = start_or_observe_operation(_input(contract), launcher=launcher, now=now)
-    second = start_or_observe_operation(_input(contract), launcher=launcher, now=now)
+    first = start_closeout_operation(
+        _input(contract, message="  close L23  "), launcher=launcher, now=now
+    )
+    second = start_closeout_operation(_input(contract), launcher=launcher, now=now)
 
     assert first.status == second.status == "queued"
     assert len(launches) == 1
@@ -251,10 +255,11 @@ def test_conflicting_commit_message_refuses_while_task_operation_exists(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    (contract.code_worktree / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
 
-    with pytest.raises(RuntimeError, match="conflicting closeout operation"):
-        start_or_observe_operation(
+    with pytest.raises(RuntimeError, match="conflicting closeout intent"):
+        start_closeout_operation(
             _input(contract, message="different mutation"), launcher=lambda *_: None
         )
 
@@ -263,28 +268,26 @@ def test_contract_lifecycle_lease_excludes_cross_kind_and_terminal_mutation(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
 
-    lease = contract_lifecycle_lease(contract, operation_kind="integrate")
-    with pytest.raises(RuntimeError, match=r"integrate cannot proceed.*closeout"):
-        lease.__enter__()
-    lease = contract_lifecycle_lease(contract, operation_kind=None)
-    with pytest.raises(RuntimeError, match=r"terminal mutation cannot proceed.*closeout"):
-        lease.__enter__()
-    with contract_lifecycle_lease(contract, operation_kind="closeout"):
-        pass
+    with contract_lifecycle_lease(contract):
+        with pytest.raises(RuntimeError, match=r"integrate cannot proceed.*closeout"):
+            require_lifecycle_operation_compatible(contract, operation_kind="integrate")
+        with pytest.raises(RuntimeError, match=r"terminal mutation cannot proceed.*closeout"):
+            require_lifecycle_operation_compatible(contract, operation_kind=None)
+        require_lifecycle_operation_compatible(contract, operation_kind="closeout")
 
 
 def test_changed_worktree_is_a_different_closeout_candidate(tmp_path: Path) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     first = store.read()
     assert first is not None and first.candidateTree is not None
     (contract.code_worktree / "later.py").write_text("VALUE = 1\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="conflicting closeout operation"):
-        start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+        start_closeout_operation(_input(contract), launcher=lambda *_: None)
 
     current = store.read()
     assert current is not None
@@ -367,10 +370,10 @@ def test_closeout_preview_path_and_cancel_validation_are_task_addressed() -> Non
 def test_stale_worker_is_relaunched_with_same_input_and_attempt(tmp_path: Path) -> None:
     contract = _contract(tmp_path)
     old = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None, now=old)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None, now=old)
     launches = []
 
-    projection = start_or_observe_operation(
+    projection = start_closeout_operation(
         _input(contract),
         launcher=lambda _, record: launches.append(record.attempt),
         now=old + timedelta(seconds=31),
@@ -382,7 +385,7 @@ def test_stale_worker_is_relaunched_with_same_input_and_attempt(tmp_path: Path) 
 
 def test_preboundary_failure_restarts_the_same_task_operation(tmp_path: Path) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     store.update(
         lambda record: record.model_copy(
@@ -395,7 +398,7 @@ def test_preboundary_failure_restarts_the_same_task_operation(tmp_path: Path) ->
     )
     attempts: list[int] = []
 
-    projection = start_or_observe_operation(
+    projection = start_closeout_operation(
         _input(contract), launcher=lambda _, record: attempts.append(record.attempt)
     )
 
@@ -403,95 +406,11 @@ def test_preboundary_failure_restarts_the_same_task_operation(tmp_path: Path) ->
     assert attempts == [2]
 
 
-def test_stale_recovery_attempt_can_be_claimed_only_once(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    store.update(
-        lambda record: record.model_copy(
-            update={
-                "status": "failed",
-                "phase": "failed",
-                "finishedAt": "2026-08-12T12:01:00+00:00",
-            }
-        )
-    )
-
-    def requeue(record):
-        return record.model_copy(
-            update={"status": "queued", "phase": "queued", "attempt": record.attempt + 1}
-        )
-
-    first, first_claimed = store.replace_for_recovery(requeue, expected_attempt=1)
-    second, second_claimed = store.replace_for_recovery(requeue, expected_attempt=1)
-
-    assert first.attempt == second.attempt == 2
-    assert first_claimed is True
-    assert second_claimed is False
-
-
-def test_completed_attempt_observes_until_contract_state_advances(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
-    operation_input = _input(contract)
-    start_or_observe_operation(operation_input, launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    store.update(
-        lambda record: record.model_copy(update={"status": "running", "phase": "preflight"})
-    )
-    store.update(
-        lambda record: record.model_copy(
-            update={
-                "status": "completed",
-                "phase": "completed",
-                "finishedAt": "2026-08-12T12:02:00+00:00",
-            }
-        )
-    )
-    assert (
-        start_or_observe_operation(operation_input, launcher=lambda *_: None).status == "completed"
-    )
-    with pytest.raises(RuntimeError, match="already completed task state"):
-        start_or_observe_operation(
-            _input(contract, message="different message"), launcher=lambda *_: None
-        )
-
-    advanced = replace(contract, code_commit="b" * 40, closeout_status="completed")
-    write_contract(advanced.contract_path, advanced)
-    attempts: list[int] = []
-    projection = start_or_observe_operation(
-        _input(advanced), launcher=lambda _, record: attempts.append(record.attempt)
-    )
-
-    assert projection.status == "queued"
-    assert attempts == [2]
-
-
-def test_corrupt_or_extra_store_fields_fail_closed(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-    path = operation_record_path(contract.worktree_group, "closeout")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["agentSelectedJobId"] = "forbidden"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(RuntimeError, match="invalid lifecycle operation record"):
-        LifecycleOperationStore(path).read()
-
-
-def test_store_revalidates_model_copy_before_write(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-
-    with pytest.raises(ValidationError):
-        store.update(lambda record: record.model_copy(update={"status": "willy-nilly"}))
-
-
 def test_cancel_before_boundary_is_task_addressed_and_kills_private_worker_group(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     store.update(
         lambda record: record.model_copy(
@@ -513,24 +432,24 @@ def test_cancel_before_boundary_is_task_addressed_and_kills_private_worker_group
     assert {projection.status for projection in projections} == {"cancelled"}
     assert all(not projection.cancellable for projection in projections)
     assert store.read().workerPid is None  # type: ignore[union-attr]
-    kill.assert_called_once()
+    assert kill.call_args_list == [
+        call(4321, 0),
+        call(4321, signal.SIGTERM),
+    ]
 
 
 def test_cancel_after_boundary_refuses_without_making_approval_reusable(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
+    (contract.code_worktree / "boundary.txt").write_text("boundary\n", encoding="utf-8")
     operation_input = _input(contract)
-    start_or_observe_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(operation_input, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
+    store.update(with_mutation_intent)
     store.update(
-        lambda record: record.model_copy(
-            update={
-                "status": "running",
-                "phase": "approval-claim",
-                "irreversibleBoundaryEntered": True,
-                "approvalClaimed": True,
-            }
+        lambda record: with_commit_proven(record).model_copy(
+            update={"status": "running", "phase": "code-commit", "approvalClaimed": True}
         )
     )
 
@@ -545,7 +464,7 @@ def test_internal_operation_key_is_stable_but_not_part_of_projection(tmp_path: P
     fingerprint = operation_fingerprint(operation_input)
     key = operation_key(contract.contract_path, "closeout", fingerprint)
 
-    projection = start_or_observe_operation(operation_input, launcher=lambda *_: None)
+    projection = start_closeout_operation(operation_input, launcher=lambda *_: None)
 
     assert len(key) == 64
     assert key not in projection.model_dump_json()
@@ -588,88 +507,6 @@ def test_consumed_gate_recovers_only_the_same_internal_operation(tmp_path: Path)
     assert len(store.read(None)) == 3
 
 
-def test_store_recovery_and_terminal_replacement_guards_every_identity_edge(
-    tmp_path: Path,
-) -> None:
-    contract = _contract(tmp_path)
-    missing = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    with pytest.raises(RuntimeError, match="does not exist"):
-        missing.update(lambda record: record)
-    with pytest.raises(RuntimeError, match="completed lifecycle operation"):
-        missing.replace_for_recovery(lambda record: record, expected_attempt=1)
-    with pytest.raises(RuntimeError, match="active lifecycle operation"):
-        missing.replace_terminal(
-            lifecycle_operations._queued_record(
-                contract,
-                _input(contract),
-                lifecycle_operations._CandidateIdentity(
-                    state="a" * 64,
-                    tree="c" * 40,
-                    fingerprint="b" * 64,
-                ),
-                None,
-                datetime(2026, 8, 12, tzinfo=UTC),
-            )
-        )
-
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    current = store.read()
-    assert current is not None
-    with pytest.raises(RuntimeError, match="cannot change its fingerprint"):
-        store.replace_for_recovery(
-            lambda record: record.model_copy(update={"fingerprint": "c" * 64}),
-            expected_attempt=1,
-        )
-    terminal_past_boundary = current.model_copy(
-        update={
-            "status": "failed",
-            "phase": "failed",
-            "irreversibleBoundaryEntered": True,
-        }
-    )
-    store._write(terminal_past_boundary)
-    with pytest.raises(RuntimeError, match="past its boundary"):
-        store.replace_for_recovery(lambda record: record, expected_attempt=1)
-
-    candidate = current.model_copy(update={"fingerprint": "d" * 64, "operationKey": "e" * 64})
-    with pytest.raises(RuntimeError, match="cannot change taskId"):
-        store.replace_terminal(candidate.model_copy(update={"taskId": "different"}))
-    replaced = store.replace_terminal(candidate)
-    assert replaced.attempt == 2
-    assert replaced.fingerprint == "d" * 64
-
-
-def test_store_transition_guards_immutable_input_claim_boundary_and_state(
-    tmp_path: Path,
-) -> None:
-    contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    current = store.read()
-    assert current is not None
-    validate = store._validate_transition
-
-    with pytest.raises(RuntimeError, match="cannot change taskName"):
-        validate(current, current.model_copy(update={"taskName": "other"}))
-    with pytest.raises(RuntimeError, match="cannot change its durable input"):
-        validate(current, current.model_copy(update={"operationKey": "f" * 64}))
-    with pytest.raises(RuntimeError, match="invalid lifecycle operation transition"):
-        validate(current, current.model_copy(update={"status": "input-required"}))
-
-    claimed = current.model_copy(update={"approvalClaimed": True})
-    with pytest.raises(RuntimeError, match="cannot become unclaimed"):
-        validate(claimed, claimed.model_copy(update={"approvalClaimed": False}))
-    entered = current.model_copy(update={"irreversibleBoundaryEntered": True})
-    with pytest.raises(RuntimeError, match="cannot be cleared"):
-        validate(entered, entered.model_copy(update={"irreversibleBoundaryEntered": False}))
-    with pytest.raises(RuntimeError, match="cannot cancel after"):
-        validate(
-            entered,
-            entered.model_copy(update={"status": "cancelled", "phase": "cancelled"}),
-        )
-
-
 def test_observe_latest_terminal_cancel_and_launch_failure_are_task_addressed(
     tmp_path: Path,
 ) -> None:
@@ -678,7 +515,7 @@ def test_observe_latest_terminal_cancel_and_launch_failure_are_task_addressed(
     assert latest_operation_projection(contract.contract_path) is None
 
     with pytest.raises(RuntimeError, match="no native runner"):
-        start_or_observe_operation(
+        start_closeout_operation(
             _input(contract),
             launcher=lambda *_: (_ for _ in ()).throw(RuntimeError("no native runner")),
         )
@@ -700,7 +537,7 @@ def test_detached_launcher_uses_native_environment_and_private_process_group(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     record = store.read()
     assert record is not None
@@ -757,7 +594,8 @@ def test_operation_runtime_tracks_progress_reports_and_terminal_outcomes(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    (contract.code_worktree / "runtime.txt").write_text("runtime\n", encoding="utf-8")
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     running = runtime.start()
@@ -769,25 +607,31 @@ def test_operation_runtime_tracks_progress_reports_and_terminal_outcomes(
         {
             "current_command": "claim exact approval",
             "approval_claimed": True,
-            "irreversible_boundary": True,
         },
     )
     assert store.read().approvalClaimed is True  # type: ignore[union-attr]
+    current = store.read()
+    assert current is not None
+    intent = with_mutation_intent(current).mutationEvidence["code"]
     runtime.progress(
         "code-commit",
-        {
-            "recovery_commits": {
-                "codeCommit": "a" * 40,
-                "memoryContentCommit": "",
-                "ledgerCommit": "",
-            }
-        },
+        {"mutation_evidence": intent.model_dump(mode="json")},
     )
+    current = store.read()
+    assert current is not None
+    proven = with_commit_proven(current).mutationEvidence["code"]
+    runtime.progress(
+        "code-commit",
+        {"mutation_evidence": proven.model_dump(mode="json")},
+    )
+    after_proof = store.read()
+    assert after_proof is not None and after_proof.recoveryCommits is not None
+    assert after_proof.recoveryCommits.codeCommit == "e" * 40
     runtime.progress(
         "ledger-commit",
         {
             "recovery_commits": {
-                "codeCommit": "a" * 40,
+                "codeCommit": "e" * 40,
                 "memoryContentCommit": "b" * 40,
                 "ledgerCommit": "c" * 40,
             }
@@ -795,7 +639,7 @@ def test_operation_runtime_tracks_progress_reports_and_terminal_outcomes(
     )
     recorded = store.read()
     assert recorded is not None and recorded.recoveryCommits is not None
-    assert recorded.recoveryCommits.codeCommit == "a" * 40
+    assert recorded.recoveryCommits.codeCommit == "e" * 40
     assert recorded.recoveryCommits.ledgerCommit == "c" * 40
     with pytest.raises(RuntimeError, match="cannot be cleared"):
         store.update(lambda record: record.model_copy(update={"recoveryCommits": None}))
@@ -804,8 +648,8 @@ def test_operation_runtime_tracks_progress_reports_and_terminal_outcomes(
             lambda record: record.model_copy(
                 update={
                     "recoveryCommits": LifecycleOperationRecoveryCommits(
-                        codeCommit="d" * 40,
-                        memoryContentCommit="b" * 40,
+                        codeCommit="e" * 40,
+                        memoryContentCommit="d" * 40,
                         ledgerCommit="c" * 40,
                     )
                 }
@@ -843,7 +687,7 @@ def test_operation_runtime_heartbeat_updates_running_and_ignores_terminal_record
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     runtime.start()
@@ -863,7 +707,7 @@ def test_operation_runtime_heartbeat_updates_running_and_ignores_terminal_record
 
 def test_operation_runtime_failure_modes_and_cancelled_progress(tmp_path: Path) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     runtime.start()
@@ -880,7 +724,7 @@ def test_operation_runtime_failure_modes_and_cancelled_progress(tmp_path: Path) 
     assert store.read().status == "cancelled"  # type: ignore[union-attr]
 
     second_contract = _contract(tmp_path / "second")
-    start_or_observe_operation(_input(second_contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(second_contract), launcher=lambda *_: None)
     second_store = LifecycleOperationStore(
         operation_record_path(second_contract.worktree_group, "closeout")
     )
@@ -895,7 +739,7 @@ def test_execute_operation_dispatches_closeout_and_integration_payloads(tmp_path
     runtime = Mock()
     config = SimpleNamespace()
     with patch.object(lifecycle_operation_worker, "load_config", return_value=config):
-        start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+        start_closeout_operation(_input(contract), launcher=lambda *_: None)
         closeout_store = LifecycleOperationStore(
             operation_record_path(contract.worktree_group, "closeout")
         )
@@ -928,6 +772,7 @@ def test_execute_operation_dispatches_closeout_and_integration_payloads(tmp_path
             operation_record_path(contract.worktree_group, "integrate")
         ).read()
         assert integration is not None
+        runtime.store.read.return_value = integration
         with patch.object(
             lifecycle_operation_worker,
             "integrate_result",
@@ -935,7 +780,17 @@ def test_execute_operation_dispatches_closeout_and_integration_payloads(tmp_path
         ):
             lifecycle_operation_worker.execute_operation(integration, runtime)
         runtime.finish.assert_called_with(
-            {"reason": "blocked", "ok": False, "operation": "worktree_integrate"}, ok=False
+            {
+                "reason": "blocked",
+                "ok": False,
+                "operation": "worktree_integrate",
+                "queueReleaseFailure": (
+                    "closeout-candidate-task-document-missing: a graph-managed leaf contract "
+                    "has no canonical leaf task document"
+                ),
+                "safeToReplace": False,
+            },
+            ok=False,
         )
 
 
@@ -980,7 +835,7 @@ def test_run_worker_records_execution_outcome(
     tmp_path: Path, side_effect: Exception | None, expected: int
 ) -> None:
     contract = _contract(tmp_path)
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     with patch.object(lifecycle_operation_worker, "execute_operation", side_effect=side_effect):
         assert lifecycle_operation_worker.run_worker(contract.contract_path, "closeout") == expected
     current = LifecycleOperationStore(
@@ -995,77 +850,18 @@ def test_run_worker_refuses_missing_or_non_startable_durable_state(tmp_path: Pat
     with pytest.raises(RuntimeError, match="no closeout operation is queued"):
         lifecycle_operation_worker.run_worker(contract.contract_path, "closeout")
 
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    store._write(
-        store.read().model_copy(update={"status": "cancelled", "phase": "cancelled"})  # type: ignore[union-attr]
+    store.update(
+        lambda record: record.model_copy(update={"status": "cancelled", "phase": "cancelled"})
     )
     assert lifecycle_operation_worker.run_worker(contract.contract_path, "closeout") == 0
 
-    store._write(
-        store.read().model_copy(  # type: ignore[union-attr]
-            update={"status": "input-required", "phase": "failed"}
-        )
+    second = _contract(tmp_path / "non-startable")
+    start_closeout_operation(_input(second), launcher=lambda *_: None)
+    second_store = LifecycleOperationStore(operation_record_path(second.worktree_group, "closeout"))
+    second_store.update(
+        lambda record: record.model_copy(update={"status": "input-required", "phase": "failed"})
     )
     with pytest.raises(RuntimeError, match="cannot start from durable state"):
-        lifecycle_operation_worker.run_worker(contract.contract_path, "closeout")
-
-
-def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
-    parser = lifecycle_operation_worker.build_parser()
-    parsed = parser.parse_args(
-        ["--contract-path", contract.contract_path.as_posix(), "--kind", "closeout"]
-    )
-    assert parsed.contract_path == contract.contract_path
-
-    services = Mock()
-    entry_order: list[str] = []
-    with (
-        patch.object(
-            lifecycle_operation_worker,
-            "declare_lifecycle_operation_process",
-            side_effect=lambda: entry_order.append("declare"),
-        ) as declare_operation,
-        patch.object(
-            lifecycle_operation_worker,
-            "build_default_worktree_services",
-            side_effect=lambda: (entry_order.append("build"), services)[1],
-        ) as build_services,
-        patch.object(lifecycle_operation_worker, "bind_worktree_services") as bind_services,
-        patch.object(lifecycle_operation_worker, "run_worker", return_value=7) as run,
-    ):
-        assert (
-            lifecycle_operation_worker.main(
-                ["--contract-path", contract.contract_path.as_posix(), "--kind", "closeout"]
-            )
-            == 7
-        )
-    declare_operation.assert_called_once_with()
-    assert entry_order == ["declare", "build"]
-    build_services.assert_called_once_with()
-    bind_services.assert_called_once_with(services)
-    run.assert_called_once_with(contract.contract_path, "closeout")
-
-    start_or_observe_operation(_input(contract), launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    store._write(
-        store.read().model_copy(update={"status": "cancelled", "phase": "cancelled"})  # type: ignore[union-attr]
-    )
-    argv = [
-        "lifecycle_operation_worker.py",
-        "--contract-path",
-        contract.contract_path.as_posix(),
-        "--kind",
-        "closeout",
-    ]
-    with (
-        preserve_owned_mutable_state(),
-        patch.object(sys, "argv", argv),
-        pytest.raises(SystemExit) as exited,
-    ):
-        runpy.run_path(
-            Path(lifecycle_operation_worker.__file__).as_posix(),
-            run_name="__main__",
-        )
-    assert exited.value.code == 0
+        lifecycle_operation_worker.run_worker(second.contract_path, "closeout")

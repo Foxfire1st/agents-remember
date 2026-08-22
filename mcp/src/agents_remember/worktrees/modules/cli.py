@@ -2,15 +2,29 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import LedgerError
+from agents_remember.models.closeout_input import CloseoutCorrectedCall
+from agents_remember.worktrees.closeout_input import (
+    corrected_closeout_arguments,
+    normalize_closeout_input,
+    raw_closeout_messages,
+)
+from agents_remember.worktrees.integration.mutation_evidence import (
+    JOURNALED_CLOSEOUT_REQUIRED,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.integrate import integrate_result
 from agents_remember.worktrees.modules.start import attach_result, start_result, status_result
-from agents_remember.worktrees.worktree_contract import ContractError, heal_contract_leaf_ids
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    heal_contract_leaf_ids,
+    load_contract,
+)
 
 
 def parse_json_stdout(stdout: str) -> object:
@@ -42,7 +56,28 @@ def command_start(args: argparse.Namespace) -> int:
 
 
 def command_closeout(args: argparse.Namespace) -> int:
-    result = closeout_result(WorktreeArgs.from_namespace(args))
+    worktree_args = WorktreeArgs.from_namespace(args)
+    if not worktree_args.dry_run:
+        raise RuntimeError(JOURNALED_CLOSEOUT_REQUIRED)
+    if worktree_args.contract_path is None:
+        raise RuntimeError("closeout requires a contract path")
+    contract = load_contract(worktree_args.contract_path)
+    effective = normalize_closeout_input(
+        contract,
+        raw_closeout_messages(
+            code=getattr(args, "code_commit_message", None),
+            memory=getattr(args, "memory_commit_message", None),
+            ledger=getattr(args, "ledger_commit_message", None),
+        ),
+        route="worktree",
+        corrected_call=CloseoutCorrectedCall(
+            tool="worktree closeout",
+            arguments=corrected_closeout_arguments(worktree_args.contract_path.as_posix()),
+        ),
+    )
+    result = closeout_result(
+        replace(worktree_args, closeout_input=effective, ledger_commit_message="")
+    )
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
@@ -121,11 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     closeout = subparsers.add_parser("closeout")
     closeout.add_argument("--contract-path", type=Path, required=True)
-    closeout.add_argument("--approved", action="store_true")
-    closeout.add_argument("--approval-note", default="")
-    closeout.add_argument("--code-commit-message", required=True)
-    closeout.add_argument("--memory-commit-message", default="")
-    closeout.add_argument("--ledger-commit-message", default="")
+    closeout.add_argument("--code-commit-message")
+    closeout.add_argument("--memory-commit-message")
+    closeout.add_argument("--ledger-commit-message")
     closeout.add_argument("--dry-run", action="store_true")
     closeout.set_defaults(func=command_closeout)
 

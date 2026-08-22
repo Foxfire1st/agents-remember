@@ -15,7 +15,10 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     repository_default_branch,
     require_terminal_worktree,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_lease import (
+    contract_lifecycle_lease,
+    require_lifecycle_operation_compatible,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
@@ -707,7 +710,8 @@ def _cleanup_with_guard(
 ) -> WorktreeCommandResult:
     # The exact leaf fence remains held through every terminal output and publication.
     try:
-        with contract_lifecycle_lease(contract, operation_kind=None):
+        with contract_lifecycle_lease(contract):
+            require_lifecycle_operation_compatible(contract, operation_kind=None)
 
             def publish(
                 series_permit: AtomicSeriesTerminalPermit | None = None,

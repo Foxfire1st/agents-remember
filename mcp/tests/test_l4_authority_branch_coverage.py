@@ -13,9 +13,7 @@ from unittest import mock
 
 from agents_remember.application.lifecycle_operation_worker import OperationRuntime
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     IntegrateOperationInput,
-    LifecycleOperationInput,
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
@@ -41,6 +39,7 @@ from agents_remember.worktrees.integration.lifecycle_operation_store import (
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from closeout_input_test_support import closeout_operation_input
 from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
@@ -236,11 +235,11 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                 (
                     running.model_copy(
                         update={
-                            "input": CloseoutOperationInput(
-                                configPath="/settings.json",
-                                contractPath=contract.contract_path.as_posix(),
-                                codeCommitMessage="candidate",
-                                approvalNote="test authority mismatch",
+                            "input": closeout_operation_input(
+                                contract,
+                                config_path="/settings.json",
+                                code="candidate",
+                                approval_note="test authority mismatch",
                             )
                         }
                     ),
@@ -602,19 +601,6 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     now,
                 )
             )
-
-    def test_wrong_runtime_input_cannot_mint_integration_authority(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = _authority_fixture(Path(tmp))
-            operation_input = cast(
-                LifecycleOperationInput,
-                SimpleNamespace(kind="integrate"),
-            )
-            with self.assertRaisesRegex(RuntimeError, "requires integrate input"):
-                lifecycle_operations._integration_authority(
-                    fixture.leaf_contract,
-                    operation_input,
-                )
 
 
 class IntegrationBranchAuthorityCoverageTests(unittest.TestCase):

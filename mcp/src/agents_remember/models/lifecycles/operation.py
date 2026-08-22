@@ -9,6 +9,11 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.base import StrictResponseModel
+from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.lifecycles.mutation_evidence import (
+    CloseoutMutationLeg,
+    GitMutationEvidence,
+)
 
 LifecycleOperationKind = Literal["closeout", "integrate"]
 IntegrateStrategy = Literal["ff-only", "replay"]
@@ -216,9 +221,7 @@ class CloseoutOperationInput(BaseModel):
     kind: Literal["closeout"] = "closeout"
     configPath: str
     contractPath: str
-    codeCommitMessage: str
-    memoryCommitMessage: str = ""
-    ledgerCommitMessage: str = ""
+    effectiveInput: EffectiveCloseoutInput
     approvalNote: str
     gatePolicy: list[GatePolicyRuleSnapshot] = Field(default_factory=list)
 
@@ -245,7 +248,7 @@ class LifecycleOperationRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schemaVersion: Literal["2.0"] = "2.0"
+    schemaVersion: Literal["3.0"] = "3.0"
     taskId: str
     taskName: str
     contractPath: str
@@ -270,7 +273,12 @@ class LifecycleOperationRecord(BaseModel):
     cancelRequested: bool = False
     irreversibleBoundaryEntered: bool = False
     approvalClaimed: bool = False
+    mutationEvidence: dict[CloseoutMutationLeg, GitMutationEvidence] = Field(default_factory=dict)
     recoveryCommits: LifecycleOperationRecoveryCommits | None = None
+    closeoutFinalizedContractSha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     qualityCertification: IntegrationQualityCertification | None = None
     queueCompletion: IntegrationQueueCompletionEvidence | None = None
     organizationalRepair: OrganizationalCompletionRepairEvidence | None = None
@@ -288,12 +296,51 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
         raise ValueError("integrate operation requires exact integrationAuthority")
     if record.operationKind == "closeout" and record.integrationAuthority is not None:
         raise ValueError("closeout operation has no integrationAuthority")
+    if record.operationKind != "closeout" and record.closeoutFinalizedContractSha256 is not None:
+        raise ValueError("closeout finalized contract SHA-256 belongs to closeout operations only")
     if (
         record.operationKind != "integrate"
         and isinstance(record.result, dict)
         and record.result.get("state") == "organizational-completion-gate-failed"
     ):
         raise ValueError("organizational completion quality failure belongs to integration only")
+    _require_organizational_repair_evidence(record)
+    if record.operationKind == "closeout":
+        _require_closeout_mutation_evidence(record)
+    elif record.mutationEvidence:
+        raise ValueError("integration operation cannot carry closeout mutation evidence")
+
+
+def _require_closeout_mutation_evidence(record: LifecycleOperationRecord) -> None:
+    closeout_input = record.input
+    if not isinstance(closeout_input, CloseoutOperationInput):
+        raise ValueError("closeout operation requires normalized closeout input")
+    expected_legs = {
+        leg for leg in ("code", "memory", "ledger") if closeout_input.effectiveInput.enabled(leg)
+    }
+    if set(record.mutationEvidence) != expected_legs:
+        raise ValueError("closeout mutation evidence must match every enabled commit leg")
+    commit_proven = any(
+        evidence.state == "commit-proven" for evidence in record.mutationEvidence.values()
+    )
+    if record.irreversibleBoundaryEntered != commit_proven:
+        raise ValueError(
+            "closeout irreversible boundary must be derived from commit-proven evidence"
+        )
+    if record.recoveryCommits is None:
+        return
+    recovery_field = {
+        "code": "codeCommit",
+        "memory": "memoryContentCommit",
+        "ledger": "ledgerCommit",
+    }
+    for leg, evidence in record.mutationEvidence.items():
+        recovered = getattr(record.recoveryCommits, recovery_field[leg])
+        if evidence.state == "commit-proven" and recovered and recovered != evidence.commit:
+            raise ValueError("closeout recovery commit contradicts commit-proven evidence")
+
+
+def _require_organizational_repair_evidence(record: LifecycleOperationRecord) -> None:
     if record.organizationalRepair is None:
         return
     if record.operationKind != "integrate":

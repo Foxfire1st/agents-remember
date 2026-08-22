@@ -58,6 +58,7 @@ from test_worktree_support import (
     long_path_tempdir,
     long_source_path,
     read_onboarding_field,
+    run_authorized_closeout_mechanics,
 )
 
 
@@ -1050,7 +1051,7 @@ class WorktreeSupport1(WorktreeSupportTests):
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["state"], "would-closeout")
             self.assertEqual(payload["phase"], "commit-approval-pending")
@@ -1061,6 +1062,9 @@ class WorktreeSupport1(WorktreeSupportTests):
             )
             self.assertNotIn("next_command", payload)
             self.assertTrue(payload["commit_approval_required"])
+            self.assertEqual(payload["proposed_commits"]["code"]["message"], "Add feature")
+            self.assertEqual(payload["proposed_commits"]["memory"]["message"], "Document feature")
+            self.assertEqual(payload["proposed_commits"]["ledger"]["message"], "Sync ledger")
             self.assertIn(
                 "refresh-onboarding-metadata-and-entity-fingerprints", payload["closeout_order"]
             )

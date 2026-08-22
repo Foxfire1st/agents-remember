@@ -1,7 +1,7 @@
 """Wave 2 (L16-R6/R7/R8/R9): branch-addressed direct execution and error dialect.
 
 Covers the policy-gated series-contract binding for ``record_route_review``
-(R6), the atomic ``direct_landing`` operation with its pre-commit staged-
+(R6), the lock-serialized ``direct_landing`` operation with its pre-commit staged-
 candidate gate (R7/R8), and the contract-bound refusal dialect (R9). Uses real
 scratch git repos and a synthetic coordination root -- never the live tree.
 """
@@ -146,6 +146,8 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -159,6 +161,8 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix() + ".leaf",
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -177,6 +181,8 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit="0" * 40,
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -187,6 +193,8 @@ class DirectLandingTests(unittest.TestCase):
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                memory_commit_message="direct memory content",
+                ledger_commit_message="direct ledger mapping",
                 intent_note="approve",
                 dry_run=True,
             ),
@@ -214,6 +222,11 @@ class DirectLandingTests(unittest.TestCase):
         self.assertTrue(landed["ledgerCommit"])
         after = git(memory, "rev-parse", "HEAD")
         self.assertNotEqual(before, after)
+        self.assertEqual(git(memory, "show", "-s", "--format=%s", after), "direct ledger")
+        self.assertEqual(
+            git(memory, "show", "-s", "--format=%s", str(landed["memoryContentCommit"])),
+            "direct memory",
+        )
         ledger_text = git(memory, "show", f"{after}:memory.md")
         self.assertIn(fixture["code_head"], ledger_text)
         self.assertIn(landed["memoryContentCommit"], ledger_text)
@@ -236,6 +249,8 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=branch_commit(code, "ar/direct-task"),
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     candidate_tree=gated_tree,
                     intent_note="approve",
                 ),
@@ -250,6 +265,8 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                 ),
             )
 
@@ -304,6 +321,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=leaf.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -317,6 +336,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix(),
                     code_commit="   ",
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -339,6 +360,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -360,6 +383,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -383,6 +408,9 @@ class DirectLandingBranchTests(unittest.TestCase):
                 ),
             )
         self.assertEqual(preview["memory"], {"memoryMode": "internal"})
+        effective_input = cast(dict[str, dict[str, str]], preview["effectiveInput"])
+        self.assertEqual(effective_input["memory"]["state"], "not-applicable")
+        self.assertEqual(effective_input["ledger"]["state"], "not-applicable")
 
     def test_preview_refuses_external_memory_without_authority_paths(self) -> None:
         root = Path(self.temp.name)
@@ -401,6 +429,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                     dry_run=True,
                 ),
@@ -423,6 +453,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                     dry_run=True,
                 ),
@@ -466,6 +498,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -483,6 +517,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
             )
@@ -500,6 +536,8 @@ class DirectLandingBranchTests(unittest.TestCase):
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                memory_commit_message="direct memory content",
+                ledger_commit_message="direct ledger mapping",
                 intent_note="approved by owner",
             ),
         )
@@ -513,6 +551,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approved by owner",
                 ),
             )
@@ -531,6 +571,8 @@ class DirectLandingBranchTests(unittest.TestCase):
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                memory_commit_message="direct memory content",
+                ledger_commit_message="direct ledger mapping",
                 intent_note="approved by owner",
             ),
         )
@@ -541,6 +583,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approved by owner",
                 ),
             )
@@ -565,6 +609,8 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
                     intent_note="approved by owner",
                 ),
             )

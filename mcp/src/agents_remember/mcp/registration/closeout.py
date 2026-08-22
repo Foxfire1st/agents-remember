@@ -37,25 +37,32 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         contract_path: str,
         code_commit: str,
         *,
-        memory_commit_message: str = "",
-        ledger_commit_message: str = "",
+        memory_commit_message: str | None = None,
+        ledger_commit_message: str | None = None,
         intent_note: str = "",
         candidate_tree: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Verify one series code commit and atomically land its memory + ledger row.
+        """Verify one series code commit and lock-serialize its memory + ledger writes.
 
         The direct landing is the branch-addressed counterpart of the worktree closeout
         commit phase for sanctioned direct execution: it binds the task-root series
         contract (series-contract.md), verifies the exact code commit is the current
         series branch HEAD, commits external-memory content, and prepends the
         code-to-memory ledger row with the same ledger semantics as the worktree path.
-        All steps are pre-validated before any mutation and run under the integration
-        authority lock. Policy-gated: directExecutionEnabled must be set in the MCP
+        Message intent is normalized before the integration authority lock. The two
+        synchronous Git commits are not a durable atomic operation; interruption can leave
+        memory content ahead of its ledger row and requires the separately sequenced
+        operation-recovery work. Policy-gated:
+        directExecutionEnabled must be set in the MCP
         authority settings. The code commit is verified, never created. Pass
         candidate_tree (the staged candidate the owner gated through the Dagger
         --source/--repository-bundle contract) to keep the gate strictly pre-commit:
         a moved branch after the gate is refused before any memory or ledger commit.
+        Each of memory_commit_message and ledger_commit_message must be explicit and
+        nonblank only when its contract-derived leg is enabled; typed not-applicable
+        legs may omit the corresponding message. The verified-existing code commit has
+        no code-message input.
         MUTATING (memory + ledger commits); preview with dry_run=true."""
         return direct_landing_payload(
             config,
@@ -76,15 +83,16 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
     def worktree_closeout_preview(
         *,
         contract_path: str,
-        code_commit_message: str,
-        memory_commit_message: str = "",
-        ledger_commit_message: str = "",
+        code_commit_message: str | None = None,
+        memory_commit_message: str | None = None,
+        ledger_commit_message: str | None = None,
     ) -> dict[str, Any]:
         """Non-mutating preview of a worktree-backed closeout: proposed commits and whether
         the leaf change-set-scoped quality gate (--targeted: changed files, reverse-import
         closure, derived test subset, mandatory CRAP enforcement over changed modules) runs
         over the staged task worktree before the code commit. memory_quality_check stays a
-        per-leaf closeout gate."""
+        per-leaf closeout gate. Every contract-enabled commit leg requires its explicit,
+        nonblank message; typed not-applicable legs may be omitted."""
         return worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -100,9 +108,9 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         *,
         contract_path: str,
         intent_note: str,
-        code_commit_message: str,
-        memory_commit_message: str = "",
-        ledger_commit_message: str = "",
+        code_commit_message: str | None = None,
+        memory_commit_message: str | None = None,
+        ledger_commit_message: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Start or observe an approved task-bound worktree closeout. A mutating call
@@ -118,6 +126,8 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         Dagger executor. A refused gate leaves the task worktree staged and commits nothing;
         retries reset and restage only the operation's immutable accepted candidate tree.
         MUTATING and commit-gated: preview and approval precede apply. Requires intent_note.
+        Every contract-enabled commit leg requires its explicit, nonblank message; typed
+        not-applicable legs may be omitted.
         Repeat the same task input to observe/recover it; conflicting input refuses."""
         return worktree_closeout_apply_payload(
             config,

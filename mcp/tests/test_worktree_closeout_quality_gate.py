@@ -16,9 +16,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
-from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules import (
+    closeout_external,
     closeout_memory_quality,
     code_quality_gate,
 )
@@ -32,11 +32,13 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from closeout_input_test_support import MutationEvidenceRecorder, closeout_worktree_args
 from test_worktree_support import (
     closeout_args,
     dirty_open_external_contract_fixture,
     git,
     init_repo,
+    run_authorized_closeout_mechanics,
     write_file_onboarding,
     write_passing_route_review,
 )
@@ -56,6 +58,32 @@ def _quality_target(
         code_worktree=worktree,
         worktree_group=worktree_group or worktree / "enclosure",
     )
+
+
+def _assert_closeout_commit_subjects(contract, commits: Mapping[str, str]) -> None:
+    assert contract.memory_worktree is not None
+    code = git(
+        contract.code_worktree,
+        "show",
+        "-s",
+        "--format=%s",
+        commits["codeCommit"],
+    )
+    memory = git(
+        contract.memory_worktree,
+        "show",
+        "-s",
+        "--format=%s",
+        commits["memoryContentCommit"],
+    )
+    ledger = git(
+        contract.memory_worktree,
+        "show",
+        "-s",
+        "--format=%s",
+        commits["ledgerCommit"],
+    )
+    assert (code, memory, ledger) == ("Add feature", "Document feature", "Sync ledger")
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
@@ -80,7 +108,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_staged_quality, "run_strict_code_quality_gate") as gate,
                 self.assertRaisesRegex(RuntimeError, "self-owned wrapper"),
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             memory.assert_not_called()
             gate.assert_not_called()
@@ -93,20 +121,22 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             assert contract.memory_worktree is not None
             assert contract.ledger_path is not None
             captured: dict[str, str] = {}
+            mutation_recorder = MutationEvidenceRecorder()
 
             def progress(phase: str, evidence: Mapping[str, object]) -> None:
+                mutation_recorder(phase, evidence)
                 if phase == "contract-finalization":
                     value = evidence.get("recovery_commits")
                     assert isinstance(value, dict)
                     captured.update({str(key): str(item) for key, item in value.items()})
 
-            first = WorktreeArgs(
-                contract_path=contract.contract_path,
+            first = closeout_worktree_args(
+                contract,
+                code="Add feature",
+                memory="Document feature",
+                ledger="Sync ledger",
                 approved=True,
                 approval_note="developer approved exact closeout",
-                code_commit_message="Add feature",
-                memory_commit_message="Document feature",
-                ledger_commit_message="Sync ledger",
                 operation_key="a" * 64,
                 candidate_tree=closeout_module.code_candidate_tree(contract),
                 operation_progress=progress,
@@ -126,13 +156,15 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             ledger_after_first = contract.ledger_path.read_bytes()
             self.assertEqual(captured["codeCommit"], code_head)
             self.assertEqual(captured["ledgerCommit"], memory_head)
+            _assert_closeout_commit_subjects(contract, captured)
+            mutation_recorder.assert_proven("code", "memory", "ledger")
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
             recovered = closeout_module.closeout_result(
                 replace(
                     first,
                     recovery_commits=LifecycleOperationRecoveryCommits.model_validate(captured),
-                    operation_progress=None,
+                    operation_progress=progress,
                 )
             )
 
@@ -149,33 +181,28 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             )
             self.assertEqual(updated.ledger_commit, captured["ledgerCommit"])
 
-    def test_memory_commit_interruption_resumes_without_mapping_stale_contract_memory(self) -> None:
+    def test_memory_commit_interruption_stays_bound_to_the_published_ledger_intent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = dirty_open_external_contract_fixture(Path(tmp))
             assert contract.memory_worktree is not None
             assert contract.ledger_path is not None
             previous_memory = contract.memory_content_commit
-            captured: dict[str, str] = {}
+            mutation_recorder = MutationEvidenceRecorder()
 
-            def progress(_phase: str, evidence: Mapping[str, object]) -> None:
-                value = evidence.get("recovery_commits")
-                if isinstance(value, dict):
-                    captured.update({str(key): str(item) for key, item in value.items()})
-
-            first = WorktreeArgs(
-                contract_path=contract.contract_path,
+            first = closeout_worktree_args(
+                contract,
+                code="Add feature",
+                memory="Document feature",
+                ledger="Sync ledger",
                 approved=True,
                 approval_note="developer approved exact closeout",
-                code_commit_message="Add feature",
-                memory_commit_message="Document feature",
-                ledger_commit_message="Sync ledger",
                 operation_key="b" * 64,
                 candidate_tree=closeout_module.code_candidate_tree(contract),
-                operation_progress=progress,
+                operation_progress=mutation_recorder,
             )
             with (
                 mock.patch.object(
-                    closeout_module,
+                    closeout_external,
                     "write_ledger",
                     side_effect=RuntimeError("ledger write interrupted"),
                 ),
@@ -183,31 +210,21 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             ):
                 closeout_module.closeout_result(first)
 
-            code_commit = captured["codeCommit"]
-            memory_commit = captured["memoryContentCommit"]
+            code_commit = mutation_recorder.evidence["code"].commit
+            memory_commit = mutation_recorder.evidence["memory"].commit
+            assert code_commit is not None
+            assert memory_commit is not None
             self.assertTrue(memory_commit)
-            self.assertEqual(captured["ledgerCommit"], "")
             self.assertNotEqual(memory_commit, previous_memory)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_commit)
-
-            recovered = closeout_module.closeout_result(
-                replace(
-                    first,
-                    approval_claimed=True,
-                    recovery_commits=LifecycleOperationRecoveryCommits.model_validate(captured),
-                    operation_progress=progress,
-                )
+            self.assertEqual(mutation_recorder.evidence["code"].state, "commit-proven")
+            self.assertEqual(mutation_recorder.evidence["memory"].state, "commit-proven")
+            self.assertEqual(mutation_recorder.evidence["ledger"].state, "mutation-intent")
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+            mapping = closeout_external.find_mapping(
+                closeout_external.load_ledger(contract.ledger_path), code_commit
             )
-
-            self.assertEqual(recovered.payload["state"], "closed")
-            updated = load_contract(contract.contract_path)
-            self.assertEqual(updated.code_commit, code_commit)
-            self.assertEqual(updated.memory_content_commit, memory_commit)
-            mapping = closeout_module.find_mapping(
-                closeout_module.load_ledger(contract.ledger_path), code_commit
-            )
-            assert mapping is not None
-            self.assertEqual(mapping.memory_commit, memory_commit)
+            self.assertIsNone(mapping)
 
     def test_closeout_refuses_stale_route_review_before_memory_or_code_quality(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,7 +239,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     ValueError, "candidate changed after independent route review"
                 ),
             ):
-                worktree_manager.command_closeout(closeout_args(contract, dry_run=True))
+                run_authorized_closeout_mechanics(closeout_args(contract, dry_run=True))
 
             memory.assert_not_called()
             quality.assert_not_called()
@@ -252,7 +269,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
                 self.assertRaisesRegex(RuntimeError, "super moved during quality"),
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             self.assertEqual(source_check.call_count, 2)
             claim.assert_not_called()
@@ -277,7 +294,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
                 self.assertRaisesRegex(RuntimeError, "changed after route review and quality"),
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             claim.assert_not_called()
 
@@ -289,7 +306,12 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             series = replace(contract, kind="series", leaf_id="")
             accepted_tree = closeout_module.code_candidate_tree(series)
             args = replace(
-                WorktreeArgs.from_namespace(closeout_args(series)),
+                closeout_worktree_args(
+                    series,
+                    approved=True,
+                    approval_note="approved",
+                    operation_progress=MutationEvidenceRecorder(),
+                ),
                 candidate_tree=accepted_tree,
             )
 
@@ -331,7 +353,12 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             git(contract.memory_worktree, "commit", "-m", "land leaf memory before master closeout")
             series = replace(contract, kind="series", leaf_id="")
             args = replace(
-                WorktreeArgs.from_namespace(closeout_args(series)),
+                closeout_worktree_args(
+                    series,
+                    approved=True,
+                    approval_note="approved",
+                    operation_progress=MutationEvidenceRecorder(),
+                ),
                 candidate_tree=closeout_module.code_candidate_tree(series),
             )
 
@@ -389,7 +416,12 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 dirty_open_external_contract_fixture(Path(tmp)), kind="series", leaf_id=""
             )
             args = replace(
-                WorktreeArgs.from_namespace(closeout_args(contract)),
+                closeout_worktree_args(
+                    contract,
+                    approved=True,
+                    approval_note="approved",
+                    operation_progress=MutationEvidenceRecorder(),
+                ),
                 candidate_tree=closeout_module.code_candidate_tree(contract),
             )
 
@@ -410,7 +442,12 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = dirty_open_external_contract_fixture(Path(tmp))
             args = replace(
-                WorktreeArgs.from_namespace(closeout_args(contract)),
+                closeout_worktree_args(
+                    contract,
+                    approved=True,
+                    approval_note="approved",
+                    operation_progress=MutationEvidenceRecorder(),
+                ),
                 operation_key="closeout:test",
                 candidate_tree=None,
             )
@@ -454,7 +491,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_staged_quality, "run_strict_code_quality_gate") as gate,
                 self.assertRaisesRegex(RuntimeError, "entity_fingerprint_without_inventory"),
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             hook.assert_not_called()
             gate.assert_not_called()
@@ -471,7 +508,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             with redirect_stdout(output):
                 self.assertEqual(
-                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)),
+                    run_authorized_closeout_mechanics(closeout_args(contract, dry_run=True)),
                     0,
                 )
 
@@ -530,7 +567,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(
-                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)),
+                    run_authorized_closeout_mechanics(closeout_args(contract, dry_run=True)),
                     0,
                 )
             gate = json.loads(output.getvalue())["code_quality_gate"]
@@ -547,7 +584,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 ) as gate_run,
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
 
             self.assertEqual(deciders, [contract.code_worktree])
             gate_run.assert_called_once_with(
@@ -583,7 +620,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     RuntimeError, "strict code-quality gate failed before code commit"
                 ),
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), code_head)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
@@ -638,7 +675,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 ),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
 
             self.assertEqual(events[:3], ["pre-commit-hook", "quality", "verified-code-commit"])
 

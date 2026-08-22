@@ -18,6 +18,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
+from agents_remember.models.closeout_input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
     IntegrationQualityCertification,
     LifecycleOperationRecoveryCommits,
@@ -66,9 +67,9 @@ class WorktreeArgs:
     force: bool = False
     teardown_providers: bool = True
 
-    # Closeout / integrate commit messages
-    code_commit_message: str = ""
-    memory_commit_message: str = ""
+    # Closeout owns one normalized effective input. Integration's ledger message
+    # remains a separate operation input because it is not a closeout commit leg.
+    closeout_input: EffectiveCloseoutInput | None = None
     ledger_commit_message: str = ""
 
     # Gate enforcement policy

@@ -8,6 +8,11 @@ from pydantic import Field
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
+from agents_remember.models.closeout_input import (
+    CloseoutCorrectedCall,
+    CloseoutInvalidField,
+    ResolvedCloseoutPlan,
+)
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
@@ -158,6 +163,11 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     providers: dict[str, Any] | None = None
     lifecycleOperation: LifecycleOperationProjection | None = None
     source_lineage: SourceLineageProjection | None = None
+    status: str | None = None
+    detail: str | None = Field(default=None, max_length=8192)
+    invalidFields: list[CloseoutInvalidField] | None = None
+    resolvedPlan: ResolvedCloseoutPlan | None = None
+    correctedCall: CloseoutCorrectedCall | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):

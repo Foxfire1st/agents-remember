@@ -17,7 +17,6 @@ from unittest import mock
 from agents_remember.application import lifecycle_operation_worker
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     IntegrateOperationInput,
 )
 from agents_remember.tasks import read_task_doc, write_task_doc
@@ -44,6 +43,7 @@ from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
 )
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from closeout_input_test_support import closeout_operation_input, start_closeout_operation
 from test_closeout_queue import LEAF_A, LEAF_B, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
 from test_worktree_support import git
 
@@ -55,14 +55,14 @@ def _close_and_certify(fixture: QueueFixture, master) -> WorktreeContract:
     leaf = fixture.leaf_refs[master]
     fixture.mutate("select", candidate=leaf)
     contract = fixture.contracts[master]
-    start_or_observe_operation(
-        CloseoutOperationInput(
-            configPath=fixture.config_path.as_posix(),
-            contractPath=contract.contract_path.as_posix(),
-            codeCommitMessage="close leaf",
-            memoryCommitMessage="close memory",
-            ledgerCommitMessage="map pair",
-            approvalNote="approved",
+    start_closeout_operation(
+        closeout_operation_input(
+            contract,
+            config_path=fixture.config_path,
+            code="close leaf",
+            memory="close memory",
+            ledger="map pair",
+            approval_note="approved",
         ),
         launcher=lambda *_: None,
     )

@@ -1,12 +1,12 @@
-"""Direct landing: atomic code-commit verification + memory commit + ledger row.
+"""Direct landing: code-commit verification + memory commit + ledger row.
 
 The direct landing is the branch-addressed counterpart of the worktree closeout
 commit phase for sanctioned direct execution. Where the worktree path stages a
 leaf worktree candidate, this operation binds the task-root series contract and
 verifies the exact code commit on the series branch, then commits external-
 memory content and prepends the code-to-memory ledger row with the same ledger
-semantics as the worktree path. All steps are pre-validated before any mutation
-and performed under the integration authority lock.
+semantics as the worktree path. Input is normalized before the integration
+authority lock; the synchronous memory/ledger durability seam remains separate.
 
 The gate stays strictly pre-commit: pass the staged ``candidate_tree`` that the
 owner already gated through the Dagger module's ``--source``/``--repository-bundle``
@@ -15,9 +15,11 @@ memory or ledger commit. Commit-then-gate is the accepted-risk exception only
 where the developer rules it.
 
 The operation is policy-gated (``directExecutionEnabled``) and deliberately
-synchronous: direct mode has no worktree group or detached worker, so the
-durable-operation pattern is the lock-guarded validate-then-mutate shape of
-``worktree_sync`` rather than the ``start_or_observe_operation`` worker.
+synchronous: direct mode has no worktree group and does not use the
+``start_or_observe_operation`` detached worker. It uses a lock-serialized synchronous
+validate-then-mutate execution pattern. The lock prevents concurrent lane use only; it
+provides neither rollback nor durable crash recovery across memory/ledger outputs.
+L2-R11 and L5-R15 own that durability work.
 """
 
 from __future__ import annotations
@@ -34,6 +36,12 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.worktrees.closeout_input import (
+    corrected_closeout_arguments,
+    normalize_closeout_input,
+    raw_closeout_messages,
+)
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     commit_if_dirty,
@@ -64,8 +72,8 @@ class DirectLandingRequest:
 
     contract_path: str
     code_commit: str
-    memory_commit_message: str = ""
-    ledger_commit_message: str = ""
+    memory_commit_message: str | None = None
+    ledger_commit_message: str | None = None
     intent_note: str = ""
     candidate_tree: str | None = None
     dry_run: bool = False
@@ -77,9 +85,7 @@ def direct_landing(
 ) -> dict[str, object]:
     """Run the direct landing under the integration authority lock.
 
-    Pre-validates every fact (contract identity, code commit on the series
-    branch, ledger parseable, memory repository authoritative) before any
-    mutation; only then commits memory content and the ledger row. The code
+    Validates the effective message plan before lane authority or Git. The code
     commit itself is verified, never created: the developer has already
     committed the candidate on the series branch in direct mode.
     """
@@ -103,6 +109,26 @@ def direct_landing(
             "direct landing binds the task-root series contract "
             f"(series-contract.md); {contract_path} is a {contract.kind} contract",
         )
+    corrected_arguments = corrected_closeout_arguments(
+        contract_path.as_posix(),
+        code_commit="<exact series code commit>",
+        intent_note="<developer intent>",
+    )
+    if request.dry_run:
+        corrected_arguments["dry_run"] = True
+    effective_input = normalize_closeout_input(
+        contract,
+        raw_closeout_messages(
+            code=None,
+            memory=request.memory_commit_message,
+            ledger=request.ledger_commit_message,
+        ),
+        route="direct-landing",
+        corrected_call=CloseoutCorrectedCall(
+            tool="direct_landing",
+            arguments=corrected_arguments,
+        ),
+    )
     if not request.intent_note.strip():
         raise DirectLandingError(
             "direct-landing-intent-required",
@@ -122,8 +148,8 @@ def direct_landing(
                 "series contract changed before direct landing",
             )
         if request.dry_run:
-            return _direct_landing_preview(current, request, code_commit)
-        return _direct_landing_apply(current, request, code_commit)
+            return _direct_landing_preview(current, request, effective_input, code_commit)
+        return _direct_landing_apply(current, request, effective_input, code_commit)
 
 
 def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) -> str:
@@ -184,7 +210,10 @@ def _memory_facts(contract) -> dict[str, object]:
 
 
 def _direct_landing_preview(
-    contract, request: DirectLandingRequest, code_commit: str
+    contract,
+    request: DirectLandingRequest,
+    effective_input: EffectiveCloseoutInput,
+    code_commit: str,
 ) -> dict[str, object]:
     _verify_code_commit(contract, code_commit, request.candidate_tree)
     memory = _memory_facts(contract)
@@ -200,12 +229,14 @@ def _direct_landing_preview(
         "ledgerCommit": "",
         "dryRun": True,
         "memory": memory,
+        "effectiveInput": effective_input.model_dump(mode="json"),
     }
 
 
 def _direct_landing_apply(
     contract,
     request: DirectLandingRequest,
+    effective_input: EffectiveCloseoutInput,
     code_commit: str,
 ) -> dict[str, object]:
     _verify_code_commit(contract, code_commit, request.candidate_tree)
@@ -235,7 +266,7 @@ def _direct_landing_apply(
     # external closeout path.
     memory_commit = commit_if_dirty(
         memory_repo,
-        request.memory_commit_message or f"[{contract.task_id}] Direct landing memory content",
+        effective_input.message_for("memory"),
     )
     ledger = load_ledger(contract.ledger_path)
     existing = find_mapping(ledger, code_commit)
@@ -256,8 +287,7 @@ def _direct_landing_apply(
         require_git(memory_repo, ["add", "memory.md"])
         ledger_commit = commit_if_dirty(
             memory_repo,
-            request.ledger_commit_message
-            or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
+            effective_input.message_for("ledger"),
         )
     if not ledger_commit or not is_ancestor(memory_repo, memory_commit, ledger_commit):
         raise DirectLandingError(
@@ -280,4 +310,5 @@ def _direct_landing_apply(
             "memoryBranch": contract.memory_work_branch,
             "memoryHead": ledger_commit,
         },
+        "effectiveInput": effective_input.model_dump(mode="json"),
     }

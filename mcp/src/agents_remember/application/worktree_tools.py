@@ -15,8 +15,8 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
     reload_provider_authority,
 )
+from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     GatePolicyRuleSnapshot,
     IntegrateOperationInput,
     IntegrateStrategy,
@@ -30,11 +30,23 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import write_lifecycle_settings
 from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.closeout_input import (
+    CloseoutInputError,
+    capture_closeout_candidate,
+    corrected_closeout_arguments,
+    normalize_closeout_input,
+    raw_closeout_messages,
+    resolve_closeout_plan,
+)
+from agents_remember.worktrees.integration.closeout_operation_admission import (
+    CloseoutOperationAdmission,
+)
 from agents_remember.worktrees.integration.lifecycle_operations import (
     cancel_operation,
     latest_operation_projection,
     observe_operation,
     require_configured_contract_repositories,
+    start_or_observe_closeout_operation,
     start_or_observe_operation,
 )
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -312,12 +324,11 @@ def worktree_sync_tool(
 
 @dataclass(frozen=True)
 class CloseoutCommitMessages:
-    """The three commits a closeout writes, one per repo it touches: the code commit in the
-    work repo, the memory commit in the memory repo, and the ledger commit that maps them."""
+    """Raw public observations; contract resolution decides which legs are enabled."""
 
-    code: str
-    memory: str = ""
-    ledger: str = ""
+    code: str | None = None
+    memory: str | None = None
+    ledger: str | None = None
 
 
 @dataclass(frozen=True)
@@ -357,18 +368,30 @@ def worktree_closeout_apply_tool(
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
     if not approval.dry_run:
-        confined = require_within_coordination(config, contract_path, "contract_path")
-        operation = start_or_observe_operation(
-            CloseoutOperationInput(
-                configPath=config.config_path.as_posix(),
-                contractPath=confined.as_posix(),
-                codeCommitMessage=messages.code,
-                memoryCommitMessage=messages.memory,
-                ledgerCommitMessage=messages.ledger,
-                approvalNote=approval.intent_note,
-                gatePolicy=_gate_policy_snapshot(config),
-            )
+        confined = _configured_contract_path(config, contract_path)
+        corrected_arguments = corrected_closeout_arguments(
+            confined.as_posix(), intent_note="<developer intent>"
         )
+        try:
+            operation = start_or_observe_closeout_operation(
+                CloseoutOperationAdmission(
+                    config_path=config.config_path.as_posix(),
+                    contract_path=confined,
+                    messages=raw_closeout_messages(
+                        code=messages.code,
+                        memory=messages.memory,
+                        ledger=messages.ledger,
+                    ),
+                    approval_note=approval.intent_note,
+                    gate_policy=_gate_policy_snapshot(config),
+                    corrected_call=CloseoutCorrectedCall(
+                        tool="worktree_closeout_apply",
+                        arguments=corrected_arguments,
+                    ),
+                ),
+            )
+        except CloseoutInputError as exc:
+            return _closeout_input_refusal("worktree_closeout_apply", exc)
         return _operation_acknowledgement("worktree_closeout_apply", operation)
     return _worktree_closeout(
         config,
@@ -627,14 +650,60 @@ def _worktree_closeout(
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
     confined_contract = _configured_contract_path(config, contract_path)
+    corrected_arguments = corrected_closeout_arguments(confined_contract.as_posix())
+    if operation == "worktree_closeout_apply":
+        corrected_arguments.update(intent_note="<developer intent>", dry_run=True)
+    try:
+        effective_input = _normalize_worktree_closeout(
+            confined_contract,
+            messages,
+            tool_name=operation,
+            corrected_arguments=corrected_arguments,
+        )
+    except CloseoutInputError as exc:
+        return _closeout_input_refusal(operation, exc)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
-        code_commit_message=messages.code,
-        memory_commit_message=messages.memory,
-        ledger_commit_message=messages.ledger,
+        closeout_input=effective_input,
         approval_note=approval.intent_note,
         approved=not approval.dry_run,
         dry_run=approval.dry_run,
         gate_policy=config.orchestration.gate_policy,
     )
     return _worktree_result(operation, git_worktree_manager.closeout_result(args))
+
+
+def _normalize_worktree_closeout(
+    contract_path: Path,
+    messages: CloseoutCommitMessages,
+    *,
+    tool_name: str,
+    corrected_arguments: dict[str, object],
+) -> EffectiveCloseoutInput:
+    contract = load_contract(contract_path)
+    plan = resolve_closeout_plan(
+        contract,
+        route="worktree",
+        candidate=capture_closeout_candidate(contract),
+    )
+    return normalize_closeout_input(
+        contract,
+        raw_closeout_messages(code=messages.code, memory=messages.memory, ledger=messages.ledger),
+        route="worktree",
+        corrected_call=CloseoutCorrectedCall(
+            tool=tool_name,
+            arguments=corrected_arguments,
+        ),
+        resolved_plan=plan,
+    )
+
+
+def _closeout_input_refusal(operation: str, error: CloseoutInputError) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "operation": operation,
+        "state": "refused",
+        "status": error.status,
+        "detail": str(error),
+        **error.response_fields(),
+    }

@@ -324,12 +324,16 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
     if contract.approved_for_commit:
         return {
             "phase": "closeout-pending",
-            "summary": "Closeout approval is recorded, but closeout has not completed.",
+            "summary": (
+                "Closeout approval is recorded, but closeout has not completed. Exact "
+                "commit-message requirements are resolved from the current candidate by "
+                "closeout preview or apply."
+            ),
             **next_guidance(
                 "closeout",
                 tool="worktree_closeout_apply",
                 args=contract_next_args(contract),
-                required_args=["intent_note", "code_commit_message"],
+                required_args=["intent_note"],
             ),
         }
     return {

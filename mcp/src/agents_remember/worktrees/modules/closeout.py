@@ -11,23 +11,26 @@ from agents_remember.controlplane.enforcement import (
 )
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.agentic_settings import load_agentic_settings
-from agents_remember.kernel.memory_ledger import (
-    find_mapping,
-    load_ledger,
-    prepend_mapping,
-    write_ledger,
-)
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
+from agents_remember.models.closeout_input import EffectiveCloseoutInput
 from agents_remember.observer.events import now_iso
+from agents_remember.worktrees.closeout_input import (
+    effective_message_arguments,
+    require_effective_closeout_plan,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_series_contract_authority,
 )
-from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
-from agents_remember.worktrees.modules.closeout_memory_quality import (
-    combine_memory_quality,
-    run_memory_quality_phase,
+from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+    closeout_contract_sha256,
 )
+from agents_remember.worktrees.integration.mutation_evidence import (
+    require_closeout_mutation_authority,
+)
+from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
+from agents_remember.worktrees.modules.closeout_external import external_closeout_commits
+from agents_remember.worktrees.modules.closeout_memory_quality import run_memory_quality_phase
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
     code_quality_gate_preview,
@@ -39,11 +42,9 @@ from agents_remember.worktrees.modules.git import (
     branch_commit,
     changed_worktree_paths,
     commit_date,
-    commit_if_dirty,
     committed_changed_paths,
     head_commit,
     is_ancestor,
-    require_git,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -67,10 +68,6 @@ from agents_remember.worktrees.modules.onboarding import (
     contract_memory_verified_commit,
     entity_fingerprint_refresh_plan,
     onboarding_refresh_plan,
-    refresh_entity_fingerprints_for_context,
-    refresh_onboarding_metadata,
-    refresh_route_indexes_for_context,
-    refresh_route_overview_metadata_for_context,
     route_index_refresh_plan_for_context,
     route_overview_metadata_refresh_plan,
     validate_onboarding_refresh_plan,
@@ -89,7 +86,6 @@ from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
     accepted_code_commit,
     prove_closeout_recovery_commits,
-    resume_external_commits,
 )
 from agents_remember.worktrees.queue.closeout_staged_quality import (
     gate_staged_code as _gate_staged_code,
@@ -100,7 +96,6 @@ from agents_remember.worktrees.route_review import (
     require_current_route_review,
 )
 from agents_remember.worktrees.series_closeout import (
-    exact_series_memory_closeout,
     publish_closeout_under_authority,
     refuse_series_workbench_commit,
 )
@@ -393,9 +388,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             tool="worktree_closeout_apply",
             args=contract_next_args(
                 contract,
-                code_commit_message=args.code_commit_message,
-                memory_commit_message=args.memory_commit_message,
-                ledger_commit_message=args.ledger_commit_message,
+                **effective_message_arguments(_effective_closeout_input(args)),
             ),
             required_args=["intent_note"],
         ),
@@ -470,11 +463,11 @@ def _validate_closeout_source_state(contract) -> None:
 
 def _closeout_approval_note(args: WorktreeArgs) -> str:
     if not args.approved:
-        raise RuntimeError("closeout requires --approved after explicit commit approval")
+        raise RuntimeError("closeout requires journaled explicit commit approval")
     approval_note = args.approval_note.replace("\n", " ").strip()
     if not approval_note:
         raise RuntimeError(
-            "closeout requires --approval-note describing the developer's explicit commit approval"
+            "closeout requires a journaled note describing the developer's explicit commit approval"
         )
     return approval_note
 
@@ -501,8 +494,9 @@ def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
     """Refuse early, on a pure read, when the gate is visibly unsatisfied. DECIDES NOTHING.
 
     Server-side gate enforcement (slice 6b): a dashboard-opened ``closeout-approval`` gate is
-    binding; a gateless lifecycle falls back to the chat commit gate (``--approved`` + note),
-    unchanged. The agent cannot satisfy the gate itself: its own ``gate_decide`` is
+    binding; a gateless lifecycle uses the approval and note persisted by the canonical
+    journaled closeout operation. The agent cannot satisfy the gate itself: its own
+    ``gate_decide`` is
     ``decidedBy="model"``, which :func:`evaluate_closeout_gate` rejects.
 
     THIS IS NOT THE ENFORCEMENT ANY MORE, and reading it as such is the check-then-act mistake
@@ -586,129 +580,6 @@ def _closeout_gate_payload(guard: CloseoutGuard | None) -> dict[str, object]:
         "gateId": guard.gate_id,
         "reason": guard.reason,
     }
-
-
-def _closeout_contract_context(contract):
-    context = contract_context(contract)
-    return replace(context, code_repository_root=contract.code_worktree)
-
-
-def _resumed_external_outcome(
-    contract,
-    args: WorktreeArgs,
-    code_commit: str,
-) -> MemoryCloseoutOutcome | None:
-    recovery_memory_commit = (
-        args.recovery_commits.memoryContentCommit if args.recovery_commits is not None else ""
-    )
-    if not recovery_memory_commit:
-        return None
-    memory_commit, ledger_commit = resume_external_commits(
-        contract,
-        args,
-        code_commit=code_commit,
-        memory_commit=recovery_memory_commit,
-    )
-    return MemoryCloseoutOutcome(memory_commit=memory_commit, ledger_commit=ledger_commit)
-
-
-def _external_closeout_commits(
-    contract,
-    args: WorktreeArgs,
-    change: VerifiedChange,
-    memory_quality_before_refresh: dict[str, Any],
-) -> MemoryCloseoutOutcome:
-    if contract.ledger_path is None:
-        raise RuntimeError("external-memory closeout requires a ledger path")
-    code_commit = change.commit
-    if contract.kind == "series":
-        return exact_series_memory_closeout(contract, code_commit)
-    if contract.memory_worktree is None:
-        raise RuntimeError("external-memory leaf closeout requires a memory worktree")
-    resuming = args.approval_claimed or args.recovery_commits is not None
-    recovered = _resumed_external_outcome(contract, args, code_commit)
-    if recovered is not None:
-        return recovered
-    context = _closeout_contract_context(contract)
-    report_operation_progress(
-        args, "memory-refresh", current_command="refresh onboarding and route metadata"
-    )
-    refreshed_onboarding = refresh_onboarding_metadata(contract, change)
-    refreshed_route_overviews = refresh_route_overview_metadata_for_context(
-        context,
-        change,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
-    )
-    refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
-    route_index_refresh = refresh_route_indexes_for_context(context)
-    _, after_checks = worktree_services().memory_quality.check_groups()
-    memory_quality_after_refresh = run_memory_quality_phase(context, after_checks)
-    memory_quality = combine_memory_quality(
-        memory_quality_before_refresh, memory_quality_after_refresh
-    )
-    memory_content_dirty = worktree_dirty(contract.memory_worktree)
-    ledger = load_ledger(contract.ledger_path)
-    existing_mapping = find_mapping(ledger, code_commit)
-    report_operation_progress(
-        args, "memory-commit", current_command="commit verified external memory"
-    )
-    if memory_content_dirty:
-        memory_commit = commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
-    elif existing_mapping is not None:
-        memory_commit = existing_mapping.memory_commit
-        if not is_ancestor(
-            contract.memory_worktree, memory_commit, head_commit(contract.memory_worktree)
-        ):
-            raise RuntimeError(
-                "closeout recovery ledger mapping names memory content that is not reachable "
-                "from the current memory worktree"
-            )
-    else:
-        memory_head = head_commit(contract.memory_worktree)
-        memory_commit = memory_head if resuming else contract.memory_content_commit or memory_head
-    report_operation_progress(
-        args,
-        "memory-commit",
-        current_command="external memory commit recorded for recovery",
-        recovery_commits={
-            "codeCommit": code_commit,
-            "memoryContentCommit": memory_commit,
-            "ledgerCommit": "",
-        },
-    )
-    if existing_mapping is not None and existing_mapping.memory_commit == memory_commit:
-        ledger_commit = head_commit(contract.memory_worktree)
-    else:
-        report_operation_progress(
-            args, "ledger-commit", current_command="commit code-to-memory ledger mapping"
-        )
-        write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
-        require_git(contract.memory_worktree, ["add", "memory.md"])
-        ledger_commit = commit_if_dirty(
-            contract.memory_worktree,
-            args.ledger_commit_message
-            or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
-        )
-    report_operation_progress(
-        args,
-        "ledger-commit",
-        current_command="external ledger commit recorded for recovery",
-        recovery_commits={
-            "codeCommit": code_commit,
-            "memoryContentCommit": memory_commit,
-            "ledgerCommit": ledger_commit,
-        },
-    )
-    return MemoryCloseoutOutcome(
-        memory_commit=memory_commit,
-        ledger_commit=ledger_commit,
-        refreshed_onboarding=refreshed_onboarding,
-        refreshed_entities=refreshed_entities,
-        refreshed_route_overviews=refreshed_route_overviews,
-        route_index_refresh=route_index_refresh,
-        memory_quality=memory_quality,
-    )
 
 
 @dataclass(frozen=True)
@@ -817,6 +688,14 @@ class _CloseoutResultFacts:
     gate_guard: CloseoutGuard | None
 
 
+@dataclass(frozen=True)
+class _CloseoutQualityFacts:
+    attestations: _CloseoutAttestations
+    code_quality_gate: dict[str, Any]
+    memory_quality_before_refresh: dict[str, Any]
+    strict_code_quality_required: bool
+
+
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
     """Finalize an already-committed detached closeout exactly once."""
     commits = args.recovery_commits
@@ -861,6 +740,13 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             commits.codeCommit,
             memory,
             bool(integration_reopen["reopened"]),
+        )
+        report_operation_progress(
+            args,
+            "contract-finalization",
+            current_command="finalize recovered closeout contract edge",
+            recovery_commits=commits.model_dump(mode="json"),
+            closeout_finalized_contract_sha256=closeout_contract_sha256(updated),
         )
         write_contract(current.contract_path, updated)
         return memory, integration_reopen, updated
@@ -992,17 +878,16 @@ class _CloseoutCommitPhase:
 def _closeout_commit_phase(
     contract,
     args: WorktreeArgs,
+    effective_input: EffectiveCloseoutInput,
     *,
     worklist: dict[str, list[str]],
-    memory_quality_before_refresh: dict[str, Any],
-    strict_code_quality_required: bool,
+    quality: _CloseoutQualityFacts,
 ) -> _CloseoutCommitPhase:
     resuming = args.approval_claimed or args.recovery_commits is not None
     report_operation_progress(
         args,
         "approval-claim",
         current_command="resume claimed closeout" if resuming else "claim closeout approval",
-        irreversible_boundary=True,
         approval_claimed=resuming,
     )
     gate_guard = (
@@ -1018,8 +903,8 @@ def _closeout_commit_phase(
     code_commit = accepted_code_commit(
         contract,
         args,
-        strict_code_quality_required=strict_code_quality_required,
-        resuming=resuming,
+        effective_input,
+        strict_code_quality_required=quality.strict_code_quality_required,
     )
     code_repository = (
         contract.code_repo_path if contract.kind == "series" else contract.code_worktree
@@ -1027,16 +912,17 @@ def _closeout_commit_phase(
     code_commit_date = commit_date(code_repository, code_commit)
     memory = MemoryCloseoutOutcome()
     if contract.memory_mode == "external":
-        memory = _external_closeout_commits(
+        memory = external_closeout_commits(
             contract,
             args,
+            effective_input,
             VerifiedChange(
                 commit=code_commit,
                 commit_date=code_commit_date,
                 changed_paths=worklist["all"],
                 working_paths=worklist["working"],
             ),
-            memory_quality_before_refresh,
+            quality.memory_quality_before_refresh,
         )
     integration_reopen = _completed_integration_reopen(
         contract,
@@ -1062,6 +948,18 @@ def _closeout_contract(args: WorktreeArgs) -> tuple[Path, WorktreeContract]:
     return contract_path, contract
 
 
+def _effective_closeout_input(args: WorktreeArgs) -> EffectiveCloseoutInput:
+    effective = args.closeout_input
+    if effective is None:
+        raise RuntimeError("closeout execution requires normalized effective input")
+    return effective
+
+
+def _closeout_contract_context(contract):
+    context = contract_context(contract)
+    return replace(context, code_repository_root=contract.code_worktree)
+
+
 def _closeout_quality_facts(
     contract: WorktreeContract,
     args: WorktreeArgs,
@@ -1069,7 +967,7 @@ def _closeout_quality_facts(
     resuming: bool,
     code_would_commit: bool,
     worklist: dict[str, list[str]],
-) -> tuple[_CloseoutAttestations, dict[str, Any], dict[str, Any], bool]:
+) -> _CloseoutQualityFacts:
     """The attestations and reversible memory/code gate facts for one closeout."""
 
     if resuming:
@@ -1090,11 +988,11 @@ def _closeout_quality_facts(
         code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
             _closeout_quality_preflight(contract, args, code_would_commit=code_would_commit)
         )
-    return (
-        attestations,
-        code_quality_gate,
-        memory_quality_before_refresh,
-        strict_code_quality_required,
+    return _CloseoutQualityFacts(
+        attestations=attestations,
+        code_quality_gate=code_quality_gate,
+        memory_quality_before_refresh=memory_quality_before_refresh,
+        strict_code_quality_required=strict_code_quality_required,
     )
 
 
@@ -1105,15 +1003,9 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     it enforces is the whole point of 260731-EFA-L5 R3.
     """
     report_operation_progress(args, "preflight", current_command="validate closeout eligibility")
-    contract_path, contract = _closeout_contract(args)
-    recovered = _recover_closeout_finalization(contract, args)
-    if recovered is not None:
-        certify_queue_candidate_closeout(load_contract(contract_path), args.operation_key)
-        return recovered
-    _validate_closeout_source_state(contract)
-    refuse_series_workbench_commit(contract)
-    if args.dry_run:
-        return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
+    contract, effective_input, early_result = _closeout_entry(args)
+    if early_result is not None:
+        return early_result
     if args.operation_key and not args.candidate_tree:
         raise RuntimeError("closeout operation is missing its accepted candidate tree")
     if not args.candidate_tree:
@@ -1125,14 +1017,12 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         _refuse_unsatisfied_closeout_gate(contract, args)
     worklist = closeout_changed_paths(contract)
     code_would_commit = code_change_present(contract)
-    attestations, code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
-        _closeout_quality_facts(
-            contract,
-            args,
-            resuming=resuming,
-            code_would_commit=code_would_commit,
-            worklist=worklist,
-        )
+    quality = _closeout_quality_facts(
+        contract,
+        args,
+        resuming=resuming,
+        code_would_commit=code_would_commit,
+        worklist=worklist,
     )
     accepted_candidate_tree = cast(str, args.candidate_tree)
     refuse_series_workbench_commit(contract)
@@ -1152,9 +1042,9 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         committed = _closeout_commit_phase(
             current,
             args,
+            effective_input,
             worklist=worklist,
-            memory_quality_before_refresh=memory_quality_before_refresh,
-            strict_code_quality_required=strict_code_quality_required,
+            quality=quality,
         )
         updated = _amended_closeout_contract(
             current,
@@ -1172,6 +1062,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 "memoryContentCommit": committed.memory.memory_commit,
                 "ledgerCommit": committed.memory.ledger_commit,
             },
+            closeout_finalized_contract_sha256=closeout_contract_sha256(updated),
         )
         write_contract(current.contract_path, updated)
         return committed, updated
@@ -1185,10 +1076,34 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             _CloseoutResultFacts(
                 code_commit=committed.code_commit,
                 memory=committed.memory,
-                attestations=attestations,
-                code_quality_gate=code_quality_gate,
+                attestations=quality.attestations,
+                code_quality_gate=quality.code_quality_gate,
                 integration_reopen=committed.integration_reopen,
                 gate_guard=committed.gate_guard,
             ),
         ),
     )
+
+
+def _closeout_entry(
+    args: WorktreeArgs,
+) -> tuple[WorktreeContract, EffectiveCloseoutInput, WorktreeCommandResult | None]:
+    if not args.dry_run:
+        require_closeout_mutation_authority(args)
+    contract_path, contract = _closeout_contract(args)
+    effective_input = _effective_closeout_input(args)
+    if args.recovery_commits is None:
+        require_effective_closeout_plan(contract, effective_input, route="worktree")
+    recovered = _recover_closeout_finalization(contract, args)
+    if recovered is not None:
+        certify_queue_candidate_closeout(load_contract(contract_path), args.operation_key)
+        return contract, effective_input, recovered
+    _validate_closeout_source_state(contract)
+    refuse_series_workbench_commit(contract)
+    if args.dry_run:
+        return (
+            contract,
+            effective_input,
+            WorktreeCommandResult(0, closeout_preview_payload(contract, args)),
+        )
+    return contract, effective_input, None

@@ -25,7 +25,10 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_lease import contract_lifecycle_lease
+from agents_remember.worktrees.integration.lifecycle_operation_lease import (
+    contract_lifecycle_lease,
+    require_lifecycle_operation_compatible,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     ENCLOSURE_REPORTS_DIRECTORY,
@@ -159,7 +162,8 @@ def _abandon_with_guard(
     guard: TerminalGuard,
 ) -> WorktreeCommandResult:
     try:
-        with contract_lifecycle_lease(contract, operation_kind=None):
+        with contract_lifecycle_lease(contract):
+            require_lifecycle_operation_compatible(contract, operation_kind=None)
 
             def publish(
                 series_permit: AtomicSeriesTerminalPermit | None = None,

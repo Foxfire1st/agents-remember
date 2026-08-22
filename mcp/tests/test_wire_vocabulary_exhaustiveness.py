@@ -280,6 +280,19 @@ class GuidanceWalkTests(unittest.TestCase):
         self.assertIn("request_carryover_decision", seen_operations)
         self.assertIn("memory_carryover_plan", seen_tools)
 
+    def test_closeout_pending_guidance_is_pure_when_the_worktree_is_missing(self) -> None:
+        contract = _contract(self.root, approved_for_commit=True)
+        self.assertFalse(contract.code_worktree.exists())
+
+        summary = cross_the_wire(contract)
+        self.assertFalse(contract.code_worktree.exists())
+        guidance = lifecycle_guidance(contract)
+        self.assertFalse(contract.code_worktree.exists())
+
+        self.assertEqual(summary.phase, "closeout-pending")
+        self.assertEqual(summary.nextRequiredArgs, ["intent_note"])
+        self.assertIn("resolved from the current candidate", guidance["summary"])
+
     def test_a_done_phase_omits_next_tool_rather_than_inventing_one(self) -> None:
         """`next_guidance` omits `nextTool` when nothing is to be called; so must the wire."""
         summary = cross_the_wire(_contract(self.root, cleanup="completed"))

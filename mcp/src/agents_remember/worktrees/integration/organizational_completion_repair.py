@@ -40,7 +40,7 @@ from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
     amend_contract,
-    contract_to_text,
+    contract_publication_text,
     load_contract,
     write_contract,
 )
@@ -406,7 +406,8 @@ def _repair_binding(contract: WorktreeContract) -> tuple[QueueBinding, str]:
 
 
 def _contract_sha256(contract: WorktreeContract) -> str:
-    return hashlib.sha256(contract_to_text(contract).encode("utf-8")).hexdigest()
+    published = contract_publication_text(contract.contract_path, contract)
+    return hashlib.sha256(published.encode("utf-8")).hexdigest()
 
 
 def _repair_commits(

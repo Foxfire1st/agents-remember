@@ -9,48 +9,87 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
+from agents_remember.models.closeout_input import (
+    EffectiveCloseoutInput,
+    EnabledCloseoutLeg,
+    NotApplicableCloseoutLeg,
+)
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees.modules import closeout as closeout_module
+from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.queue import closeout_recovery as closeout_recovery_journal
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from closeout_input_test_support import MutationEvidenceRecorder, closeout_worktree_args
 from test_worktree_support import git, open_external_contract_fixture
 
 
-def _patch_external_refresh(stack: ExitStack) -> None:
+def _message_authority(
+    *, contract_kind: str = "leaf", memory_mode: str = "internal"
+) -> EffectiveCloseoutInput:
+    disabled = NotApplicableCloseoutLeg(reason="verified-existing test output")
+    external = memory_mode == "external"
+    return EffectiveCloseoutInput.model_validate(
+        {
+            "route": "worktree",
+            "contractKind": contract_kind,
+            "memoryMode": memory_mode,
+            "code": disabled,
+            "memory": (
+                EnabledCloseoutLeg(reason="external memory output", message="commit memory")
+                if external
+                else disabled
+            ),
+            "ledger": (
+                EnabledCloseoutLeg(reason="external ledger output", message="commit ledger")
+                if external
+                else disabled
+            ),
+        }
+    )
+
+
+def _patch_external_refresh(stack: ExitStack, contract: WorktreeContract) -> None:
     services = SimpleNamespace(memory_quality=SimpleNamespace(check_groups=lambda: ([], [])))
-    stack.enter_context(mock.patch.object(closeout_module, "_closeout_contract_context"))
     stack.enter_context(
-        mock.patch.object(closeout_module, "refresh_onboarding_metadata", return_value=[])
+        mock.patch.object(
+            closeout_external,
+            "contract_context",
+            return_value=contract_context(contract),
+        )
+    )
+    stack.enter_context(
+        mock.patch.object(closeout_external, "refresh_onboarding_metadata", return_value=[])
     )
     stack.enter_context(
         mock.patch.object(
-            closeout_module,
+            closeout_external,
             "refresh_route_overview_metadata_for_context",
             return_value=[],
         )
     )
     stack.enter_context(
         mock.patch.object(
-            closeout_module,
+            closeout_external,
             "refresh_entity_fingerprints_for_context",
             return_value=[],
         )
     )
     stack.enter_context(
-        mock.patch.object(closeout_module, "refresh_route_indexes_for_context", return_value={})
+        mock.patch.object(closeout_external, "refresh_route_indexes_for_context", return_value={})
     )
     stack.enter_context(
-        mock.patch.object(closeout_module, "worktree_services", return_value=services)
+        mock.patch.object(closeout_external, "worktree_services", return_value=services)
     )
     stack.enter_context(
-        mock.patch.object(closeout_module, "run_memory_quality_phase", return_value={})
+        mock.patch.object(closeout_external, "run_memory_quality_phase", return_value={})
     )
     stack.enter_context(
-        mock.patch.object(closeout_module, "combine_memory_quality", return_value={})
+        mock.patch.object(closeout_external, "combine_memory_quality", return_value={})
     )
-    stack.enter_context(mock.patch.object(closeout_module, "worktree_dirty", return_value=False))
-    stack.enter_context(mock.patch.object(closeout_module, "load_ledger"))
+    stack.enter_context(mock.patch.object(closeout_external, "worktree_dirty", return_value=False))
+    stack.enter_context(mock.patch.object(closeout_external, "load_ledger"))
 
 
 class CloseoutRecoveryTests(unittest.TestCase):
@@ -77,7 +116,11 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "contract path does not match"),
             ):
                 closeout_module.closeout_result(
-                    WorktreeArgs(contract_path=requested_path, operation_key="a" * 64)
+                    WorktreeArgs(
+                        contract_path=requested_path,
+                        operation_key="a" * 64,
+                        operation_progress=MutationEvidenceRecorder(),
+                    )
                 )
 
             authority.assert_not_called()
@@ -98,8 +141,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
             closeout_recovery_journal.accepted_code_commit(
                 contract,
                 args,
+                _message_authority(),
                 strict_code_quality_required=True,
-                resuming=True,
             )
 
         with (
@@ -111,8 +154,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
             closeout_recovery_journal.accepted_code_commit(
                 contract,
                 args,
+                _message_authority(),
                 strict_code_quality_required=True,
-                resuming=True,
             )
 
     def test_clean_claimed_code_commit_is_journaled_without_recommit(self) -> None:
@@ -130,8 +173,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
             found = closeout_recovery_journal.accepted_code_commit(
                 contract,
                 args,
+                _message_authority(),
                 strict_code_quality_required=True,
-                resuming=True,
             )
         self.assertEqual(found, "a" * 40)
         self.assertEqual(
@@ -165,8 +208,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
             found = closeout_recovery_journal.accepted_code_commit(
                 contract,
                 args,
+                _message_authority(contract_kind="series"),
                 strict_code_quality_required=False,
-                resuming=False,
             )
 
         self.assertEqual(found, "a" * 40)
@@ -174,6 +217,20 @@ class CloseoutRecoveryTests(unittest.TestCase):
         branch_commit.assert_called_once_with(contract.code_repo_path, contract.code_work_branch)
         commit_verified.assert_not_called()
         commit_dirty.assert_not_called()
+
+        recovery_args = WorktreeArgs(
+            recovery_commits=LifecycleOperationRecoveryCommits(codeCommit="c" * 40)
+        )
+        with (
+            mock.patch.object(closeout_recovery_journal, "branch_commit", return_value="a" * 40),
+            self.assertRaisesRegex(RuntimeError, "exact series ref"),
+        ):
+            closeout_recovery_journal.accepted_code_commit(
+                contract,
+                recovery_args,
+                _message_authority(contract_kind="series"),
+                strict_code_quality_required=False,
+            )
 
     def test_external_resume_rejects_conflict_missing_head_and_unreachable_content(self) -> None:
         contract = SimpleNamespace(
@@ -191,7 +248,11 @@ class CloseoutRecoveryTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "conflicting"),
         ):
             closeout_recovery_journal.resume_external_commits(
-                contract, args, code_commit="a" * 40, memory_commit="d" * 40
+                contract,
+                args,
+                _message_authority(memory_mode="external"),
+                code_commit="a" * 40,
+                memory_commit="d" * 40,
             )
         with (
             mock.patch.object(closeout_recovery_journal, "require_clean"),
@@ -201,7 +262,11 @@ class CloseoutRecoveryTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "memory HEAD"),
         ):
             closeout_recovery_journal.resume_external_commits(
-                contract, args, code_commit="a" * 40, memory_commit="b" * 40
+                contract,
+                args,
+                _message_authority(memory_mode="external"),
+                code_commit="a" * 40,
+                memory_commit="b" * 40,
             )
         with (
             mock.patch.object(closeout_recovery_journal, "require_clean"),
@@ -212,7 +277,11 @@ class CloseoutRecoveryTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "not reachable"),
         ):
             closeout_recovery_journal.resume_external_commits(
-                contract, args, code_commit="a" * 40, memory_commit="b" * 40
+                contract,
+                args,
+                _message_authority(memory_mode="external"),
+                code_commit="a" * 40,
+                memory_commit="b" * 40,
             )
         evidence: dict[str, object] = {}
         with (
@@ -228,6 +297,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                     args,
                     operation_progress=lambda _phase, found: evidence.update(found),
                 ),
+                _message_authority(memory_mode="external"),
                 code_commit="a" * 40,
                 memory_commit="b" * 40,
             )
@@ -403,27 +473,53 @@ class CloseoutRecoveryTests(unittest.TestCase):
     def test_external_closeout_refuses_an_unreachable_existing_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             contract = open_external_contract_fixture(Path(tmp))
-            _patch_external_refresh(stack)
+            _patch_external_refresh(stack, contract)
             stack.enter_context(
                 mock.patch.object(
-                    closeout_module,
+                    closeout_external,
                     "find_mapping",
                     return_value=SimpleNamespace(memory_commit="b" * 40),
                 )
             )
             stack.enter_context(
-                mock.patch.object(closeout_module, "head_commit", return_value="c" * 40)
+                mock.patch.object(closeout_external, "head_commit", return_value="c" * 40)
             )
             stack.enter_context(
-                mock.patch.object(closeout_module, "is_ancestor", return_value=False)
+                mock.patch.object(closeout_external, "is_ancestor", return_value=False)
             )
             stack.enter_context(self.assertRaisesRegex(RuntimeError, "not reachable"))
-            closeout_module._external_closeout_commits(
+            args = closeout_worktree_args(contract)
+            assert args.closeout_input is not None
+            closeout_external.external_closeout_commits(
                 contract,
-                WorktreeArgs(),
+                args,
+                args.closeout_input,
                 closeout_module.VerifiedChange("a" * 40, "2026-08-14", ["feature.py"]),
                 {},
             )
+
+    def test_external_closeout_requires_ledger_and_memory_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = open_external_contract_fixture(Path(tmp))
+            args = closeout_worktree_args(contract)
+            assert args.closeout_input is not None
+            change = closeout_module.VerifiedChange("a" * 40, "2026-08-22", [])
+            with self.assertRaisesRegex(RuntimeError, "requires a ledger path"):
+                closeout_external.external_closeout_commits(
+                    replace(contract, ledger_path=None),
+                    args,
+                    args.closeout_input,
+                    change,
+                    {},
+                )
+            with self.assertRaisesRegex(RuntimeError, "requires a memory worktree"):
+                closeout_external.external_closeout_commits(
+                    replace(contract, memory_worktree=None),
+                    args,
+                    args.closeout_input,
+                    change,
+                    {},
+                )
 
     def test_external_closeout_uses_clean_memory_head_when_no_mapping_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
@@ -431,22 +527,45 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 open_external_contract_fixture(Path(tmp)),
                 memory_content_commit="d" * 40,
             )
-            _patch_external_refresh(stack)
+            _patch_external_refresh(stack, contract)
             stack.enter_context(
-                mock.patch.object(closeout_module, "find_mapping", return_value=None)
+                mock.patch.object(closeout_external, "find_mapping", return_value=None)
             )
             stack.enter_context(
-                mock.patch.object(closeout_module, "head_commit", return_value="b" * 40)
+                mock.patch.object(closeout_external, "head_commit", return_value="b" * 40)
             )
-            stack.enter_context(mock.patch.object(closeout_module, "prepend_mapping"))
-            stack.enter_context(mock.patch.object(closeout_module, "write_ledger"))
-            stack.enter_context(mock.patch.object(closeout_module, "require_git"))
+            stack.enter_context(mock.patch.object(closeout_external, "prepend_mapping"))
+            stack.enter_context(mock.patch.object(closeout_external, "write_ledger"))
+            stack.enter_context(mock.patch.object(closeout_external, "require_git"))
+            ledger_intent = object()
             stack.enter_context(
-                mock.patch.object(closeout_module, "commit_if_dirty", return_value="c" * 40)
+                mock.patch.object(
+                    closeout_external,
+                    "begin_git_mutation",
+                    return_value=ledger_intent,
+                )
             )
-            result = closeout_module._external_closeout_commits(
+            stack.enter_context(
+                mock.patch.object(
+                    closeout_external,
+                    "bind_expected_output_tree",
+                    return_value=ledger_intent,
+                )
+            )
+            stack.enter_context(mock.patch.object(closeout_external, "prove_git_commit"))
+            stack.enter_context(
+                mock.patch.object(closeout_external, "commit_if_dirty", return_value="c" * 40)
+            )
+            args = closeout_worktree_args(
                 contract,
-                WorktreeArgs(approval_claimed=True),
+                approval_claimed=True,
+                operation_progress=MutationEvidenceRecorder(),
+            )
+            assert args.closeout_input is not None
+            result = closeout_external.external_closeout_commits(
+                contract,
+                args,
+                args.closeout_input,
                 closeout_module.VerifiedChange("a" * 40, "2026-08-14", ["feature.py"]),
                 {},
             )

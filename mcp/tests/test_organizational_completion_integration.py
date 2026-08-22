@@ -14,7 +14,6 @@ from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.kernel.memory_ledger import ledger_to_text, parse_ledger_text
 from agents_remember.memory import carryover as carryover_mod
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     IntegrateOperationInput,
 )
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
@@ -55,6 +54,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from closeout_input_test_support import closeout_operation_input, start_closeout_operation
 from test_closeout_queue import (
     JUDGMENT_HEADING,
     LEAF_A,
@@ -112,14 +112,14 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         self.fixture.declare(MASTER_A)
         self.fixture.mutate("select", candidate=LEAF_A)
         contract = self.fixture.contracts[MASTER_A]
-        start_or_observe_operation(
-            CloseoutOperationInput(
-                configPath=self.fixture.config_path.as_posix(),
-                contractPath=contract.contract_path.as_posix(),
-                codeCommitMessage="close organizational leaf",
-                memoryCommitMessage="close organizational memory",
-                ledgerCommitMessage="map organizational pair",
-                approvalNote="approved",
+        start_closeout_operation(
+            closeout_operation_input(
+                contract,
+                config_path=self.fixture.config_path,
+                code="close organizational leaf",
+                memory="close organizational memory",
+                ledger="map organizational pair",
+                approval_note="approved",
             ),
             launcher=lambda *_: None,
         )
@@ -219,14 +219,14 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         return load_contract(contract.contract_path)
 
     def _close_and_certify(self, contract):
-        start_or_observe_operation(
-            CloseoutOperationInput(
-                configPath=self.fixture.config_path.as_posix(),
-                contractPath=contract.contract_path.as_posix(),
-                codeCommitMessage="close organizational leaf",
-                memoryCommitMessage="close organizational memory",
-                ledgerCommitMessage="map organizational pair",
-                approvalNote="approved",
+        start_closeout_operation(
+            closeout_operation_input(
+                contract,
+                config_path=self.fixture.config_path,
+                code="close organizational leaf",
+                memory="close organizational memory",
+                ledger="map organizational pair",
+                approval_note="approved",
             ),
             launcher=lambda *_: None,
         )

@@ -1,0 +1,251 @@
+"""Lease-owned normalization and immutable admission for closeout operations."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from agents_remember.models.closeout_input import (
+    CloseoutCorrectedCall,
+    CloseoutMessageInput,
+    EffectiveCloseoutInput,
+    ResolvedCloseoutPlan,
+)
+from agents_remember.models.lifecycles.operation import (
+    CloseoutOperationInput,
+    GatePolicyRuleSnapshot,
+    LifecycleOperationRecord,
+)
+from agents_remember.worktrees.closeout_input import (
+    CloseoutCandidateSnapshot,
+    candidate_drift_error,
+    capture_closeout_candidate,
+    normalize_closeout_input,
+    resolve_closeout_plan,
+    resolved_plan_from_effective_input,
+)
+from agents_remember.worktrees.integration.closeout_recovery_projection import (
+    closeout_generation_retained,
+)
+from agents_remember.worktrees.integration.lifecycle_operation_candidate import (
+    LifecycleOperationCandidate,
+    lifecycle_operation_candidate,
+)
+from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+    closeout_contract_sha256,
+)
+from agents_remember.worktrees.integration.mutation_evidence import (
+    reconcile_closeout_mutations,
+)
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+
+
+@dataclass(frozen=True)
+class CloseoutOperationAdmission:
+    """Raw, non-authoritative closeout request resolved only inside the lifecycle lease."""
+
+    config_path: str
+    contract_path: Path
+    messages: CloseoutMessageInput
+    approval_note: str
+    gate_policy: list[GatePolicyRuleSnapshot]
+    corrected_call: CloseoutCorrectedCall
+
+
+@dataclass(frozen=True)
+class CloseoutAdmissionSnapshot:
+    state: str
+    candidate: CloseoutCandidateSnapshot
+
+
+@dataclass(frozen=True)
+class ValidatedCloseoutAdmission:
+    """Current-state input validation completed before lifecycle records are observed."""
+
+    operation_input: CloseoutOperationInput
+    snapshot: CloseoutAdmissionSnapshot
+    candidate: LifecycleOperationCandidate
+
+
+def prevalidate_closeout_operation_admission(
+    contract: WorktreeContract,
+    admission: CloseoutOperationAdmission,
+) -> ValidatedCloseoutAdmission:
+    """Normalize raw input against one stable current candidate before authority decisions."""
+
+    snapshot = capture_closeout_admission_snapshot(contract)
+    plan = resolve_closeout_plan(
+        contract,
+        route="worktree",
+        candidate=snapshot.candidate,
+    )
+    effective = normalize_closeout_input(
+        contract,
+        admission.messages,
+        route="worktree",
+        corrected_call=admission.corrected_call,
+        resolved_plan=plan,
+    )
+    _require_stable_snapshot(contract, snapshot, plan, admission.corrected_call)
+    operation_input = _operation_input(contract, admission, effective)
+    return ValidatedCloseoutAdmission(
+        operation_input=operation_input,
+        snapshot=snapshot,
+        candidate=lifecycle_operation_candidate(
+            operation_input,
+            candidate_state=snapshot.state,
+            closeout_candidate=snapshot.candidate,
+            integration_authority=None,
+        ),
+    )
+
+
+def resolve_closeout_operation_admission(
+    contract: WorktreeContract,
+    current: LifecycleOperationRecord | None,
+    admission: CloseoutOperationAdmission,
+    validated: ValidatedCloseoutAdmission,
+) -> tuple[CloseoutOperationInput, LifecycleOperationCandidate]:
+    """Resolve one new or duplicate request against a stable accepted generation."""
+    if current is None or _completed_generation_was_advanced(
+        contract,
+        current,
+        validated.snapshot.candidate,
+    ):
+        return validated.operation_input, validated.candidate
+    return _validate_existing_closeout_request(contract, current, admission, validated)
+
+
+def capture_closeout_admission_snapshot(
+    contract: WorktreeContract,
+) -> CloseoutAdmissionSnapshot:
+    return CloseoutAdmissionSnapshot(
+        state=closeout_contract_sha256(contract),
+        candidate=capture_closeout_candidate(contract),
+    )
+
+
+def _validate_existing_closeout_request(
+    contract: WorktreeContract,
+    current: LifecycleOperationRecord,
+    admission: CloseoutOperationAdmission,
+    validated: ValidatedCloseoutAdmission,
+) -> tuple[CloseoutOperationInput, LifecycleOperationCandidate]:
+    accepted = current.input
+    if not isinstance(accepted, CloseoutOperationInput):
+        raise RuntimeError("closeout journal contains a non-closeout durable input")
+    plan = resolved_plan_from_effective_input(accepted.effectiveInput)
+    retained = closeout_generation_retained(current)
+    effective = normalize_closeout_input(
+        contract,
+        admission.messages,
+        route="worktree",
+        corrected_call=admission.corrected_call,
+        resolved_plan=plan,
+    )
+    operation_input = _operation_input(contract, admission, effective)
+    if operation_input != accepted:
+        raise RuntimeError(
+            "conflicting closeout intent targets an existing accepted generation; "
+            "observe or recover it with the exact accepted input"
+        )
+    if retained:
+        _require_recovery_identity(contract, current)
+        return operation_input, LifecycleOperationCandidate(
+            current.candidateState,
+            current.candidateTree,
+            current.fingerprint,
+        )
+    return operation_input, lifecycle_operation_candidate(
+        operation_input,
+        candidate_state=validated.snapshot.state,
+        closeout_candidate=validated.snapshot.candidate,
+        integration_authority=None,
+    )
+
+
+def _completed_generation_was_advanced(
+    contract: WorktreeContract,
+    current: LifecycleOperationRecord,
+    candidate: CloseoutCandidateSnapshot,
+) -> bool:
+    """Permit a sequential generation only after exact prior finalization advanced again."""
+
+    return (
+        current.status == "completed"
+        and closeout_generation_retained(current)
+        and (
+            current.closeoutFinalizedContractSha256 is None
+            or closeout_contract_sha256(contract) != current.closeoutFinalizedContractSha256
+            or not _candidate_is_generation_output(current, candidate)
+        )
+    )
+
+
+def _operation_input(
+    contract: WorktreeContract,
+    admission: CloseoutOperationAdmission,
+    effective: EffectiveCloseoutInput,
+) -> CloseoutOperationInput:
+    return CloseoutOperationInput(
+        configPath=admission.config_path,
+        contractPath=contract.contract_path.as_posix(),
+        effectiveInput=effective,
+        approvalNote=admission.approval_note,
+        gatePolicy=admission.gate_policy,
+    )
+
+
+def _require_stable_snapshot(
+    contract: WorktreeContract,
+    before: CloseoutAdmissionSnapshot,
+    plan: ResolvedCloseoutPlan,
+    corrected_call: CloseoutCorrectedCall,
+) -> None:
+    after_contract = load_contract(contract.contract_path)
+    after = capture_closeout_admission_snapshot(after_contract)
+    if after_contract != contract or after != before:
+        raise candidate_drift_error(plan, corrected_call=corrected_call)
+
+
+def _require_recovery_identity(
+    contract: WorktreeContract,
+    current: LifecycleOperationRecord,
+) -> None:
+    contract_state = closeout_contract_sha256(contract)
+    if contract_state != current.candidateState and (
+        current.closeoutFinalizedContractSha256 is None
+        or contract_state != current.closeoutFinalizedContractSha256
+    ):
+        raise RuntimeError(
+            "closeout contract identity changed outside the accepted generation's proven output"
+        )
+    candidate = capture_closeout_candidate(contract)
+    if _candidate_is_generation_output(current, candidate):
+        return
+    raise RuntimeError("closeout candidate changed outside the accepted generation's proven output")
+
+
+def _candidate_is_generation_output(
+    current: LifecycleOperationRecord,
+    candidate: CloseoutCandidateSnapshot,
+) -> bool:
+    if candidate.candidate_tree != current.candidateTree:
+        return False
+    accepted = current.input
+    assert isinstance(accepted, CloseoutOperationInput)
+    unchanged = lifecycle_operation_candidate(
+        accepted,
+        candidate_state=current.candidateState,
+        closeout_candidate=candidate,
+        integration_authority=None,
+    )
+    if unchanged.fingerprint == current.fingerprint:
+        return True
+    code = reconcile_closeout_mutations(current).get("code")
+    return bool(
+        code is not None
+        and code.state == "commit-proven"
+        and code.commit == candidate.head_commit
+        and code.expectedOutputTree == candidate.head_tree
+    )

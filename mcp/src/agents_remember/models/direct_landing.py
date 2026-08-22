@@ -7,6 +7,12 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.closeout_input import (
+    CloseoutCorrectedCall,
+    CloseoutInvalidField,
+    EffectiveCloseoutInput,
+    ResolvedCloseoutPlan,
+)
 
 
 class DirectLandingResponse(ToolResponse):
@@ -28,3 +34,7 @@ class DirectLandingResponse(ToolResponse):
     ledgerCommit: str | None = None
     dryRun: bool = False
     memory: dict[str, Any] | None = None
+    effectiveInput: EffectiveCloseoutInput | None = None
+    invalidFields: list[CloseoutInvalidField] | None = None
+    resolvedPlan: ResolvedCloseoutPlan | None = None
+    correctedCall: CloseoutCorrectedCall | None = None

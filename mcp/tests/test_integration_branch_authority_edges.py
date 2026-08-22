@@ -20,7 +20,6 @@ from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.memory import carryover
 from agents_remember.memory.carryover import CarryoverApplyOptions, CarryoverRequest
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     IntegrateOperationInput,
     LifecycleOperationRecoveryCommits,
 )
@@ -60,6 +59,12 @@ from agents_remember.worktrees.worktree_contract import (
     default_series_contract,
     load_contract,
     write_contract,
+)
+from closeout_input_test_support import (
+    MutationEvidenceRecorder,
+    closeout_operation_input,
+    closeout_worktree_args,
+    start_closeout_operation,
 )
 from integration_branch_authority_test_support import (
     _acquire_atomic_blocker,
@@ -781,12 +786,12 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             fixture.declare(MASTER_A)
             fixture.mutate("select", candidate=LEAF_A)
             candidate = fixture.contracts[MASTER_A]
-            lifecycle_operations.start_or_observe_operation(
-                CloseoutOperationInput(
-                    configPath=fixture.config_path.as_posix(),
-                    contractPath=candidate.contract_path.as_posix(),
-                    codeCommitMessage="close candidate",
-                    approvalNote="approved",
+            start_closeout_operation(
+                closeout_operation_input(
+                    candidate,
+                    config_path=fixture.config_path,
+                    code="close candidate",
+                    approval_note="approved",
                 ),
                 launcher=lambda *_: None,
             )
@@ -964,18 +969,17 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             series = load_contract(fixture.master_contract.contract_path)
             _complete_atomic_master(fixture)
 
-            preview = closeout_result(
-                WorktreeArgs(contract_path=series.contract_path, dry_run=True)
-            )
+            preview = closeout_result(closeout_worktree_args(series, dry_run=True))
             _assert_exact_series_preview(self, preview)
 
             result = closeout_result(
-                WorktreeArgs(
-                    contract_path=series.contract_path,
+                closeout_worktree_args(
+                    series,
                     approved=True,
                     approval_note="approve exact landed atomic refs",
                     candidate_tree=code_candidate_tree(series),
                     recovery_commits=LifecycleOperationRecoveryCommits(codeCommit=code_commit),
+                    operation_progress=MutationEvidenceRecorder(),
                 )
             )
             self.assertEqual(result.payload["code_commit"], code_commit)

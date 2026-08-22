@@ -19,6 +19,7 @@ from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from closeout_input_test_support import MutationEvidenceRecorder
 from test_worktree_support import (
     WorktreeSupportTests,
     claimed_external_contract_fixture,
@@ -34,6 +35,7 @@ from test_worktree_support import (
     integrated_external_contract_fixture,
     open_external_contract_fixture,
     read_onboarding_field,
+    run_authorized_closeout_mechanics,
     write_entity_catalog,
     write_file_onboarding,
     write_passing_route_review,
@@ -53,9 +55,10 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             with self.assertRaises(RuntimeError):
-                worktree_manager.command_closeout(args)
+                run_authorized_closeout_mechanics(args)
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
@@ -71,9 +74,10 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             loaded = load_contract(contract.contract_path)
             self.assertEqual(loaded.closeout_status, "completed")
             self.assertTrue(loaded.approved_for_commit)
@@ -93,10 +97,11 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             loaded = load_contract(contract.contract_path)
             self.assertEqual(
@@ -136,11 +141,12 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             with self.assertRaisesRegex(
                 RuntimeError, "Run the c-05-create-or-update-onboarding-files skill"
             ):
-                worktree_manager.command_closeout(args)
+                run_authorized_closeout_mechanics(args)
             self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
@@ -159,7 +165,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(
                 payload["changed_code_paths"],
@@ -202,10 +208,11 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["code_commit"], code_head)
             self.assertEqual(read_onboarding_field(sidecar, "lastVerifiedCommitHash"), code_head)
@@ -233,9 +240,10 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             with self.assertRaisesRegex(RuntimeError, "feature.txt"):
-                worktree_manager.command_closeout(args)
+                run_authorized_closeout_mechanics(args)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
     def test_second_closeout_does_not_regate_prior_closeout_paths(self) -> None:
@@ -262,7 +270,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["changed_code_paths"], {"count": 1, "sample": ["second.txt"]})
             self.assertEqual(payload["sidecar_body_gate"]["stale"], {"count": 0, "sample": []})
@@ -288,7 +296,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 redirect_stdout(output),
             ):
                 self.assertEqual(
-                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
+                    run_authorized_closeout_mechanics(closeout_args(contract, dry_run=True)), 0
                 )
             preview = json.loads(output.getvalue())
             self.assertTrue(preview["integration_reopen"]["would_reopen"])
@@ -298,7 +306,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 mock.patch.object(closeout_module, "require_ordinary_worktree"),
                 redirect_stdout(output),
             ):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
             closeout_payload = json.loads(output.getvalue())
             self.assertTrue(closeout_payload["integration_reopen"]["reopened"])
             reopened = load_contract(contract.contract_path)
@@ -345,14 +353,14 @@ class WorktreeSupport2(WorktreeSupportTests):
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(
-                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)), 0
+                    run_authorized_closeout_mechanics(closeout_args(contract, dry_run=True)), 0
                 )
             preview = json.loads(output.getvalue())
             self.assertFalse(preview["integration_reopen"]["would_reopen"])
 
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
             closeout_payload = json.loads(output.getvalue())
             self.assertFalse(closeout_payload["integration_reopen"]["reopened"])
             loaded = load_contract(contract.contract_path)
@@ -403,7 +411,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["changed_code_paths"], {"count": 0, "sample": []})
             self.assertEqual(payload["changed_code_paths_committed"], {"count": 0, "sample": []})
@@ -430,7 +438,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["changed_code_paths"]["count"], PATH_SAMPLE_LIMIT + 7)
             self.assertEqual(len(payload["changed_code_paths"]["sample"]), PATH_SAMPLE_LIMIT)
@@ -452,6 +460,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             failed_quality = {
                 "ok": False,
@@ -471,7 +480,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 ),
                 self.assertRaisesRegex(RuntimeError, "clean memory_quality_check"),
             ):
-                worktree_manager.command_closeout(args)
+                run_authorized_closeout_mechanics(args)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
@@ -490,7 +499,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             write_passing_route_review(contract)
 
-            self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+            self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
 
             code_head = git(contract.code_worktree, "rev-parse", "HEAD")
             self.assertNotEqual(code_head, baseline)
@@ -510,7 +519,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             write_passing_route_review(contract)
 
             with self.assertRaisesRegex(RuntimeError, "citation_anchor_absent_from_range"):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), baseline)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
@@ -530,7 +539,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             output = io.StringIO()
 
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
 
             payload = json.loads(output.getvalue())
             self.assertNotEqual(payload["code_commit"], baseline)
@@ -585,10 +594,11 @@ class WorktreeSupport2(WorktreeSupportTests):
                 memory_commit_message="Document feature update",
                 ledger_commit_message="Sync ledger",
                 dry_run=False,
+                operation_progress=MutationEvidenceRecorder(),
             )
             output = io.StringIO()
             with redirect_stdout(output):
-                self.assertEqual(worktree_manager.command_closeout(args), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             expected = drift.compute_git_blob_set_fingerprint(
                 contract.code_worktree, ["feature.txt"]

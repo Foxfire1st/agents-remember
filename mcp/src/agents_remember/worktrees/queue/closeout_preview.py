@@ -14,17 +14,20 @@ def proposed_closeout_commits(
     code_quality_gate: dict[str, object],
 ) -> dict[str, object]:
     """Describe only the writes the matching closeout apply path can perform."""
+    effective = args.closeout_input
+    if effective is None:
+        raise RuntimeError("closeout preview requires normalized effective input")
     if contract.kind == "series":
         return {
             "code": {
                 "would_commit": False,
-                "message": "",
+                "intent": effective.code.model_dump(mode="json"),
                 "ref": f"refs/heads/{contract.code_work_branch}",
                 "strict_code_quality_before_commit": False,
             },
             "memory": {
                 "would_commit": False,
-                "message": "",
+                "intent": effective.memory.model_dump(mode="json"),
                 "ref": (
                     f"refs/heads/{contract.memory_work_branch}"
                     if contract.memory_mode == "external"
@@ -37,24 +40,20 @@ def proposed_closeout_commits(
             },
             "ledger": {
                 "would_update": False,
-                "message": "",
+                "intent": effective.ledger.model_dump(mode="json"),
                 "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
             },
         }
-    ledger_message = (
-        args.ledger_commit_message
-        or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
-    )
-    return {
+    proposed: dict[str, object] = {
         "code": {
             "would_commit": code_dirty,
-            "message": args.code_commit_message,
+            "intent": effective.code.model_dump(mode="json"),
             "worktree": contract.code_worktree.as_posix(),
             "strict_code_quality_before_commit": bool(code_quality_gate["required"]),
         },
         "memory": {
             "would_commit": memory_would_commit,
-            "message": args.memory_commit_message,
+            "intent": effective.memory.model_dump(mode="json"),
             "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
             "metadata_refresh_after_code_commit": contract.memory_mode == "external",
             "entity_fingerprint_refresh_after_code_commit": contract.memory_mode == "external",
@@ -63,10 +62,16 @@ def proposed_closeout_commits(
         },
         "ledger": {
             "would_update": contract.memory_mode == "external",
-            "message": ledger_message,
+            "intent": effective.ledger.model_dump(mode="json"),
             "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
         },
     }
+    for leg in ("code", "memory", "ledger"):
+        if effective.enabled(leg):
+            entry = proposed[leg]
+            assert isinstance(entry, dict)
+            entry["message"] = effective.message_for(leg)
+    return proposed
 
 
 def closeout_summary(contract: WorktreeContract) -> str:

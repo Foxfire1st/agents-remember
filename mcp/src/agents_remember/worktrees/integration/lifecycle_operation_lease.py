@@ -38,28 +38,37 @@ def _active_operation_kinds(contract: WorktreeContract) -> list[LifecycleOperati
 @contextmanager
 def contract_lifecycle_lease(
     contract: WorktreeContract,
-    *,
-    operation_kind: LifecycleOperationKind | None,
 ) -> Iterator[None]:
-    """Serialize cross-kind launch/cancel and terminal mutation for one contract.
-
-    A same-kind caller may observe or recover its existing journal. A different
-    operation kind, cleanup, or abandon must wait until the durable owner is terminal.
-    """
+    """Acquire only the cross-kind filesystem serialization lease for one contract."""
 
     path = _lease_path(contract)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
-            active = _active_operation_kinds(contract)
-            blockers = [kind for kind in active if kind != operation_kind]
-            if blockers:
-                label = "terminal mutation" if operation_kind is None else operation_kind
-                raise RuntimeError(
-                    f"{label} cannot proceed while task lifecycle operation(s) are active: "
-                    f"{', '.join(blockers)}"
-                )
             yield
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def require_lifecycle_operation_compatible(
+    contract: WorktreeContract,
+    *,
+    operation_kind: LifecycleOperationKind | None,
+) -> None:
+    """Decide active-operation compatibility while the caller holds the lease.
+
+    Separating this durable-state decision from lock acquisition lets closeout
+    validate untrusted input before any lifecycle record is observed. Integrate,
+    cleanup, abandon, and cancellation call the same decision owner immediately
+    after acquiring serialization.
+    """
+
+    active = _active_operation_kinds(contract)
+    blockers = [kind for kind in active if kind != operation_kind]
+    if blockers:
+        label = "terminal mutation" if operation_kind is None else operation_kind
+        raise RuntimeError(
+            f"{label} cannot proceed while task lifecycle operation(s) are active: "
+            f"{', '.join(blockers)}"
+        )

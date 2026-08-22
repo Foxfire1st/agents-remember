@@ -26,6 +26,7 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
+from agents_remember.models.closeout_input import CloseoutCorrectedCall
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
@@ -35,6 +36,10 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.closeout_input import (
+    normalize_closeout_input,
+    raw_closeout_messages,
+)
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -46,6 +51,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from closeout_input_test_support import MutationEvidenceRecorder
 
 drift = adopt_baseline.drift
 
@@ -724,7 +730,37 @@ def closeout_args(contract, *, dry_run: bool = False) -> Namespace:
         memory_commit_message="Document feature",
         ledger_commit_message="Sync ledger",
         dry_run=dry_run,
+        operation_progress=None if dry_run else MutationEvidenceRecorder(),
     )
+
+
+def run_authorized_closeout_mechanics(args: Namespace) -> int:
+    """Exercise commit mechanics with explicit test evidence authority, never the CLI."""
+    worktree_args = worktree_manager.WorktreeArgs.from_namespace(args)
+    if worktree_args.dry_run:
+        return worktree_manager.command_closeout(args)
+    if worktree_args.operation_progress is None:
+        raise AssertionError("applying closeout mechanics require an evidence recorder")
+    assert worktree_args.contract_path is not None
+    contract = load_contract(worktree_args.contract_path)
+    effective = normalize_closeout_input(
+        contract,
+        raw_closeout_messages(
+            code=getattr(args, "code_commit_message", None),
+            memory=getattr(args, "memory_commit_message", None),
+            ledger=getattr(args, "ledger_commit_message", None),
+        ),
+        route="worktree",
+        corrected_call=CloseoutCorrectedCall(
+            tool="worktree_closeout_apply",
+            arguments={"contract_path": contract.contract_path.as_posix()},
+        ),
+    )
+    result = worktree_manager.closeout_result(
+        replace(worktree_args, closeout_input=effective, ledger_commit_message="")
+    )
+    print(json.dumps(result.payload, indent=2))
+    return result.returncode
 
 
 def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
@@ -740,7 +776,7 @@ def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
 def integrated_external_contract_fixture(root: Path):
     contract = dirty_open_external_contract_fixture(root)
     with redirect_stdout(io.StringIO()):
-        assert worktree_manager.command_closeout(closeout_args(contract)) == 0
+        assert run_authorized_closeout_mechanics(closeout_args(contract)) == 0
     closed = load_contract(contract.contract_path)
     assert closed.memory_repo_path is not None
     git(

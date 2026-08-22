@@ -58,14 +58,17 @@ from agents_remember.controlplane.records import (
 )
 from agents_remember.controlplane.store import GateStore
 from agents_remember.serving.projections.paths import observer_logs_root
-from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import HANDOVER_GATE_KIND
-from agents_remember.worktrees.queue import closeout_staged_quality
+from agents_remember.worktrees.queue import closeout_recovery, closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import write_contract
 from pydantic import ValidationError
-from test_worktree_support import closeout_args, dirty_open_external_contract_fixture
+from test_worktree_support import (
+    closeout_args,
+    dirty_open_external_contract_fixture,
+    run_authorized_closeout_mechanics,
+)
 
 LIFECYCLE = "L-replay"
 GATE_ID = "01HREPLAY"
@@ -563,9 +566,8 @@ def _approved_closeout_gate_for(contract) -> str:
 class ClaimPrecedesTheIrreversibleWorkTests(unittest.TestCase):
     """R3: the approval must be spent BEFORE the first thing that cannot be taken back.
 
-    These run the real ``worktree_closeout_apply`` against real git repositories, because the
-    property is about where the claim sits among the commits and only the real call has commits in
-    it.
+    These run real closeout commit mechanics with explicit mutation-evidence authority, because
+    the property is about where the claim sits among the commits.
     """
 
     def _lifecycle_contract(self, root: Path):
@@ -578,7 +580,7 @@ class ClaimPrecedesTheIrreversibleWorkTests(unittest.TestCase):
 
     def _closeout(self, contract) -> int:
         with redirect_stdout(io.StringIO()):
-            return worktree_manager.command_closeout(closeout_args(contract))
+            return run_authorized_closeout_mechanics(closeout_args(contract))
 
     def test_the_approval_is_already_consumed_when_the_first_commit_runs(self) -> None:
         """The ordering property, observed from inside the first irreversible act.
@@ -598,13 +600,13 @@ class ClaimPrecedesTheIrreversibleWorkTests(unittest.TestCase):
             gate_id = _approved_closeout_gate_for(contract)
             store = GateStore(observer_logs_root(contract.coordination_root))
             seen: list[str] = []
-            real_commit = closeout_mod.commit_if_dirty
+            real_commit = closeout_recovery.commit_if_dirty
 
             def spy(repo: Path, message: str) -> str:
                 seen.append(store.current(LIFECYCLE)[gate_id].state)
                 return real_commit(repo, message)
 
-            with mock.patch.object(closeout_mod, "commit_if_dirty", side_effect=spy):
+            with mock.patch.object(closeout_recovery, "commit_if_dirty", side_effect=spy):
                 self.assertEqual(self._closeout(contract), 0)
 
             self.assertTrue(seen, "closeout committed nothing; the ordering was never exercised")

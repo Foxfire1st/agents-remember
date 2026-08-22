@@ -23,7 +23,6 @@ from agents_remember.controlplane.closeout_queue_store import (
 from agents_remember.controlplane.durable_store import CompactionOwnerError
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     IntegrateOperationInput,
 )
 from agents_remember.models.queue.closeout_queue import CloseoutQueueState
@@ -59,6 +58,12 @@ from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
 )
 from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.worktree_contract import write_contract
+from closeout_input_test_support import (
+    closeout_operation_input,
+    start_closeout_operation,
+    with_commit_proven,
+    with_mutation_intent,
+)
 from pydantic import ValidationError
 from test_closeout_queue import (
     LEAF_A,
@@ -431,13 +436,8 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         self.assertEqual(orchestrator_selected["legalNextOperations"], ["release-selection"])
         self.assertEqual(manager_selected["legalNextOperations"], ["worktree_closeout_apply"])
         contract = fixture.contracts[MASTER_A]
-        start_or_observe_operation(
-            CloseoutOperationInput(
-                configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
-                contractPath=contract.contract_path.as_posix(),
-                codeCommitMessage="close candidate",
-                approvalNote="approved",
-            ),
+        start_closeout_operation(
+            closeout_operation_input(contract, code="close candidate", approval_note="approved"),
             launcher=lambda *_: None,
         )
         closeout_store = LifecycleOperationStore(
@@ -446,9 +446,8 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         closeout_record = closeout_store.read()
         assert closeout_record is not None
         claim_queue_candidate_for_closeout(contract, closeout_record.operationKey)
-        closeout_store.update(
-            lambda current: current.model_copy(update={"irreversibleBoundaryEntered": True})
-        )
+        closeout_store.update(with_mutation_intent)
+        closeout_store.update(with_commit_proven)
         active_closeout = fixture.status(QueueActor(role="manager", task_document_ref=MASTER_A))[
             "inFlight"
         ][0]

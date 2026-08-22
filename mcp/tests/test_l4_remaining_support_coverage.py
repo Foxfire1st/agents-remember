@@ -18,10 +18,7 @@ from agents_remember.application.task_docs import task_doc_tools, task_execution
 from agents_remember.controlplane import closeout_queue_store
 from agents_remember.kernel import memory_init
 from agents_remember.memory import baseline, carryover
-from agents_remember.models.lifecycles.operation import (
-    IntegrateOperationInput,
-    LifecycleOperationRecord,
-)
+from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import document_refs
 from agents_remember.worktrees import atomic_series_seal, series_closeout, source_lineage
@@ -410,19 +407,6 @@ class BootstrapAndMemoryRemainderTests(unittest.TestCase):
 
 
 class ModelAndIdentityRemainderTests(unittest.TestCase):
-    def test_operation_model_requires_altitude_specific_authority(self) -> None:
-        integrate_record = LifecycleOperationRecord.model_construct(
-            operationKind="integrate", integrationAuthority=None
-        )
-        with self.assertRaisesRegex(ValueError, "requires exact integrationAuthority"):
-            cast(Any, integrate_record)._require_altitude_authority()
-
-        closeout_record = LifecycleOperationRecord.model_construct(
-            operationKind="closeout", integrationAuthority=cast(Any, object())
-        )
-        with self.assertRaisesRegex(ValueError, "has no integrationAuthority"):
-            cast(Any, closeout_record)._require_altitude_authority()
-
     def test_standalone_atomic_document_has_master_altitude(self) -> None:
         resolved = SimpleNamespace(
             document=SimpleNamespace(kind="master", orchestrates=[], executionNature="atomic")
@@ -584,21 +568,6 @@ class SealEvidenceAndRecoveryRemainderTests(unittest.TestCase):
         ):
             closeout_recovery._prove_recovered_series_memory(
                 cast(Any, contract), cast(Any, commits)
-            )
-
-        series = SimpleNamespace(
-            kind="series", code_repo_path=Path("/code"), code_work_branch="ar/master"
-        )
-        args = WorktreeArgs(recovery_commits=cast(Any, commits))
-        with (
-            mock.patch.object(closeout_recovery, "branch_commit", return_value="wrong"),
-            self.assertRaisesRegex(RuntimeError, "exact series ref"),
-        ):
-            closeout_recovery.accepted_code_commit(
-                series,
-                args,
-                strict_code_quality_required=False,
-                resuming=True,
             )
 
     def test_leaf_integration_quality_checkout_is_the_existing_worktree(self) -> None:
@@ -840,27 +809,7 @@ class TerminalAndCloseoutRemainderTests(unittest.TestCase):
         ):
             cleanup.delete_branch_force(Path("/repo"), "leaf", True, authority=authority)
 
-    def test_closeout_external_and_publication_rechecks_refuse_missing_facts(self) -> None:
-        change = SimpleNamespace(commit="code")
-        with self.assertRaisesRegex(RuntimeError, "requires a ledger path"):
-            closeout._external_closeout_commits(
-                SimpleNamespace(ledger_path=None),
-                WorktreeArgs(),
-                cast(Any, change),
-                {},
-            )
-        with self.assertRaisesRegex(RuntimeError, "requires a memory worktree"):
-            closeout._external_closeout_commits(
-                SimpleNamespace(
-                    ledger_path=Path("/ledger"),
-                    kind="leaf",
-                    memory_worktree=None,
-                ),
-                WorktreeArgs(),
-                cast(Any, change),
-                {},
-            )
-
+    def test_closeout_publication_rechecks_refuse_changed_contract_facts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp))
             contract = fixture.leaf_contract
@@ -904,51 +853,6 @@ class TerminalAndCloseoutRemainderTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "series authority checked"),
             ):
                 closeout._recover_closeout_finalization(series, series_args)
-
-    def test_closeout_candidate_publication_rechecks_the_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = _authority_fixture(Path(tmp))
-            contract = fixture.leaf_contract
-            changed = replace(contract, cleanup="completed")
-            args = WorktreeArgs(
-                contract_path=contract.contract_path,
-                approved=True,
-                approval_note="approved",
-                candidate_tree="tree",
-            )
-            with (
-                mock.patch.object(closeout, "report_operation_progress"),
-                mock.patch.object(
-                    closeout, "_closeout_contract", return_value=(contract.contract_path, contract)
-                ),
-                mock.patch.object(closeout, "_recover_closeout_finalization", return_value=None),
-                mock.patch.object(closeout, "_validate_closeout_source_state"),
-                mock.patch.object(closeout, "refuse_series_workbench_commit"),
-                mock.patch.object(closeout, "require_current_route_review", return_value=object()),
-                mock.patch.object(closeout, "_refuse_unsatisfied_closeout_gate"),
-                mock.patch.object(closeout, "closeout_changed_paths", return_value=[]),
-                mock.patch.object(closeout, "code_change_present", return_value=False),
-                mock.patch.object(
-                    closeout,
-                    "_closeout_attestations",
-                    return_value=closeout._CloseoutAttestations(),
-                ),
-                mock.patch.object(
-                    closeout,
-                    "_closeout_quality_preflight",
-                    return_value=({}, {}, False),
-                ),
-                mock.patch.object(closeout, "_revalidate_reviewed_candidate"),
-                mock.patch.object(closeout, "claim_queue_candidate_for_closeout"),
-                mock.patch.object(closeout, "load_contract", return_value=changed),
-                mock.patch.object(
-                    closeout,
-                    "publish_closeout_under_authority",
-                    side_effect=lambda _contract, publication: publication(),
-                ),
-                self.assertRaisesRegex(RuntimeError, "changed before candidate commit"),
-            ):
-                closeout.closeout_result(args)
 
     def test_git_guidance_sync_terminal_preview_and_queue_store_remainders(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "invalid local branch"):

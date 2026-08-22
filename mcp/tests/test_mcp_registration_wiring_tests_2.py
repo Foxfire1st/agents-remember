@@ -136,6 +136,8 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertIs(config, self.config)
         self.assertEqual(contract_path, "/tmp/contract.yaml")
         self.assertEqual(messages.code, "code msg")
+        self.assertIsNone(messages.memory)
+        self.assertIsNone(messages.ledger)
         self.assertEqual(approval.intent_note, "approved by developer")
         self.assertIs(approval.dry_run, True)
 
@@ -274,6 +276,8 @@ class RegistrationWiringTests2(RegistrationWiringTests):
             {
                 "contract_path": "/tmp/series-contract.md",
                 "code_commit": "a" * 40,
+                "memory_commit_message": "direct memory",
+                "ledger_commit_message": "direct ledger",
                 "intent_note": "owner approved",
                 "dry_run": True,
             },
@@ -283,6 +287,8 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertIs(config, self.config)
         self.assertEqual(request.contract_path, "/tmp/series-contract.md")
         self.assertEqual(request.code_commit, "a" * 40)
+        self.assertEqual(request.memory_commit_message, "direct memory")
+        self.assertEqual(request.ledger_commit_message, "direct ledger")
         self.assertEqual(request.intent_note, "owner approved")
         self.assertIs(request.dry_run, True)
 

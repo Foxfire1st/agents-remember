@@ -492,6 +492,8 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         DirectLandingRequest(
             contract_path="/fixture/series-contract.md",
             code_commit="a" * 40,
+            memory_commit_message="direct memory content",
+            ledger_commit_message="direct ledger mapping",
             intent_note="representative landing preview",
             dry_run=True,
         ),

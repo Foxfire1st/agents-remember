@@ -473,10 +473,16 @@ def load_contract(path: Path) -> WorktreeContract:
     return contract
 
 
+def contract_publication_text(path: Path, contract: WorktreeContract) -> str:
+    """Return the exact canonical UTF-8 text that :func:`write_contract` publishes."""
+
+    normalized = normalize_contract_leaf_id(contract)
+    validate_contract(normalized, path=path)
+    return contract_to_text(normalized)
+
+
 def write_contract(path: Path, contract: WorktreeContract) -> None:
-    contract = normalize_contract_leaf_id(contract)
-    validate_contract(contract, path=path)
-    atomic_write_text(path, contract_to_text(contract))
+    atomic_write_text(path, contract_publication_text(path, contract))
 
 
 def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) -> dict[str, object]:

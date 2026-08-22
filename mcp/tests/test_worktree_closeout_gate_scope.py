@@ -14,7 +14,6 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.code_quality import check as quality_check
-from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import code_quality_gate
 from agents_remember.worktrees.queue import closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import (
@@ -30,6 +29,7 @@ from test_worktree_support import (
     closeout_args,
     git,
     init_repo,
+    run_authorized_closeout_mechanics,
     write_passing_route_review,
 )
 
@@ -142,7 +142,7 @@ class CloseoutGateSeesCreatedFilesTests(unittest.TestCase):
                 ),
                 self.assertRaises(RuntimeError) as caught,
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             message = str(caught.exception)
             self.assertIn("strict code-quality gate failed before code commit", message)
@@ -171,7 +171,7 @@ class CloseoutGateSeesCreatedFilesTests(unittest.TestCase):
                 ),
                 self.assertRaises(RuntimeError),
             ):
-                worktree_manager.command_closeout(closeout_args(contract))
+                run_authorized_closeout_mechanics(closeout_args(contract))
 
             self.assertEqual(
                 git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
@@ -196,7 +196,7 @@ class CloseoutGateSeesCreatedFilesTests(unittest.TestCase):
                 ),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+                self.assertEqual(run_authorized_closeout_mechanics(closeout_args(contract)), 0)
 
             committed = git(
                 contract.code_worktree, "ls-tree", "-r", "--name-only", "HEAD"

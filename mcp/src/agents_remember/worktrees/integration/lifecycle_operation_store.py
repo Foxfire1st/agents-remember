@@ -15,6 +15,11 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationStatus,
 )
+from agents_remember.worktrees.integration.closeout_recovery_projection import (
+    closeout_generation_retained,
+    require_closeout_finalization_evidence,
+    require_closeout_recovery_projection,
+)
 
 _OWNERSHIP = StoreOwnership(
     store="lifecycle-operation",
@@ -24,7 +29,7 @@ _OWNERSHIP = StoreOwnership(
 )
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _ALLOWED: dict[LifecycleOperationStatus, frozenset[LifecycleOperationStatus]] = {
-    "queued": frozenset({"queued", "running", "failed", "cancelled"}),
+    "queued": frozenset({"queued", "running", "input-required", "failed", "cancelled"}),
     "running": frozenset(
         {"queued", "running", "input-required", "completed", "failed", "cancelled"}
     ),
@@ -32,6 +37,12 @@ _ALLOWED: dict[LifecycleOperationStatus, frozenset[LifecycleOperationStatus]] = 
     "completed": frozenset({"completed"}),
     "failed": frozenset({"failed"}),
     "cancelled": frozenset({"cancelled"}),
+}
+_MUTATION_ALLOWED = {
+    "pre-mutation": frozenset({"pre-mutation", "mutation-intent"}),
+    "mutation-intent": frozenset({"mutation-intent", "reconciled-unchanged", "commit-proven"}),
+    "reconciled-unchanged": frozenset({"reconciled-unchanged"}),
+    "commit-proven": frozenset({"commit-proven"}),
 }
 
 
@@ -85,6 +96,44 @@ def _validate_organizational_repair_transition(
         raise RuntimeError("recorded organizational repair evidence is immutable")
 
 
+def _validate_mutation_evidence_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    for leg, before in current.mutationEvidence.items():
+        after = updated.mutationEvidence[leg]
+        if after.leg != before.leg or after.repository != before.repository:
+            raise RuntimeError("closeout mutation evidence identity is immutable")
+        if after.state not in _MUTATION_ALLOWED[before.state]:
+            raise RuntimeError(
+                f"invalid closeout mutation evidence transition {before.state} -> {after.state}"
+            )
+        if before.before is not None and after.before != before.before:
+            raise RuntimeError("closeout pre-command Git evidence is immutable")
+        if before.observed is not None and after.observed != before.observed:
+            raise RuntimeError("closeout observed Git evidence is immutable once recorded")
+        if (
+            before.expectedOutputTree is not None
+            and after.expectedOutputTree != before.expectedOutputTree
+        ):
+            raise RuntimeError("closeout expected output tree is immutable once recorded")
+
+
+def _validate_closeout_finalization_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    before = current.closeoutFinalizedContractSha256
+    after = updated.closeoutFinalizedContractSha256
+    if before is not None and after != before:
+        raise RuntimeError("closeout finalized contract SHA-256 is immutable once recorded")
+    if before is None and after is not None and updated.phase != "contract-finalization":
+        raise RuntimeError(
+            "closeout finalized contract SHA-256 must be introduced at contract-finalization"
+        )
+    require_closeout_finalization_evidence(updated)
+
+
 def operation_record_path(worktree_group: Path, operation_kind: LifecycleOperationKind) -> Path:
     return worktree_group / "reports" / f"{operation_kind}-operation.json"
 
@@ -104,11 +153,11 @@ class LifecycleOperationStore:
             return None
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict) and payload.get("schemaVersion") == "1.0":
+            if isinstance(payload, dict) and payload.get("schemaVersion") != "3.0":
                 raise RuntimeError(
-                    "legacy lifecycle operation schema 1.0 cannot be resumed: exact integration "
-                    "repository/ref authority was not recorded; cancel or archive the old record "
-                    "and start a fresh task operation"
+                    "legacy lifecycle operation record cannot be resumed through the normal "
+                    "reader: migrate or retire it through the explicit lifecycle-record "
+                    "migration task"
                 )
             return LifecycleOperationRecord.model_validate(payload)
         except RuntimeError:
@@ -159,17 +208,23 @@ class LifecycleOperationStore:
                 and isinstance(current.result, dict)
                 and current.result.get("safeToReplace") is True
             )
-            if (
-                current.status in {"failed", "cancelled"}
-                and current.irreversibleBoundaryEntered
-                and not restored_failure
-            ):
+            past_boundary = (
+                closeout_generation_retained(current)
+                if current.operationKind == "closeout"
+                else current.irreversibleBoundaryEntered
+            )
+            if current.status in {"failed", "cancelled"} and past_boundary and not restored_failure:
                 raise RuntimeError("a terminal operation past its boundary cannot restart")
             updated = LifecycleOperationRecord.model_validate(
                 transform(current).model_dump(mode="json")
             )
             if updated.fingerprint != current.fingerprint:
                 raise RuntimeError("lifecycle operation recovery cannot change its fingerprint")
+            if updated.operationKey != current.operationKey or updated.input != current.input:
+                raise RuntimeError("lifecycle operation recovery cannot change durable input")
+            _validate_mutation_evidence_transition(current, updated)
+            require_closeout_recovery_projection(updated)
+            _validate_closeout_finalization_transition(current, updated)
             self._write(updated)
             return updated, True
 
@@ -193,6 +248,8 @@ class LifecycleOperationStore:
     def _write(self, record: LifecycleOperationRecord) -> None:
         _OWNERSHIP.check_declared_writer()
         validated = LifecycleOperationRecord.model_validate(record.model_dump(mode="json"))
+        require_closeout_recovery_projection(validated)
+        require_closeout_finalization_evidence(validated)
         atomic_write_text(
             self.path,
             validated.model_dump_json(indent=2, exclude_none=True) + "\n",
@@ -227,8 +284,16 @@ class LifecycleOperationStore:
         _validate_quality_certification_transition(current, updated)
         _validate_queue_completion_transition(current, updated)
         _validate_organizational_repair_transition(current, updated)
+        _validate_mutation_evidence_transition(current, updated)
+        require_closeout_recovery_projection(updated)
+        _validate_closeout_finalization_transition(current, updated)
         if current.irreversibleBoundaryEntered and not updated.irreversibleBoundaryEntered:
             raise RuntimeError("an entered irreversible boundary cannot be cleared")
+        closeout_ambiguous = current.operationKind == "closeout" and any(
+            item.state == "mutation-intent" for item in current.mutationEvidence.values()
+        )
+        if updated.status == "cancelled" and closeout_ambiguous:
+            raise RuntimeError("a closeout operation cannot cancel with ambiguous Git intent")
         if updated.status == "cancelled" and current.irreversibleBoundaryEntered:
             raise RuntimeError(
                 "a lifecycle operation cannot cancel after its irreversible boundary"

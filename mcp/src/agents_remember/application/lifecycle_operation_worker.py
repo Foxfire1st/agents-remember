@@ -28,6 +28,7 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.kernel.primitives.gate_vocab import GateKind
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
+from agents_remember.models.lifecycles.mutation_evidence import GitMutationEvidence
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
@@ -37,6 +38,10 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
     OrganizationalCompletionRepairEvidence,
+)
+from agents_remember.worktrees.integration.closeout_recovery_projection import (
+    closeout_generation_retained,
+    derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.lifecycle_operation_store import (
     LifecycleOperationStore,
@@ -97,16 +102,19 @@ class OperationRuntime:
                 raise RuntimeError(
                     "queued lifecycle operation is reserved for another worker process"
                 )
+            recovering = (
+                closeout_generation_retained(record)
+                if record.operationKind == "closeout"
+                else record.irreversibleBoundaryEntered
+            )
             return record.model_copy(
                 update={
                     "status": "running",
-                    "phase": "recovering-after-claim"
-                    if record.irreversibleBoundaryEntered
-                    else "preflight",
+                    "phase": "recovering-after-claim" if recovering else "preflight",
                     "startedAt": record.startedAt or stamp,
                     "heartbeatAt": stamp,
                     "currentCommand": "recover task state"
-                    if record.irreversibleBoundaryEntered
+                    if recovering
                     else "validate lifecycle operation",
                     "workerPid": worker_pid,
                 }
@@ -147,10 +155,31 @@ class OperationRuntime:
             and failure_value.get("state") == "organizational-completion-gate-failed"
             else None
         )
+        mutation_value = evidence.get("mutation_evidence")
+        mutation_evidence = (
+            GitMutationEvidence.model_validate(mutation_value)
+            if mutation_value is not None
+            else None
+        )
+        finalization_value = evidence.get("closeout_finalized_contract_sha256")
+        if finalization_value is not None and not isinstance(finalization_value, str):
+            raise RuntimeError("closeout finalized contract SHA-256 must be a string")
 
         def advance(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
             if record.cancelRequested or record.status == "cancelled":
                 return record
+            mutations = dict(record.mutationEvidence)
+            if mutation_evidence is not None:
+                mutations[mutation_evidence.leg] = mutation_evidence
+            durable_recovery = (
+                derive_closeout_recovery_commits(
+                    record,
+                    mutations=mutations,
+                    reported=recovery_commits,
+                )
+                if record.operationKind == "closeout"
+                else recovery_commits or record.recoveryCommits
+            )
             return record.model_copy(
                 update={
                     "status": "running",
@@ -160,11 +189,21 @@ class OperationRuntime:
                     "irreversibleBoundaryEntered": (
                         record.irreversibleBoundaryEntered
                         or bool(evidence.get("irreversible_boundary"))
+                        or (
+                            mutation_evidence is not None
+                            and mutation_evidence.state == "commit-proven"
+                        )
                     ),
                     "approvalClaimed": (
                         record.approvalClaimed or bool(evidence.get("approval_claimed"))
                     ),
-                    "recoveryCommits": (recovery_commits or record.recoveryCommits),
+                    "mutationEvidence": mutations,
+                    "recoveryCommits": durable_recovery,
+                    "closeoutFinalizedContractSha256": (
+                        record.closeoutFinalizedContractSha256
+                        if finalization_value is None
+                        else finalization_value
+                    ),
                     "qualityCertification": (quality_certification or record.qualityCertification),
                     "queueCompletion": (queue_completion or record.queueCompletion),
                     "organizationalRepair": (organizational_repair or record.organizationalRepair),
@@ -242,8 +281,10 @@ class OperationRuntime:
                         "workerPid": None,
                     }
                 )
-            needs_recovery = record.irreversibleBoundaryEntered and not bool(
-                result.get("safeToReplace")
+            needs_recovery = (
+                closeout_generation_retained(record)
+                if record.operationKind == "closeout"
+                else record.irreversibleBoundaryEntered and not bool(result.get("safeToReplace"))
             )
             needs_input = needs_recovery or bool(result.get("developer_decision_required"))
             return record.model_copy(
@@ -305,9 +346,7 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
         args = WorktreeArgs(
             **common,
             approval_note=operation_input.approvalNote,
-            code_commit_message=operation_input.codeCommitMessage,
-            memory_commit_message=operation_input.memoryCommitMessage,
-            ledger_commit_message=operation_input.ledgerCommitMessage,
+            closeout_input=operation_input.effectiveInput,
         )
         result = closeout_result(args)
         payload = {
@@ -351,7 +390,9 @@ def _release_reversible_queue_ownership(
 ) -> str | None:
     if _organizational_repair_failure(record) is not None:
         return None
-    if record.irreversibleBoundaryEntered and not restored:
+    if record.operationKind == "closeout" and closeout_generation_retained(record):
+        return None
+    if record.operationKind == "integrate" and record.irreversibleBoundaryEntered and not restored:
         return None
     try:
         release_queue_candidate_after_reversible_operation(

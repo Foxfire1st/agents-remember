@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    contract_publication_text,
+)
 
 
 def operation_state_fingerprint(contract: WorktreeContract) -> str:
@@ -26,3 +29,10 @@ def operation_state_fingerprint(contract: WorktreeContract) -> str:
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def closeout_contract_sha256(contract: WorktreeContract) -> str:
+    """Hash the exact canonical contract bytes that closeout would publish."""
+
+    published = contract_publication_text(contract.contract_path, contract)
+    return hashlib.sha256(published.encode("utf-8")).hexdigest()

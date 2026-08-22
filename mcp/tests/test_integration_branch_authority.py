@@ -72,6 +72,7 @@ from agents_remember.worktrees.modules.integrate import (
 from agents_remember.worktrees.modules.start import attach_result
 from agents_remember.worktrees.modules.sync import sync_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from closeout_input_test_support import closeout_worktree_args
 from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
@@ -603,8 +604,8 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "cannot create code, memory, or ledger"):
                 closeout_result(
-                    WorktreeArgs(
-                        contract_path=fixture.master_contract.contract_path,
+                    closeout_worktree_args(
+                        fixture.master_contract,
                         dry_run=True,
                     )
                 )

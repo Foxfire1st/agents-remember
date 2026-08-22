@@ -11,7 +11,13 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.models.closeout_input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
+from agents_remember.worktrees.integration.mutation_evidence import (
+    begin_git_mutation,
+    bind_expected_output_tree,
+    prove_git_commit,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -151,12 +157,13 @@ def _require_recovered_mapping(ledger, *, code_commit: str, memory_commit: str) 
 def accepted_code_commit(
     contract,
     args: WorktreeArgs,
+    effective_input: EffectiveCloseoutInput,
     *,
     strict_code_quality_required: bool,
-    resuming: bool,
 ) -> str:
     """Commit or prove the accepted code tree, then journal its exact commit."""
     commits = args.recovery_commits
+    created_commit = False
     if contract.kind == "series":
         code_commit = branch_commit(contract.code_repo_path, contract.code_work_branch)
         if commits is not None and code_commit != commits.codeCommit:
@@ -166,34 +173,50 @@ def accepted_code_commit(
         code_commit = head_commit(contract.code_worktree)
         if code_commit != commits.codeCommit:
             raise RuntimeError("closeout recovery code commit does not match task HEAD")
-    elif resuming and not worktree_dirty(contract.code_worktree):
+    elif not worktree_dirty(contract.code_worktree):
         code_commit = head_commit(contract.code_worktree)
     else:
+        created_commit = True
+        intent = begin_git_mutation(
+            args,
+            leg="code",
+            repository=contract.code_worktree,
+            expected_output_tree=None,
+            use_current_candidate=True,
+        )
         code_commit = (
-            commit_verified_staged(contract.code_worktree, args.code_commit_message)
+            commit_verified_staged(contract.code_worktree, effective_input.message_for("code"))
             if strict_code_quality_required
-            else commit_if_dirty(contract.code_worktree, args.code_commit_message)
+            else commit_if_dirty(contract.code_worktree, effective_input.message_for("code"))
+        )
+        prove_git_commit(
+            args,
+            intent,
+            repository=contract.code_worktree,
+            commit=code_commit,
         )
     repository = contract.code_repo_path if contract.kind == "series" else contract.code_worktree
     committed_tree = require_git(repository, ["rev-parse", f"{code_commit}^{{tree}}"])
     if args.candidate_tree and committed_tree != args.candidate_tree:
         raise RuntimeError("closeout committed tree does not match the accepted candidate tree")
-    report_operation_progress(
-        args,
-        "code-commit",
-        current_command="code commit recorded for recovery",
-        recovery_commits={
-            "codeCommit": code_commit,
-            "memoryContentCommit": "",
-            "ledgerCommit": "",
-        },
-    )
+    if not created_commit:
+        report_operation_progress(
+            args,
+            "code-commit",
+            current_command="verified-existing code commit recorded for recovery",
+            recovery_commits={
+                "codeCommit": code_commit,
+                "memoryContentCommit": "",
+                "ledgerCommit": "",
+            },
+        )
     return code_commit
 
 
 def resume_external_commits(
     contract,
     args: WorktreeArgs,
+    effective_input: EffectiveCloseoutInput,
     *,
     code_commit: str,
     memory_commit: str,
@@ -206,30 +229,48 @@ def resume_external_commits(
     mapping = find_mapping(ledger, code_commit)
     if mapping is not None and mapping.memory_commit != memory_commit:
         raise RuntimeError("closeout recovery found a conflicting code-to-memory ledger row")
-    if mapping is None:
+    created_commit = mapping is None
+    if created_commit:
         if memory_head != memory_commit:
             raise RuntimeError(
                 "closeout recovery cannot prove the recorded memory commit at memory HEAD"
             )
+        intent = begin_git_mutation(
+            args,
+            leg="ledger",
+            repository=contract.memory_worktree,
+            expected_output_tree=None,
+        )
         write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
         require_git(contract.memory_worktree, ["add", "memory.md"])
+        intent = bind_expected_output_tree(
+            args,
+            intent,
+            repository=contract.memory_worktree,
+        )
         ledger_commit = commit_if_dirty(
             contract.memory_worktree,
-            args.ledger_commit_message
-            or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
+            effective_input.message_for("ledger"),
+        )
+        prove_git_commit(
+            args,
+            intent,
+            repository=contract.memory_worktree,
+            commit=ledger_commit,
         )
     else:
         if not is_ancestor(contract.memory_worktree, memory_commit, memory_head):
             raise RuntimeError("closeout recovery memory commit is not reachable from ledger HEAD")
         ledger_commit = memory_head
-    report_operation_progress(
-        args,
-        "ledger-commit",
-        current_command="external ledger commit recorded for recovery",
-        recovery_commits={
-            "codeCommit": code_commit,
-            "memoryContentCommit": memory_commit,
-            "ledgerCommit": ledger_commit,
-        },
-    )
+    if not created_commit:
+        report_operation_progress(
+            args,
+            "ledger-commit",
+            current_command="verified-existing ledger commit recorded for recovery",
+            recovery_commits={
+                "codeCommit": code_commit,
+                "memoryContentCommit": memory_commit,
+                "ledgerCommit": ledger_commit,
+            },
+        )
     return memory_commit, ledger_commit
