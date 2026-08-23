@@ -16,7 +16,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
 from agents_remember.models.providers import ProviderStatusResponse
-from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.providers import current_state
 from agents_remember.providers import status as provider_status
 from agents_remember.providers.lifecycle.docker_runtime import (

@@ -12,15 +12,39 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.application.lifecycle.lifecycle_operation_location import (
+    LocationDecisionPayload,
+    configured_lifecycle_operation_location,
+    location_decision_payload,
+    observe_contract_read_failure,
+    primary_operation_projection,
+)
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
-from agents_remember.models.worktree import SourceLineageProjection, WorktreeSummary
+from agents_remember.models.worktree import (
+    SourceLineageProjection,
+    WorktreeState,
+    WorktreeSummary,
+)
 from agents_remember.worktrees import git_worktree_manager
-from agents_remember.worktrees.integration.lifecycle_operations import latest_operation_projection
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocationError,
+    require_contract_matches_lifecycle_operation_location,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
+    current_operation_projections,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
+)
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
-def worktree_status_packet(contract_path: Path | None) -> WorktreeSummary:
+def worktree_status_packet(
+    config: McpRuntimeConfig,
+    contract_path: Path | None,
+) -> WorktreeSummary:
     """The context packet's ``worktree`` block, built as the model rather than validated into it.
 
     This used to return ``dict[str, Any]`` for the caller to ``model_validate``, and that
@@ -33,15 +57,13 @@ def worktree_status_packet(contract_path: Path | None) -> WorktreeSummary:
     if contract_path is None:
         return WorktreeSummary(state="inactive")
     resolved = contract_path.resolve()
-    if not resolved.exists():
-        return WorktreeSummary(
-            state="missingContract",
-            contractPath=resolved.as_posix(),
-            enclosurePath=resolved.as_posix(),
-        )
+    try:
+        _, location = configured_lifecycle_operation_location(config, resolved)
+    except LifecycleOperationLocationError as error:
+        return _location_decision_summary(resolved, error)
     try:
         contract = load_contract(resolved)
-    except ContractError as error:
+    except (ContractError, OSError, UnicodeError, ValueError) as error:
         # What is left here is a document that is not a contract at all: no front matter, an
         # unrecognized schema, a required field missing, an external-memory contract with no
         # memory repository. A cell whose *value* is outside its vocabulary is NOT one of
@@ -49,15 +71,106 @@ def worktree_status_packet(contract_path: Path | None) -> WorktreeSummary:
         # because refusing it here would only have made the packet honest about a task that
         # `worktree_closeout_apply`, `worktree_integrate`, `worktree_cleanup`, `worktree_sync`
         # and `worktree_abandon` had all simultaneously stopped being able to touch.
+        # ``load_contract`` deliberately translates file absence into ``ContractError``.
+        # Classify the live path only after locator authority has already been proven, so
+        # deletion affects the contract surface without hiding the retained root journal.
+        missing = isinstance(error, FileNotFoundError) or not resolved.exists()
+        failure = public_failure_evidence(
+            stage="contract-read",
+            side="contract",
+            name=resolved.name,
+            error_type=type(error).__name__,
+            observed={"state": "missing" if missing else "unreadable"},
+        )
+        observation = observe_contract_read_failure(location, failure)
+        retained = primary_operation_projection(list(observation.operations))
+        if observation.decision is not None:
+            return _contract_read_decision_summary(
+                resolved,
+                missing=missing,
+                failure=failure,
+                decision=observation.decision,
+            )
         return WorktreeSummary(
-            state="invalidContract",
+            state="missingContract" if missing else "invalidContract",
             contractPath=resolved.as_posix(),
             enclosurePath=resolved.as_posix(),
-            error=str(error),
+            error=(
+                "the canonical worktree contract is missing"
+                if missing
+                else "the canonical worktree contract is unreadable or invalid"
+            ),
+            errorEvidence=failure,
+            lifecycleOperation=retained,
         )
+    try:
+        require_contract_matches_lifecycle_operation_location(contract, location)
+    except LifecycleOperationLocationError as error:
+        return _location_decision_summary(resolved, error)
     return _summary_from_status_payload(
         git_worktree_manager.status_payload(contract),
-        lifecycle_operation=latest_operation_projection(contract.contract_path),
+        lifecycle_operation=primary_operation_projection(
+            current_operation_projections(
+                contract.contract_path,
+                contract=contract,
+                location=location,
+            )
+        ),
+    )
+
+
+def _location_decision_summary(
+    contract_path: Path,
+    error: LifecycleOperationLocationError,
+) -> WorktreeSummary:
+    """Carry the shared locator decision without inventing a context-only dialect."""
+
+    decision = location_decision_payload(error)
+    return _developer_decision_summary(
+        contract_path,
+        state="missingContract" if not contract_path.exists() else "invalidContract",
+        decision=decision,
+    )
+
+
+def _contract_read_decision_summary(
+    contract_path: Path,
+    *,
+    missing: bool,
+    failure: dict[str, object],
+    decision: LocationDecisionPayload,
+) -> WorktreeSummary:
+    return _developer_decision_summary(
+        contract_path,
+        state="missingContract" if missing else "invalidContract",
+        decision=decision,
+        error_evidence=failure,
+    )
+
+
+def _developer_decision_summary(
+    contract_path: Path,
+    *,
+    state: WorktreeState,
+    decision: LocationDecisionPayload,
+    error_evidence: dict[str, object] | None = None,
+) -> WorktreeSummary:
+    """Project one shared typed lifecycle-location/read decision onto context."""
+
+    return WorktreeSummary(
+        state=state,
+        contractPath=contract_path.as_posix(),
+        enclosurePath=contract_path.as_posix(),
+        error=decision["summary"],
+        errorEvidence=error_evidence,
+        status=decision["status"],
+        summary=decision["summary"],
+        detail=decision["detail"],
+        expected=decision["expected"],
+        observed=decision["observed"],
+        nextAction=decision["nextAction"],
+        developerDecisionRequired=decision["developerDecisionRequired"],
+        decisionSurface=decision["decisionSurface"],
     )
 
 

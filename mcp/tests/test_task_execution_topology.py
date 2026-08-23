@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,14 +11,20 @@ from unittest import mock
 import agents_remember.tasks.document_refs as task_document_refs
 import agents_remember.tasks.store as task_store
 from agents_remember.application.task_docs import task_doc_queue_scope
-from agents_remember.application.task_docs.task_doc_queue_scope import QueuePublicationScope
+from agents_remember.application.task_docs.task_doc_publication import (
+    TaskDocPublication,
+    publish_task_doc_set,
+)
+from agents_remember.application.task_docs.task_doc_queue_scope import (
+    PreparedQueuePublicationScope,
+    QueuePublicationScope,
+    QueueScopePreparation,
+)
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
     TaskDocEdit,
     TaskDocError,
     TaskDocTarget,
-    _publish_task_doc_set,
-    _TaskDocPublication,
     task_doc_tool,
 )
 from agents_remember.application.task_docs.task_execution_topology import (
@@ -36,6 +41,7 @@ from agents_remember.tasks import (
     Section,
     SprintExecutionGraph,
     TaskDocument,
+    missing_task_doc_source,
     read_task_doc,
     write_task_doc,
 )
@@ -277,7 +283,7 @@ class ExecutionTopologyTests(unittest.TestCase):
             )
 
     def test_queue_scope_split_has_direct_topology_test_ownership(self) -> None:
-        self.assertTrue(callable(task_doc_queue_scope.governing_queue_scope))
+        self.assertTrue(callable(task_doc_queue_scope.prepare_governing_queue_scope))
 
     def test_queue_scope_refuses_multiple_sprints_and_wrong_leaf_owner(self) -> None:
         affected = [
@@ -304,6 +310,7 @@ class ExecutionTopologyTests(unittest.TestCase):
             task_root=leaf_path.parent,
             repository_root=self.tasks,
             existing_path=leaf_path,
+            existing=True,
         )
         with (
             mock.patch.object(
@@ -326,53 +333,78 @@ class ExecutionTopologyTests(unittest.TestCase):
             task_doc_queue_scope.QueueScopeError,
             "cannot resolve governing sprint queue",
         ):
-            task_doc_queue_scope.governing_queue_scope(
-                self.coord,
-                REPOSITORY,
-                broken_root,
-                None,
-                _master(identity="BROKEN"),
+            task_doc_queue_scope.prepare_governing_queue_scope(
+                QueueScopePreparation(
+                    coordination_root=self.coord,
+                    repo_id=REPOSITORY,
+                    task_root=broken_root,
+                    original=None,
+                    candidate=_master(identity="BROKEN"),
+                    source_snapshots=(
+                        task_store.capture_task_doc_source(broken_root / "task.json"),
+                    ),
+                )
             )
 
     def test_light_task_has_no_queue_scope_and_missing_owner_fails_closed(self) -> None:
         light = _master(identity="LIGHT").model_copy(update={"kind": "light", "orchestrates": []})
         self.assertIsNone(
-            task_doc_queue_scope.governing_queue_scope(
-                self.coord,
-                REPOSITORY,
-                self.tasks / "light",
-                None,
-                light,
-            )
+            task_doc_queue_scope.prepare_governing_queue_scope(
+                QueueScopePreparation(
+                    coordination_root=self.coord,
+                    repo_id=REPOSITORY,
+                    task_root=self.tasks / "light",
+                    original=None,
+                    candidate=light,
+                    source_snapshots=(),
+                )
+            ).scope
         )
-        publication = _TaskDocPublication(
-            config=self.cfg,
-            target=TaskDocTarget(repo_id=REPOSITORY, task_name="master-a"),
-            task_root=self.tasks / "master-a",
-            original=None,
-            candidate=_master(identity="MASTER-A"),
-            documents=[_master(identity="MASTER-A")],
-            publisher=lambda: [],
-        )
+        candidate = _master(identity="MASTER-A")
+        source = missing_task_doc_source(self.tasks / "master-a" / "task.json")
         with (
             mock.patch(
-                "agents_remember.application.task_docs.task_doc_tools.governing_queue_scope",
-                return_value=QueuePublicationScope(SPRINT, None),
+                "agents_remember.application.task_docs.task_doc_publication."
+                "prepare_governing_queue_scope",
+                return_value=PreparedQueuePublicationScope(
+                    QueuePublicationScope(SPRINT, None),
+                    (source,),
+                ),
             ),
             self.assertRaisesRegex(TaskDocError, "no owning master"),
         ):
-            _publish_task_doc_set(publication)
+            publish_task_doc_set(
+                TaskDocPublication(
+                    config=self.cfg,
+                    target_repo_id=REPOSITORY,
+                    task_root=self.tasks / "master-a",
+                    original=None,
+                    candidate=candidate,
+                    documents=[candidate],
+                    source_snapshots=(source,),
+                    publisher=lambda: [],
+                )
+            )
 
         publisher = mock.Mock(return_value=[])
-        publication = replace(publication, publisher=publisher)
         with (
             mock.patch(
-                "agents_remember.application.task_docs.task_doc_tools.governing_queue_scope",
+                "agents_remember.application.task_docs.task_doc_publication."
+                "prepare_governing_queue_scope",
                 side_effect=task_doc_queue_scope.QueueScopeError("broken queue scope"),
             ),
             self.assertRaisesRegex(TaskDocError, "broken queue scope"),
         ):
-            _publish_task_doc_set(publication)
+            TaskDocPublication(
+                config=self.cfg,
+                target_repo_id=REPOSITORY,
+                task_root=self.tasks / "master-a",
+                original=None,
+                candidate=candidate,
+                documents=[candidate],
+                source_snapshots=(source,),
+                publisher=publisher,
+            )
         publisher.assert_not_called()
 
     def test_completion_topology_errors_are_normalized_at_the_queue_boundary(self) -> None:
@@ -741,27 +773,24 @@ class ExecutionTopologyTests(unittest.TestCase):
         self._write_legacy()
         self._bootstrap()
         sprint_path = self.tasks / "sprint" / "task.json"
-        real_read = task_document_refs.read_task_doc
+        real_read = task_document_refs.read_task_doc_with_source
         sprint_reads = 0
 
-        def drift_after_first_sprint_read(path: Path) -> TaskDocument:
+        def counted_source_read(
+            path: Path,
+        ) -> tuple[TaskDocument, task_store.TaskDocSourceSnapshot]:
             nonlocal sprint_reads
             if path == sprint_path:
                 sprint_reads += 1
-                if sprint_reads > 1:
-                    return _master(
-                        identity="SPRINT",
-                        orchestrates=["master-a", "master-b"],
-                    )
             return real_read(path)
 
         with mock.patch.object(
             task_document_refs,
-            "read_task_doc",
-            side_effect=drift_after_first_sprint_read,
+            "read_task_doc_with_source",
+            side_effect=counted_source_read,
         ):
             self.assertEqual(self.topology.execution_waves(SPRINT), [[MASTER_A], [MASTER_B]])
-        self.assertGreaterEqual(sprint_reads, 2)
+        self.assertEqual(sprint_reads, 1)
 
     def test_bootstrap_refuses_a_segment_node_on_an_atomic_master(self) -> None:
         self._write_legacy()

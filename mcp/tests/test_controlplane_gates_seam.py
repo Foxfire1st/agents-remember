@@ -40,6 +40,9 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationSources
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.worktree_contract import (
@@ -139,6 +142,10 @@ def _real_gate_contract(coordination_root: Path) -> WorktreeContract:
         ),
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract.contract_path.read_text(encoding="utf-8"),
+    )
     return contract
 
 
@@ -372,9 +379,10 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
                 contract_path=contract.contract_path.as_posix(),
                 dry_run=True,
             )
-        (args,), _kwargs = integrate_result.call_args
+        (args, admitted_contract), _kwargs = integrate_result.call_args
         self.assertIs(args.gate_policy, HANDOVER_SEAM_POLICY)
         self.assertIsNot(args.gate_policy, DEFAULT_GATE_POLICY)
+        self.assertEqual(admitted_contract, contract)
 
     # --- AR4-1(b): the unmatched-open-gate spelling-check warning (pure helper) ---
 
@@ -455,6 +463,11 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
             mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(
                 integrate_mod,
+                "_quality_gate_preview",
+                return_value={"mode": "targeted", "required": False, "passed": True},
+            ),
+            mock.patch.object(
+                integrate_mod,
                 "_integration_replay_requirements",
                 return_value=IntegrationSources(
                     current_code_source="c1",
@@ -465,7 +478,7 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
             ),
             mock.patch.object(integrate_mod, "write_contract") as write_contract,
         ):
-            result = integrate_mod.integrate_result(args)
+            result = integrate_mod.integrate_result(args, self.contract)
         write_contract.assert_not_called()  # the dry run persists no contract mutation
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.payload["state"], "would-integrate")
@@ -498,6 +511,7 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
                 return_value=SimpleNamespace(
                     integrationAuthority=None,
                     recoveryCommits=None,
+                    integrationPublication=None,
                 ),
             ),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),
@@ -519,7 +533,7 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
             mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(integrate_mod, "_apply_integration") as apply,
         ):
-            result = integrate_mod.integrate_result(args)
+            result = integrate_mod.integrate_result(args, self.contract)
 
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.payload["state"], "handover-gate-blocked")

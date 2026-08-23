@@ -187,6 +187,7 @@ def _accepts(model: Any, base: dict[str, Any], field: str, value: object) -> boo
 
 def _contract(root: Path, **overrides: Any) -> WorktreeContract:
     """A contract with only the fields the guidance machine reads, plus the overrides."""
+    worktree_group = root / "worktrees" / "r" / "t"
     base = WorktreeContract(
         task_id="T",
         task_name="t",
@@ -197,12 +198,12 @@ def _contract(root: Path, **overrides: Any) -> WorktreeContract:
         task_root=root / "tasks",
         contract_path=root / "tasks" / "series-contract.md",
         task_artifact=root / "tasks" / "task.md",
-        worktree_group=root / "wt",
+        worktree_group=worktree_group,
         code_repo_path=root / "repo",
         code_source_branch="main",
         code_work_branch="ar/t",
         code_base_commit="abc1234",
-        code_worktree=root / "wt" / "code",
+        code_worktree=worktree_group / "code",
         leaf_id="l",
     )
     return replace(base, **overrides)

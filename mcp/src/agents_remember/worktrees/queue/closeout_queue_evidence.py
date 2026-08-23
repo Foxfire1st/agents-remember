@@ -22,7 +22,7 @@ from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
 
 PRIORITY_RANK = {"critical": 0, "high": 1, "normal": 2, "low": 3}
 MAX_CURATOR_SOURCE_CANDIDATES = 2048
@@ -159,7 +159,12 @@ def curator_evidence(contract: WorktreeContract) -> list[EvidenceFact]:
     except (OSError, ValidationError) as exc:
         raise CloseoutQueueError(
             "closeout-candidate-curator-evidence-missing",
-            f"required structured curator evidence is unavailable: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-curator-evidence",
+                side="report",
+                name="curator-attestation",
+            ),
         ) from exc
     expected_report = path.resolve().as_posix()
     expected_onboarding = (
@@ -289,7 +294,13 @@ def _coherence_dispositions(text: str) -> list[_CuratorDisposition]:
             )
         except ValidationError as exc:
             raise CloseoutQueueError(
-                "closeout-candidate-curator-disposition-invalid", str(exc)
+                "closeout-candidate-curator-disposition-invalid",
+                bounded_queue_failure_detail(
+                    exc,
+                    stage="queue-curator-disposition-validation",
+                    side="task-evidence",
+                    name="curator-disposition",
+                ),
             ) from exc
     return rows
 
@@ -308,7 +319,15 @@ def canonical_grade(
     try:
         asserted = SchedulingGradeInput.model_validate(raw)
     except ValidationError as exc:
-        raise CloseoutQueueError("closeout-grade-invalid", str(exc)) from exc
+        raise CloseoutQueueError(
+            "closeout-grade-invalid",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-grade-validation",
+                side="request",
+                name="scheduling-grade",
+            ),
+        ) from exc
     priority = authority.priorities.get(candidate_ref.key) or authority.priorities.get(
         owning_master.key
     )
@@ -326,7 +345,7 @@ def canonical_grade(
     if judgment is None:
         raise CloseoutQueueError(
             "closeout-grade-judgment-missing",
-            f"canonical Judgment Register has no row {asserted.judgmentId!r}",
+            "canonical Judgment Register has no row for the accepted grade judgment",
         )
     _require_matching_judgment(asserted, priority, judgment)
     try:
@@ -343,7 +362,15 @@ def canonical_grade(
             supersedes=judgment.supersedes,
         )
     except ValidationError as exc:
-        raise CloseoutQueueError("closeout-grade-invalid", str(exc)) from exc
+        raise CloseoutQueueError(
+            "closeout-grade-invalid",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-grade-publication",
+                side="task-evidence",
+                name="scheduling-grade",
+            ),
+        ) from exc
     digest = hashlib.sha256(f"{priority.source_row}\n{judgment.source_row}".encode()).hexdigest()
     evidence = [
         _task_relative_evidence(authority.sprint.path.parent, ref, "grade.evidenceRefs")
@@ -459,7 +486,12 @@ def register_section_facts(sprint: ResolvedTaskDocument) -> dict[str, str]:
             for body in bodies:
                 parser({}, body)
         except CloseoutQueueError as exc:
-            facts[key] = f"malformed: {exc}"
+            facts[key] = bounded_queue_failure_detail(
+                exc,
+                stage="queue-register-read",
+                side="task-document",
+                name=key,
+            )
         else:
             facts[key] = "ok"
     return facts
@@ -482,7 +514,16 @@ def require_register_sections_valid(document: TaskDocument) -> None:
         except CloseoutQueueError as exc:
             raise CloseoutQueueError(
                 "closeout-grade-register-shape-invalid",
-                f"section {section.heading!r} must keep the canonical register shape: {exc}",
+                bounded_queue_failure_detail(
+                    exc,
+                    stage="queue-register-validation",
+                    side="task-document",
+                    name=(
+                        "judgment-register"
+                        if heading == JUDGMENT_REGISTER_SECTION
+                        else "priority-register"
+                    ),
+                ),
             ) from exc
 
 

@@ -33,6 +33,7 @@ from test_serving_response_conformance import (
     COMPLETED,
     DRIVEN,
     UNDRIVEN_DECLARATIONS,
+    _await_projector_ready,
     _config,
     declared_model,
     declared_pairs,
@@ -381,7 +382,8 @@ class StreamContractTests(unittest.IsolatedAsyncioTestCase):
         entry = self.routes[("GET", "/api/state")].responses[304]
         self.assertNotIn("model", entry)
         with TestClient(self.app) as client:
-            first = client.get("/api/state")
+            first = _await_projector_ready(client)
+            self.assertEqual(first.status_code, 200, first.text)
             cached = client.get("/api/state", headers={"If-None-Match": first.headers["etag"]})
         self.assertEqual(cached.status_code, 304)
         self.assertEqual(cached.content, b"")

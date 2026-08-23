@@ -8,9 +8,8 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    located_lifecycle_operation_store,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import repository_identity
@@ -26,9 +25,7 @@ def require_plane_integration_operation(
         raise RuntimeError(
             "integration-branch mutation requires a plane-owned journaled integration operation"
         )
-    record = LifecycleOperationStore(
-        operation_record_path(contract.worktree_group, "integrate")
-    ).read()
+    record = located_lifecycle_operation_store(contract, "integrate").read()
     if record is None:
         raise RuntimeError("plane-owned integration operation record is missing")
     if record.operationKey != args.operation_key:

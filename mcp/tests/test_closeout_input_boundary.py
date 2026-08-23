@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from agents_remember.application import lifecycle_operation_worker, worktree_tools
+from agents_remember.application import worktree_tools
+from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.closeout_input import CloseoutCorrectedCall
 from agents_remember.models.lifecycles.mutation_evidence import CloseoutMutationLeg
@@ -22,9 +23,9 @@ from agents_remember.worktrees.closeout_input import (
 )
 from agents_remember.worktrees.integration import (
     closeout_operation_admission,
-    lifecycle_operations,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -189,9 +190,11 @@ def test_preview_apply_and_duplicate_fingerprints_share_one_normalized_input(
     assert preview_input is not None
     launcher = mock.Mock()
 
-    def admit(admission):
+    def admit(admission, admitted_contract):
+        assert admitted_contract == contract
         return lifecycle_operations.start_or_observe_closeout_operation(
             admission,
+            admitted_contract,
             launcher=launcher,
         )
 
@@ -254,7 +257,9 @@ def test_invalid_apply_after_selection_changes_no_authority_or_git_fact(tmp_path
     before_memory = _git_facts(contract.memory_worktree)
     operation_path = operation_record_path(contract.worktree_group, "closeout")
 
-    with mock.patch.object(lifecycle_operations, "_launch_or_fail") as launch:
+    with mock.patch.object(
+        lifecycle_operations.lifecycle_worker_launch, "launch_or_fail"
+    ) as launch:
         refusals = [
             worktree_tools.worktree_closeout_apply_tool(
                 config,
@@ -323,7 +328,7 @@ def test_candidate_drift_at_normalization_capture_seam_refuses_without_authority
             "capture_closeout_admission_snapshot",
             side_effect=cross_barrier,
         ),
-        mock.patch.object(lifecycle_operations, "_launch_or_fail") as launch,
+        mock.patch.object(lifecycle_operations.lifecycle_worker_launch, "launch_or_fail") as launch,
     ):
         refused = worktree_tools.worktree_closeout_apply_tool(
             load_config(fixture.config_path),
@@ -355,7 +360,7 @@ def test_preview_and_direct_apply_return_the_same_typed_refusal(tmp_path: Path) 
         ledger="ledger",
     )
     with (
-        mock.patch.object(lifecycle_operations, "_launch_or_fail") as launch,
+        mock.patch.object(lifecycle_operations.lifecycle_worker_launch, "launch_or_fail") as launch,
         mock.patch.object(worktree_tools.git_worktree_manager, "closeout_result") as closeout,
     ):
         preview = worktree_tools.worktree_closeout_preview_tool(
@@ -469,7 +474,9 @@ def test_valid_duplicate_keeps_one_generation_and_invalid_duplicate_cannot_obser
     duplicate_launcher.assert_not_called()
     assert record_path.read_bytes() == before
 
-    with mock.patch.object(lifecycle_operations, "_launch_or_fail") as launch:
+    with mock.patch.object(
+        lifecycle_operations.lifecycle_worker_launch, "launch_or_fail"
+    ) as launch:
         invalid = worktree_tools.worktree_closeout_apply_tool(
             load_config(fixture.config_path),
             contract.contract_path.as_posix(),
@@ -502,7 +509,10 @@ def test_same_tree_different_head_conflicts_with_pre_mutation_generation(
     git(contract.code_worktree, "commit", "--allow-empty", "-m", "move candidate parent")
     assert code_candidate_tree(contract) == accepted_tree
 
-    with pytest.raises(RuntimeError, match="conflicting closeout operation"):
+    with pytest.raises(
+        RuntimeError,
+        match="closeout candidate changed outside the accepted generation's proven output",
+    ):
         start_closeout_operation(operation_input, launcher=lambda *_: None)
 
     assert store.path.read_bytes() == before
@@ -534,7 +544,9 @@ def test_public_retry_uses_accepted_plan_after_each_proven_output_cut(
         "memory": operation_input.effectiveInput.message_for("memory"),
         "ledger": operation_input.effectiveInput.message_for("ledger"),
     }
-    with mock.patch.object(lifecycle_operations, "_launch_or_fail") as launch:
+    with mock.patch.object(
+        lifecycle_operations.lifecycle_worker_launch, "launch_or_fail"
+    ) as launch:
         observed = worktree_tools.worktree_closeout_apply_tool(
             load_config(fixture.config_path),
             contract.contract_path.as_posix(),
@@ -574,7 +586,10 @@ def test_valid_retry_refuses_candidate_content_added_after_proven_code_output(
         "VALUE = 'outside-generation'\n", encoding="utf-8"
     )
 
-    with pytest.raises(RuntimeError, match="candidate changed outside"):
+    with pytest.raises(
+        RuntimeError,
+        match=("closeout candidate changed outside the accepted generation's proven output"),
+    ):
         start_closeout_operation(operation_input, launcher=lambda *_: None)
 
     assert store.path.read_bytes() == before
@@ -609,10 +624,16 @@ def test_atomic_proof_publication_and_restart_repair_each_recovery_projection(
     start_closeout_operation(operation_input, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
-    runtime.start()
+    running = runtime.start()
     ordered: tuple[CloseoutMutationLeg, ...] = ("code", "memory", "ledger")
     for leg in ordered[: ordered.index(output_cut)]:
-        _publish_output(contract, operation_input, runtime.progress, leg)
+        _publish_output(
+            contract,
+            operation_input,
+            runtime.progress,
+            leg,
+            operation_key=running.operationKey,
+        )
 
     def crash_after_atomic_proof(phase: str, evidence: Mapping[str, object]) -> None:
         runtime.progress(phase, evidence)
@@ -621,7 +642,13 @@ def test_atomic_proof_publication_and_restart_repair_each_recovery_projection(
             raise RuntimeError("cut immediately after atomic proof publication")
 
     with pytest.raises(RuntimeError, match="cut immediately after atomic proof publication"):
-        _publish_output(contract, operation_input, crash_after_atomic_proof, output_cut)
+        _publish_output(
+            contract,
+            operation_input,
+            crash_after_atomic_proof,
+            output_cut,
+            operation_key=running.operationKey,
+        )
 
     durable = store.read()
     assert durable is not None and durable.recoveryCommits is not None
@@ -662,9 +689,17 @@ def _publish_outputs_through(
     runtime: lifecycle_operation_worker.OperationRuntime,
     output_cut: CloseoutMutationLeg,
 ) -> None:
+    current = runtime.store.read()
+    assert current is not None
     ordered: tuple[CloseoutMutationLeg, ...] = ("code", "memory", "ledger")
     for leg in ordered:
-        _publish_output(contract, operation_input, runtime.progress, leg)
+        _publish_output(
+            contract,
+            operation_input,
+            runtime.progress,
+            leg,
+            operation_key=current.operationKey,
+        )
         if leg == output_cut:
             return
     raise AssertionError(f"unknown output cut: {output_cut}")
@@ -675,11 +710,14 @@ def _publish_output(
     operation_input: CloseoutOperationInput,
     progress: Callable[[str, Mapping[str, object]], None],
     leg: CloseoutMutationLeg,
+    *,
+    operation_key: str,
 ) -> None:
     args = WorktreeArgs(
         contract_path=contract.contract_path,
         closeout_input=operation_input.effectiveInput,
         operation_progress=progress,
+        operation_key=operation_key,
     )
     if leg == "code":
         repository = contract.code_worktree

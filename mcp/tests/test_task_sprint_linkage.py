@@ -948,6 +948,7 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             ],
         )
         (self.tasks / "master-c" / "task.json").unlink()
+        (self.tasks / "master-c" / "task.md").unlink()
         result = self._detach({"masterRef": MASTER_C.model_dump()})
         self.assertEqual(result["masterResolved"], False)
         self.assertEqual(result["removedOrchestrates"], ["master-c"])

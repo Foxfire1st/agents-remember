@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.direct_landing import (
+from agents_remember.application.lifecycle.direct_landing import (
     DirectLandingRequest,
     direct_landing_tool,
 )

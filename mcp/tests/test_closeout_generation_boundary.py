@@ -9,24 +9,30 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from agents_remember.application import lifecycle_operation_worker, worktree_tools
+from agents_remember.application import worktree_tools
+from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.tasks import read_task_doc, write_task_doc
-from agents_remember.worktrees.integration import lifecycle_operations
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     closeout_generation_retained,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.lifecycle import lifecycle_worker_launch
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
     operation_state_fingerprint,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_projection import (
+    operation_projection,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import start_or_observe_operation
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
+    start_or_observe_operation,
+)
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_git_mutation,
     prove_git_commit,
@@ -65,7 +71,7 @@ def test_invalid_closeout_precedes_active_integrate_decision_without_authority(
         configPath=fixture.config_path.as_posix(),
         contractPath=contract.contract_path.as_posix(),
     )
-    start_or_observe_operation(integration, launcher=lambda *_: None)
+    start_or_observe_operation(integration, contract, launcher=lambda *_: None)
     integrate_path = operation_record_path(contract.worktree_group, "integrate")
     closeout_path = operation_record_path(contract.worktree_group, "closeout")
     if field == "code":
@@ -86,7 +92,7 @@ def test_invalid_closeout_precedes_active_integrate_decision_without_authority(
     assert contract.memory_worktree is not None
     before_memory = _git_facts(contract.memory_worktree)
 
-    with mock.patch.object(lifecycle_operations, "_launch_or_fail") as launch:
+    with mock.patch.object(lifecycle_worker_launch, "launch_or_fail") as launch:
         refused = worktree_tools.worktree_closeout_apply_tool(
             load_config(fixture.config_path),
             contract.contract_path.as_posix(),
@@ -126,6 +132,7 @@ def test_valid_closeout_conflicts_with_active_integrate_only_after_validation(
             configPath=fixture.config_path.as_posix(),
             contractPath=contract.contract_path.as_posix(),
         ),
+        contract,
         launcher=lambda *_: None,
     )
     closeout_path = operation_record_path(contract.worktree_group, "closeout")
@@ -264,11 +271,13 @@ def test_retained_generation_stays_recoverable_when_worker_relaunch_fails(
     )
     runtime.fail(RuntimeError("cut before terminal worker finish"))
 
-    with pytest.raises(RuntimeError, match="no native runner"):
+    private_launch = "PRIVATE_LAUNCH_STDERR_SENTINEL /tmp/native-runner"
+    with pytest.raises(RuntimeError, match="lifecycle-worker-launch-failed") as raised:
         start_closeout_operation(
             operation_input,
-            launcher=lambda *_: (_ for _ in ()).throw(RuntimeError("no native runner")),
+            launcher=lambda *_: (_ for _ in ()).throw(RuntimeError(private_launch)),
         )
+    assert private_launch not in str(raised.value)
 
     retained = store.read()
     assert retained is not None
@@ -276,7 +285,9 @@ def test_retained_generation_stays_recoverable_when_worker_relaunch_fails(
     assert retained.phase == "contract-finalization"
     assert retained.attempt == 2
     assert retained.finishedAt is None
-    assert "no native runner" in (retained.failure or "")
+    assert retained.failure == "detached lifecycle worker could not start"
+    assert private_launch not in str(retained.model_dump(mode="json"))
+    assert retained.result["failureEvidence"]["errorType"] == "RuntimeError"  # type: ignore[index]
 
 
 def test_recovery_cells_without_exact_finalization_state_do_not_retain_generation(
@@ -305,7 +316,7 @@ def test_recovery_cells_without_exact_finalization_state_do_not_retain_generatio
     assert recorded.closeoutFinalizedContractSha256 is None
     assert recorded.irreversibleBoundaryEntered is False
     assert closeout_generation_retained(recorded) is False
-    assert lifecycle_operations.operation_projection(recorded).cancellable is True
+    assert operation_projection(recorded).cancellable is True
 
 
 def test_unrelated_contract_advancement_after_completed_noop_allows_a_new_generation(
@@ -438,11 +449,12 @@ def _publish_mutated_code_generation(contract):
     start_closeout_operation(operation_input, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
-    runtime.start()
+    running = runtime.start()
     runtime.progress("approval-claim", {"approval_claimed": True})
     args = WorktreeArgs(
         contract_path=contract.contract_path,
         closeout_input=operation_input.effectiveInput,
+        operation_key=running.operationKey,
         operation_progress=runtime.progress,
     )
     intent = begin_git_mutation(
@@ -457,7 +469,7 @@ def _publish_mutated_code_generation(contract):
     code_commit = _git(contract.code_worktree, "rev-parse", "HEAD")
     prove_git_commit(args, intent, repository=contract.code_worktree, commit=code_commit)
     finalized = replace(
-        contract,
+        load_contract(contract.contract_path),
         approved_for_commit=True,
         commit_approval_note=operation_input.approvalNote,
         human_review_status="approved",

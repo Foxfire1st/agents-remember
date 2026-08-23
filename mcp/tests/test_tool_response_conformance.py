@@ -21,6 +21,7 @@ taxonomy intends: every model that is not built on ``FlexibleResponseModel`` kee
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,9 +38,11 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
-from agents_remember.application.direct_landing import DirectLandingRequest
 from agents_remember.application.gate_tools import GateRaise, GateWait
-from agents_remember.application.lifecycle_operation_worker import run_worker
+from agents_remember.application.lifecycle.direct_landing import DirectLandingRequest
+from agents_remember.application.lifecycle.legacy_operation_tool import LegacyOperationRequest
+from agents_remember.application.lifecycle.lifecycle_enclosure_tools import EnclosureAdoptionRequest
+from agents_remember.application.lifecycle.lifecycle_operation_worker import run_worker
 from agents_remember.application.memory_tools import CarryoverSelection, CitationOperationScope
 from agents_remember.application.orchestration_tools import NudgeSubject, NudgeTarget
 from agents_remember.application.provider_tools import (
@@ -53,6 +56,7 @@ from agents_remember.application.terminal_tools import RetiredSpawnInputs
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
+    OperationControlRequest,
     StartExecution,
     TaskBases,
     TaskIdentity,
@@ -69,7 +73,9 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.mcp import tools
 from agents_remember.mcp.tools import memory as memory_payload_tools
+from agents_remember.mcp.tools.base import _tool_payload
 from agents_remember.models.base import FlexibleResponseModel
+from agents_remember.models.lifecycles.operation import LifecycleOperationKind
 from agents_remember.models.structural.agent import (
     DispatchAgentRequest,
     RenameChildRequest,
@@ -81,7 +87,7 @@ from agents_remember.models.structural.gates import (
     StructuralLifecycleGateRequest,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
@@ -91,11 +97,16 @@ from agents_remember.observer import (
 from agents_remember.observer.ambient import AmbientTiming
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
     default_contract,
+    load_contract,
     write_contract,
 )
 from test_config import settings_payload
@@ -110,6 +121,25 @@ from test_worktree_support import (
 REPO = "agents-remember"
 DRY_RUN_SCOPE = ProviderQueryScope(dry_run=True)
 EXTERNAL_MEMORY_BASES = TaskBases(memory_mode="external")
+
+
+def _reserve_conformance_worker(
+    contract_path: str,
+    kind: LifecycleOperationKind,
+) -> str:
+    contract = load_contract(Path(contract_path))
+    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, kind))
+    lease = ("a" if kind == "closeout" else "b") * 64
+    store.update(
+        lambda current: current.model_copy(
+            update={
+                "workerPid": os.getpid(),
+                "workerLease": lease,
+                "workerProcessFingerprint": ("c" if kind == "closeout" else "d") * 64,
+            }
+        )
+    )
+    return lease
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -382,8 +412,9 @@ def _simple_payloads(config) -> dict[str, dict]:
     }
 
 
-def _worktree_payloads(root: Path) -> dict[str, dict]:
-    """Drive a real worktree lifecycle (disabled memory) and capture every step."""
+def _worktree_lifecycle_fixture(root: Path, *, task_name: str, worktree_name: str):
+    """Create one isolated, addressable worktree lifecycle fixture."""
+
     config = _base_fixture(root, execution_graph=False)
     # worktree_start needs a memory git repo to exist even when memory is disabled.
     tools.memory_init_payload(config, REPO, dry_run=False, initialize_git=True)
@@ -402,26 +433,73 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     _run_git(memory_root, ["commit", "-m", "seed memory ledger"])
     _write_leaf_task(
         config.coordination_root,
-        master="demo-task",
-        doc_id="demo-wt",
+        master=task_name,
+        doc_id=worktree_name,
         execution_graph=False,
+    )
+    return config, code_head
+
+
+def _worktree_payloads(root: Path) -> dict[str, dict]:
+    """Drive isolated real worktree lifecycles and capture every step."""
+
+    config, code_head = _worktree_lifecycle_fixture(
+        root / "main",
+        task_name="demo-task",
+        worktree_name="demo-wt",
+    )
+    abandon_config, _ = _worktree_lifecycle_fixture(
+        root / "abandon",
+        task_name="abandon-task",
+        worktree_name="abandon-wt",
     )
     _write_leaf_task(
         config.coordination_root,
-        master="abandon-task",
-        doc_id="abandon-wt",
+        master="adoption-task",
+        doc_id="adoption-wt",
         execution_graph=False,
     )
 
     payloads: dict[str, dict] = {}
-    abandon_start = tools.worktree_start_payload(
+    adoption_contract = default_contract(
+        ContractTask(
+            name="adoption-task",
+            repo_name=REPO,
+            coordination_root=config.coordination_root,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="adoption-wt", leaf_id="adoption-wt"),
+        code=RepoBranchPlan(
+            repo_path=config.workspace_root / REPO,
+            source_branch="main",
+            work_branch="ar/adoption-wt",
+            base_commit=code_head,
+        ),
+    )
+    write_contract(adoption_contract.contract_path, adoption_contract)
+    payloads["worktree_enclosure_adopt"] = tools.worktree_enclosure_adopt_payload(
         config,
+        EnclosureAdoptionRequest(
+            contract_path=adoption_contract.contract_path.as_posix(),
+            expected_worktree_group=adoption_contract.worktree_group.as_posix(),
+            rationale="representative explicit enclosure adoption preview",
+        ),
+    )
+    payloads["worktree_legacy_operation"] = tools.worktree_legacy_operation_payload(
+        config,
+        adoption_contract.contract_path.as_posix(),
+        LegacyOperationRequest(operation_kind="closeout", action="inspect"),
+    )
+    abandon_start = tools.worktree_start_payload(
+        abandon_config,
         TaskIdentity(repo_id=REPO, task_name="abandon-task", worktree_name="abandon-wt"),
         bases=EXTERNAL_MEMORY_BASES,
         execution=StartExecution(skip_provider_setup=True),
     )
+    assert abandon_start.get("contract_path"), abandon_start
     payloads["worktree_abandon"] = tools.worktree_abandon_payload(
-        config, abandon_start["contract_path"], dry_run=False, force=True
+        abandon_config, abandon_start["contract_path"], dry_run=False, force=True
     )
     payloads["worktree_start"] = tools.worktree_start_payload(
         config,
@@ -429,6 +507,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         bases=EXTERNAL_MEMORY_BASES,
         execution=StartExecution(skip_provider_setup=True),
     )
+    assert payloads["worktree_start"].get("contract_path"), payloads["worktree_start"]
     contract_path = payloads["worktree_start"]["contract_path"]
     payloads["worktree_status"] = tools.worktree_status_payload(
         config, TaskRef(repo_id=REPO, contract_path=contract_path)
@@ -447,7 +526,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         ),
     )
     with mock.patch(
-        "agents_remember.worktrees.integration.lifecycle_operations.launch_detached_worker"
+        "agents_remember.worktrees.integration.lifecycle.lifecycle_operations.launch_detached_worker"
     ):
         payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
             config,
@@ -459,22 +538,30 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
             ),
             CloseoutApproval(intent_note="intent note"),
         )
-    assert run_worker(Path(contract_path), "closeout") == 0
-    payloads["worktree_operation_cancel"] = tools.worktree_operation_cancel_payload(
+    assert payloads["worktree_closeout_apply"]["ok"] is True, payloads["worktree_closeout_apply"]
+    closeout_lease = _reserve_conformance_worker(contract_path, "closeout")
+    assert run_worker(Path(contract_path), "closeout", closeout_lease) == 0
+    payloads["worktree_operation_control"] = tools.worktree_operation_control_payload(
         config,
-        contract_path,
-        operation_kind="closeout",
-        intent_note="observe completed operation",
-        dry_run=True,
+        OperationControlRequest(
+            contract_path=contract_path,
+            operation_kind="closeout",
+            action="retire",
+            expected_generation=1,
+            intent_note="observe completed operation",
+            dry_run=True,
+        ),
     )
     _run_git(config.workspace_root / REPO, ["checkout", "ar/demo-task"])
     with mock.patch(
-        "agents_remember.worktrees.integration.lifecycle_operations.launch_detached_worker"
+        "agents_remember.worktrees.integration.lifecycle.lifecycle_operations.launch_detached_worker"
     ):
         payloads["worktree_integrate"] = tools.worktree_integrate_payload(
             config, contract_path, dry_run=False
         )
-    assert run_worker(Path(contract_path), "integrate") == 0
+    assert payloads["worktree_integrate"]["ok"] is True, payloads["worktree_integrate"]
+    integrate_lease = _reserve_conformance_worker(contract_path, "integrate")
+    assert run_worker(Path(contract_path), "integrate", integrate_lease) == 0
     payloads["worktree_cleanup"] = tools.worktree_cleanup_payload(
         config, contract_path, dry_run=False
     )
@@ -814,6 +901,16 @@ def _allowed_keys(model) -> set[str]:
     return allowed
 
 
+def _recursive_keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        return {str(key) for key in value} | {
+            nested for item in value.values() for nested in _recursive_keys(item)
+        }
+    if isinstance(value, list):
+        return {nested for item in value for nested in _recursive_keys(item)}
+    return set()
+
+
 class ToolResponseConformanceTests(unittest.TestCase):
     payloads: dict[str, dict]
     _temp_dirs: list[str]
@@ -887,6 +984,25 @@ class ToolResponseConformanceTests(unittest.TestCase):
                     f"{sorted(set(round_trip) - allowed)}",
                 )
 
+    def test_no_public_response_serializes_private_operation_identity_keys(self) -> None:
+        prohibited = {"operationKey", "claimedOperationKey", "legacyOperationKey"}
+        for tool_name, payload in self.payloads.items():
+            with self.subTest(tool=tool_name):
+                self.assertFalse(prohibited & _recursive_keys(payload))
+
+    def test_generic_flexible_payload_preserves_lifecycle_named_provider_fields(self) -> None:
+        provider_payload = {
+            "ok": True,
+            "operation": "grepai_search",
+            "provider": "grepai",
+            "operationKey": "provider-owned-operation-key",
+            "claimedOperationKey": {"nested": "provider-owned-claim"},
+            "legacyOperationKey": "provider-owned-legacy-key",
+        }
+        result = _tool_payload("grepai_search", provider_payload)
+        for key in ("operationKey", "claimedOperationKey", "legacyOperationKey"):
+            self.assertEqual(result[key], provider_payload[key])
+
     def test_strict_response_models_forbid_extra_fields(self) -> None:
         for tool_name, model in TOOL_RESPONSE_MODELS.items():
             with self.subTest(tool=tool_name):
@@ -899,6 +1015,27 @@ class ToolResponseConformanceTests(unittest.TestCase):
                     expected,
                     f"{tool_name} ({model.__name__}) must use extra={expected!r}",
                 )
+
+    def test_flexible_response_models_reject_reserved_snake_decision_keys_only(self) -> None:
+        accepted = FlexibleResponseModel.model_validate(
+            {"providerNative": {"unrelated_extra": True}}
+        )
+        self.assertEqual(
+            accepted.model_dump(mode="json"),
+            {"providerNative": {"unrelated_extra": True}},
+        )
+        for reserved in (
+            "developer_decision_required",
+            "decision_surface",
+        ):
+            with (
+                self.subTest(key=reserved),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "reserved lifecycle decision keys must use camelCase",
+                ),
+            ):
+                FlexibleResponseModel.model_validate({"providerNative": {reserved: True}})
 
     def test_completion_cleanup_fields_are_declared_on_both_edge_models(self) -> None:
         expected = {

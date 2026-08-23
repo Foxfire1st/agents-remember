@@ -9,8 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.application import lifecycle_operation_worker
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore, QueueTransaction
+from agents_remember.application.lifecycle import lifecycle_operation_worker
+from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.kernel.memory_ledger import ledger_to_text, parse_ledger_text
 from agents_remember.memory import carryover as carryover_mod
 from agents_remember.models.lifecycles.operation import (
@@ -19,17 +19,17 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.tasks import read_task_doc, render_markdown, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.integration import integration_claim_transfer as claim_transfer_mod
 from agents_remember.worktrees.integration import integration_quality as quality_mod
 from agents_remember.worktrees.integration import organizational_completion as organizational_mod
 from agents_remember.worktrees.integration import (
     organizational_completion_integration as completion_mod,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
-    cancel_operation,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
 from agents_remember.worktrees.integration.organizational_completion import (
@@ -37,6 +37,7 @@ from agents_remember.worktrees.integration.organizational_completion import (
 )
 from agents_remember.worktrees.modules import clean_quality_executor, code_quality_gate
 from agents_remember.worktrees.modules import integrate as integrate_mod
+from agents_remember.worktrees.modules import integration_publication as publication_mod
 from agents_remember.worktrees.modules import sync as sync_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.queue.closeout_queue import (
@@ -48,13 +49,16 @@ from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     certify_queue_candidate_closeout,
     claim_queue_candidate_for_closeout,
 )
+from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
 from agents_remember.worktrees.worktree_contract import (
-    ContractCells,
-    amend_contract,
     load_contract,
     write_contract,
 )
-from closeout_input_test_support import closeout_operation_input, start_closeout_operation
+from closeout_input_test_support import (
+    closeout_operation_input,
+    publish_closeout_finalization,
+    start_closeout_operation,
+)
 from test_closeout_queue import (
     JUDGMENT_HEADING,
     LEAF_A,
@@ -128,10 +132,12 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         )
         closeout_runtime = lifecycle_operation_worker.OperationRuntime(closeout_store)
         closeout = closeout_runtime.start()
+        contract = load_contract(contract.contract_path)
         claim_queue_candidate_for_closeout(contract, closeout.operationKey)
         closed = self.fixture.close_contract(MASTER_A)
+        publish_closeout_finalization(closeout_runtime, closed)
         certify_queue_candidate_closeout(closed, closeout.operationKey)
-        closeout_runtime.finish({"ok": True}, ok=True)
+        closeout_runtime.finish({"state": "closed"}, ok=True)
         git(closed.code_repo_path, "checkout", closed.code_source_branch)
         assert closed.memory_repo_path is not None
         git(closed.memory_repo_path, "checkout", closed.memory_source_branch)
@@ -144,6 +150,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
                 contractPath=contract.contract_path.as_posix(),
                 autoCompleteSeats=False,
             ),
+            contract,
             launcher=lambda *_: None,
         )
         store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
@@ -233,11 +240,12 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
         runtime = lifecycle_operation_worker.OperationRuntime(store)
         record = runtime.start()
+        contract = load_contract(contract.contract_path)
         claim_queue_candidate_for_closeout(contract, record.operationKey)
-        self.fixture.contracts[MASTER_A] = contract
         closed = self.fixture.close_contract(MASTER_A)
+        publish_closeout_finalization(runtime, closed)
         certify_queue_candidate_closeout(closed, record.operationKey)
-        runtime.finish({"ok": True}, ok=True)
+        runtime.finish({"state": "closed"}, ok=True)
         git(closed.code_repo_path, "checkout", closed.code_source_branch)
         assert closed.memory_repo_path is not None
         git(closed.memory_repo_path, "checkout", closed.memory_source_branch)
@@ -252,7 +260,8 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         first = self._close_and_certify(first)
         _first_store, first_runtime, first_record = self._integration_runtime(first)
         first_result = integrate_mod.integrate_result(
-            self._args(first, first_runtime, first_record)
+            self._args(first, first_runtime, first_record),
+            first,
         )
         self.assertEqual(first_result.returncode, 0)
         first_gate = first_result.payload["quality_gate"]
@@ -311,8 +320,10 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             approved=True,
             strategy="ff-only",
             operation_key=record.operationKey,
+            operation_generation=record.generation,
             recovery_commits=record.recoveryCommits,
             quality_certification=record.qualityCertification,
+            integration_publication=record.integrationPublication,
             operation_progress=runtime.progress,
         )
 
@@ -320,7 +331,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         contract = self._certified_contract(final=False)
         _store, runtime, record = self._integration_runtime(contract)
         with mock.patch.object(quality_mod, "run_strict_code_quality_gate") as full_gate:
-            result = integrate_mod.integrate_result(self._args(contract, runtime, record))
+            result = integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
         self.assertEqual(result.returncode, 0)
         quality_gate = result.payload["quality_gate"]
         assert isinstance(quality_gate, dict)
@@ -342,7 +353,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
 
         first = self._certified_contract(final=False)
         _store, runtime, record = self._integration_runtime(first)
-        integrated = integrate_mod.integrate_result(self._args(first, runtime, record))
+        integrated = integrate_mod.integrate_result(self._args(first, runtime, record), first)
         self.assertEqual(integrated.returncode, 0)
         runtime.finish(integrated.payload, ok=True)
 
@@ -383,7 +394,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             "run_strict_code_quality_gate",
             side_effect=exact_gate,
         ) as full_gate:
-            result = integrate_mod.integrate_result(self._args(contract, runtime, record))
+            result = integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
 
         self.assertEqual(result.returncode, 0)
         quality_gate = result.payload["quality_gate"]
@@ -406,7 +417,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         durable = store.read()
         assert durable is not None
         self.assertIsNotNone(durable.qualityCertification)
-        self.assertIsNotNone(durable.queueCompletion)
+        self.assertIsNotNone(durable.integrationPublication)
         assert durable.qualityCertification is not None
         with self.assertRaisesRegex(RuntimeError, "quality certification is immutable"):
             store.update(lambda current: current.model_copy(update={"qualityCertification": None}))
@@ -419,13 +430,17 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
                     update={"qualityCertification": durable.qualityCertification}
                 )
             )
-        with self.assertRaisesRegex(RuntimeError, "queue completion is immutable"):
-            store.update(lambda current: current.model_copy(update={"queueCompletion": None}))
-        assert durable.queueCompletion is not None
+        with self.assertRaisesRegex(RuntimeError, "publication intent is immutable"):
+            store.update(
+                lambda current: current.model_copy(update={"integrationPublication": None})
+            )
+        assert durable.integrationPublication is not None
+        self.assertEqual(durable.integrationPublication.claimState, "proven")
+        self.assertIsNotNone(durable.integrationPublication.organizationalCompletion)
         with self.assertRaisesRegex(RuntimeError, "only integration operations"):
             closeout_store.update(
                 lambda current: current.model_copy(
-                    update={"queueCompletion": durable.queueCompletion}
+                    update={"integrationPublication": durable.integrationPublication}
                 )
             )
         self.assertEqual(self.fixture.status()["inFlight"], [])
@@ -453,7 +468,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             "run_strict_code_quality_gate",
             side_effect=exact_gate,
         ) as full_gate:
-            result = integrate_mod.integrate_result(self._args(final, runtime, record))
+            result = integrate_mod.integrate_result(self._args(final, runtime, record), final)
 
         self.assertEqual(result.returncode, 0)
         full_gate.assert_called_once()
@@ -498,7 +513,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
 
         topology = TaskDocumentTopology(self.fixture.coord)
         graph = completion_mod._graph_context(topology, SPRINT)
-        initial = completion_mod._initial_state(SPRINT, graph.revision, NOW)
+        initial = initial_queue_state(SPRINT, graph.revision, NOW)
         state = CloseoutQueueStore(self.fixture.coord, SPRINT).read(initial)
         candidate = state.candidates[LEAF_A2.key]
         master = graph.masters[candidate.owningMaster]
@@ -549,7 +564,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             mock.patch.object(quality_mod, "run_strict_code_quality_gate") as full_gate,
             self.assertRaisesRegex(OrganizationalCompletionError, "another code repository"),
         ):
-            integrate_mod.integrate_result(self._args(final, runtime, record))
+            integrate_mod.integrate_result(self._args(final, runtime, record), final)
         full_gate.assert_not_called()
         self.assertEqual(
             git(final.code_repo_path, "rev-parse", final.code_source_branch), code_before
@@ -566,7 +581,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         memory_before = git(final.memory_repo_path, "rev-parse", final.memory_source_branch)
         _store, runtime, record = self._integration_runtime(final)
         with self.assertRaisesRegex(OrganizationalCompletionError, "no readable landing contract"):
-            integrate_mod.integrate_result(self._args(final, runtime, record))
+            integrate_mod.integrate_result(self._args(final, runtime, record), final)
         self.assertEqual(
             git(final.code_repo_path, "rev-parse", final.code_source_branch), code_before
         )
@@ -588,7 +603,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             mock.patch.object(quality_mod, "run_strict_code_quality_gate") as full_gate,
             self.assertRaisesRegex(OrganizationalCompletionError, "escapes through a symlink"),
         ):
-            integrate_mod.integrate_result(self._args(final, runtime, record))
+            integrate_mod.integrate_result(self._args(final, runtime, record), final)
         full_gate.assert_not_called()
         self.assertEqual(
             git(final.code_repo_path, "rev-parse", final.code_source_branch), code_before
@@ -629,135 +644,13 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             mock.patch.object(quality_mod, "run_strict_code_quality_gate") as full_gate,
             self.assertRaisesRegex(OrganizationalCompletionError, "duplicate code mappings"),
         ):
-            integrate_mod.integrate_result(self._args(final, runtime, record))
+            integrate_mod.integrate_result(self._args(final, runtime, record), final)
         full_gate.assert_not_called()
         self.assertEqual(
             git(final.code_repo_path, "rev-parse", final.code_source_branch), code_before
         )
         self.assertEqual(
             git(final.memory_repo_path, "rev-parse", final.memory_source_branch), memory_before
-        )
-
-    def test_failed_final_gate_moves_no_ref_and_cancel_reopens_same_leaf(self) -> None:
-        contract = self._certified_contract(final=True)
-        store, runtime, record = self._integration_runtime(contract)
-        code_before = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
-        assert contract.memory_repo_path is not None
-        memory_before = git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch)
-        with mock.patch.object(
-            quality_mod,
-            "run_strict_code_quality_gate",
-            side_effect=RuntimeError("full Dagger failure"),
-        ):
-            lifecycle_operation_worker.execute_operation(record, runtime)
-
-        failed = store.read()
-        assert failed is not None
-        self.assertEqual(failed.status, "input-required")
-        assert failed.result is not None and failed.organizationalRepair is not None
-        self.assertEqual(failed.result["state"], "organizational-completion-gate-failed")
-        self.assertEqual(
-            git(contract.code_repo_path, "rev-parse", contract.code_source_branch), code_before
-        )
-        self.assertEqual(
-            git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-            memory_before,
-        )
-        self.assertEqual(
-            self._candidate_projection(LEAF_A)["candidateState"], "integration-in-flight"
-        )
-        cancelled = cancel_operation(contract.contract_path, "integrate")
-        self.assertEqual(cancelled.status, "cancelled")
-        reset = load_contract(contract.contract_path)
-        self.assertEqual((reset.closeout_status, reset.code_commit), ("not-started", ""))
-        self.assertEqual(self.fixture.status()["inFlight"], [])
-        (reset.code_worktree / "repair.txt").write_text("repair\n", encoding="utf-8")
-        write_task_doc(reset.task_root, _leaf(reset, "leaf-a"))
-        self.fixture.contracts[MASTER_A] = reset
-        declared = self.fixture.declare(MASTER_A)
-        self.assertEqual(declared["ready"][0]["taskDocumentRef"], LEAF_A.model_dump())
-
-    def test_quality_repair_retries_after_contract_reset_before_queue_commit(self) -> None:
-        contract = self._certified_contract(final=True)
-        _store, runtime, record = self._integration_runtime(contract)
-        code_before = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
-        assert contract.memory_repo_path is not None
-        memory_before = git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch)
-        with mock.patch.object(
-            quality_mod,
-            "run_strict_code_quality_gate",
-            side_effect=RuntimeError("full Dagger failure"),
-        ):
-            lifecycle_operation_worker.execute_operation(record, runtime)
-        with (
-            mock.patch.object(
-                CloseoutQueueStore,
-                "_commit_transaction",
-                side_effect=RuntimeError("crash after repair contract publication"),
-            ),
-            self.assertRaisesRegex(RuntimeError, "crash after repair contract publication"),
-        ):
-            cancel_operation(contract.contract_path, "integrate")
-        reset = load_contract(contract.contract_path)
-        self.assertEqual((reset.closeout_status, reset.code_commit), ("not-started", ""))
-        self.assertEqual(
-            self._candidate_projection(LEAF_A)["candidateState"], "integration-in-flight"
-        )
-        self.assertEqual(
-            git(contract.code_repo_path, "rev-parse", contract.code_source_branch), code_before
-        )
-        self.assertEqual(
-            git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-            memory_before,
-        )
-
-        cancelled = cancel_operation(contract.contract_path, "integrate")
-        self.assertEqual(cancelled.status, "cancelled")
-        self.assertEqual(self.fixture.status()["inFlight"], [])
-        self.assertEqual(cancel_operation(contract.contract_path, "integrate").status, "cancelled")
-
-    def test_quality_repair_refuses_a_partial_reset_generation(self) -> None:
-        contract = self._certified_contract(final=True)
-        _store, runtime, record = self._integration_runtime(contract)
-        with mock.patch.object(
-            quality_mod,
-            "run_strict_code_quality_gate",
-            side_effect=RuntimeError("full Dagger failure"),
-        ):
-            lifecycle_operation_worker.execute_operation(record, runtime)
-
-        partial = amend_contract(
-            replace(
-                contract,
-                approved_for_commit=False,
-                commit_approval_note="stale approval",
-                code_commit="",
-                memory_content_commit="",
-                ledger_commit="",
-                integration_strategy="ff-only",
-                integrated_code_commit="f" * 40,
-                memory_state="stale",
-            ),
-            ContractCells(
-                closeout_status="not-started",
-                integration_status="not-started",
-            ),
-        )
-        write_contract(partial.contract_path, partial)
-        code_tip = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
-        assert contract.memory_repo_path is not None
-        memory_tip = git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch)
-        with self.assertRaisesRegex(CloseoutQueueError, "operation-state-mismatch"):
-            cancel_operation(contract.contract_path, "integrate")
-        self.assertEqual(
-            self._candidate_projection(LEAF_A)["candidateState"], "integration-in-flight"
-        )
-        self.assertEqual(
-            git(contract.code_repo_path, "rev-parse", contract.code_source_branch), code_tip
-        )
-        self.assertEqual(
-            git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-            memory_tip,
         )
 
     def test_pre_cas_retry_reuses_durable_full_gate_certification(self) -> None:
@@ -770,16 +663,18 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
                 return_value=_full_gate(contract),
             ) as full_gate,
             mock.patch.object(
-                integrate_mod,
-                "publish_queue_candidate_integration_result_under_authority",
+                claim_transfer_mod,
+                "transfer_integration_claim",
                 side_effect=RuntimeError("crash after quality certification"),
             ),
             self.assertRaisesRegex(RuntimeError, "crash after quality certification"),
         ):
-            integrate_mod.integrate_result(self._args(contract, runtime, record))
+            integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
         after_crash = store.read()
         assert after_crash is not None and after_crash.qualityCertification is not None
-        self.assertIsNone(after_crash.recoveryCommits)
+        self.assertIsNotNone(after_crash.recoveryCommits)
+        assert after_crash.integrationPublication is not None
+        self.assertEqual(after_crash.integrationPublication.claimState, "intent")
         completion = completion_mod.preview_organizational_completion(contract)
         assert completion is not None
         for changes in (
@@ -851,7 +746,9 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
                 certification=after_crash.qualityCertification,
             )
 
-        result = integrate_mod.integrate_result(self._args(contract, runtime, after_crash))
+        result = integrate_mod.integrate_result(
+            self._args(contract, runtime, after_crash), contract
+        )
         self.assertEqual(result.returncode, 0)
         full_gate.assert_called_once()
         self.assertEqual(
@@ -873,13 +770,13 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
                 return_value=_full_gate(contract),
             ) as full_gate,
             mock.patch.object(
-                integrate_mod,
-                "publish_queue_candidate_integration_result_under_authority",
+                claim_transfer_mod,
+                "transfer_integration_claim",
                 side_effect=RuntimeError("crash after quality certification"),
             ),
             self.assertRaisesRegex(RuntimeError, "crash after quality certification"),
         ):
-            integrate_mod.integrate_result(self._args(contract, runtime, record))
+            integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
         after_crash = store.read()
         assert after_crash is not None and after_crash.qualityCertification is not None
         master_path = self.fixture.tasks / "master-a" / "task.json"
@@ -894,7 +791,9 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             *payload["decisions"],
         ]
         write_task_doc(master_path.parent, type(master).model_validate(payload))
-        refused = integrate_mod.integrate_result(self._args(contract, runtime, after_crash))
+        refused = integrate_mod.integrate_result(
+            self._args(contract, runtime, after_crash), contract
+        )
         assert refused.returncode == 2
         assert refused.payload["state"] == "organizational-completion-gate-failed"
         reason = refused.payload["reason"]
@@ -1002,13 +901,13 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
                 return_value=_full_gate(contract),
             ) as full_gate,
             mock.patch.object(
-                completion_mod,
+                publication_mod,
                 "publish_organizational_master_completion",
                 side_effect=RuntimeError("crash before logical completion"),
             ),
             self.assertRaisesRegex(RuntimeError, "crash before logical completion"),
         ):
-            integrate_mod.integrate_result(self._args(contract, runtime, record))
+            integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
 
         landed = load_contract(contract.contract_path)
         self.assertEqual(landed.integration_status, "completed")
@@ -1020,7 +919,7 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(after_crash.recoveryCommits)
         self.assertIsNotNone(after_crash.qualityCertification)
 
-        result = integrate_mod.integrate_result(self._args(landed, runtime, after_crash))
+        result = integrate_mod.integrate_result(self._args(landed, runtime, after_crash), landed)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.payload["state"], "already-integrated")
         full_gate.assert_called_once()
@@ -1038,12 +937,12 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
         master_markdown = self.fixture.tasks / "master-a" / "task.md"
         markdown_before = master_markdown.read_bytes()
 
-        def publish_json_then_crash(task_root, document):
-            master_json.write_text(
-                document.model_dump_json(by_alias=True, exclude_none=True, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            raise RuntimeError("crash after master JSON publication")
+        atomic_write = organizational_mod.atomic_write_text
+
+        def publish_json_then_crash(path, content):
+            atomic_write(path, content)
+            if path == master_json:
+                raise RuntimeError("crash after master JSON publication")
 
         with (
             mock.patch.object(
@@ -1053,28 +952,27 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             ) as full_gate,
             mock.patch.object(
                 organizational_mod,
-                "write_task_doc",
+                "atomic_write_text",
                 side_effect=publish_json_then_crash,
             ),
             self.assertRaisesRegex(RuntimeError, "crash after master JSON publication"),
         ):
-            integrate_mod.integrate_result(self._args(contract, runtime, record))
+            integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
 
         completed_json = read_task_doc(master_json)
         self.assertEqual(completed_json.status, "Completed")
         self.assertEqual(master_markdown.read_bytes(), markdown_before)
         after_crash = store.read()
         assert after_crash is not None
-        result = integrate_mod.integrate_result(
-            self._args(load_contract(contract.contract_path), runtime, after_crash)
-        )
+        current = load_contract(contract.contract_path)
+        result = integrate_mod.integrate_result(self._args(current, runtime, after_crash), current)
         self.assertEqual(result.returncode, 0)
         full_gate.assert_called_once()
         completed = read_task_doc(master_json)
         self.assertEqual(master_markdown.read_text(encoding="utf-8"), render_markdown(completed))
         runtime.finish(result.payload, ok=True)
 
-    def test_post_queue_completion_crash_retries_without_redeclaring_candidate(self) -> None:
+    def test_completed_integration_recovery_never_reads_queue_after_claim_transfer(self) -> None:
         contract = self._certified_contract(final=True)
         store, runtime, record = self._integration_runtime(contract)
         with mock.patch.object(
@@ -1082,99 +980,39 @@ class OrganizationalCompletionIntegrationTests(unittest.TestCase):
             "run_strict_code_quality_gate",
             return_value=_full_gate(contract),
         ) as full_gate:
-            first = integrate_mod.integrate_result(self._args(contract, runtime, record))
+            first = integrate_mod.integrate_result(self._args(contract, runtime, record), contract)
             self.assertEqual(first.returncode, 0)
             self.assertEqual(self.fixture.status()["inFlight"], [])
             after_crash = store.read()
             assert after_crash is not None
             self.assertEqual(after_crash.status, "running")
-            self.assertIsNotNone(after_crash.queueCompletion)
-            original_inspect = CloseoutQueueStore.inspect
-            real_record = store.read()
-            self.assertEqual(real_record, after_crash)
-            assert after_crash.queueCompletion is not None
-            reloaded = load_contract(contract.contract_path)
-            frozen_args = replace(
-                self._args(reloaded, runtime, after_crash), operation_progress=None
-            )
-            invalid_wal_records = {
-                "missing": after_crash.model_copy(update={"queueCompletion": None}),
-                "mismatched": after_crash.model_copy(
-                    update={
-                        "queueCompletion": after_crash.queueCompletion.model_copy(
-                            update={"fingerprint": "0" * 64}
-                        )
-                    }
-                ),
-            }
-            for case, invalid_record in invalid_wal_records.items():
-                completion_store = mock.Mock()
-                completion_store.read.return_value = invalid_record
-                with (
-                    self.subTest(case=case),
-                    mock.patch.object(
-                        completion_mod,
-                        "LifecycleOperationStore",
-                        return_value=completion_store,
-                    ),
-                    self.assertRaisesRegex(CloseoutQueueError, "durable removal intent"),
-                ):
-                    integrate_mod.integrate_result(frozen_args)
-                completion_store.read.assert_called()
-                self.assertEqual(store.read(), real_record)
-
-            def inspect_with_mismatched_completion_receipt(queue_store, initial, reader):
-                def mismatched(state):
-                    receipts = [
-                        receipt.model_copy(update={"fingerprint": "0" * 64})
-                        if receipt.requestId.startswith("integration-complete:")
-                        else receipt
-                        for receipt in state.appliedRequests
-                    ]
-                    return reader(state.model_copy(update={"appliedRequests": receipts}))
-
-                return original_inspect(queue_store, initial, mismatched)
-
+            assert after_crash.integrationPublication is not None
+            self.assertEqual(after_crash.integrationPublication.claimState, "proven")
+            queue_store = CloseoutQueueStore(self.fixture.coord, SPRINT)
+            queue_store.state_path.unlink(missing_ok=True)
+            queue_store.pending_path.unlink(missing_ok=True)
             with (
                 mock.patch.object(
-                    CloseoutQueueStore,
-                    "inspect",
-                    new=inspect_with_mismatched_completion_receipt,
+                    CloseoutQueueStore, "inspect", side_effect=AssertionError("read")
                 ),
-                self.assertRaisesRegex(CloseoutQueueError, "receipt does not match"),
+                mock.patch.object(
+                    CloseoutQueueStore,
+                    "transact",
+                    side_effect=AssertionError("write"),
+                ),
             ):
-                integrate_mod.integrate_result(frozen_args)
-            self.assertEqual(store.read(), real_record)
-
-            topology = TaskDocumentTopology(self.fixture.coord)
-            graph = completion_mod._graph_context(topology, SPRINT)
-            initial = completion_mod._initial_state(SPRINT, graph.revision, NOW)
-            queue_store = CloseoutQueueStore(self.fixture.coord, SPRINT)
-            for index in range(129):
-                fingerprint = hashlib.sha256(f"later-queue-event:{index}".encode()).hexdigest()
-                queue_store.transact(
-                    initial=initial,
-                    event=QueueTransaction(
-                        action="reclaim-sprint",
-                        request_id=f"later-queue-event:{index}",
-                        fingerprint=fingerprint,
-                        recorded_at=NOW,
-                        actor="test-queue-owner",
+                current = load_contract(contract.contract_path)
+                retry = integrate_mod.integrate_result(
+                    replace(
+                        self._args(current, runtime, after_crash),
+                        operation_progress=None,
                     ),
-                    transform=lambda state: state,
+                    current,
                 )
-            state = queue_store.read(initial)
-            assert after_crash.queueCompletion is not None
-            self.assertNotIn(
-                after_crash.queueCompletion.requestId,
-                {receipt.requestId for receipt in state.appliedRequests},
-            )
-            retry = integrate_mod.integrate_result(
-                self._args(load_contract(contract.contract_path), runtime, after_crash)
-            )
         self.assertEqual(retry.returncode, 0)
         self.assertEqual(retry.payload["state"], "already-integrated")
-        self.assertEqual(self.fixture.status()["inFlight"], [])
+        self.assertFalse(queue_store.state_path.exists())
+        self.assertFalse(queue_store.pending_path.exists())
         full_gate.assert_called_once()
         runtime.finish(retry.payload, ok=True)
 

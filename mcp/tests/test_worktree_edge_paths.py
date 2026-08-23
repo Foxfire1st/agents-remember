@@ -32,7 +32,10 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.worktrees import leaf_refs
 from agents_remember.worktrees.integration import integration_ref_transaction
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     operation_record_path,
     operation_report_path,
 )
@@ -41,11 +44,11 @@ from agents_remember.worktrees.modules import guidance as guidance_module
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import onboarding as onboarding_module
 from agents_remember.worktrees.modules import start as start_module
-from agents_remember.worktrees.modules import start_contract as start_contract_module
 from agents_remember.worktrees.modules import sync as sync_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.clean_quality_executor import clean_sandbox_root
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.startup import start_contract as start_contract_module
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -245,14 +248,15 @@ class SeriesWorktreeGroupLocationTests(unittest.TestCase):
     def test_series_report_paths_land_inside_the_worktree_group(self) -> None:
         series = default_series_contract(self.task(), code=self.code_plan())
         reports = series.worktree_group / "reports"
+        lifecycle = series.worktree_group / ".lifecycle"
 
         self.assertEqual(
             operation_record_path(series.worktree_group, "closeout"),
-            reports / "closeout-operation.json",
+            lifecycle / "closeout-operation.json",
         )
         self.assertEqual(
             operation_report_path(series.worktree_group, "closeout"),
-            reports / "closeout-operation.log",
+            lifecycle / "closeout-operation.log",
         )
         self.assertEqual(clean_sandbox_root(series.worktree_group), reports / "test-sandbox")
 
@@ -509,6 +513,10 @@ class ExistingContractStartTests(unittest.TestCase):
         contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
         contract.worktree_group.mkdir(parents=True, exist_ok=True)
         write_contract(contract.contract_path, contract)
+        publish_new_lifecycle_operation_location(
+            contract,
+            contract_text=contract.contract_path.read_text(encoding="utf-8"),
+        )
         return contract
 
     def test_retry_provider_setup_relaunches_instead_of_reattaching(self) -> None:
@@ -901,7 +909,8 @@ class IntegrationRefusalTests(unittest.TestCase):
                         approved=True,
                         strategy="ff-only",
                         dry_run=False,
-                    )
+                    ),
+                    contract,
                 )
 
             self.assertNotEqual(moved_source, source_before)

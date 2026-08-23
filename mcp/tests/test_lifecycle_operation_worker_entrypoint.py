@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 from _global_state import preserve_owned_mutable_state
-from agents_remember.application import lifecycle_operation_worker
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.application.lifecycle import lifecycle_operation_worker
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -20,8 +20,16 @@ from test_lifecycle_operations import _contract, _input
 
 def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path) -> None:
     contract = _contract(tmp_path)
+    worker_lease = "a" * 64
     parsed = lifecycle_operation_worker.build_parser().parse_args(
-        ["--contract-path", contract.contract_path.as_posix(), "--kind", "closeout"]
+        [
+            "--contract-path",
+            contract.contract_path.as_posix(),
+            "--kind",
+            "closeout",
+            "--worker-lease",
+            worker_lease,
+        ]
     )
     assert parsed.contract_path == contract.contract_path
 
@@ -43,7 +51,14 @@ def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path)
     ):
         assert (
             lifecycle_operation_worker.main(
-                ["--contract-path", contract.contract_path.as_posix(), "--kind", "closeout"]
+                [
+                    "--contract-path",
+                    contract.contract_path.as_posix(),
+                    "--kind",
+                    "closeout",
+                    "--worker-lease",
+                    worker_lease,
+                ]
             )
             == 7
         )
@@ -51,7 +66,7 @@ def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path)
     assert entry_order == ["declare", "build"]
     build_services.assert_called_once_with()
     bind_services.assert_called_once_with(services)
-    run.assert_called_once_with(contract.contract_path, "closeout")
+    run.assert_called_once_with(contract.contract_path, "closeout", worker_lease)
 
     start_closeout_operation(_input(contract), launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
@@ -64,6 +79,8 @@ def test_worker_parser_main_and_script_entry_use_task_addressing(tmp_path: Path)
         contract.contract_path.as_posix(),
         "--kind",
         "closeout",
+        "--worker-lease",
+        worker_lease,
     ]
     with (
         preserve_owned_mutable_state(),

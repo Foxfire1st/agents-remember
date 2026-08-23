@@ -7,14 +7,15 @@ from typing import Any
 
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
+    ledger_to_text,
     load_ledger,
     prepend_mapping,
     write_ledger,
 )
 from agents_remember.models.closeout_input import EffectiveCloseoutInput
 from agents_remember.worktrees.integration.mutation_evidence import (
+    begin_exact_file_git_mutation,
     begin_git_mutation,
-    bind_expected_output_tree,
     prove_git_commit,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
@@ -218,22 +219,20 @@ def _commit_ledger_mapping(
         and facts.existing_mapping.memory_commit == facts.memory_commit
     ):
         return head_commit(contract.memory_worktree), False
-    ledger_intent = begin_git_mutation(
+    intended_ledger = prepend_mapping(
+        facts.ledger,
+        facts.code_commit,
+        facts.memory_commit,
+    )
+    ledger_intent = begin_exact_file_git_mutation(
         args,
         leg="ledger",
         repository=contract.memory_worktree,
-        expected_output_tree=None,
+        path=contract.ledger_path,
+        intended_text=ledger_to_text(intended_ledger),
     )
-    write_ledger(
-        contract.ledger_path,
-        prepend_mapping(facts.ledger, facts.code_commit, facts.memory_commit),
-    )
+    write_ledger(contract.ledger_path, intended_ledger)
     require_git(contract.memory_worktree, ["add", "memory.md"])
-    ledger_intent = bind_expected_output_tree(
-        args,
-        ledger_intent,
-        repository=contract.memory_worktree,
-    )
     committed = commit_if_dirty(
         contract.memory_worktree,
         effective_input.message_for("ledger"),

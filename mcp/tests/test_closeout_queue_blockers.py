@@ -19,9 +19,11 @@ from agents_remember.models.queue.closeout_queue import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.queue import closeout_queue as queue
+from agents_remember.worktrees.queue.closeout_queue import QueueActor
 from agents_remember.worktrees.queue.closeout_queue_blocker import _acquire_blocker
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_graph import acquisition_facts
+from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
 from test_closeout_queue import LEAF_A, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
 
 
@@ -34,7 +36,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         self.topology = TaskDocumentTopology(self.fixture.coord)
         self.graph = queue._graph_context(self.topology, SPRINT)
         state = CloseoutQueueStore(self.fixture.coord, SPRINT).read(
-            queue._initial_state(SPRINT, self.graph.revision, NOW)
+            initial_queue_state(SPRINT, self.graph.revision, NOW)
         )
         self.candidate = state.candidates[LEAF_A.key]
 
@@ -45,13 +47,35 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         self,
     ) -> None:
         changed_graph = replace(self.graph, revision="f" * 64, masters={})
+        failure_evidence: list[dict[str, object]] = []
+        private = "PRIVATE_QUEUE_PATH_SENTINEL /tmp/candidate stderr"
         with mock.patch.object(
-            queue, "_pre_closeout_blockers", side_effect=CloseoutQueueError("bad", "facts")
+            queue, "_pre_closeout_blockers", side_effect=CloseoutQueueError("bad", private)
         ):
-            blockers = queue._candidate_blockers(self.topology, changed_graph, self.candidate)
+            blockers = queue._candidate_blockers(
+                self.topology,
+                changed_graph,
+                self.candidate,
+                failure_evidence=failure_evidence,
+            )
         self.assertIn("graph-revision-stale", blockers)
         self.assertIn("owning-master-no-longer-commanded", blockers)
-        self.assertTrue(any(item.startswith("candidate-revalidation-failed") for item in blockers))
+        self.assertIn("candidate-revalidation-failed", blockers)
+        self.assertNotIn(private, str([blockers, failure_evidence]))
+        self.assertEqual(failure_evidence[0]["stage"], "queue-candidate-revalidation")
+        self.assertEqual(failure_evidence[0]["errorType"], "CloseoutQueueError")
+
+        with mock.patch.object(
+            queue, "_pre_closeout_blockers", side_effect=CloseoutQueueError("bad", private)
+        ):
+            status = self.fixture.status(QueueActor(role="orchestrator", task_document_ref=SPRINT))
+        [blocked] = status["blocked"]
+        self.assertIn("candidate-revalidation-failed", blocked["reasons"])
+        self.assertEqual(
+            blocked["blockerEvidence"][0]["stage"],
+            "queue-candidate-revalidation",
+        )
+        self.assertNotIn(private, str(status))
 
         in_flight = self.candidate.model_copy(
             update={
@@ -60,7 +84,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             }
         )
         with (
-            mock.patch.object(queue, "_owned_lifecycle_operation", return_value=None),
+            mock.patch.object(queue, "owned_candidate_lifecycle_operation", return_value=None),
             mock.patch.object(queue, "_pre_closeout_blockers", return_value=[]),
         ):
             self.assertIn(
@@ -70,7 +94,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
         with (
             mock.patch.object(
                 queue,
-                "_owned_lifecycle_operation",
+                "owned_candidate_lifecycle_operation",
                 return_value=SimpleNamespace(status="failed"),
             ),
             mock.patch.object(queue, "_pre_closeout_blockers", return_value=[]),
@@ -92,7 +116,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             mock.patch.object(queue, "load_contract", return_value=completed),
             mock.patch.object(
                 queue,
-                "_owned_lifecycle_operation",
+                "owned_candidate_lifecycle_operation",
                 return_value=SimpleNamespace(status="running"),
             ),
             mock.patch.object(queue, "curator_evidence", return_value=[mock.sentinel.fact]),
@@ -105,7 +129,7 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
             mock.patch.object(queue, "load_contract", return_value=completed),
             mock.patch.object(
                 queue,
-                "_owned_lifecycle_operation",
+                "owned_candidate_lifecycle_operation",
                 return_value=SimpleNamespace(status="running"),
             ),
             mock.patch.object(
@@ -344,12 +368,15 @@ class CloseoutQueueBlockerTests(unittest.TestCase):
     def test_grade_blockers_detect_invalid_judgment_and_each_drift_class(self) -> None:
         grade = self.candidate.grade
         assert grade is not None
-        with mock.patch.object(queue, "_grade", side_effect=CloseoutQueueError("bad", "grade")):
-            self.assertTrue(
-                queue._grade_blockers(self.graph, self.candidate)[0].startswith(
-                    "grade-evidence-invalid"
-                )
-            )
+        with (
+            mock.patch.object(
+                queue,
+                "_grade",
+                side_effect=CloseoutQueueError("bad", "PRIVATE_GRADE_SENTINEL /tmp/grade"),
+            ),
+            self.assertRaises(CloseoutQueueError),
+        ):
+            queue._grade_blockers(self.graph, self.candidate)
         with mock.patch.object(
             queue,
             "_grade",
@@ -457,7 +484,7 @@ class BlockerLifetimeExclusivityTests(unittest.TestCase):
 
     def _state(self) -> CloseoutQueueState:
         return CloseoutQueueStore(self.fixture.coord, SPRINT).read(
-            queue._initial_state(SPRINT, self.graph.revision, NOW)
+            initial_queue_state(SPRINT, self.graph.revision, NOW)
         )
 
     def test_second_block_is_refused_with_structured_owner_facts(self) -> None:

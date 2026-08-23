@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.application import lifecycle_operation_worker
+from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -39,14 +39,9 @@ def test_failed_closeout_with_commit_proof_keeps_queue_ownership(tmp_path: Path)
             "closeout_result",
             return_value=WorktreeCommandResult(1, {"state": "blocked"}),
         ),
-        mock.patch.object(
-            lifecycle_operation_worker,
-            "release_queue_candidate_after_reversible_operation",
-        ) as release,
     ):
         lifecycle_operation_worker.execute_operation(record, runtime)
 
-    release.assert_not_called()
     current = store.read()
     assert current is not None and current.status == "input-required"
     assert "queueReleaseFailure" not in (current.result or {})
@@ -58,7 +53,7 @@ def test_failed_irreversible_integration_keeps_queue_ownership(tmp_path: Path) -
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
     )
-    start_or_observe_operation(operation_input, launcher=lambda *_: None)
+    start_or_observe_operation(operation_input, contract, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
     record = store.update(
         lambda current: current.model_copy(update={"irreversibleBoundaryEntered": True})
@@ -71,14 +66,9 @@ def test_failed_irreversible_integration_keeps_queue_ownership(tmp_path: Path) -
             "integrate_result",
             return_value=WorktreeCommandResult(1, {"state": "blocked"}),
         ),
-        mock.patch.object(
-            lifecycle_operation_worker,
-            "release_queue_candidate_after_reversible_operation",
-        ) as release,
     ):
         lifecycle_operation_worker.execute_operation(record, runtime)
 
-    release.assert_not_called()
     current = store.read()
     assert current is not None and current.status == "input-required"
     assert "queueReleaseFailure" not in (current.result or {})

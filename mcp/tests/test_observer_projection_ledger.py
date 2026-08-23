@@ -42,6 +42,9 @@ from agents_remember.serving.projections.snapshots import (
 )
 from agents_remember.serving.projections.snapshots_impl import _analytics as snapshots_analytics
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -445,6 +448,10 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
         )
         active_contract.code_worktree.mkdir(parents=True)
         write_contract(active_contract.contract_path, active_contract)
+        publish_new_lifecycle_operation_location(
+            active_contract,
+            contract_text=active_contract.contract_path.read_text(encoding="utf-8"),
+        )
         active = self._write_snapshot(active_contract.code_worktree.name, "ar/active")
         orphaned = self._write_snapshot("deleted-worktree", "ar/deleted")
         invalid = drift_snapshot_dir(self.coord) / "invalid.json"

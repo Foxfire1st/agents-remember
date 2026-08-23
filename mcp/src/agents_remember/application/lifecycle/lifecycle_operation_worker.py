@@ -32,28 +32,33 @@ from agents_remember.models.lifecycles.mutation_evidence import GitMutationEvide
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
+    IntegrationPublicationIntent,
     IntegrationQualityCertification,
-    IntegrationQueueCompletionEvidence,
     LifecycleOperationKind,
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
     OrganizationalCompletionRepairEvidence,
 )
+from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+    CloseoutLedgerRecoveryDecision,
+)
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     closeout_generation_retained,
     derive_closeout_recovery_commits,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    located_lifecycle_operation_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
-    operation_record_path,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.integrate import integrate_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    release_queue_candidate_after_reversible_operation,
-)
 from agents_remember.worktrees.worktree_contract import load_contract
 
 HEARTBEAT_SECONDS = 5.0
@@ -81,24 +86,34 @@ def _policy(operation_input: CloseoutOperationInput | IntegrateOperationInput) -
 
 
 class OperationRuntime:
-    def __init__(self, store: LifecycleOperationStore) -> None:
+    def __init__(self, store: LifecycleOperationStore, *, worker_lease: str | None = None) -> None:
         self.store = store
         self.stop = threading.Event()
+        self.worker_lease = worker_lease
 
     def start(self) -> LifecycleOperationRecord:
         stamp = _stamp()
-        worker_pid = os.getpid()
+        worker_pid = os.getpid() if self.worker_lease is not None else None
 
         def running(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
-            if record.status == "running":
+            if self.worker_lease is None and record.workerPid is not None:
+                raise RuntimeError(
+                    "inline lifecycle execution cannot replace detached worker authority"
+                )
+            if self.worker_lease is not None:
+                if record.workerLease != self.worker_lease:
+                    raise RuntimeError("lifecycle worker lease does not match durable authority")
                 if record.workerPid != worker_pid:
+                    raise RuntimeError("lifecycle worker pid does not match durable authority")
+            if record.status == "running":
+                if self.worker_lease is not None and record.workerPid != worker_pid:
                     raise RuntimeError(
                         "lifecycle operation is already owned by another running worker"
                     )
                 return record
             if record.status != "queued":
                 return record
-            if record.workerPid is not None and record.workerPid != worker_pid:
+            if self.worker_lease is not None and record.workerPid != worker_pid:
                 raise RuntimeError(
                     "queued lifecycle operation is reserved for another worker process"
                 )
@@ -116,7 +131,6 @@ class OperationRuntime:
                     "currentCommand": "recover task state"
                     if recovering
                     else "validate lifecycle operation",
-                    "workerPid": worker_pid,
                 }
             )
 
@@ -136,10 +150,10 @@ class OperationRuntime:
             if quality_value is not None
             else None
         )
-        queue_value = evidence.get("queue_completion")
-        queue_completion = (
-            IntegrationQueueCompletionEvidence.model_validate(queue_value)
-            if queue_value is not None
+        publication_value = evidence.get("integration_publication")
+        integration_publication = (
+            IntegrationPublicationIntent.model_validate(publication_value)
+            if publication_value is not None
             else None
         )
         repair_value = evidence.get("organizational_repair")
@@ -185,7 +199,7 @@ class OperationRuntime:
                     "status": "running",
                     "phase": phase,
                     "heartbeatAt": stamp,
-                    "currentCommand": str(evidence.get("current_command") or phase),
+                    "currentCommand": f"lifecycle stage: {phase}",
                     "irreversibleBoundaryEntered": (
                         record.irreversibleBoundaryEntered
                         or bool(evidence.get("irreversible_boundary"))
@@ -205,14 +219,16 @@ class OperationRuntime:
                         else finalization_value
                     ),
                     "qualityCertification": (quality_certification or record.qualityCertification),
-                    "queueCompletion": (queue_completion or record.queueCompletion),
+                    "integrationPublication": (
+                        integration_publication or record.integrationPublication
+                    ),
                     "organizationalRepair": (organizational_repair or record.organizationalRepair),
                     "result": organizational_failure or record.result,
                 }
             )
 
         current = self.store.update(advance)
-        if current.status == "cancelled":
+        if current.cancelRequested or current.status in {"cancelled", "termination-required"}:
             raise OperationCancelled("operation cancelled before irreversible boundary")
         print(f"phase={phase} command={current.currentCommand}", flush=True)
 
@@ -245,28 +261,19 @@ class OperationRuntime:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return self._clean_quality_command()
-        if not isinstance(payload, dict) or payload.get("status") != "running":
-            return self._clean_quality_command()
-        step = payload.get("step")
-        detail = payload.get("detail")
-        if not isinstance(step, str) or not isinstance(detail, str):
-            return self._clean_quality_command()
-        return f"quality: {step} — {detail}"
-
-    def _clean_quality_command(self) -> str | None:
-        path = self.store.path.parent / "dagger-progress.log"
-        try:
-            latest = path.read_text(encoding="utf-8").splitlines()[-1]
-        except (IndexError, OSError):
             return None
-        return f"Dagger quality: {latest[:240]}"
+        if not isinstance(payload, dict) or payload.get("status") != "running":
+            return None
+        step = payload.get("step")
+        if step not in {"dagger", "complete", "failed"}:
+            return None
+        return f"quality stage: {step}"
 
     def finish(self, result: dict[str, object], *, ok: bool) -> None:
         stamp = _stamp()
 
         def terminal(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
-            if record.status == "cancelled":
+            if record.cancelRequested or record.status in {"cancelled", "termination-required"}:
                 return record
             if ok:
                 return record.model_copy(
@@ -278,7 +285,8 @@ class OperationRuntime:
                         "currentCommand": "operation completed",
                         "result": result,
                         "guidance": "Observe the task contract for the next lifecycle edge.",
-                        "workerPid": None,
+                        # The process is still executing this final stack frame. Status/control
+                        # reconciliation clears its binding only after observing actual exit.
                     }
                 )
             needs_recovery = (
@@ -286,7 +294,8 @@ class OperationRuntime:
                 if record.operationKind == "closeout"
                 else record.irreversibleBoundaryEntered and not bool(result.get("safeToReplace"))
             )
-            needs_input = needs_recovery or bool(result.get("developer_decision_required"))
+            developer_decision = bool(result.get("developerDecisionRequired"))
+            needs_input = needs_recovery or developer_decision
             return record.model_copy(
                 update={
                     "status": "input-required" if needs_input else "failed",
@@ -299,20 +308,20 @@ class OperationRuntime:
                     "result": result,
                     "failure": str(result.get("reason") or result.get("summary") or result),
                     "guidance": (
-                        "Restart this exact task operation; its consumed approval remains bound "
-                        "to the same internal fingerprint and recovery will not replay a different mutation."
-                        if needs_recovery
+                        "Resolve the exact developer-decision evidence without replacing this "
+                        "generation; status will advertise recovery only after the accepted or "
+                        "intended state is restored."
+                        if developer_decision
                         else (
-                            "Resolve the reported developer decision, cancel this pre-boundary "
-                            "attempt, then start the task operation with the selected input."
-                            if needs_input
+                            "Restart this exact task operation; its consumed approval remains "
+                            "bound to the same internal fingerprint and recovery will not replay "
+                            "a different mutation."
+                            if needs_recovery
                             else "Fix the reported preflight failure, then restart this task operation."
                         )
                     ),
-                    # This callback runs in the worker's final stack frame. Retaining its
-                    # numeric PID after this point lets a delayed cancellation signal an
-                    # unrelated process group if the kernel reuses that id.
-                    "workerPid": None,
+                    # Exit proof and Git proof are independent. Retain this process binding
+                    # until a task-addressed observer proves the process instance exited.
                 }
             )
 
@@ -321,7 +330,23 @@ class OperationRuntime:
     def fail(self, error: Exception) -> None:
         current = self.store.read()
         pending = _organizational_repair_failure(current)
-        self.finish(pending or {"reason": str(error)}, ok=False)
+        if isinstance(error, CloseoutLedgerRecoveryDecision):
+            decision = error.classification
+            pending = {**decision.decision_payload(), "reason": decision.detail}
+        self.finish(
+            pending
+            or {
+                "reason": "operation worker failed before publishing a typed domain result",
+                "failure": public_failure_evidence(
+                    stage="worker-execution",
+                    side="operation",
+                    name="accepted-generation",
+                    error_type=type(error).__name__,
+                    observed={"state": "failed"},
+                ),
+            },
+            ok=False,
+        )
 
 
 def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntime) -> None:
@@ -334,75 +359,42 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
     common = {
         "contract_path": Path(operation_input.contractPath),
         "approved": True,
-        "gate_policy": _policy(operation_input),
         "operation_key": record.operationKey,
+        "operation_generation": record.generation,
         "candidate_tree": record.candidateTree,
         "approval_claimed": record.approvalClaimed,
         "recovery_commits": record.recoveryCommits,
         "quality_certification": record.qualityCertification,
+        "integration_publication": record.integrationPublication,
         "operation_progress": runtime.progress,
     }
     if isinstance(operation_input, CloseoutOperationInput):
         args = WorktreeArgs(
             **common,
+            gate_policy=_policy(operation_input),
             approval_note=operation_input.approvalNote,
             closeout_input=operation_input.effectiveInput,
         )
-        result = closeout_result(args)
+        current_contract = load_contract(Path(operation_input.contractPath))
+        result = closeout_result(args, current_contract)
         payload = {
             **result.payload,
             "ok": result.returncode == 0,
             "operation": "worktree_closeout_apply",
         }
-    else:
+    elif isinstance(operation_input, IntegrateOperationInput):
         args = WorktreeArgs(
             **common,
+            gate_policy=_policy(operation_input),
             strategy=operation_input.strategy,
             ledger_commit_message=operation_input.ledgerCommitMessage,
         )
-        result = integrate_result(args)
+        current_contract = load_contract(Path(operation_input.contractPath))
+        result = integrate_result(args, current_contract)
         payload = integration_completion_payload(config, operation_input, result)
-    if result.returncode != 0:
-        current = runtime.store.read() or record
-        release_failure = (
-            None
-            if payload.get("state") == "organizational-completion-gate-failed"
-            else _release_reversible_queue_ownership(
-                current,
-                restored=bool(payload.get("safeToReplace")),
-            )
-        )
-        if release_failure is not None:
-            payload["queueReleaseFailure"] = release_failure
-            payload["safeToReplace"] = False
-            payload.setdefault(
-                "reason",
-                "operation failed and its queue ownership could not be released; "
-                "repair the reported queue authority before retrying",
-            )
+    else:
+        raise RuntimeError("direct landing cannot execute through the detached worker")
     runtime.finish(payload, ok=result.returncode == 0)
-
-
-def _release_reversible_queue_ownership(
-    record: LifecycleOperationRecord,
-    *,
-    restored: bool = False,
-) -> str | None:
-    if _organizational_repair_failure(record) is not None:
-        return None
-    if record.operationKind == "closeout" and closeout_generation_retained(record):
-        return None
-    if record.operationKind == "integrate" and record.irreversibleBoundaryEntered and not restored:
-        return None
-    try:
-        release_queue_candidate_after_reversible_operation(
-            load_contract(Path(record.contractPath)),
-            operation_key=record.operationKey,
-            operation_kind=record.operationKind,
-        )
-    except Exception as error:  # queue authority must remain visible in the terminal record
-        return str(error)
-    return None
 
 
 def _organizational_repair_failure(
@@ -441,13 +433,17 @@ def integration_completion_payload(
     return payload
 
 
-def run_worker(contract_path: Path, kind: LifecycleOperationKind) -> int:
+def run_worker(contract_path: Path, kind: LifecycleOperationKind, worker_lease: str) -> int:
     contract = load_contract(contract_path)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, kind))
+    store = located_lifecycle_operation_store(contract, kind)
     current = store.read()
     if current is None or current.operationKind != kind:
         raise RuntimeError(f"no {kind} operation is queued for {contract.task_name}")
-    runtime = OperationRuntime(store)
+    deadline = datetime.now(UTC).timestamp() + 5.0
+    while current.workerLease != worker_lease and datetime.now(UTC).timestamp() < deadline:
+        threading.Event().wait(0.01)
+        current = store.read() or current
+    runtime = OperationRuntime(store, worker_lease=worker_lease)
     current = runtime.start()
     if current.status in {"cancelled", "completed"}:
         return 0
@@ -461,12 +457,6 @@ def run_worker(contract_path: Path, kind: LifecycleOperationKind) -> int:
         return 0
     except Exception as error:
         print(f"operation failed: {error}", flush=True)
-        latest = store.read() or current
-        release_failure = _release_reversible_queue_ownership(latest)
-        if release_failure is not None:
-            error = RuntimeError(
-                f"{error}; reversible queue ownership release failed: {release_failure}"
-            )
         runtime.fail(error)
         return 1
     finally:
@@ -479,6 +469,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Resume one durable task lifecycle operation")
     parser.add_argument("--contract-path", type=Path, required=True)
     parser.add_argument("--kind", choices=("closeout", "integrate"), required=True)
+    parser.add_argument("--worker-lease", required=True)
     return parser
 
 
@@ -486,7 +477,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     declare_lifecycle_operation_process()
     bind_worktree_services(build_default_worktree_services())
-    return run_worker(args.contract_path, cast(LifecycleOperationKind, args.kind))
+    return run_worker(
+        args.contract_path,
+        cast(LifecycleOperationKind, args.kind),
+        args.worker_lease,
+    )
 
 
 if __name__ == "__main__":

@@ -30,9 +30,9 @@ from agents_remember.worktrees.modules.git import (
 from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     _graph_context,
-    _initial_state,
     now_iso,
 )
+from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
 from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
@@ -102,7 +102,7 @@ def _publish_atomic_series_edge(
         # already owns the sequential lane through its live series contract.
         return repository_publication()
     graph = _graph_context(topology, sprint_ref)
-    initial = _initial_state(sprint_ref, graph.revision, now_iso())
+    initial = initial_queue_state(sprint_ref, graph.revision, now_iso())
 
     def validate_and_publish(state):
         current_graph = _graph_context(topology, sprint_ref)

@@ -3,25 +3,22 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import cast
 from unittest import mock
 
 import test_organizational_completion_integration as fixture_mod
-from agents_remember.application import lifecycle_operation_worker
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.worktrees.integration import (
     organizational_completion_integration as completion_integration,
 )
 from agents_remember.worktrees.integration import organizational_completion_repair as repair
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     operation_state_fingerprint,
 )
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    _operation_owner,
     contract_queue_binding,
 )
-from test_closeout_queue import NOW
+from lifecycle_control_test_support import cancel_current_generation
 
 
 class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
@@ -44,7 +41,15 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
         authority = record.integrationAuthority
         assert authority is not None
         failure = {
-            **fixture_mod.quality_mod.organizational_quality_failure_payload(contract, "test"),
+            **fixture_mod.quality_mod.organizational_quality_failure_payload(
+                contract,
+                fixture_mod.quality_mod.integration_quality_failure(
+                    RuntimeError("private-quality-sentinel"),
+                    stage="integration-quality-execution",
+                    organizational_completion=True,
+                ),
+                expected_generation=record.generation,
+            ),
             "ok": False,
             "operation": "worktree_integrate",
         }
@@ -55,11 +60,6 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
         assert binding is not None
         expected = repair._repair_commits(contract, authority)
         reset = repair._quality_repair_contract(contract, expected_commits=expected)
-        topology = repair.TaskDocumentTopology(contract.coordination_root)
-        owner = _operation_owner(record.operationKey)
-        context = repair._RepairContext(
-            contract, reset, binding, owner, topology, expected, failed, evidence
-        )
         return SimpleNamespace(
             contract=contract,
             store=store,
@@ -69,9 +69,6 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
             evidence=evidence,
             binding=binding,
             reset=reset,
-            topology=topology,
-            owner=owner,
-            context=context,
         )
 
     def _cancelled(self, facts, *, result, evidence):
@@ -79,7 +76,7 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
             "status": "cancelled",
             "phase": "cancelled",
             "cancelRequested": True,
-            "finishedAt": repair.now_iso(),
+            "finishedAt": "2026-08-22T12:00:00+00:00",
             "workerPid": None,
             "result": result,
             "organizationalRepair": evidence,
@@ -139,25 +136,6 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
         self._cancelled(facts, result=facts.failed.result, evidence=wrong)
         with self.assertRaisesRegex(CloseoutQueueError, "repair-evidence-mismatch"):
             repair.prepare_organizational_completion_repair(facts.contract)
-
-    # ---- _retire_candidate :267 ----
-    def test_retire_refuses_candidate_identity_mismatch(self) -> None:
-        facts = self._repair_fixture()
-        graph = repair._graph_context(facts.topology, facts.binding.sprint_ref)
-        initial = repair._initial_state(facts.binding.sprint_ref, graph.revision, NOW)
-        state = repair.CloseoutQueueStore(
-            facts.contract.coordination_root, facts.binding.sprint_ref
-        ).read(initial)
-        candidate = state.candidates[facts.binding.candidate_ref.key]
-        claimed = candidate.model_copy(
-            update={"state": "integration-in-flight", "inFlightOwnerFingerprint": facts.owner}
-        )
-        drifted = claimed.model_copy(update={"contractPath": "/elsewhere/contract.md"})
-        drifted_state = state.model_copy(
-            update={"candidates": {facts.binding.candidate_ref.key: drifted}}
-        )
-        with self.assertRaisesRegex(CloseoutQueueError, "candidate-identity-mismatch"):
-            repair._retire_candidate(drifted_state, context=facts.context)
 
     # ---- _require_operation_identity :314, :338, :351, :356 ----
     def test_require_operation_identity_refuses_identity_mismatch(self) -> None:
@@ -239,18 +217,6 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
         ):
             repair._repair_commits(drifted, facts.authority)
 
-    # ---- lifecycle_operation_worker :352 ----
-    def test_release_reversible_ownership_returns_none_for_repair_failure(self) -> None:
-        record = cast(LifecycleOperationRecord, SimpleNamespace())
-        with mock.patch.object(
-            lifecycle_operation_worker, "_organizational_repair_failure", return_value="failure"
-        ):
-            self.assertIsNone(
-                lifecycle_operation_worker._release_reversible_queue_ownership(
-                    record, restored=False
-                )
-            )
-
     # ---- operation.py validator :299, :303 ----
     def test_repair_evidence_validator_requires_integration_operation(self) -> None:
         facts = self._repair_fixture()
@@ -286,7 +252,12 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
             )
         self.assertEqual(result, {})
         assert failure is not None
-        self.assertEqual(failure["state"], "organizational-completion-gate-failed")
+        self.assertEqual(failure["state"], "organizational-completion-gate-planning-failed")
+        self.assertEqual(
+            failure["decisionSurface"],
+            fixture_mod.quality_mod.INTEGRATION_QUALITY_DECISION_SURFACE,
+        )
+        self.assertTrue(failure["developerDecisionRequired"])
 
     # ---- lifecycle_operations.py :251 ----
     def test_cancel_gate_failed_operation_requires_repair_evidence(self) -> None:
@@ -297,7 +268,10 @@ class OrganizationalCompletionRepairBranchTests(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(RuntimeError, "durable repair evidence"):
-            fixture_mod.cancel_operation(facts.contract.contract_path, "integrate")
+            cancel_current_generation(
+                facts.contract.contract_path,
+                "integrate",
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

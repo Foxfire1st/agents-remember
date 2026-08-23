@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationSnapshot,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

@@ -50,11 +50,13 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import (
     AsyncIterator,
     Iterator,
 )
+from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Any,
@@ -104,6 +106,9 @@ from agents_remember.serving.terminal_pty import TerminalSession
 from agents_remember.tasks import (
     TaskDocument,
     write_task_doc,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
 )
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -423,52 +428,56 @@ def _seed_changeset(tmp: Path, code: Path) -> None:
     (code / "f.py").write_text("one\ntwo\n", encoding="utf-8")
     task_root = tmp / "tasks" / "R" / "t"
     series_path = task_root / "series-contract.md"
-    write_contract(
-        series_path,
-        WorktreeContract(
-            task_id="T",
-            task_name="t",
-            repo_name="R",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=tmp,
-            task_root=task_root,
-            contract_path=series_path,
-            task_artifact=task_root / "task.md",
-            worktree_group=task_root / "enclosures",
-            code_repo_path=code,
-            code_source_branch="main",
-            code_work_branch="master",
-            code_base_commit=base,
-            code_worktree=code,
-            kind="series",
-        ),
+    series_contract = WorktreeContract(
+        task_id="T",
+        task_name="t",
+        repo_name="R",
+        workflow_kind="light-task",
+        memory_mode="disabled",
+        coordination_root=tmp,
+        task_root=task_root,
+        contract_path=series_path,
+        task_artifact=task_root / "task.md",
+        worktree_group=tmp / "worktrees" / "R" / "t-series",
+        code_repo_path=code,
+        code_source_branch="main",
+        code_work_branch="master",
+        code_base_commit=base,
+        code_worktree=code,
+        kind="series",
+    )
+    write_contract(series_path, series_contract)
+    publish_new_lifecycle_operation_location(
+        series_contract,
+        contract_text=series_path.read_text(encoding="utf-8"),
     )
     contract_path = tmp / "tasks" / "R" / "t" / "enclosures" / "leaf-1" / "series-contract.md"
     contract_path.parent.mkdir(parents=True, exist_ok=True)
-    write_contract(
-        contract_path,
-        WorktreeContract(
-            task_id="T",
-            task_name="t",
-            repo_name="R",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=tmp,
-            task_root=task_root,
-            contract_path=contract_path,
-            task_artifact=tmp / "tasks" / "R" / "t" / "task.md",
-            worktree_group=contract_path.parent,
-            code_repo_path=code,
-            code_source_branch="master",
-            code_work_branch="work",
-            code_base_commit=base,
-            code_worktree=code,
-            kind="leaf",
-            leaf_id="leaf-1",
-            parent_task_name="t",
-            parent_contract_path=series_path,
-        ),
+    leaf_contract = WorktreeContract(
+        task_id="T",
+        task_name="t",
+        repo_name="R",
+        workflow_kind="light-task",
+        memory_mode="disabled",
+        coordination_root=tmp,
+        task_root=task_root,
+        contract_path=contract_path,
+        task_artifact=tmp / "tasks" / "R" / "t" / "task.md",
+        worktree_group=tmp / "worktrees" / "R" / "t-leaf-1",
+        code_repo_path=code,
+        code_source_branch="master",
+        code_work_branch="work",
+        code_base_commit=base,
+        code_worktree=code,
+        kind="leaf",
+        leaf_id="leaf-1",
+        parent_task_name="t",
+        parent_contract_path=series_path,
+    )
+    write_contract(contract_path, leaf_contract)
+    publish_new_lifecycle_operation_location(
+        leaf_contract,
+        contract_text=contract_path.read_text(encoding="utf-8"),
     )
 
 
@@ -817,6 +826,18 @@ class RouteWalkerTests(unittest.TestCase):
 # --- the driven conformance table --------------------------------------------------------------
 
 
+def _await_projector_ready(client: TestClient):
+    """Cross the one deterministic readiness boundary before asserting served models."""
+
+    response = client.get("/api/state")
+    for _attempt in range(100):
+        if response.status_code != 503:
+            return response
+        time.sleep(0.01)
+        response = client.get("/api/state")
+    return response
+
+
 class ServingResponseConformanceTests(unittest.TestCase):
     """One real request per route; the answer must validate against what the route declares."""
 
@@ -873,7 +894,8 @@ class ServingResponseConformanceTests(unittest.TestCase):
         )
         self.routes = route_index(self.app)
 
-    def _client(self, *, peer: tuple[str, int] = ("127.0.0.1", 50000)) -> TestClient:
+    @contextmanager
+    def _client(self, *, peer: tuple[str, int] = ("127.0.0.1", 50000)):
         """A LOOPBACK peer: conversation authorization is loopback-only by design, so the
         default ``testclient`` host would turn every conversation route into the same 403 and
         the refusal surface would never be exercised past its first gate.
@@ -881,7 +903,10 @@ class ServingResponseConformanceTests(unittest.TestCase):
         ``peer`` exists so the 403 leg can be driven deliberately, from a host that is not
         loopback -- see ``test_the_conversation_authorization_refusal_conforms``."""
 
-        return TestClient(self.app, client=peer)
+        with TestClient(self.app, client=peer) as client:
+            response = _await_projector_ready(client)
+            self.assertEqual(response.status_code, 200, response.text)
+            yield client
 
     def _check(
         self,

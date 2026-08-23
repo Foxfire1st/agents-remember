@@ -20,7 +20,12 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application import completion_cleanup, worktree_tools
-from agents_remember.application.lifecycle_operation_worker import integration_completion_payload
+from agents_remember.application.lifecycle.configured_contract_admission import (
+    ConfiguredContractAccepted,
+)
+from agents_remember.application.lifecycle.lifecycle_operation_worker import (
+    integration_completion_payload,
+)
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
     InboxMessage,
@@ -906,8 +911,12 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
             ),
             mock.patch.object(
                 worktree_tools,
-                "_configured_contract_path",
-                return_value=self.contract_path,
+                "admit_configured_contract",
+                return_value=ConfiguredContractAccepted(
+                    contract_path=self.contract_path,
+                    contract=self.fake_contract,
+                    location=mock.Mock(),
+                ),
             ),
             mock.patch.object(completion_cleanup, "load_contract", return_value=self.fake_contract),
         ):

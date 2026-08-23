@@ -24,7 +24,10 @@ from agents_remember.worktrees.modules import cleanup as worktree_cleanup
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import projected_status_payload
-from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
+from agents_remember.worktrees.modules.models import (
+    WorktreeCommandResult,
+    WorktreeProviderSetupConfig,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -436,7 +439,14 @@ class TeardownGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._integrated_contract(Path(tmp))
             args = WorktreeArgs(contract_path=contract.contract_path, approved=True)
-            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
+            with (
+                mock.patch.object(provider_async, "provider_setup_running", return_value=True),
+                mock.patch.object(
+                    worktree_cleanup,
+                    "terminal_archive_required_result",
+                    return_value=WorktreeCommandResult(0, {}),
+                ),
+            ):
                 result = worktree_cleanup.cleanup_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
@@ -446,7 +456,14 @@ class TeardownGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = self._integrated_contract(Path(tmp))
             args = WorktreeArgs(contract_path=contract.contract_path, approved=True)
-            with mock.patch.object(provider_async, "provider_setup_running", return_value=True):
+            with (
+                mock.patch.object(provider_async, "provider_setup_running", return_value=True),
+                mock.patch.object(
+                    worktree_abandon,
+                    "terminal_archive_required_result",
+                    return_value=WorktreeCommandResult(0, {}),
+                ),
+            ):
                 result = worktree_abandon.abandon_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")

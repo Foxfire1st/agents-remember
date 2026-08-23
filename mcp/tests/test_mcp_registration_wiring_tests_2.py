@@ -4,6 +4,29 @@ from test_mcp_registration_wiring import RegistrationWiringTests
 
 
 class RegistrationWiringTests2(RegistrationWiringTests):
+    def test_worktree_enclosure_adopt_forwards_exact_preview_binding(self) -> None:
+        recorder = self.invoke(
+            "worktree_enclosure_adopt",
+            "agents_remember.mcp.registration.worktrees.worktree_enclosure_adopt_payload",
+            {
+                "contract_path": "/tmp/contract.yaml",
+                "expected_worktree_group": "/tmp/worktree-group",
+                "rationale": "adopt exact historic enclosure",
+                "dry_run": False,
+                "approved": True,
+                "expected_publication_request_id": "a" * 64,
+            },
+        )
+
+        self.assertIs(recorder.args[0], self.config)
+        request = recorder.args[1]
+        self.assertEqual(request.contract_path, "/tmp/contract.yaml")
+        self.assertEqual(request.expected_worktree_group, "/tmp/worktree-group")
+        self.assertEqual(request.rationale, "adopt exact historic enclosure")
+        self.assertFalse(request.dry_run)
+        self.assertTrue(request.approved)
+        self.assertEqual(request.expected_publication_request_id, "a" * 64)
+
     def test_closeout_queue_registration_validates_and_forwards_the_request(self) -> None:
         recorder = self.invoke(
             "closeout_queue",
@@ -25,27 +48,38 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertEqual(request.sprint_task_document_ref.repository, "agents-remember")
         self.assertEqual(request.sprint_task_document_ref.path, "sprint/task.json")
 
-    def test_worktree_operation_cancel_forwards_only_the_task_address(self) -> None:
+    def test_worktree_operation_control_forwards_exact_generation_request(self) -> None:
         recorder = self.invoke(
-            "worktree_operation_cancel",
-            "agents_remember.mcp.registration.closeout.worktree_operation_cancel_payload",
+            "worktree_operation_control",
+            "agents_remember.mcp.registration.closeout.worktree_operation_control_payload",
             {
                 "contract_path": "/tmp/contract.yaml",
                 "operation_kind": "closeout",
+                "action": "cancel",
+                "expected_generation": 3,
                 "intent_note": "developer cancelled before the boundary",
                 "dry_run": True,
+                "caller": {
+                    "role": "worker",
+                    "task_document_ref": {
+                        "repository": "agents-remember",
+                        "path": "task/leaf.json",
+                    },
+                },
             },
         )
 
-        self.assertEqual(recorder.args, (self.config, "/tmp/contract.yaml"))
-        self.assertEqual(
-            recorder.kwargs,
-            {
-                "operation_kind": "closeout",
-                "intent_note": "developer cancelled before the boundary",
-                "dry_run": True,
-            },
-        )
+        self.assertIs(recorder.args[0], self.config)
+        request = recorder.args[1]
+        self.assertEqual(request.contract_path, "/tmp/contract.yaml")
+        self.assertEqual(request.operation_kind, "closeout")
+        self.assertEqual(request.action, "cancel")
+        self.assertEqual(request.expected_generation, 3)
+        self.assertEqual(request.intent_note, "developer cancelled before the boundary")
+        self.assertTrue(request.dry_run)
+        self.assertEqual(request.caller.role, "worker")
+        self.assertEqual(request.caller.task_document_ref.path, "task/leaf.json")
+        self.assertEqual(recorder.kwargs, {})
 
     def test_worktree_start_defaults_to_a_real_light_task_start(self) -> None:
         recorder = self.invoke(
@@ -81,12 +115,23 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         recorder = self.invoke(
             "worktree_status",
             "agents_remember.mcp.registration.worktrees.worktree_status_payload",
-            {"repo_id": "agents-remember", "leaf_id": "260731-EFA-L2"},
+            {
+                "repo_id": "agents-remember",
+                "leaf_id": "260731-EFA-L2",
+                "caller": {
+                    "role": "orchestrator",
+                    "task_document_ref": {
+                        "repository": "agents-remember",
+                        "path": "sprint/task.json",
+                    },
+                },
+            },
         )
 
         _config, task_ref = recorder.args
         self.assertEqual(task_ref.repo_id, "agents-remember")
         self.assertEqual(task_ref.leaf_id, "260731-EFA-L2")
+        self.assertEqual(recorder.kwargs["caller"].role, "orchestrator")
 
     def test_worktree_sync_takes_the_contract_path_directly(self) -> None:
         recorder = self.invoke(

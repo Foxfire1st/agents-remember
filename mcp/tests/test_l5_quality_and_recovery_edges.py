@@ -14,7 +14,7 @@ from agents_remember.worktrees.integration import integration_ref_transaction as
 from agents_remember.worktrees.integration import (
     organizational_completion_integration as completion,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )

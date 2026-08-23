@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -42,10 +41,6 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.worktrees.atomic_series_seal import require_series_path_accepting_leaves
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
@@ -73,12 +68,20 @@ from .closeout_queue_candidate_evidence import (
     commit_tree,
     ledger_mapping,
     memory_candidate_tree,
-    operation_owner_fingerprint,
+    queue_candidate_failure_evidence,
     require_source_bases_current,
     route_review_blockers,
     route_review_fact,
 )
-from .closeout_queue_errors import CloseoutQueueError, queue_task_ref
+from .closeout_queue_door import (
+    candidate_closeout_door_blocker,
+    owned_candidate_lifecycle_operation,
+)
+from .closeout_queue_errors import (
+    CloseoutQueueError,
+    bounded_queue_failure_detail,
+    queue_task_ref,
+)
 from .closeout_queue_evidence import (
     canonical_grade,
     curator_evidence,
@@ -96,20 +99,10 @@ from .closeout_queue_graph import (
 from .closeout_queue_graph import (
     graph_context as _graph_context,
 )
-
-_ACTIONS = frozenset(
-    {
-        "status",
-        "declare",
-        "withdraw",
-        "set-grade",
-        "set-admission",
-        "select",
-        "release-selection",
-        "acquire-blocker",
-        "release-blocker",
-        "abort-blocker",
-    }
+from .closeout_queue_state import (
+    initial_queue_state,
+    queue_action,
+    queue_request_fingerprint,
 )
 
 
@@ -189,7 +182,7 @@ def closeout_queue_tool(
     actor: QueueActor,
     now: str | None = None,
 ) -> dict[str, Any]:
-    action = _queue_action(request.action)
+    action = queue_action(request.action)
     sprint_ref = queue_task_ref(request.sprint_task_document_ref, "sprint_task_document_ref")
     topology = TaskDocumentTopology(config.coordination_root)
     timestamp = (now or now_iso()).strip()
@@ -200,7 +193,7 @@ def closeout_queue_tool(
         # missing/malformed register — it reports the degraded projection instead.
         return _status_readout(config, topology, sprint_ref, actor=actor, timestamp=timestamp)
     graph = _graph_context(topology, sprint_ref)
-    initial = _initial_state(sprint_ref, graph.revision, timestamp)
+    initial = initial_queue_state(sprint_ref, graph.revision, timestamp)
     store = CloseoutQueueStore(config.coordination_root, sprint_ref)
     _authorize_status_scope(actor, graph)
     if graph.sprint.document.status == "Completed":
@@ -239,7 +232,7 @@ def closeout_queue_tool(
         event=QueueTransaction(
             action=cast(QueueEventAction, action),
             request_id=request_id,
-            fingerprint=_request_fingerprint(request, actor),
+            fingerprint=queue_request_fingerprint(request, actor.identity),
             recorded_at=timestamp,
             actor=actor.identity,
             rationale=request.rationale,
@@ -271,7 +264,15 @@ def _status_readout(
     try:
         sprint = topology.resolve(sprint_ref)
     except TaskDocumentRefError as exc:
-        raise CloseoutQueueError(exc.status, str(exc)) from exc
+        raise CloseoutQueueError(
+            exc.status,
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-status-resolution",
+                side="task-document",
+                name="sprint",
+            ),
+        ) from exc
     if sprint.document.kind != "master" or not sprint.document.orchestrates:
         raise CloseoutQueueError(
             "closeout-queue-sprint-required",
@@ -281,13 +282,21 @@ def _status_readout(
         try:
             mode = resolve_scheduling_mode(topology, sprint_ref)
         except TaskDocumentRefError as exc:
-            raise CloseoutQueueError(exc.status, str(exc)) from exc
+            raise CloseoutQueueError(
+                exc.status,
+                bounded_queue_failure_detail(
+                    exc,
+                    stage="queue-scheduling-mode",
+                    side="task-document",
+                    name="sprint",
+                ),
+            ) from exc
         _authorize_degraded_scope(actor, mode)
         return _degraded_projection(topology, mode, timestamp)
     graph = _graph_context(topology, sprint_ref, strict_registers=False)
     _authorize_status_scope(actor, graph)
     store = CloseoutQueueStore(config.coordination_root, sprint_ref)
-    initial = _initial_state(sprint_ref, graph.revision, timestamp)
+    initial = initial_queue_state(sprint_ref, graph.revision, timestamp)
     # Status never rewrites state or races the task-document-owned sprint transition.
     state = store.read(initial)
     payload = _projection(topology, graph, state, "status", actor)
@@ -493,7 +502,12 @@ def _declare_candidate_under_authority(
         except RuntimeError as exc:
             raise CloseoutQueueError(
                 "closeout-candidate-parent-series-sealed",
-                str(exc),
+                bounded_queue_failure_detail(
+                    exc,
+                    stage="queue-parent-series-authority",
+                    side="contract",
+                    name="series-contract",
+                ),
             ) from exc
     existing = state.candidates.get(leaf_ref.key)
     if existing is not None:
@@ -558,7 +572,12 @@ def _declaration_identity(
     except ContractError as exc:
         raise CloseoutQueueError(
             "closeout-candidate-contract-invalid",
-            f"declare could not read the leaf contract at {path}: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-candidate-contract",
+                side="contract",
+                name="leaf-contract",
+            ),
         ) from exc
     if contract.kind != "leaf":
         raise CloseoutQueueError(
@@ -672,7 +691,13 @@ def _project_candidates(
     }
     lane_owner = _active_lane_owner(state)
     for candidate in state.candidates.values():
-        blockers = _candidate_blockers(topology, graph, candidate)
+        blocker_evidence: list[dict[str, object]] = []
+        blockers = _candidate_blockers(
+            topology,
+            graph,
+            candidate,
+            failure_evidence=blocker_evidence,
+        )
         if candidate.state != "declared":
             blockers.extend(_waiting_reasons(graph, candidate, lane_owner, state.activeBlocker))
             blockers = list(dict.fromkeys(blockers))
@@ -697,6 +722,7 @@ def _project_candidates(
             candidateState=candidate.state,
             classification=cast(Any, classification),
             reasons=reasons,
+            blockerEvidence=blocker_evidence,
             legalNextOperations=legal,
             grade=candidate.grade,
         )
@@ -769,15 +795,12 @@ def _lifecycle_operation_legal(
     if not authorized:
         return []
     observe = "worktree_closeout_apply" if kind == "closeout" else "worktree_integrate"
-    record = _owned_lifecycle_operation(candidate)
+    record = owned_candidate_lifecycle_operation(candidate)
     if record is None or record.status == "completed":
         return []
     if record.status in {"failed", "cancelled"}:
         return [] if record.irreversibleBoundaryEntered else [observe]
-    legal = [observe]
-    if not record.irreversibleBoundaryEntered:
-        legal.append("worktree_operation_cancel")
-    return legal
+    return [observe]
 
 
 def _integration_actor(
@@ -790,61 +813,29 @@ def _integration_actor(
     )
 
 
-def _owned_lifecycle_operation(candidate: CloseoutCandidateRecord) -> Any | None:
-    kind = "closeout" if candidate.state == "closeout-in-flight" else "integrate"
-    try:
-        contract = load_contract(Path(candidate.contractPath))
-        record = LifecycleOperationStore(
-            operation_record_path(contract.worktree_group, cast(Any, kind))
-        ).read()
-    except (ContractError, OSError, RuntimeError, ValidationError):
-        return None
-    if (
-        record is None
-        or record.operationKind != kind
-        or Path(record.contractPath) != Path(candidate.contractPath)
-        or operation_owner_fingerprint(record.operationKey) != candidate.inFlightOwnerFingerprint
-    ):
-        return None
-    return record
-
-
 def _candidate_blockers(
     topology: TaskDocumentTopology,
     graph: _GraphContext,
     candidate: CloseoutCandidateRecord,
+    *,
+    failure_evidence: list[dict[str, object]] | None = None,
 ) -> list[str]:
     blockers: list[str] = []
+    door_blocker = candidate_closeout_door_blocker(candidate)
+    if door_blocker is not None:
+        blockers.append(door_blocker)
     if candidate.graphRevision != graph.revision:
         blockers.append("graph-revision-stale")
     if candidate.owningMaster not in graph.masters:
         blockers.append("owning-master-no-longer-commanded")
     if candidate.state in {"closeout-in-flight", "integration-in-flight"}:
-        operation = _owned_lifecycle_operation(candidate)
+        operation = owned_candidate_lifecycle_operation(candidate)
         if operation is None:
             blockers.append("lifecycle-operation-owner-unavailable")
         elif operation.status in {"completed", "failed", "cancelled"}:
             blockers.append("lifecycle-operation-owner-terminal")
     try:
-        contract = load_contract(Path(candidate.contractPath))
-        if candidate.state in {"certified", "integration-in-flight"} or (
-            candidate.state == "closeout-in-flight" and contract.closeout_status == "completed"
-        ):
-            refreshed_memory_evidence = None
-            if candidate.state == "closeout-in-flight" and candidate.memoryMode == "external":
-                with suppress(CloseoutQueueError):
-                    refreshed_memory_evidence = curator_evidence(contract)
-            blockers.extend(
-                _post_closeout_blockers(
-                    topology,
-                    graph,
-                    candidate,
-                    contract,
-                    expected_memory_evidence=refreshed_memory_evidence,
-                )
-            )
-        else:
-            blockers.extend(_pre_closeout_blockers(topology, graph, candidate, contract))
+        blockers.extend(_live_candidate_blockers(topology, graph, candidate))
     except (
         CloseoutQueueError,
         ContractError,
@@ -856,8 +847,33 @@ def _candidate_blockers(
         ValidationError,
         ValueError,
     ) as exc:
-        blockers.append(f"candidate-revalidation-failed: {exc}")
+        blockers.append("candidate-revalidation-failed")
+        if failure_evidence is not None:
+            failure_evidence.append(queue_candidate_failure_evidence(exc))
     return list(dict.fromkeys(blockers))
+
+
+def _live_candidate_blockers(
+    topology: TaskDocumentTopology,
+    graph: _GraphContext,
+    candidate: CloseoutCandidateRecord,
+) -> list[str]:
+    contract = load_contract(Path(candidate.contractPath))
+    if candidate.state not in {"certified", "integration-in-flight"} and not (
+        candidate.state == "closeout-in-flight" and contract.closeout_status == "completed"
+    ):
+        return _pre_closeout_blockers(topology, graph, candidate, contract)
+    refreshed_memory_evidence = None
+    if candidate.state == "closeout-in-flight" and candidate.memoryMode == "external":
+        with suppress(CloseoutQueueError):
+            refreshed_memory_evidence = curator_evidence(contract)
+    return _post_closeout_blockers(
+        topology,
+        graph,
+        candidate,
+        contract,
+        expected_memory_evidence=refreshed_memory_evidence,
+    )
 
 
 def _pre_closeout_blockers(
@@ -1037,20 +1053,17 @@ def _source_and_ledger_blockers(
 def _grade_blockers(graph: _GraphContext, candidate: CloseoutCandidateRecord) -> list[str]:
     if candidate.grade is None:
         return []
-    try:
-        grade, digest, evidence = _grade(
-            SchedulingGradeInput(
-                priority=candidate.grade.priority,
-                judgmentId=candidate.grade.judgmentId,
-                urgency=candidate.grade.urgency,
-                risk=candidate.grade.risk,
-            ),
-            graph,
-            candidate.taskDocumentRef,
-            candidate.owningMaster,
-        )
-    except CloseoutQueueError as exc:
-        return [f"grade-evidence-invalid: {exc}"]
+    grade, digest, evidence = _grade(
+        SchedulingGradeInput(
+            priority=candidate.grade.priority,
+            judgmentId=candidate.grade.judgmentId,
+            urgency=candidate.grade.urgency,
+            risk=candidate.grade.risk,
+        ),
+        graph,
+        candidate.taskDocumentRef,
+        candidate.owningMaster,
+    )
     blockers = []
     if grade != candidate.grade or digest != candidate.gradeJudgmentDigest:
         blockers.append("grade-judgment-stale")
@@ -1149,7 +1162,15 @@ def _admission(raw: CandidateAdmissionFacts | None) -> CandidateAdmissionFacts:
     try:
         return CandidateAdmissionFacts.model_validate(raw or {})
     except ValidationError as exc:
-        raise CloseoutQueueError("closeout-admission-invalid", str(exc)) from exc
+        raise CloseoutQueueError(
+            "closeout-admission-invalid",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-admission-validation",
+                side="request",
+                name="candidate-admission",
+            ),
+        ) from exc
 
 
 def _required_candidate_ref(request: CloseoutQueueRequest) -> TaskDocumentRef:
@@ -1163,36 +1184,3 @@ def _candidate_or_error(
     if candidate is None:
         raise CloseoutQueueError("closeout-candidate-not-declared", candidate_ref.key)
     return candidate
-
-
-def _queue_action(value: str) -> QueueAction:
-    action = value.strip()
-    if action not in _ACTIONS:
-        raise CloseoutQueueError(
-            "closeout-queue-action-invalid", f"unsupported closeout queue action: {value!r}"
-        )
-    return cast(QueueAction, action)
-
-
-def _initial_state(
-    sprint_ref: TaskDocumentRef, graph_revision: str, timestamp: str
-) -> CloseoutQueueState:
-    return CloseoutQueueState(
-        sprintTaskDocumentRef=sprint_ref,
-        revision=0,
-        graphRevision=graph_revision,
-        candidates={},
-        activeBlocker=None,
-        appliedRequests=[],
-        updatedAt=timestamp,
-    )
-
-
-def _request_fingerprint(request: CloseoutQueueRequest, actor: QueueActor) -> str:
-    payload = {
-        "request": request.model_dump(mode="json", exclude_none=True),
-        "actor": actor.identity,
-    }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()

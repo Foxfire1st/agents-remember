@@ -40,6 +40,7 @@ TASK_DOCUMENT_STORE_OWNER = "tasks/store.py"
 TASK_DOCUMENT_WRITER_AUTHORITIES = frozenset(
     {
         "application/task_docs/task_doc_tools.py",
+        "application/task_docs/task_doc_publication.py",
         "application/task_docs/task_execution_topology.py",
         # L14 sprint↔master linkage: attach/detach publish through the same locked,
         # queue-guarded write_task_doc_batch boundary as the graph-authoring authority.
@@ -47,7 +48,6 @@ TASK_DOCUMENT_WRITER_AUTHORITIES = frozenset(
         TASK_DOCUMENT_STORE_OWNER,
         "worktrees/modules/finalize.py",
         "worktrees/modules/start.py",
-        "worktrees/integration/organizational_completion.py",
         "worktrees/reopen.py",
     }
 )

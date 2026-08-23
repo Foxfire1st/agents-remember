@@ -82,7 +82,7 @@ def _overlay_proven_cells(
 
 def require_closeout_recovery_projection(record: LifecycleOperationRecord) -> None:
     """Require every proven mutation to appear in the same durable record snapshot."""
-    if record.operationKind != "closeout":
+    if record.operationKind not in {"closeout", "direct-landing"}:
         return
     projected = derive_closeout_recovery_commits(record)
     if projected != record.recoveryCommits:
@@ -100,7 +100,7 @@ def closeout_generation_retained(record: LifecycleOperationRecord) -> bool:
     retain a generation.
     """
 
-    if closeout_requires_recovery(record):
+    if record.legacyMigration is not None or closeout_requires_recovery(record):
         return True
     return _has_exact_finalization_evidence(record)
 

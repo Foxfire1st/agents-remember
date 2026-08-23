@@ -68,6 +68,9 @@ from agents_remember.serving.served_state import (
     ServedWorkspaceProjection,
     served_state_tail,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     ContractTask,
@@ -132,6 +135,10 @@ def _write_enclosure(root: Path, worktree_name: str, *, landed: bool) -> None:
             ),
         )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract.contract_path.read_text(encoding="utf-8"),
+    )
 
 
 def _populate(root: Path) -> None:

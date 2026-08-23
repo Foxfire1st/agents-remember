@@ -25,9 +25,12 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_lease import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
     contract_lifecycle_lease,
     require_lifecycle_operation_compatible,
+)
+from agents_remember.worktrees.integration.terminal_enclosure_archive import (
+    terminal_archive_required_result,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
@@ -83,6 +86,13 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    archive_refusal = terminal_archive_required_result(
+        contract,
+        operation="worktree_abandon",
+        dry_run=args.dry_run,
+    )
+    if archive_refusal.returncode != 0:
+        return archive_refusal
     if contract.kind == "series":
         require_atomic_series_terminal_release(contract)
     require_terminal_worktree(contract, operation="worktree_abandon")
@@ -163,7 +173,11 @@ def _abandon_with_guard(
 ) -> WorktreeCommandResult:
     try:
         with contract_lifecycle_lease(contract):
-            require_lifecycle_operation_compatible(contract, operation_kind=None)
+            require_lifecycle_operation_compatible(
+                contract,
+                operation_kind=None,
+                publish_worker_exits=not args.dry_run,
+            )
 
             def publish(
                 series_permit: AtomicSeriesTerminalPermit | None = None,

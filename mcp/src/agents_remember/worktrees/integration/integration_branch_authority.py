@@ -792,7 +792,7 @@ def _require_live_leaf_task_identity(
         path=resolved_leaf_path.relative_to(repository_task_root).as_posix(),
     )
     try:
-        document = topology.resolve_candidate(leaf_ref, overrides).document
+        document = topology.resolve(leaf_ref, overrides).document
     except TaskDocumentRefError as exc:
         raise RuntimeError(
             "task topology publication refused: live leaf task document authority is "

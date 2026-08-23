@@ -15,10 +15,17 @@ from agents_remember.worktrees.worktree_contract import (
     amend_contract,
     write_contract,
 )
-from test_cleanup_carryover import CitationCacheLifecycleTests
+from test_cleanup_carryover import (
+    CitationCacheLifecycleTests,
+    _allow_terminal_archive_for_downstream_unit,
+)
 
 
 class CitationCacheLifecycleTests1(CitationCacheLifecycleTests):
+    def setUp(self) -> None:
+        super().setUp()
+        _allow_terminal_archive_for_downstream_unit(self)
+
     def test_cleanup_dirty_refusal_leaves_cache_intact(self) -> None:
         contract = self.contract("dirty-cleanup")
         cache = self.cache(contract)

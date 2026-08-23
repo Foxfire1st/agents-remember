@@ -13,8 +13,8 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import start as start_module
-from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.startup import start_contract
 from integration_branch_authority_test_support import _authority_fixture
 
 

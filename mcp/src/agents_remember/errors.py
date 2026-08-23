@@ -9,6 +9,9 @@ catch) the typed members of this family rather than bare ``ValueError`` /
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Literal
+
 
 class AgentsRememberError(ValueError):
     """Base class for all Agents Remember domain errors."""
@@ -21,6 +24,51 @@ class AuthorityError(AgentsRememberError):
     path that escapes the coordinator root. Centralizing this means every
     application entry point reports the same boundary violation the same way.
     """
+
+
+class ConfiguredContractAuthorityError(AgentsRememberError):
+    """A readable task contract contradicts configured repository authority.
+
+    The exception identifies the bounded authority cell that failed without
+    carrying repository paths or lower backend diagnostics into public results.
+    """
+
+    def __init__(self, *, side: str, name: str) -> None:
+        self.side = side
+        self.name = name
+        super().__init__("configured contract authority does not match")
+
+
+ConfiguredContractRereadReason = Literal[
+    "location-invalid",
+    "contract-unreadable",
+    "authority-invalid",
+]
+
+
+class ConfiguredContractRereadError(AgentsRememberError):
+    """A mutation boundary could not re-prove current configured-contract truth.
+
+    The value contains only the finite semantic classification and bounded
+    public evidence assembled by the domain authority owner. The lower
+    exception remains available only through ordinary exception chaining.
+    """
+
+    def __init__(
+        self,
+        *,
+        reason: ConfiguredContractRereadReason,
+        status: str,
+        detail: str,
+        expected: Mapping[str, object],
+        observed: Mapping[str, object],
+    ) -> None:
+        self.reason = reason
+        self.status = status
+        self.detail = detail
+        self.expected = dict(expected)
+        self.observed = dict(observed)
+        super().__init__(detail)
 
 
 class RouteIndexCensusError(AgentsRememberError):

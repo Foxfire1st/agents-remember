@@ -1163,9 +1163,15 @@
         "elapsedSeconds": 12,
         "failure": "fixture failure",
         "finishedAt": "2026-08-12T12:00:12+00:00",
+        "generation": 1,
         "guidance": "Fix the reported preflight failure, then restart this task operation.",
         "heartbeatAt": "2026-08-12T12:00:10+00:00",
         "kind": "closeout",
+        "legalControls": [
+          {
+            "action": "recover"
+          }
+        ],
         "phase": "failed",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "result": {
@@ -1197,6 +1203,7 @@
         "currentCommand": "queued",
         "elapsedSeconds": 0,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "queued",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "queued"
@@ -1224,6 +1231,7 @@
         "currentCommand": "preflight",
         "elapsedSeconds": 1,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "preflight",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1251,6 +1259,7 @@
         "currentCommand": "memory preflight",
         "elapsedSeconds": 2,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "memory-preflight",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1278,6 +1287,7 @@
         "currentCommand": "quality",
         "elapsedSeconds": 3,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "quality",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1305,6 +1315,7 @@
         "currentCommand": "approval claim",
         "elapsedSeconds": 4,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "approval-claim",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1332,6 +1343,7 @@
         "currentCommand": "recovering approval",
         "elapsedSeconds": 5,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "recovering-after-claim",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "input-required"
@@ -1359,6 +1371,7 @@
         "currentCommand": "code commit",
         "elapsedSeconds": 6,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "code-commit",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1386,6 +1399,7 @@
         "currentCommand": "memory refresh",
         "elapsedSeconds": 7,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "memory-refresh",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1413,6 +1427,7 @@
         "currentCommand": "memory commit",
         "elapsedSeconds": 8,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "memory-commit",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1440,6 +1455,7 @@
         "currentCommand": "ledger commit",
         "elapsedSeconds": 9,
         "kind": "closeout",
+        "legalControls": [],
         "phase": "ledger-commit",
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
@@ -1467,6 +1483,7 @@
         "currentCommand": "integration replay",
         "elapsedSeconds": 10,
         "kind": "integrate",
+        "legalControls": [],
         "phase": "integration-replay",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "running"
@@ -1494,6 +1511,7 @@
         "currentCommand": "integration quality",
         "elapsedSeconds": 11,
         "kind": "integrate",
+        "legalControls": [],
         "phase": "integration-quality",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "running"
@@ -1521,6 +1539,7 @@
         "currentCommand": "source merge",
         "elapsedSeconds": 12,
         "kind": "integrate",
+        "legalControls": [],
         "phase": "source-merge",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "running"
@@ -1548,6 +1567,7 @@
         "currentCommand": "contract finalization",
         "elapsedSeconds": 13,
         "kind": "integrate",
+        "legalControls": [],
         "phase": "contract-finalization",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "input-required"
@@ -1575,6 +1595,7 @@
         "currentCommand": "completed",
         "elapsedSeconds": 14,
         "kind": "integrate",
+        "legalControls": [],
         "phase": "completed",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "completed"
@@ -1602,6 +1623,7 @@
         "currentCommand": "cancelled",
         "elapsedSeconds": 15,
         "kind": "integrate",
+        "legalControls": [],
         "phase": "cancelled",
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "cancelled"

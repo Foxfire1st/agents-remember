@@ -16,6 +16,7 @@ from typing import TypeVar, cast, get_args
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.worktree import (
     CleanupStatus,
     CloseoutStatus,
@@ -272,6 +273,8 @@ class WorktreeContract:
     # Empty means this contract has never crossed the explicit L3 queue boundary.
     queue_sprint_task_document: str = ""
     queue_candidate_task_document: str = ""
+    # Durable declaration/disposition authority. Queue membership is derived elsewhere.
+    closeout_door: CloseoutDoorGeneration | None = None
     # The lifecycle this enclosure anchors (design §1.1): written by worktree_start
     # promotion, read by worktree_attach to resume. Additive on schema v1 -- old
     # contracts parse to "" (the v2 schema flip is the deliberate 3.0 cutover).
@@ -635,6 +638,17 @@ def _parse_sync_log(value: str) -> tuple[dict[str, str], ...]:
     return tuple(entry for entry in entries if isinstance(entry, dict))
 
 
+def _parse_closeout_door(value: str, contract_path: Path) -> CloseoutDoorGeneration | None:
+    if not value:
+        return None
+    try:
+        return CloseoutDoorGeneration.model_validate(json.loads(value))
+    except (json.JSONDecodeError, ValueError) as error:
+        raise ContractError(
+            f"invalid contract-owned closeout door (in {contract_path}): {error}"
+        ) from error
+
+
 def _human_review_lines(contract: WorktreeContract, approved: str) -> list[str]:
     lines = [
         "human_review:",
@@ -725,6 +739,13 @@ def contract_to_text(contract: WorktreeContract) -> str:
         lines.append(f"  queue_sprint_task_document: {contract.queue_sprint_task_document}")
     if contract.queue_candidate_task_document:
         lines.append(f"  queue_candidate_task_document: {contract.queue_candidate_task_document}")
+    if contract.closeout_door is not None:
+        encoded_door = json.dumps(
+            contract.closeout_door.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        lines.append(f"  closeout_door: {encoded_door}")
     lines.extend(
         [
             "",
@@ -1055,6 +1076,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),
         queue_sprint_task_document=coordination.get("queue_sprint_task_document", ""),
         queue_candidate_task_document=coordination.get("queue_candidate_task_document", ""),
+        closeout_door=_parse_closeout_door(coordination.get("closeout_door", ""), contract_path),
         lifecycle_id=lifecycle.get("id", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),
     )

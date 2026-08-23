@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
@@ -21,7 +20,7 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.queue.closeout_queue import (
     CloseoutQueueState,
     SchedulingGradeInput,
@@ -34,6 +33,9 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     CloseoutQueueRequest,
@@ -44,7 +46,6 @@ from agents_remember.worktrees.queue.closeout_queue import (
 )
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     claim_queue_candidate_for_closeout,
-    release_queue_candidate_after_reversible_operation,
 )
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
@@ -52,6 +53,7 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     default_series_contract,
     load_contract,
@@ -88,16 +90,6 @@ PRIORITY_SEPARATOR = (
     "| ---------------- | ------------------------------------ | ------------------- | "
     "----------- |"
 )
-
-
-def _config(root: Path, code: Path, memory: Path | None) -> McpRuntimeConfig:
-    return cast(
-        McpRuntimeConfig,
-        SimpleNamespace(
-            coordination_root=root,
-            repositories={REPO: RepositoryScope(REPO, code, memory)},
-        ),
-    )
 
 
 def _master(
@@ -347,14 +339,7 @@ class QueueFixture:
             ),
         )
         (self.tasks / "sprint" / "grade.md").write_text("# Grade\n", encoding="utf-8")
-        configured_memory = (
-            self.memory
-            if memory_mode == "external"
-            else self.code / "ar-memory"
-            if memory_mode == "internal"
-            else None
-        )
-        self.cfg = _config(self.coord, self.code, configured_memory)
+        self.cfg = load_config(self.config_path)
         self.request_number = 0
         self.request_revisions: dict[str, int] = {}
 
@@ -397,9 +382,14 @@ class QueueFixture:
             ),
             memory=memory_plan,
         )
-        write_contract(
-            parent.contract_path,
-            parent if atomic else replace(parent, cleanup="completed"),
+        published_parent = parent if atomic else replace(parent, cleanup="completed")
+        write_contract(parent.contract_path, published_parent)
+        publish_new_lifecycle_operation_location(
+            published_parent,
+            contract_text=contract_publication_text(
+                published_parent.contract_path,
+                published_parent,
+            ),
         )
         contract = default_contract(
             task,
@@ -445,6 +435,10 @@ class QueueFixture:
             _write_curator_evidence(contract)
         write_task_doc(contract.task_root, _leaf(contract, leaf_id.lower()))
         write_contract(contract.contract_path, contract)
+        publish_new_lifecycle_operation_location(
+            contract,
+            contract_text=contract_publication_text(contract.contract_path, contract),
+        )
         return contract
 
     def next_request_id(self, prefix: str = "request") -> str:
@@ -579,7 +573,10 @@ class QueueFixture:
         )
 
     def close_contract(self, master: TaskDocumentRef) -> WorktreeContract:
-        contract = self.contracts[master]
+        # Closeout admission publishes its claimed door before the worker starts.
+        # Always finalize from those current contract bytes rather than the
+        # fixture's pre-admission snapshot, or the fixture would erase the door.
+        contract = load_contract(self.contracts[master].contract_path)
         assert contract.memory_worktree is not None
         assert contract.ledger_path is not None
         git(contract.code_worktree, "add", "-A")
@@ -862,30 +859,6 @@ class CloseoutQueueTests(unittest.TestCase):
         fixture.replace_section_body(JUDGMENT_HEADING, "\n".join(rows))
         with self.assertRaisesRegex(CloseoutQueueError, "urgency"):
             fixture.declare(MASTER_A)
-
-    def test_in_flight_candidate_is_immutable_and_owned_release_is_exact(self) -> None:
-        fixture = QueueFixture(Path(self.temp.name))
-        fixture.declare(MASTER_A)
-        fixture.mutate("select", candidate=LEAF_A)
-        for action, values in (
-            ("withdraw", {}),
-            ("set-grade", {"grade": _grade("low", LEAF_A)}),
-            ("set-admission", {"admission": {}}),
-        ):
-            with self.subTest(action=action), self.assertRaisesRegex(CloseoutQueueError, "frozen"):
-                fixture.mutate(action, candidate=LEAF_A, **values)
-        with self.assertRaisesRegex(CloseoutQueueError, "existing candidate"):
-            fixture.declare(MASTER_A)
-        key = "a" * 64
-        claim_queue_candidate_for_closeout(fixture.contracts[MASTER_A], key)
-        with self.assertRaisesRegex(CloseoutQueueError, "task-addressed cancellation"):
-            fixture.mutate("release-selection", candidate=LEAF_A)
-        release_queue_candidate_after_reversible_operation(
-            fixture.contracts[MASTER_A],
-            operation_key=key,
-            operation_kind="closeout",
-        )
-        self.assertEqual(fixture.status()["ready"][0]["candidateState"], "declared")
 
     def test_declaration_refuses_incomplete_task_and_non_authoritative_curator_file(self) -> None:
         fixture = QueueFixture(Path(self.temp.name))

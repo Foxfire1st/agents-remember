@@ -22,12 +22,12 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.integration import integration_branch_authority as authority
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.start_contract import (
+from agents_remember.worktrees.modules.startup.start_contract import (
     _commanding_sprint_document,
     _declared_integration_source_branch,
     _parent_series_contract,
 )
-from agents_remember.worktrees.modules.start_result import started_result
+from agents_remember.worktrees.modules.startup.start_result import started_result
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     require_atomic_series_terminal_release,
 )

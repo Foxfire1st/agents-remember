@@ -35,7 +35,11 @@ from .closeout_queue_candidate_evidence import (
     require_atomic_master_landed,
     require_source_bases_current,
 )
-from .closeout_queue_errors import CloseoutQueueError, queue_task_ref
+from .closeout_queue_errors import (
+    CloseoutQueueError,
+    bounded_queue_failure_detail,
+    queue_task_ref,
+)
 from .closeout_queue_evidence import canonical_blocker_abort
 from .closeout_queue_graph import (
     QueueGraphContext,
@@ -74,7 +78,12 @@ def _require_unsealed_blocker_series(master: ResolvedTaskDocument) -> WorktreeCo
     except RuntimeError as exc:
         raise CloseoutQueueError(
             "atomic-blocker-series-sealed",
-            str(exc),
+            bounded_queue_failure_detail(
+                exc,
+                stage="atomic-blocker-series-authority",
+                side="contract",
+                name="series-contract",
+            ),
         ) from exc
 
 

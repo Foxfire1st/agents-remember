@@ -18,7 +18,6 @@ from pydantic import (
 )
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -29,6 +28,7 @@ from agents_remember.tasks import (
     SprintExecutionGraph,
     SprintExecutionNode,
     SprintGraphTitles,
+    TaskDocSourceSnapshot,
     TaskDocument,
     build_graph_titles,
     completion_blockers,
@@ -37,7 +37,7 @@ from agents_remember.tasks import (
     markdown_path_for,
     numbering_drift_hints,
     read_graph_titles,
-    read_task_doc,
+    read_task_doc_with_source,
     render_markdown,
     resolve_graph_endpoint,
     write_task_doc_batch,
@@ -60,6 +60,8 @@ from agents_remember.worktrees.queue.closeout_queue_evidence import (
     JUDGMENT_REGISTER_SECTION,
     planning_authorities,
 )
+
+from .task_doc_queue_scope import QueuePublicationScope
 
 
 class ExecutionTopologyError(AgentsRememberError):
@@ -187,7 +189,19 @@ class _AuthoringCandidate:
     sprint: TaskDocument
     overrides: dict[TaskDocumentRef, TaskDocument]
     documents: list[tuple[TaskDocumentRef, Path, TaskDocument]]
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...]
     placement_facts: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _AuthoringSource:
+    """Exact sprint/topology source accepted before graph candidate construction."""
+
+    topology: TaskDocumentTopology
+    sprint_ref: TaskDocumentRef
+    sprint: TaskDocument
+    task_root: Path
+    sprint_source: TaskDocSourceSnapshot
 
 
 def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[str, Any]:
@@ -215,7 +229,7 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
     except ValidationError as exc:
         raise ExecutionTopologyError(f"invalid execution-graph authoring: {exc}") from exc
     sprint_path = _existing_json(request.task_root, request.slug)
-    sprint = read_task_doc(sprint_path)
+    sprint, sprint_source = read_task_doc_with_source(sprint_path)
     if sprint.kind != "master" or not sprint.orchestrates:
         raise ExecutionTopologyError(
             "author_execution_graph requires an orchestration sprint document"
@@ -227,10 +241,13 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
         raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
     _verify_authoring_judgments(topology, sprint_ref, authoring.mutations)
     prepared = _prepare_authoring(
-        topology,
-        sprint_ref,
-        sprint,
-        request.task_root,
+        _AuthoringSource(
+            topology=topology,
+            sprint_ref=sprint_ref,
+            sprint=sprint,
+            task_root=request.task_root,
+            sprint_source=sprint_source,
+        ),
         authoring,
     )
     result: dict[str, Any] = {
@@ -250,8 +267,13 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
         "numberingHints": numbering_drift_hints(prepared.graph),
     }
     if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id, create=False):
-            _require_authoring_publication_authority(request, prepared.overrides)
+        from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
+            validate_task_doc_transaction,
+        )
+
+        validate_task_doc_transaction(
+            _authoring_transaction(request, sprint_ref, prepared, lambda: [])
+        )
         result["dryRun"] = True
         result["documents"] = [
             _document_preview(ref, root, document) for ref, root, document in prepared.documents
@@ -262,12 +284,12 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
 
 
 def _prepare_authoring(
-    topology: TaskDocumentTopology,
-    sprint_ref: TaskDocumentRef,
-    sprint: TaskDocument,
-    task_root: Path,
+    source: _AuthoringSource,
     authoring: _ExecutionGraphAuthoring,
 ) -> _AuthoringCandidate:
+    topology = source.topology
+    sprint_ref = source.sprint_ref
+    sprint = source.sprint
     graph = sprint.executionGraph
     if graph is None:
         # Bootstrap seam (L13): no prior graph, so commanded membership comes from the
@@ -296,16 +318,23 @@ def _prepare_authoring(
     candidate_sprint = TaskDocument.model_validate(sprint_data)
     overrides: dict[TaskDocumentRef, TaskDocument] = {sprint_ref: candidate_sprint}
     documents: list[tuple[TaskDocumentRef, Path, TaskDocument]] = [
-        (sprint_ref, task_root, candidate_sprint)
+        (sprint_ref, source.task_root, candidate_sprint)
     ]
+    source_snapshots = [source.sprint_source]
     for ref, nature in draft.natures.items():
         # `ref` passed the commanded-membership check in _apply_set_nature, so it resolves.
         resolved = topology.resolve(ref)
-        data = resolved.document.model_dump(by_alias=True)
+        document, source_snapshot = read_task_doc_with_source(resolved.path)
+        if document.repo != ref.repository:
+            raise ExecutionTopologyError(
+                f"task-document-repo-mismatch: {ref.key} changed repository identity"
+            )
+        data = document.model_dump(by_alias=True)
         data["executionNature"] = nature
         candidate = TaskDocument.model_validate(data)
         overrides[ref] = candidate
         documents.append((ref, resolved.path.parent, candidate))
+        source_snapshots.append(source_snapshot)
     _validate_topology(topology, sprint_ref, overrides)
     _require_complete_partitions(topology, sprint_ref, overrides)
     return _AuthoringCandidate(
@@ -313,6 +342,7 @@ def _prepare_authoring(
         sprint=candidate_sprint,
         overrides=overrides,
         documents=documents,
+        source_snapshots=tuple(source_snapshots),
         placement_facts=_authoring_placement_facts(topology, sprint_ref, overrides),
     )
 
@@ -336,12 +366,21 @@ def _publish_authoring(
     prepared: _AuthoringCandidate,
 ) -> list[dict[str, Any]]:
     def publication() -> list[tuple[Path, Path]]:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
-            _require_authoring_publication_authority(request, prepared.overrides)
-            return write_task_doc_batch(
-                [(root, document) for _ref, root, document in prepared.documents],
-                graph_titles=_authoring_batch_titles(prepared.documents),
+        from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
+            publish_task_doc_transaction,
+        )
+
+        return publish_task_doc_transaction(
+            _authoring_transaction(
+                request,
+                sprint_ref,
+                prepared,
+                lambda: write_task_doc_batch(
+                    [(root, document) for _ref, root, document in prepared.documents],
+                    graph_titles=_authoring_batch_titles(prepared.documents),
+                ),
             )
+        )
 
     queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
     written = queue.publish_sprint_update(
@@ -364,6 +403,21 @@ def _publish_authoring(
             prepared.documents, written, strict=True
         )
     ]
+
+
+def _authoring_transaction(request, sprint_ref, prepared, publisher):
+    from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
+        TaskDocPublicationTransaction,
+    )
+
+    return TaskDocPublicationTransaction(
+        request.coordination_root,
+        request.repo_id,
+        prepared.source_snapshots,
+        QueuePublicationScope(sprint_ref, None),
+        lambda: _require_authoring_publication_authority(request, prepared.overrides),
+        publisher,
+    )
 
 
 def _verify_authoring_judgments(
@@ -803,7 +857,7 @@ def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> No
             )
         )
         for sprint_ref in sorted(sprint_refs, key=lambda item: item.key):
-            sprint = topology.resolve_candidate(sprint_ref, overrides)
+            sprint = topology.resolve(sprint_ref, overrides)
             if sprint.document.executionGraph is None:
                 # The atomic-sequential default (L13-R1): a graph-less sprint has no
                 # topology contract to validate; the series lane serializes masters.

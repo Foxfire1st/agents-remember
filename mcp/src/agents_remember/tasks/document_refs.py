@@ -6,7 +6,7 @@ but it never decides who a seat's parent or child is.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -22,7 +22,10 @@ from agents_remember.tasks.document import (
     TaskDocument,
     derived_leaf_placement,
 )
-from agents_remember.tasks.store import read_task_doc
+from agents_remember.tasks.store import (
+    TaskDocSourceSnapshot,
+    read_task_doc_with_source,
+)
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
 
@@ -82,23 +85,55 @@ class MasterLeafPlacement:
 class TaskDocumentTopology:
     """Read-only resolver for one coordination root's canonical task hierarchy."""
 
-    def __init__(self, coordination_root: Path) -> None:
+    def __init__(
+        self,
+        coordination_root: Path,
+        *,
+        accepted_sources: Sequence[TaskDocSourceSnapshot] = (),
+        source_observer: Callable[[TaskDocSourceSnapshot], None] | None = None,
+    ) -> None:
         self.coordination_root = coordination_root.resolve()
+        self._accepted_sources = {
+            source.json_path.resolve(strict=False): source for source in accepted_sources
+        }
+        self._source_observer = source_observer
 
-    def resolve(self, ref: TaskDocumentRef) -> ResolvedTaskDocument:
-        root = self._repo_root(ref.repository)
-        path = (root / ref.path).resolve(strict=False)
-        if not path.is_relative_to(root):
-            raise TaskDocumentRefError(
-                "task-document-outside-root",
-                f"task document {ref.path!r} escapes tasks/{ref.repository}",
-            )
-        if not path.is_file():
+    def resolve(
+        self,
+        ref: TaskDocumentRef,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> ResolvedTaskDocument:
+        if overrides is not None and (document := overrides.get(ref)) is not None:
+            root = self._repo_root(ref.repository)
+            path = (root / ref.path).resolve(strict=False)
+            if not path.is_relative_to(root):
+                raise TaskDocumentRefError(
+                    "task-document-outside-root",
+                    f"task document {ref.path!r} escapes tasks/{ref.repository}",
+                )
+            if document.repo != ref.repository:
+                raise TaskDocumentRefError(
+                    "task-document-repo-mismatch",
+                    f"task document {ref.key} declares repo {document.repo!r}",
+                )
+            return ResolvedTaskDocument(ref=ref, path=path, document=document)
+        path = self.path_for_ref(ref)
+        source = self._accepted_sources.get(path)
+        if (source is None and not path.is_file()) or (
+            source is not None and source.json_bytes is None
+        ):
             raise TaskDocumentRefError(
                 "task-document-not-found", f"task document does not exist: {path}"
             )
         try:
-            document = read_task_doc(path)
+            if source is None:
+                document, source = read_task_doc_with_source(path)
+                self._accepted_sources[path] = source
+                if self._source_observer is not None:
+                    self._source_observer(source)
+            else:
+                assert source.json_bytes is not None
+                document = TaskDocument.model_validate_json(source.json_bytes)
         except (OSError, ValueError) as exc:
             raise TaskDocumentRefError(
                 "task-document-invalid", f"cannot read task document {path}: {exc}"
@@ -109,6 +144,18 @@ class TaskDocumentTopology:
                 f"task document {path} declares repo {document.repo!r}, expected {ref.repository!r}",
             )
         return ResolvedTaskDocument(ref=ref, path=path, document=document)
+
+    def path_for_ref(self, ref: TaskDocumentRef) -> Path:
+        """Return the exact confined JSON path without requiring it to exist."""
+
+        root = self._repo_root(ref.repository)
+        path = (root / ref.path).resolve(strict=False)
+        if not path.is_relative_to(root):
+            raise TaskDocumentRefError(
+                "task-document-outside-root",
+                f"task document {ref.path!r} escapes tasks/{ref.repository}",
+            )
+        return path
 
     def canonical_ref(self, repository: str, path: str | Path) -> TaskDocumentRef:
         """Confine an absolute or repository-relative path and return its canonical reference."""
@@ -265,7 +312,7 @@ class TaskDocumentTopology:
         """
 
         candidates = overrides or {}
-        sprint = self._resolve_with_overrides(sprint_ref, candidates)
+        sprint = self.resolve(sprint_ref, candidates)
         if sprint.document.kind != "master" or not sprint.document.orchestrates:
             raise TaskDocumentRefError(
                 "task-execution-graph-sprint-required",
@@ -318,7 +365,7 @@ class TaskDocumentTopology:
         """
 
         candidates = overrides or {}
-        sprint = self._resolve_with_overrides(sprint_ref, candidates)
+        sprint = self.resolve(sprint_ref, candidates)
         linked = [row for row in sprint.document.subTasks if row.masterRef is not None]
         if not linked:
             return
@@ -335,7 +382,7 @@ class TaskDocumentTopology:
                     "task-sprint-linkage-cross-repo",
                     f"row {row.number!r} links outside the sprint repository: {ref.key}",
                 )
-            resolved = self._resolve_with_overrides(ref, candidates)
+            resolved = self.resolve(ref, candidates)
             if resolved.document.kind != "master" or resolved.document.orchestrates:
                 raise TaskDocumentRefError(
                     "task-sprint-linkage-target-not-a-master",
@@ -369,7 +416,7 @@ class TaskDocumentTopology:
 
         candidates = overrides or {}
         masters = self.validate_execution_topology(sprint_ref, overrides=overrides)
-        sprint = self._resolve_with_overrides(sprint_ref, candidates)
+        sprint = self.resolve(sprint_ref, candidates)
         graph = sprint.document.executionGraph
         if graph is None:  # pragma: no cover - validate_execution_topology already refused
             raise TaskDocumentRefError(
@@ -429,39 +476,8 @@ class TaskDocumentTopology:
 
         return self._master_documents(repository)
 
-    def resolve_candidate(
-        self,
-        ref: TaskDocumentRef,
-        overrides: Mapping[TaskDocumentRef, TaskDocument],
-    ) -> ResolvedTaskDocument:
-        """Resolve one published-or-proposed document through the canonical authority."""
-
-        return self._resolve_with_overrides(ref, overrides)
-
     def _repo_root(self, repository: str) -> Path:
         return (self.coordination_root / "tasks" / repository).resolve(strict=False)
-
-    def _resolve_with_overrides(
-        self,
-        ref: TaskDocumentRef,
-        overrides: Mapping[TaskDocumentRef, TaskDocument],
-    ) -> ResolvedTaskDocument:
-        document = overrides.get(ref)
-        if document is None:
-            return self.resolve(ref)
-        root = self._repo_root(ref.repository)
-        path = (root / ref.path).resolve(strict=False)
-        if not path.is_relative_to(root):
-            raise TaskDocumentRefError(
-                "task-document-outside-root",
-                f"task document {ref.path!r} escapes tasks/{ref.repository}",
-            )
-        if document.repo != ref.repository:
-            raise TaskDocumentRefError(
-                "task-document-repo-mismatch",
-                f"task document {ref.key} declares repo {document.repo!r}",
-            )
-        return ResolvedTaskDocument(ref=ref, path=path, document=document)
 
     def _leaf_parent(self, leaf: ResolvedTaskDocument) -> ResolvedTaskDocument:
         parent_path = leaf.path.parent / "task.json"
@@ -531,7 +547,7 @@ class TaskDocumentTopology:
         overrides: Mapping[TaskDocumentRef, TaskDocument],
     ) -> tuple[ResolvedTaskDocument, ...]:
         available = {
-            candidate.ref: self._resolve_with_overrides(candidate.ref, overrides)
+            candidate.ref: self.resolve(candidate.ref, overrides)
             for candidate in self._master_documents(sprint.ref.repository)
             if candidate.ref != sprint.ref
         }
@@ -541,7 +557,7 @@ class TaskDocumentTopology:
                 and ref != sprint.ref
                 and document.kind == "master"
             ):
-                available[ref] = self._resolve_with_overrides(ref, overrides)
+                available[ref] = self.resolve(ref, overrides)
         resolved: list[ResolvedTaskDocument] = []
         for commanded_name in sprint.document.orchestrates:
             matches = [

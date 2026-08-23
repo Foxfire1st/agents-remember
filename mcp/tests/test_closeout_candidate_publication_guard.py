@@ -62,4 +62,4 @@ def test_closeout_candidate_publication_rechecks_the_contract(tmp_path: Path) ->
         ),
         pytest.raises(RuntimeError, match="changed before candidate commit"),
     ):
-        closeout.closeout_result(args)
+        closeout.closeout_result(args, contract)

@@ -7,21 +7,31 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
-from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
+from agents_remember.models.lifecycles.mutation_evidence import (
+    CloseoutMutationLeg,
+    GitMutationSnapshot,
+)
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
+    IntegrationPublicationIntent,
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_generation_resume import (
+    requeued_same_generation,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
+    LifecycleControlError,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationReadError,
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
-    cancel_operation,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
 from agents_remember.worktrees.modules.git import head_commit
@@ -33,6 +43,7 @@ from closeout_input_test_support import (
     with_commit_proven,
     with_mutation_intent,
 )
+from lifecycle_control_test_support import cancel_current_generation
 from pydantic import ValidationError
 from test_closeout_queue import MASTER_A
 from test_lifecycle_operations import _contract, _integration_ready
@@ -65,43 +76,67 @@ def _snapshot(seed: str) -> GitMutationSnapshot:
     )
 
 
+def _proven_publication(operation_key: str, *, transferred_at: str) -> dict[str, object]:
+    return {
+        "operationKey": operation_key,
+        "generation": 1,
+        "preparedAt": "2026-08-23T00:00:00+00:00",
+        "claimState": "proven",
+        "claimTransferredAt": transferred_at,
+        "queueSprintTaskDocument": "tasks/repo/sprint/task.md",
+        "queueCandidateTaskDocument": "tasks/repo/leaf/task.md",
+        "queueCandidateSha256": "1" * 64,
+        "closeoutDoorGenerationId": "2" * 64,
+        "closeoutOperationFingerprint": "3" * 64,
+        "closeoutOperationKey": "4" * 64,
+    }
+
+
+def test_proven_integration_claim_timestamp_is_nonempty_and_strictly_read(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        IntegrationPublicationIntent.model_validate(
+            _proven_publication("5" * 64, transferred_at="")
+        )
+
+    contract = _integration_ready(_contract(tmp_path))
+    operation_input = IntegrateOperationInput(
+        configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
+        contractPath=contract.contract_path.as_posix(),
+    )
+    start_or_observe_operation(operation_input, contract, launcher=lambda *_: None)
+    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
+    authority = payload["integrationAuthority"]
+    payload["recoveryCommits"] = {
+        "codeCommit": authority["codeCandidateCommit"],
+        "memoryContentCommit": authority["memoryContentCommit"],
+        "ledgerCommit": authority["ledgerCommit"],
+    }
+    payload["integrationPublication"] = _proven_publication(
+        payload["operationKey"], transferred_at=""
+    )
+    store.path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(LifecycleOperationReadError) as raised:
+        store.read()
+    assert raised.value.error_type == "ValidationError"
+
+
 def test_store_reads_one_schema_and_revalidates_every_update(tmp_path: Path) -> None:
     _contract_value, store = _closeout_store(tmp_path)
     payload = json.loads(store.path.read_text(encoding="utf-8"))
     payload["agentSelectedJobId"] = "forbidden"
     store.path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(RuntimeError, match="invalid lifecycle operation record"):
+    with pytest.raises(LifecycleOperationReadError) as raised:
         store.read()
+    assert raised.value.side == "current"
+    assert raised.value.error_type == "ValidationError"
+    assert store.path.as_posix() not in str(raised.value)
 
     _contract_value, store = _closeout_store(tmp_path / "invalid-status")
     with pytest.raises(ValidationError):
         store.update(lambda record: record.model_copy(update={"status": "willy-nilly"}))
-
-
-def test_recovery_claim_is_single_writer_and_preserves_durable_input(tmp_path: Path) -> None:
-    _contract_value, store = _closeout_store(tmp_path)
-    store.update(
-        lambda record: record.model_copy(
-            update={"status": "failed", "phase": "failed", "finishedAt": "2026-08-22T00:00Z"}
-        )
-    )
-
-    def requeue(record):
-        return record.model_copy(
-            update={"status": "queued", "phase": "queued", "attempt": record.attempt + 1}
-        )
-
-    first, claimed = store.replace_for_recovery(requeue, expected_attempt=1)
-    observed, duplicated = store.replace_for_recovery(requeue, expected_attempt=1)
-    assert first.attempt == observed.attempt == 2
-    assert claimed is True and duplicated is False
-    with pytest.raises(RuntimeError, match="cannot change durable input"):
-        store.replace_for_recovery(
-            lambda record: record.model_copy(
-                update={"input": record.input.model_copy(update={"approvalNote": "changed"})}
-            ),
-            expected_attempt=2,
-        )
 
 
 def test_store_replacement_and_recovery_require_valid_terminal_identity(tmp_path: Path) -> None:
@@ -110,12 +145,6 @@ def test_store_replacement_and_recovery_require_valid_terminal_identity(tmp_path
     assert current is not None
     with pytest.raises(RuntimeError, match="active lifecycle operation"):
         store.replace_terminal(current)
-    with pytest.raises(RuntimeError, match="cannot change its fingerprint"):
-        store.replace_for_recovery(
-            lambda record: record.model_copy(update={"fingerprint": "c" * 64}),
-            expected_attempt=1,
-        )
-
     store.update(
         lambda record: record.model_copy(
             update={"status": "failed", "phase": "failed", "finishedAt": "2026-08-22T00:00Z"}
@@ -124,22 +153,7 @@ def test_store_replacement_and_recovery_require_valid_terminal_identity(tmp_path
     candidate = current.model_copy(update={"fingerprint": "d" * 64, "operationKey": "e" * 64})
     with pytest.raises(RuntimeError, match="cannot change taskId"):
         store.replace_terminal(candidate.model_copy(update={"taskId": "different"}))
-    assert store.replace_terminal(candidate).attempt == 2
-
-
-def test_store_refuses_recovery_after_truthful_commit_proof(tmp_path: Path) -> None:
-    contract = _contract(tmp_path)
-    (contract.code_worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
-    start_closeout_operation(closeout_operation_input(contract), launcher=lambda *_: None)
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    store.update(with_mutation_intent)
-    store.update(
-        lambda record: with_commit_proven(record).model_copy(
-            update={"status": "failed", "phase": "failed"}
-        )
-    )
-    with pytest.raises(RuntimeError, match="past its boundary"):
-        store.replace_for_recovery(lambda record: record, expected_attempt=1)
+    assert store.replace_terminal(candidate).attempt == 1
 
 
 @pytest.mark.parametrize(
@@ -182,12 +196,26 @@ def test_store_refuses_clearing_or_cancelling_commit_boundary(tmp_path: Path) ->
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     store.update(with_mutation_intent)
     store.update(with_commit_proven)
-    with pytest.raises(ValidationError, match="must be derived from commit-proven evidence"):
+    with pytest.raises(
+        ValidationError,
+        match="closeout irreversible boundary must be derived from commit proof or legacy output proof",
+    ):
         store.update(
             lambda record: record.model_copy(update={"irreversibleBoundaryEntered": False})
         )
-    with pytest.raises(RuntimeError, match="cancellation is refused"):
-        cancel_operation(contract.contract_path, "closeout")
+    with pytest.raises(LifecycleControlError) as caught:
+        cancel_current_generation(contract.contract_path, "closeout")
+    assert caught.value.status == "lifecycle-immutable-output-recovery-required"
+    assert caught.value.next_action == "recover"
+    assert caught.value.expected == {
+        "operationKind": "closeout",
+        "generation": 1,
+        "nextAction": "recover",
+    }
+    assert caught.value.observed["irreversibleBoundaryEntered"] is True
+    mutation = caught.value.observed["mutationEvidence"]
+    assert isinstance(mutation, dict)
+    assert mutation["code"]["state"] == "commit-proven"
 
 
 def test_integrate_boundary_cannot_be_cleared_or_cancelled(tmp_path: Path) -> None:
@@ -196,7 +224,7 @@ def test_integrate_boundary_cannot_be_cleared_or_cancelled(tmp_path: Path) -> No
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
     )
-    start_or_observe_operation(operation_input, launcher=lambda *_: None)
+    start_or_observe_operation(operation_input, contract, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
     runtime = OperationRuntime(store)
     runtime.start()
@@ -206,8 +234,17 @@ def test_integrate_boundary_cannot_be_cleared_or_cancelled(tmp_path: Path) -> No
         store.update(
             lambda record: record.model_copy(update={"irreversibleBoundaryEntered": False})
         )
-    with pytest.raises(RuntimeError, match="integrate has entered its irreversible boundary"):
-        cancel_operation(contract.contract_path, "integrate")
+    with pytest.raises(LifecycleControlError) as caught:
+        cancel_current_generation(contract.contract_path, "integrate")
+    assert caught.value.status == "lifecycle-immutable-output-recovery-required"
+    assert caught.value.next_action == "recover"
+    assert caught.value.expected == {
+        "operationKind": "integrate",
+        "generation": 1,
+        "nextAction": "recover",
+    }
+    assert caught.value.observed["irreversibleBoundaryEntered"] is True
+    assert caught.value.observed["integrationRefs"] is not None
 
 
 @pytest.mark.parametrize(
@@ -273,6 +310,61 @@ def test_store_checks_mutation_evidence_monotonicity(tmp_path: Path, mutation: s
                 _changed_evidence(record.mutationEvidence[leg], mutation),
             )
         )
+
+
+@pytest.mark.parametrize("leg", ["memory", "ledger"])
+def test_closeout_retry_reset_preserves_admission_prestate_and_refuses_tampering(
+    tmp_path: Path,
+    leg: CloseoutMutationLeg,
+) -> None:
+    store = _external_store(tmp_path)
+    admitted = store.read()
+    assert admitted is not None
+    accepted = admitted.mutationEvidence[leg].acceptedBefore
+    assert accepted is not None
+    store.update(
+        lambda record: _replace_evidence(
+            record,
+            leg,
+            record.mutationEvidence[leg].model_copy(
+                update={
+                    "state": "mutation-intent",
+                    "before": accepted,
+                    "expectedOutputTree": accepted.candidateTree,
+                }
+            ),
+        )
+    )
+    reconciled = store.update(
+        lambda record: _replace_evidence(
+            record,
+            leg,
+            record.mutationEvidence[leg].model_copy(
+                update={"state": "reconciled-unchanged", "observed": accepted}
+            ),
+        )
+    )
+
+    def tamper(record):
+        reset = requeued_same_generation(record)
+        changed = reset.mutationEvidence[leg].model_copy(
+            update={"acceptedBefore": accepted.model_copy(update={"head": "9" * 40})}
+        )
+        return _replace_evidence(reset, leg, changed)
+
+    with pytest.raises(RuntimeError, match="accepted Git prestate is immutable"):
+        store.resume_generation(tamper, expected_generation=reconciled.generation)
+    resumed, changed = store.resume_generation(
+        requeued_same_generation,
+        expected_generation=reconciled.generation,
+    )
+    assert changed is True
+    reset = resumed.mutationEvidence[leg]
+    assert reset.acceptedBefore == accepted
+    assert reset.before is None
+    assert reset.observed is None
+    assert reset.expectedOutputTree is None
+    assert resumed.mutationHistory[leg] == [reconciled.mutationEvidence[leg]]
 
 
 def _replace_evidence(record, leg: str, evidence):
@@ -420,7 +512,7 @@ def test_completed_integration_retains_its_exact_parameters(tmp_path: Path) -> N
         contractPath=contract.contract_path.as_posix(),
         strategy="ff-only",
     )
-    start_or_observe_operation(first, launcher=lambda *_: None)
+    start_or_observe_operation(first, contract, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
     runtime = OperationRuntime(store)
     runtime.start()
@@ -429,5 +521,6 @@ def test_completed_integration_retains_its_exact_parameters(tmp_path: Path) -> N
     with pytest.raises(RuntimeError, match="already completed task state"):
         start_or_observe_operation(
             first.model_copy(update={"strategy": "replay"}),
+            contract,
             launcher=lambda *_: None,
         )

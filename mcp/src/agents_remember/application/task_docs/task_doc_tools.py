@@ -15,36 +15,32 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
-from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintGraphTitles,
-    SubTaskRef,
+    TaskDocSourceSnapshot,
     TaskDocument,
+    capture_task_doc_source,
     completion_blockers,
     json_path_for,
     markdown_path_for,
+    missing_task_doc_source,
     read_graph_titles,
     read_task_doc,
+    read_task_doc_with_source,
     render_markdown,
     step_done,
     step_total,
     write_task_docs,
 )
-from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.master_sync import MasterSyncError, MasterSyncPlan, plan_master_sync
 from agents_remember.tasks.readiness import (
     completed_master_rows_to_validate,
     missing_unresolved_master_rows,
-)
-from agents_remember.worktrees.integration.integration_branch_authority import (
-    require_topology_publication_authority,
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_evidence import (
@@ -65,7 +61,12 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 from . import task_sprint_linkage
-from .task_doc_queue_scope import QueueScopeError, governing_queue_scope
+from .task_doc_publication import (
+    TaskDocPublication,
+    publish_task_doc_set,
+    task_doc_publication_transaction,
+    validate_task_doc_transaction,
+)
 from .task_doc_route_review import (
     DEFAULT_TASK_DOC_CALL,
     TaskDocCall,
@@ -83,7 +84,6 @@ from .task_execution_topology import (
     ExecutionTopologyError,
     author_execution_graph,
     enforce_execution_topology_edit,
-    require_commanded_masters_completed,
 )
 from .task_reopen import (
     task_reopen_tool,  # noqa: F401  # facade re-export (moved to task_reopen.py)
@@ -178,14 +178,34 @@ class _TaskDocSpecialContext:
 
 
 @dataclass(frozen=True)
-class _TaskDocPublication:
+class _PreparedTaskDocEdit:
+    original: TaskDocument | None
+    candidate: TaskDocument
+    selected_snapshot: TaskDocSourceSnapshot
+
+
+@dataclass(frozen=True)
+class _TaskDocPrepareRequest:
+    operation: str
+    payload_fields: dict[str, Any]
+    edit: TaskDocEdit
+    contract: WorktreeContract | None
+    task_root: Path
+    slug: str | None
+    branch_addressed: bool
+
+
+@dataclass(frozen=True)
+class _TaskDocCandidateContext:
     config: McpRuntimeConfig
     target: TaskDocTarget
+    operation: str
+    edit: TaskDocEdit
     task_root: Path
     original: TaskDocument | None
     candidate: TaskDocument
-    documents: list[TaskDocument]
-    publisher: Callable[[], list[tuple[Path, Path]]] | None = None
+    payload_fields: dict[str, Any]
+    selected_snapshot: TaskDocSourceSnapshot
 
 
 def task_doc_tool(
@@ -219,30 +239,44 @@ def task_doc_tool(
     if special is not None:
         return special
 
-    original: TaskDocument | None = None
-    if operation == "create":
-        doc = _create(payload_fields, contract, task_root)
-    elif operation == "replace":
-        json_path = _existing_json(task_root, slug)
-        original = read_task_doc(json_path)
-        doc = _replace(payload_fields, contract, task_root, json_path)
-    elif operation == "record_route_review":
-        json_path = _existing_json(task_root, slug)
-        original = read_task_doc(json_path)
-        doc = _record_route_review_bound(
-            original,
-            edit.review,
-            _RouteReviewBinding(
-                contract=contract,
-                task_root=task_root,
-                selected_path=json_path,
-                branch_addressed=call.branch_addressed,
-            ),
+    prepared = _prepare_task_doc_edit(
+        _TaskDocPrepareRequest(
+            operation,
+            payload_fields,
+            edit,
+            contract,
+            task_root,
+            slug,
+            call.branch_addressed,
         )
-    else:
-        original = read_task_doc(_existing_json(task_root, slug))
-        doc = _apply(operation, original, edit, contract=contract)
+    )
+    original = prepared.original
+    doc = prepared.candidate
+    selected_snapshot = prepared.selected_snapshot
 
+    candidate_context = _TaskDocCandidateContext(
+        config,
+        target,
+        operation,
+        edit,
+        task_root,
+        original,
+        doc,
+        payload_fields,
+        selected_snapshot,
+    )
+    _validate_task_doc_candidate(candidate_context)
+    return _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run)
+
+
+def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
+    config = context.config
+    target = context.target
+    operation = context.operation
+    edit = context.edit
+    task_root = context.task_root
+    original = context.original
+    doc = context.candidate
     _enforce_disposition_authority(operation, original, doc)
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
@@ -259,134 +293,96 @@ def task_doc_tool(
                 operation=operation,
                 original=original,
                 candidate=doc,
-                fields=payload_fields,
+                fields=context.payload_fields,
             )
         )
     except ExecutionTopologyError as exc:
         raise TaskDocError(str(exc)) from exc
 
+
+def _publish_task_doc_candidate(
+    context: _TaskDocCandidateContext,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    config = context.config
+    target = context.target
+    operation = context.operation
+    task_root = context.task_root
+    original = context.original
+    doc = context.candidate
     try:
         master_sync = plan_master_sync(task_root, doc)
     except MasterSyncError as exc:
         raise TaskDocError(str(exc)) from exc
     docs: list[TaskDocument] = [doc]
+    source_snapshots = [context.selected_snapshot]
+    if master_sync.source_snapshot is not None:
+        source_snapshots.append(master_sync.source_snapshot)
     if master_sync.changed and master_sync.master is not None:
+        if master_sync.source_snapshot is None:
+            raise TaskDocError("changed master synchronization has no accepted source bytes")
         docs.append(master_sync.master)
-    if call.dry_run:
-        preview_context = _TaskDocPublication(config, target, task_root, original, doc, docs)
-        with integration_authority_lock(config.coordination_root, target.repo_id):
-            _validate_task_doc_publication_authority(preview_context)
+    if dry_run:
+        preview_context = TaskDocPublication(
+            config,
+            target.repo_id,
+            task_root,
+            original,
+            doc,
+            docs,
+            tuple(source_snapshots),
+        )
+        validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
         return _preview(operation, doc, task_root, master_sync=master_sync)
-    written = _publish_task_doc_set(
-        _TaskDocPublication(config, target, task_root, original, doc, docs)
+    written = publish_task_doc_set(
+        TaskDocPublication(
+            config,
+            target.repo_id,
+            task_root,
+            original,
+            doc,
+            docs,
+            tuple(source_snapshots),
+        )
     )
     json_path, markdown_path = written[0]
     return _result(operation, doc, json_path, markdown_path, master_sync=master_sync)
 
 
-def _publish_task_doc_set(context: _TaskDocPublication) -> list[tuple[Path, Path]]:
-    def publication() -> list[tuple[Path, Path]]:
-        with integration_authority_lock(
-            context.config.coordination_root,
-            context.target.repo_id,
-        ):
-            _validate_task_doc_publication_authority(context)
-            return (
-                context.publisher()
-                if context.publisher is not None
-                else write_task_docs(
-                    context.task_root,
-                    context.documents,
-                    graph_titles=_batch_graph_titles(context.task_root, context.documents),
-                )
-            )
-
-    try:
-        scope = governing_queue_scope(
-            context.config.coordination_root,
-            context.target.repo_id,
-            context.task_root,
-            context.original,
-            context.candidate,
+def _prepare_task_doc_edit(
+    request: _TaskDocPrepareRequest,
+) -> _PreparedTaskDocEdit:
+    if request.operation == "create":
+        doc = _create(request.payload_fields, request.contract, request.task_root)
+        return _PreparedTaskDocEdit(
+            None,
+            doc,
+            missing_task_doc_source(json_path_for(request.task_root, doc)),
         )
-    except QueueScopeError as exc:
-        raise TaskDocError(str(exc)) from exc
-    if scope is None:
-        return publication()
-    queue = CloseoutQueueStore(context.config.coordination_root, scope.sprint_ref)
-    if context.candidate.kind != "master" or not context.candidate.orchestrates:
-        if scope.owning_master is None:
-            raise TaskDocError("governed master/leaf edit has no owning master queue scope")
-        return queue.publish_task_facts_update(
-            publication,
-            owning_master=scope.owning_master,
-            topology_stable=_task_topology_stable(context.original, context.candidate),
-        )
-    return cast(
-        list[tuple[Path, Path]],
-        queue.publish_sprint_update(
-            publication,
-            completed=context.candidate.status == "Completed",
-            recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
-            validate_completion=lambda: require_commanded_masters_completed(
-                TaskDocumentTopology(context.config.coordination_root),
-                scope.sprint_ref,
-                {scope.sprint_ref: context.candidate},
+    json_path = _existing_json(request.task_root, request.slug)
+    original, selected_snapshot = read_task_doc_with_source(json_path)
+    if request.operation == "replace":
+        doc = _replace(request.payload_fields, request.contract, request.task_root, json_path)
+    elif request.operation == "record_route_review":
+        doc = _record_route_review_bound(
+            original,
+            request.edit.review,
+            _RouteReviewBinding(
+                contract=request.contract,
+                task_root=request.task_root,
+                selected_path=json_path,
+                branch_addressed=request.branch_addressed,
             ),
-        ),
-    )
-
-
-def _validate_task_doc_publication_authority(context: _TaskDocPublication) -> None:
-    repository = context.config.repositories[context.target.repo_id]
-    try:
-        require_topology_publication_authority(
-            context.config.coordination_root,
-            context.target.repo_id,
-            repository.path,
-            repository.memory_root,
-            _task_doc_publication_overrides(context),
         )
-    except RuntimeError as exc:
-        raise TaskDocError(str(exc)) from exc
-
-
-def _task_doc_publication_overrides(
-    context: _TaskDocPublication,
-) -> dict[TaskDocumentRef, TaskDocument]:
-    root = (context.config.coordination_root / "tasks" / context.target.repo_id).resolve(
-        strict=False
-    )
-    overrides: dict[TaskDocumentRef, TaskDocument] = {}
-    for document in context.documents:
-        path = json_path_for(context.task_root, document).resolve(strict=False)
-        if not path.is_relative_to(root):
-            raise TaskDocError(f"task document publication escapes tasks root: {path}")
-        ref = TaskDocumentRef(
-            repository=context.target.repo_id,
-            path=path.relative_to(root).as_posix(),
+    else:
+        doc = _apply(
+            request.operation,
+            original,
+            request.edit,
+            contract=request.contract,
         )
-        overrides[ref] = document
-    return overrides
-
-
-def _task_topology_stable(original: TaskDocument | None, candidate: TaskDocument) -> bool:
-    """Whether an in-blocker task update preserves scheduling identity and membership."""
-
-    if original is None or original.kind != candidate.kind:
-        return False
-    stable_fields = ("id", "slug", "title", "repo", "orchestrates", "executionNature")
-    if any(getattr(original, field) != getattr(candidate, field) for field in stable_fields):
-        return False
-    if candidate.kind != "master":
-        return True
-
-    def identity(row: SubTaskRef) -> tuple[str, str, str | None]:
-        return row.number, row.name, row.file
-
-    return [identity(row) for row in original.subTasks] == [
-        identity(row) for row in candidate.subTasks
-    ]
+    return _PreparedTaskDocEdit(original, doc, selected_snapshot)
 
 
 def _sprint_doc_identity(context: _TaskDocSpecialContext) -> dict[str, Any]:
@@ -986,7 +982,9 @@ def _remove_subtask(
         raise TaskDocError("remove_subtask requires subtask.number")
     number = str(subtask["number"])
     keep_file = bool(subtask.get("keep_file"))
-    doc = read_task_doc(_existing_json(context.task_root, context.target.slug))
+    doc, selected_snapshot = read_task_doc_with_source(
+        _existing_json(context.task_root, context.target.slug)
+    )
     if doc.kind != "master":
         raise TaskDocError("remove_subtask is only valid for a master document")
     data = doc.model_dump(by_alias=True)
@@ -1006,20 +1004,20 @@ def _remove_subtask(
         TaskDocEdit(subtask=subtask),
     )
     leaf_files = _leaf_doc_files(context.task_root, match)
+    source_snapshots = [selected_snapshot]
+    if leaf_files:
+        source_snapshots.append(capture_task_doc_source(leaf_files[0]))
     if context.dry_run:
-        preview_context = _TaskDocPublication(
+        preview_context = TaskDocPublication(
             context.config,
-            context.target,
+            context.target.repo_id,
             context.task_root,
             doc,
             updated,
             [updated],
+            tuple(source_snapshots),
         )
-        with integration_authority_lock(
-            context.config.coordination_root,
-            context.target.repo_id,
-        ):
-            _validate_task_doc_publication_authority(preview_context)
+        validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
         result = _preview("remove_subtask", updated, context.task_root)
         result["removedSubtask"] = number
         result["wouldDeleteFiles"] = (
@@ -1041,15 +1039,16 @@ def _remove_subtask(
                     deleted.append(path.as_posix())
         return written
 
-    json_path, markdown_path = _publish_task_doc_set(
-        _TaskDocPublication(
+    json_path, markdown_path = publish_task_doc_set(
+        TaskDocPublication(
             context.config,
-            context.target,
+            context.target.repo_id,
             context.task_root,
             doc,
             updated,
             [updated],
-            publication,
+            tuple(source_snapshots),
+            publisher=publication,
         )
     )[0]
     result = _result("remove_subtask", updated, json_path, markdown_path)
@@ -1136,13 +1135,6 @@ def _graph_titles_for(task_root: Path, doc: TaskDocument) -> SprintGraphTitles |
     if doc.executionGraph is None:
         return None
     return read_graph_titles(task_root.parents[1], doc.executionGraph)
-
-
-def _batch_graph_titles(task_root: Path, docs: list[TaskDocument]) -> SprintGraphTitles | None:
-    for doc in docs:
-        if doc.executionGraph is not None:
-            return _graph_titles_for(task_root, doc)
-    return None
 
 
 def _render_preview(task_root: Path, doc: TaskDocument) -> dict[str, Any]:

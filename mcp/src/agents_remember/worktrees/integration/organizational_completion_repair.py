@@ -1,39 +1,37 @@
-"""Queue-owned repair transition after a final organizational quality failure."""
+"""Journal-owned contract repair after a final organizational quality failure."""
 
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from functools import partial
 from pathlib import Path
+from typing import Literal
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
     LifecycleOperationRecord,
     OrganizationalCompletionRepairEvidence,
 )
-from agents_remember.models.queue.closeout_queue import CloseoutQueueState
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.integration_ref_state import (
+    require_unchanged_integration_refs,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     operation_state_fingerprint,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    located_lifecycle_operation_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
 )
 from agents_remember.worktrees.modules.git import branch_commit
-from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError, now_iso
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     QueueBinding,
-    _graph_context,
-    _initial_state,
-    _internal_event,
-    _operation_owner,
-    _required_operation_key,
     contract_queue_binding,
 )
 from agents_remember.worktrees.worktree_contract import (
@@ -46,16 +44,99 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 
+class OrganizationalRepairPublicationError(RuntimeError):
+    """Exact contract-reset interruption or third-state contradiction."""
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        evidence: OrganizationalCompletionRepairEvidence,
+        observed: WorktreeContract,
+        **outcome: object,
+    ) -> None:
+        unexpected = set(outcome) - {"next_action", "publication_failure"}
+        if unexpected:
+            raise TypeError(f"unsupported organizational repair outcome: {sorted(unexpected)}")
+        next_action = outcome.get("next_action")
+        publication_failure = outcome.get("publication_failure")
+        if not isinstance(next_action, str):
+            raise TypeError("organizational repair next_action must be a string")
+        if publication_failure is not None and not isinstance(publication_failure, Mapping):
+            raise TypeError("publication_failure must be a mapping or None")
+        self.status = status
+        self.detail = detail
+        classification = _classify_organizational_repair_evidence(observed, evidence)
+        self.expected = classification.expected
+        self.observed = {
+            **classification.observed,
+            **(
+                {"publicationFailure": dict(publication_failure)}
+                if publication_failure is not None
+                else {}
+            ),
+        }
+        self.next_action = next_action
+        super().__init__(detail)
+
+
 @dataclass(frozen=True)
-class _RepairContext:
-    contract: WorktreeContract
-    reset: WorktreeContract
-    binding: QueueBinding
-    owner: str
-    topology: TaskDocumentTopology
-    expected_commits: tuple[str, str, str]
-    record: LifecycleOperationRecord
-    evidence: OrganizationalCompletionRepairEvidence
+class OrganizationalRepairState:
+    """Pure exact accepted/reset/third contract classification."""
+
+    state: Literal["not-applicable", "accepted", "reset", "developer-decision"]
+    expected: dict[str, object]
+    observed: dict[str, object]
+
+    def decision_payload(self) -> dict[str, object]:
+        detail = "the contract is neither the accepted failed generation nor its exact reset"
+        return {
+            "state": "organizational-completion-contract-conflict",
+            "reason": detail,
+            "summary": detail,
+            "developerDecisionRequired": True,
+            "decisionSurface": detail,
+            "nextAction": "developer-decision",
+            "expected": self.expected,
+            "observed": self.observed,
+        }
+
+
+def classify_organizational_completion_repair(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> OrganizationalRepairState:
+    """Classify live reset bytes from journal evidence without mutating them."""
+
+    evidence = record.organizationalRepair
+    if evidence is None:
+        return OrganizationalRepairState("not-applicable", {}, {})
+    return _classify_organizational_repair_evidence(contract, evidence)
+
+
+def _classify_organizational_repair_evidence(
+    contract: WorktreeContract,
+    evidence: OrganizationalCompletionRepairEvidence,
+) -> OrganizationalRepairState:
+    expected: dict[str, object] = {
+        "acceptedContractSha256": evidence.acceptedContractSha256,
+        "resetContractSha256": evidence.resetContractSha256,
+    }
+    observed: dict[str, object] = {
+        "contractSha256": _contract_sha256(contract),
+        "closeoutStatus": contract.closeout_status,
+        "integrationStatus": contract.integration_status,
+        "doorDisposition": (contract.closeout_door.disposition if contract.closeout_door else ""),
+    }
+    live_sha = observed["contractSha256"]
+    if live_sha == evidence.acceptedContractSha256:
+        state: Literal["accepted", "reset", "developer-decision"] = "accepted"
+    elif live_sha == evidence.resetContractSha256:
+        state = "reset"
+    else:
+        state = "developer-decision"
+    return OrganizationalRepairState(state, expected, observed)
 
 
 def record_organizational_completion_repair(
@@ -67,9 +148,7 @@ def record_organizational_completion_repair(
 ) -> None:
     """Persist the reset generation at the exact organizational gate-failure seam."""
 
-    record = LifecycleOperationStore(
-        operation_record_path(contract.worktree_group, "integrate")
-    ).read()
+    record = located_lifecycle_operation_store(contract, "integrate").read()
     if record is None or record.operationKey != operation_key:
         raise RuntimeError("organizational quality failure lost its lifecycle operation identity")
     evidence = organizational_completion_repair_evidence(contract, record)
@@ -111,6 +190,7 @@ def organizational_completion_repair_evidence(
         codeCommit=expected_commits[0],
         memoryContentCommit=expected_commits[1],
         ledgerCommit=expected_commits[2],
+        acceptedContractSha256=_contract_sha256(contract),
         resetContractSha256=_contract_sha256(reset),
     )
 
@@ -118,10 +198,9 @@ def organizational_completion_repair_evidence(
 def prepare_organizational_completion_repair(
     contract: WorktreeContract,
 ) -> WorktreeContract:
-    """Retire the failed candidate and reopen only its exact leaf closeout."""
+    """Publish only the exact contract/door reset proven by journal evidence."""
 
     record = _durable_cancelled_repair_record(contract)
-    authority = _require_operation_identity(contract, record)
     if (
         not isinstance(record.result, dict)
         or record.result.get("state") != "organizational-completion-gate-failed"
@@ -137,8 +216,18 @@ def prepare_organizational_completion_repair(
             "quality repair requires its durable exact reset generation",
         )
     _require_repair_evidence(record, evidence)
-    key = _required_operation_key(record.operationKey, "integration")
-    owner = _operation_owner(key)
+    classification = classify_organizational_completion_repair(contract, record)
+    if classification.state == "developer-decision":
+        raise OrganizationalRepairPublicationError(
+            "organizational-completion-contract-conflict",
+            "the contract is neither the accepted failed generation nor its exact reset",
+            evidence=evidence,
+            observed=contract,
+            next_action="developer-decision",
+        )
+    if classification.state == "reset":
+        return contract
+    authority = _require_operation_identity(contract, record)
     expected_commits = (
         authority.codeCandidateCommit,
         authority.memoryContentCommit,
@@ -163,57 +252,23 @@ def prepare_organizational_completion_repair(
             "organizational-completion-repair-binding-mismatch",
             "quality repair contract no longer names its accepted queue binding",
         )
-    if _quality_repair_is_complete(contract, evidence):
-        reset = contract
-    else:
-        if operation_state_fingerprint(contract) != record.candidateState:
-            raise CloseoutQueueError(
-                "organizational-completion-operation-state-mismatch",
-                "quality repair contract no longer matches its accepted operation state",
-            )
-        reset = _quality_repair_contract(contract, expected_commits=expected_commits)
-        if not _quality_repair_is_complete(reset, evidence):
-            raise CloseoutQueueError(
-                "organizational-completion-repair-evidence-mismatch",
-                "quality repair contract does not produce its durable reset generation",
-            )
-    topology = TaskDocumentTopology(contract.coordination_root)
-    graph = _graph_context(topology, binding.sprint_ref)
-    initial = _initial_state(binding.sprint_ref, graph.revision, now_iso())
-    context = _RepairContext(
-        contract,
-        reset,
-        binding,
-        owner,
-        topology,
-        expected_commits,
-        record,
-        evidence,
-    )
-
-    CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).transact_with_publication(
-        initial=initial,
-        event=_internal_event(
-            "prepare-quality-repair",
-            f"organizational-quality-repair:{owner}",
-            {
-                "candidate": binding.candidate_ref.key,
-                "codeCommit": expected_commits[0],
-                "memoryContentCommit": expected_commits[1],
-                "ledgerCommit": expected_commits[2],
-                "repairGeneration": evidence.resetContractSha256,
-            },
-        ),
-        transform=partial(_retire_candidate, context=context),
-        publication=partial(_publish_reset, context=context),
-    )
+    if operation_state_fingerprint(contract) != record.candidateState:
+        raise CloseoutQueueError(
+            "organizational-completion-operation-state-mismatch",
+            "quality repair contract no longer matches its accepted operation state",
+        )
+    reset = _quality_repair_contract(contract, expected_commits=expected_commits)
+    if not _quality_repair_is_complete(reset, evidence):
+        raise CloseoutQueueError(
+            "organizational-completion-repair-evidence-mismatch",
+            "quality repair contract does not produce its durable reset generation",
+        )
+    _publish_reset(contract=contract, reset=reset, evidence=evidence, record=record)
     return load_contract(contract.contract_path)
 
 
 def _durable_cancelled_repair_record(contract: WorktreeContract) -> LifecycleOperationRecord:
-    record = LifecycleOperationStore(
-        operation_record_path(contract.worktree_group, "integrate")
-    ).read()
+    record = located_lifecycle_operation_store(contract, "integrate").read()
     if (
         record is None
         or record.status != "cancelled"
@@ -227,73 +282,65 @@ def _durable_cancelled_repair_record(contract: WorktreeContract) -> LifecycleOpe
     return record
 
 
-def _publish_reset(*, context: _RepairContext) -> None:
-    contract = context.contract
+def _publish_reset(
+    *,
+    contract: WorktreeContract,
+    reset: WorktreeContract,
+    evidence: OrganizationalCompletionRepairEvidence,
+    record: LifecycleOperationRecord,
+) -> None:
     with integration_authority_lock(contract.coordination_root, contract.repo_name):
         current = load_contract(contract.contract_path)
-        if _quality_repair_is_complete(current, context.evidence):
+        require_unchanged_integration_refs(record)
+        classification = _classify_organizational_repair_evidence(current, evidence)
+        if classification.state == "reset":
             return
-        if current != contract:
-            raise CloseoutQueueError(
-                "organizational-completion-contract-changed",
-                "the failed final-leaf contract changed before repair was prepared",
+        if classification.state == "developer-decision":
+            raise OrganizationalRepairPublicationError(
+                "organizational-completion-contract-conflict",
+                "the contract is neither the accepted failed generation nor its exact reset",
+                evidence=evidence,
+                observed=current,
+                next_action="developer-decision",
             )
         _require_sources_unmoved(current)
-        write_contract(context.reset.contract_path, context.reset)
-
-
-def _retire_candidate(
-    state: CloseoutQueueState,
-    *,
-    context: _RepairContext,
-) -> CloseoutQueueState:
-    live_graph = _graph_context(context.topology, context.binding.sprint_ref)
-    candidate = state.candidates.get(context.binding.candidate_ref.key)
-    if candidate is None:
-        if _quality_repair_is_complete(
-            load_contract(context.contract.contract_path), context.evidence
-        ):
-            return state
-        raise CloseoutQueueError(
-            "organizational-completion-candidate-missing",
-            "the failed final-leaf candidate disappeared before repair",
-        )
-    if (
-        candidate.state != "integration-in-flight"
-        or candidate.inFlightOwnerFingerprint != context.owner
-    ):
-        raise CloseoutQueueError(
-            "organizational-completion-owner-mismatch",
-            "only the failed final-leaf integration owner may reopen this closeout",
-        )
-    if (
-        Path(candidate.contractPath).resolve() != Path(context.record.contractPath).resolve()
-        or candidate.taskDocumentRef.key != context.evidence.candidateTaskDocument
-        or candidate.owningMaster.key != context.evidence.owningMasterTaskDocument
-    ):
-        raise CloseoutQueueError(
-            "organizational-completion-candidate-identity-mismatch",
-            "the failed final-leaf candidate no longer matches its accepted operation identity",
-        )
-    master = live_graph.masters.get(candidate.owningMaster)
-    if master is None or master.document.executionNature != "organizational":
-        raise CloseoutQueueError(
-            "organizational-completion-master-mismatch",
-            "quality repair requires the live candidate's organizational master",
-        )
-    observed = (
-        candidate.closeoutCodeCommit,
-        candidate.closeoutMemoryContentCommit or "",
-        candidate.closeoutLedgerCommit or "",
-    )
-    if observed != context.expected_commits:
-        raise CloseoutQueueError(
-            "organizational-completion-candidate-mismatch",
-            "the failed final-leaf candidate no longer matches its closed contract",
-        )
-    candidates = dict(state.candidates)
-    candidates.pop(context.binding.candidate_ref.key)
-    return state.model_copy(update={"candidates": candidates})
+        try:
+            write_contract(reset.contract_path, reset)
+        except (OSError, RuntimeError) as exc:
+            observed = load_contract(contract.contract_path)
+            if _quality_repair_is_complete(observed, evidence):
+                return
+            if _contract_sha256(observed) == evidence.acceptedContractSha256:
+                raise OrganizationalRepairPublicationError(
+                    "organizational-completion-contract-publication-interrupted",
+                    "the exact reset write left the accepted contract bytes unchanged",
+                    evidence=evidence,
+                    observed=observed,
+                    next_action="cancel",
+                    publication_failure=public_failure_evidence(
+                        stage="organizational-reset-publication",
+                        side="contract",
+                        name=contract.contract_path.name,
+                        error_type=type(exc).__name__,
+                        observed={"state": "accepted-before"},
+                    ),
+                ) from exc
+            raise OrganizationalRepairPublicationError(
+                "organizational-completion-contract-conflict",
+                "the contract changed to a third byte state during exact reset publication",
+                evidence=evidence,
+                observed=observed,
+                next_action="developer-decision",
+            ) from exc
+        observed = load_contract(contract.contract_path)
+        if not _quality_repair_is_complete(observed, evidence):
+            raise OrganizationalRepairPublicationError(
+                "organizational-completion-contract-conflict",
+                "the reset publication did not produce its exact journaled bytes",
+                evidence=evidence,
+                observed=observed,
+                next_action="developer-decision",
+            )
 
 
 def _require_operation_identity(
@@ -451,6 +498,21 @@ def _quality_repair_contract(
             "organizational-completion-contract-mismatch",
             "only the exact closed, unintegrated final leaf can be reopened for quality repair",
         )
+    door = contract.closeout_door
+    if door is not None:
+        if door.disposition != "claimed":
+            raise CloseoutQueueError(
+                "organizational-completion-door-mismatch",
+                "quality repair requires the existing claimed closeout-door generation",
+            )
+        door = door.model_copy(
+            update={
+                "disposition": "cancelled",
+                "operationKind": None,
+                "operationFingerprint": "",
+                "claimedOperationKey": "",
+            }
+        )
     return amend_contract(
         replace(
             contract,
@@ -464,6 +526,7 @@ def _quality_repair_contract(
             integrated_memory_content_commit="",
             integrated_ledger_commit="",
             memory_state="",
+            closeout_door=door,
         ),
         ContractCells(
             human_review_status="pending-review",

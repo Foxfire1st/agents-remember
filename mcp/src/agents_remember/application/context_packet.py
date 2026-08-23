@@ -93,7 +93,7 @@ def build_context_packet(
         # worktree state machine can emit and this block cannot accept is now a type error
         # in `application.worktree_status` rather than a ValidationError raised from inside the
         # `context_packet` tool handler, where nothing catches it.
-        worktree=worktree_status_packet(context.contract_path),
+        worktree=worktree_status_packet(config, context.contract_path),
         providers=ProviderSummary.model_validate(
             provider_summary_packet(
                 config,

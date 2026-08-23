@@ -29,7 +29,7 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
 )
 
-from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
 from .closeout_queue_evidence import PRIORITY_RANK, GradeAuthority, planning_authorities
 
 
@@ -92,7 +92,15 @@ def graph_context(
     try:
         sprint = topology.resolve(sprint_ref)
     except TaskDocumentRefError as exc:
-        raise CloseoutQueueError(exc.status, str(exc)) from exc
+        raise CloseoutQueueError(
+            exc.status,
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-sprint-resolution",
+                side="task-document",
+                name="sprint",
+            ),
+        ) from exc
     graph = sprint.document.executionGraph
     if graph is None:
         raise CloseoutQueueError(
@@ -114,7 +122,15 @@ def graph_context(
     try:
         masters = topology.validate_execution_topology(sprint_ref)
     except TaskDocumentRefError as exc:
-        raise CloseoutQueueError(exc.status, str(exc)) from exc
+        raise CloseoutQueueError(
+            exc.status,
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-topology-validation",
+                side="task-document",
+                name="execution-graph",
+            ),
+        ) from exc
     master_map = {master.ref: master for master in masters}
     if (
         sum(len(master_map[ref].document.subTasks) for ref in graph.master_refs())
@@ -144,8 +160,12 @@ def graph_context(
     except CloseoutQueueError as exc:
         raise CloseoutQueueError(
             exc.status,
-            f"{exc}; recovery: repair the sprint's canonical register section with "
-            "task_doc.set_section (the register shape is validated at write time)",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-register-planning",
+                side="task-document",
+                name="planning-registers",
+            ),
         ) from exc
     return QueueGraphContext(
         sprint,

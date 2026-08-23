@@ -6,9 +6,10 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -16,9 +17,13 @@ from agents_remember.kernel.memory_ledger import (
     find_unique_mapping,
     parse_ledger_text,
 )
+from agents_remember.models.lifecycles.operation import (
+    IntegrationQualityCertification,
+    OrganizationalTaskPublicationIntent,
+)
 from agents_remember.models.queue.closeout_queue import CloseoutCandidateRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument, completion_blockers, write_task_doc
+from agents_remember.tasks import TaskDocument, completion_blockers, render_markdown
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity, require_git
@@ -32,6 +37,48 @@ from agents_remember.worktrees.worktree_contract import (
 
 class OrganizationalCompletionError(RuntimeError):
     """The proposed organizational completion edge is not exact or publishable."""
+
+
+class OrganizationalCompletionPublicationError(RuntimeError):
+    """Exact task-document publication found a persistent third byte state."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        expected: Mapping[str, object],
+        observed: Mapping[str, object],
+    ) -> None:
+        self.detail = detail
+        self.expected = dict(expected)
+        self.observed = dict(observed)
+        super().__init__(detail)
+
+
+@dataclass(frozen=True)
+class OrganizationalCompletionPublicationState:
+    """Pure exact JSON/Markdown state for one journaled completion intent."""
+
+    state: Literal["convergent", "published", "developer-decision"]
+    expected: dict[str, object]
+    observed: dict[str, object]
+
+    @property
+    def mechanically_convergent(self) -> bool:
+        return self.state != "developer-decision"
+
+    def decision_payload(self) -> dict[str, object]:
+        detail = "organizational task document has a third byte state"
+        return {
+            "state": "organizational-completion-publication-conflict",
+            "reason": detail,
+            "summary": detail,
+            "developerDecisionRequired": True,
+            "decisionSurface": detail,
+            "nextAction": "developer-decision",
+            "expected": self.expected,
+            "observed": self.observed,
+        }
 
 
 _COMPLETION_DECISION = "Complete organizational master at its certified final-leaf landing."
@@ -226,23 +273,20 @@ def _landed_siblings(
     return landed
 
 
-def publish_organizational_master_completion(
+def prepare_organizational_master_completion(
     plan: OrganizationalCompletionPlan,
     *,
-    certified_fingerprint: str,
-) -> None:
-    """Publish the logical master terminal edge after its certified ref movement."""
+    certification: IntegrationQualityCertification,
+    completed_at: str,
+) -> OrganizationalTaskPublicationIntent:
+    """Choose and bind exact before/after task bytes before protected refs move."""
 
-    if certified_fingerprint != plan.fingerprint:
+    if certification.completionFingerprint != plan.fingerprint:
         raise OrganizationalCompletionError(
             "organizational completion quality certificate does not match the final-leaf plan"
         )
-    current = TaskDocument.model_validate_json(plan.master_path.read_text(encoding="utf-8"))
-    if current.status == "Completed" and _has_completion_marker(
-        current, fingerprint=plan.fingerprint
-    ):
-        write_task_doc(plan.master_path.parent, current)
-        return
+    accepted_json = plan.master_path.read_text(encoding="utf-8")
+    current = TaskDocument.model_validate_json(accepted_json)
     if current != plan.master_document:
         raise OrganizationalCompletionError(
             "organizational master task document changed before completion publication"
@@ -255,13 +299,138 @@ def publish_organizational_master_completion(
     payload["status"] = "Completed"
     payload["decisions"] = [
         {
-            "at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+            "at": completed_at,
             "decision": _COMPLETION_DECISION,
             "rationale": f"{_COMPLETION_RATIONALE_PREFIX}{plan.fingerprint}",
         },
         *payload.get("decisions", []),
     ]
-    write_task_doc(plan.master_path.parent, TaskDocument.model_validate(payload))
+    intended = TaskDocument.model_validate(payload)
+    intended_json = intended.model_dump_json(by_alias=True, exclude_none=True, indent=2) + "\n"
+    markdown_path = plan.master_path.with_suffix(".md")
+    accepted_markdown = markdown_path.read_text(encoding="utf-8")
+    expected_markdown = render_markdown(current)
+    if accepted_markdown != expected_markdown:
+        raise OrganizationalCompletionError(
+            "organizational master Markdown changed outside its accepted JSON render"
+        )
+    intended_markdown = render_markdown(intended)
+    return OrganizationalTaskPublicationIntent(
+        masterTaskDocument=plan.master_path.as_posix(),
+        sprintTaskDocument=plan.sprint_ref.key,
+        candidateTaskDocument=plan.candidate_ref.key,
+        completionFingerprint=plan.fingerprint,
+        certificationResultSha256=certification.resultSha256,
+        completedAt=completed_at,
+        acceptedJson=accepted_json,
+        acceptedJsonSha256=_text_sha256(accepted_json),
+        intendedJson=intended_json,
+        intendedJsonSha256=_text_sha256(intended_json),
+        acceptedMarkdown=accepted_markdown,
+        acceptedMarkdownSha256=_text_sha256(accepted_markdown),
+        intendedMarkdown=intended_markdown,
+        intendedMarkdownSha256=_text_sha256(intended_markdown),
+    )
+
+
+def publish_organizational_master_completion(
+    intent: OrganizationalTaskPublicationIntent,
+) -> None:
+    """CAS/prove the exact journaled JSON+Markdown completion bytes."""
+
+    classification = classify_organizational_master_completion(intent)
+    if not classification.mechanically_convergent:
+        raise OrganizationalCompletionPublicationError(
+            "organizational task document has a third byte state",
+            expected=classification.expected,
+            observed=classification.observed,
+        )
+    json_path = Path(intent.masterTaskDocument)
+    markdown_path = json_path.with_suffix(".md")
+    try:
+        current_json = json_path.read_text(encoding="utf-8")
+        current_markdown = markdown_path.read_text(encoding="utf-8")
+        if current_json != intent.intendedJson:
+            atomic_write_text(json_path, intent.intendedJson)
+        if current_markdown != intent.intendedMarkdown:
+            atomic_write_text(markdown_path, intent.intendedMarkdown)
+    except (OSError, UnicodeError, ValueError) as exc:
+        interrupted = classify_organizational_master_completion(intent)
+        raise OrganizationalCompletionPublicationError(
+            "organizational task publication was interrupted",
+            expected=interrupted.expected,
+            observed=interrupted.observed,
+        ) from exc
+    final = classify_organizational_master_completion(intent)
+    if final.state != "published":
+        raise OrganizationalCompletionPublicationError(
+            "organizational task publication did not produce its exact intended bytes",
+            expected=final.expected,
+            observed=final.observed,
+        )
+
+
+def classify_organizational_master_completion(
+    intent: OrganizationalTaskPublicationIntent,
+) -> OrganizationalCompletionPublicationState:
+    """Read and classify exact journal-owned task bytes without mutating them."""
+
+    expected: dict[str, object] = {
+        "acceptedJsonSha256": intent.acceptedJsonSha256,
+        "intendedJsonSha256": intent.intendedJsonSha256,
+        "acceptedMarkdownSha256": intent.acceptedMarkdownSha256,
+        "intendedMarkdownSha256": intent.intendedMarkdownSha256,
+    }
+    observed: dict[str, object] = {}
+    json_path = Path(intent.masterTaskDocument)
+    try:
+        current_json = json_path.read_bytes()
+        observed["jsonSha256"] = _bytes_sha256(current_json)
+    except (OSError, UnicodeError, ValueError) as exc:
+        return OrganizationalCompletionPublicationState(
+            "developer-decision",
+            expected,
+            {
+                **observed,
+                "readFailure": {
+                    "side": "json",
+                    "name": json_path.name,
+                    "errorType": type(exc).__name__,
+                },
+            },
+        )
+    markdown_path = json_path.with_suffix(".md")
+    try:
+        current_markdown = markdown_path.read_bytes()
+        observed["markdownSha256"] = _bytes_sha256(current_markdown)
+    except (OSError, UnicodeError, ValueError) as exc:
+        return OrganizationalCompletionPublicationState(
+            "developer-decision",
+            expected,
+            {
+                **observed,
+                "readFailure": {
+                    "side": "markdown",
+                    "name": markdown_path.name,
+                    "errorType": type(exc).__name__,
+                },
+            },
+        )
+    if current_json not in {
+        intent.acceptedJson.encode("utf-8"),
+        intent.intendedJson.encode("utf-8"),
+    } or current_markdown not in {
+        intent.acceptedMarkdown.encode("utf-8"),
+        intent.intendedMarkdown.encode("utf-8"),
+    }:
+        return OrganizationalCompletionPublicationState("developer-decision", expected, observed)
+    state: Literal["convergent", "published"] = (
+        "published"
+        if current_json == intent.intendedJson.encode("utf-8")
+        and current_markdown == intent.intendedMarkdown.encode("utf-8")
+        else "convergent"
+    )
+    return OrganizationalCompletionPublicationState(state, expected, observed)
 
 
 def require_published_organizational_master_completion(
@@ -278,6 +447,14 @@ def require_published_organizational_master_completion(
         raise OrganizationalCompletionError(
             "organizational master completion marker is not durably published"
         )
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _bytes_sha256(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 def _require_candidate_identity(
@@ -533,10 +710,7 @@ def _require_confined_sibling_contract_path(
 def _commit_tree(repository: Path, commit: str) -> str:
     result = run_git(repository, ["rev-parse", f"{commit}^{{tree}}"])
     if result.returncode != 0:
-        detail = result.stderr.strip()
-        raise OrganizationalCompletionError(
-            f"cannot resolve organizational candidate {commit}" + (f": {detail}" if detail else "")
-        )
+        raise OrganizationalCompletionError("cannot resolve the organizational candidate tree")
     return result.stdout.strip()
 
 

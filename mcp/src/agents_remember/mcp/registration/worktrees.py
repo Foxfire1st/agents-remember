@@ -4,12 +4,19 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.lifecycle.lifecycle_enclosure_tools import EnclosureAdoptionRequest
 from agents_remember.application.task_docs.task_ref import TaskRef
-from agents_remember.application.worktree_tools import StartExecution, TaskBases, TaskIdentity
+from agents_remember.application.worktree_tools import (
+    StartExecution,
+    TaskBases,
+    TaskIdentity,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.declared_caller import DeclaredCaller
 
 from ..tools import (
     worktree_attach_payload,
+    worktree_enclosure_adopt_payload,
     worktree_start_payload,
     worktree_status_payload,
     worktree_sync_payload,
@@ -19,7 +26,8 @@ from ..tools import (
 def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register the worktree tools, split by whether the contract exists yet."""
     _register_worktree_start_tools(server, config)
-    _register_worktree_working_tools(server, config)
+    _register_worktree_address_tools(server, config)
+    _register_worktree_observation_tools(server, config)
 
 
 def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -92,8 +100,36 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         )
 
 
-def _register_worktree_working_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """Work with a contract that already exists: re-attach, observe, pull the base forward."""
+def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Adopt or re-attach one existing worktree enclosure."""
+
+    @server.tool()
+    def worktree_enclosure_adopt(
+        contract_path: str,
+        expected_worktree_group: str,
+        rationale: str,
+        *,
+        dry_run: bool = True,
+        approved: bool = False,
+        expected_publication_request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly adopt one readable pre-locator enclosure. Dry-run by default.
+
+        This is the only old-layout address migration. It validates one exact contract/root,
+        preserves source digests and an audit receipt, and never runs from normal status,
+        control, contract writes, or schema-1 repair.
+        """
+        return worktree_enclosure_adopt_payload(
+            config,
+            EnclosureAdoptionRequest(
+                contract_path=contract_path,
+                expected_worktree_group=expected_worktree_group,
+                rationale=rationale,
+                dry_run=dry_run,
+                approved=approved,
+                expected_publication_request_id=expected_publication_request_id,
+            ),
+        )
 
     @server.tool()
     def worktree_attach(
@@ -120,13 +156,19 @@ def _register_worktree_working_tools(server: FastMCP, config: McpRuntimeConfig) 
             on_unsaved=on_unsaved,
         )
 
+
+def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Observe or pull forward a canonically addressable worktree enclosure."""
+
     @server.tool()
     def worktree_status(
         repo_id: str,
+        *,
         task_name: str | None = None,
         contract_path: str | None = None,
         leaf_id: str | None = None,
         parent_task: str | None = None,
+        caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
         """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only.
         While background provider setup runs, the providers block carries the live phase,
@@ -141,6 +183,7 @@ def _register_worktree_working_tools(server: FastMCP, config: McpRuntimeConfig) 
                 leaf_id=leaf_id,
                 parent_task=parent_task,
             ),
+            caller=caller,
         )
 
     @server.tool()

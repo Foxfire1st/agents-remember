@@ -21,11 +21,11 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
 )
 from agents_remember.worktrees import closeout_input
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
 from closeout_fixture_test_support import selected_fixture
@@ -178,7 +178,7 @@ def test_operation_model_refuses_cross_kind_authority_and_results(tmp_path: Path
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
     )
-    start_or_observe_operation(integrate_input, launcher=lambda *_: None)
+    start_or_observe_operation(integrate_input, contract, launcher=lambda *_: None)
     integrate_store = LifecycleOperationStore(
         operation_record_path(contract.worktree_group, "integrate")
     )
@@ -236,7 +236,7 @@ def test_public_closeout_admission_refuses_a_non_closeout_journal(tmp_path: Path
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
     )
-    start_or_observe_operation(integrate_input, launcher=lambda *_: None)
+    start_or_observe_operation(integrate_input, contract, launcher=lambda *_: None)
     integrate_store = LifecycleOperationStore(
         operation_record_path(contract.worktree_group, "integrate")
     )

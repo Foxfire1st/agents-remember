@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
 from agents_remember.application.task_docs.task_ref import TaskRef
@@ -16,6 +16,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     reload_provider_authority,
 )
 from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
     IntegrateOperationInput,
@@ -41,15 +42,67 @@ from agents_remember.worktrees.closeout_input import (
 from agents_remember.worktrees.integration.closeout_operation_admission import (
     CloseoutOperationAdmission,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
-    cancel_operation,
-    latest_operation_projection,
-    observe_operation,
-    require_configured_contract_repositories,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
+    LifecycleControlCommand,
+    LifecycleControlError,
+    control_operation,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocationError,
+    require_matching_lifecycle_operation_location,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_read_decision import (
+    lifecycle_journal_read_decision,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_request import (
+    LifecycleControlRequestError,
+    validate_lifecycle_control_request,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationReadError,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
+    current_operation_projections,
     start_or_observe_closeout_operation,
     start_or_observe_operation,
 )
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
+)
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
+
+from .lifecycle.configured_contract_admission import (
+    ConfiguredContractAccepted,
+    ConfiguredContractRefused,
+    admit_configured_contract,
+    execute_configured_contract_operation,
+    project_configured_contract_refusal,
+)
+from .lifecycle.lifecycle_control_authority import (
+    LifecycleCallerError,
+    completed_disposition_authorized,
+    require_completed_disposition_authority,
+    resolve_lifecycle_caller,
+)
+from .lifecycle.lifecycle_operation_location import (
+    LifecycleOperationPublicAddress,
+    location_decision_payload,
+    unreadable_operation_refusal,
+    unreadable_status_operations,
+)
+
+LifecycleControlAction = Literal[
+    "retry",
+    "recover",
+    "cancel",
+    "revise",
+    "retire",
+    "supersede",
+]
 
 
 @dataclass(frozen=True)
@@ -103,6 +156,28 @@ DEFAULT_TASK_BASES = TaskBases()
 
 DEFAULT_START_EXECUTION = StartExecution()
 """A real start with background provider setup launched normally."""
+
+
+@dataclass(frozen=True)
+class OperationControlRequest:
+    contract_path: str
+    operation_kind: LifecycleOperationKind
+    action: LifecycleControlAction
+    expected_generation: int
+    intent_note: str
+    dry_run: bool = False
+    code_commit_message: str | None = None
+    memory_commit_message: str | None = None
+    ledger_commit_message: str | None = None
+    caller: DeclaredCaller | None = None
+
+    def __post_init__(self) -> None:
+        # Legal-control arguments are public JSON and must be directly
+        # executable when fed back through this application request boundary.
+        # Transport registration already supplies the typed model; direct
+        # application callers reconstruct the same bounded model from JSON.
+        if self.caller is not None and not isinstance(self.caller, DeclaredCaller):
+            object.__setattr__(self, "caller", DeclaredCaller.model_validate(self.caller))
 
 
 def worktree_start_tool(
@@ -279,14 +354,80 @@ def worktree_attach_tool(
     return result
 
 
-def worktree_status_tool(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
+def worktree_status_tool(
+    config: McpRuntimeConfig,
+    task: TaskRef,
+    *,
+    caller: DeclaredCaller | None = None,
+) -> dict[str, Any]:
     args = _task_ref_namespace(config, task)
     result = _worktree_result("worktree_status", git_worktree_manager.status_result(args))
     contract_path = result.get("contract_path")
     if isinstance(contract_path, str) and contract_path:
-        operation = latest_operation_projection(Path(contract_path))
-        if operation is not None:
-            result["lifecycleOperation"] = operation.model_dump(mode="json", exclude_none=True)
+        try:
+            resolved_caller = resolve_lifecycle_caller(config, caller)
+        except LifecycleCallerError as exc:
+            return {
+                "ok": False,
+                "operation": "worktree_status",
+                "state": "refused",
+                "status": exc.status,
+                "detail": exc.detail,
+            }
+        path = Path(contract_path)
+        read_failure = result.get("contractReadFailure")
+        if isinstance(read_failure, dict):
+            operations = unreadable_status_operations(
+                config,
+                result,
+                path,
+                read_failure,
+            )
+        else:
+            try:
+                contract = load_contract(path)
+                location = require_matching_lifecycle_operation_location(contract)
+                operations = current_operation_projections(
+                    path,
+                    allow_completed_disposition=completed_disposition_authorized(
+                        contract,
+                        resolved_caller,
+                    ),
+                    caller=resolved_caller,
+                    contract=contract,
+                    location=location,
+                )
+            except LifecycleOperationLocationError as exc:
+                result.update(location_decision_payload(exc))
+                operations = []
+            except (ContractError, OSError, UnicodeError, ValueError) as exc:
+                detail = "the canonical worktree contract is unreadable"
+                result.update(
+                    {
+                        "ok": False,
+                        "state": "worktree-contract-unreadable",
+                        "status": "worktree-contract-unreadable",
+                        "summary": detail,
+                        "detail": detail,
+                    }
+                )
+                operations = unreadable_status_operations(
+                    config,
+                    result,
+                    path,
+                    public_failure_evidence(
+                        stage="contract-read",
+                        side="contract",
+                        name=path.name,
+                        error_type=type(exc).__name__,
+                        observed={"state": "missing" if not path.exists() else "unreadable"},
+                    ),
+                )
+        result.pop("contractReadFailure", None)
+        result.pop("lifecycleOperation", None)
+        result["lifecycleOperations"] = [
+            operation.model_dump(mode="json", exclude_none=True) for operation in operations
+        ]
     return result
 
 
@@ -313,9 +454,11 @@ def worktree_sync_tool(
     memory_sync_choice: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    confined_contract = _configured_contract_path(config, contract_path)
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(configured, operation="worktree_sync")
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=confined_contract,
+        contract_path=configured.contract_path,
         memory_sync_choice=memory_sync_choice,
         dry_run=dry_run,
     )
@@ -367,13 +510,39 @@ def worktree_closeout_apply_tool(
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
-    if not approval.dry_run:
-        confined = _configured_contract_path(config, contract_path)
-        corrected_arguments = corrected_closeout_arguments(
-            confined.as_posix(), intent_note="<developer intent>"
+    if approval.dry_run:
+        return _worktree_closeout(
+            config,
+            operation="worktree_closeout_apply",
+            contract_path=contract_path,
+            messages=messages,
+            approval=approval,
         )
-        try:
-            operation = start_or_observe_closeout_operation(
+    return _start_closeout_operation(config, contract_path, messages, approval)
+
+
+def _start_closeout_operation(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    messages: CloseoutCommitMessages,
+    approval: CloseoutApproval,
+) -> dict[str, Any]:
+    configured = admit_configured_contract(config, contract_path)
+    address = LifecycleOperationPublicAddress("worktree_closeout_apply", "closeout")
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation=address.operation,
+            address=address,
+        )
+    confined = configured.contract_path
+    corrected_arguments = corrected_closeout_arguments(
+        confined.as_posix(), intent_note="<developer intent>"
+    )
+    try:
+        execution = execute_configured_contract_operation(
+            configured,
+            lambda: start_or_observe_closeout_operation(
                 CloseoutOperationAdmission(
                     config_path=config.config_path.as_posix(),
                     contract_path=confined,
@@ -389,17 +558,27 @@ def worktree_closeout_apply_tool(
                         arguments=corrected_arguments,
                     ),
                 ),
-            )
-        except CloseoutInputError as exc:
-            return _closeout_input_refusal("worktree_closeout_apply", exc)
-        return _operation_acknowledgement("worktree_closeout_apply", operation)
-    return _worktree_closeout(
-        config,
-        operation="worktree_closeout_apply",
-        contract_path=contract_path,
-        messages=messages,
-        approval=approval,
-    )
+                configured.contract,
+            ),
+        )
+    except (
+        CloseoutInputError,
+        LifecycleControlError,
+        LifecycleOperationReadError,
+    ) as error:
+        return _start_operation_refusal(
+            config,
+            confined,
+            address,
+            error,
+        )
+    if isinstance(execution, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            execution,
+            operation=address.operation,
+            address=address,
+        )
+    return _operation_acknowledgement("worktree_closeout_apply", execution)
 
 
 def worktree_integrate_tool(
@@ -418,21 +597,48 @@ def worktree_integrate_tool(
     durable queue record immediately before moving source history.
     """
 
-    confined_contract = require_within_coordination(config, contract_path, "contract_path")
-    if dry_run:
-        _configured_contract_path(config, contract_path)
-    if not dry_run:
-        operation = start_or_observe_operation(
-            IntegrateOperationInput(
-                configPath=config.config_path.as_posix(),
-                contractPath=confined_contract.as_posix(),
-                strategy=strategy,
-                ledgerCommitMessage=ledger_commit_message,
-                gatePolicy=_gate_policy_snapshot(config),
-                autoCompleteSeats=config.retirement.auto_land_on_integration,
-            )
+    configured = admit_configured_contract(config, contract_path)
+    address = LifecycleOperationPublicAddress("worktree_integrate", "integrate")
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation=address.operation,
+            address=address,
         )
-        return _operation_acknowledgement("worktree_integrate", operation)
+    confined_contract = configured.contract_path
+    if not dry_run:
+        try:
+            execution = execute_configured_contract_operation(
+                configured,
+                lambda: start_or_observe_operation(
+                    IntegrateOperationInput(
+                        configPath=config.config_path.as_posix(),
+                        contractPath=confined_contract.as_posix(),
+                        strategy=strategy,
+                        ledgerCommitMessage=ledger_commit_message,
+                        gatePolicy=_gate_policy_snapshot(config),
+                        autoCompleteSeats=config.retirement.auto_land_on_integration,
+                    ),
+                    configured.contract,
+                ),
+            )
+        except (
+            LifecycleControlError,
+            LifecycleOperationReadError,
+        ) as error:
+            return _start_operation_refusal(
+                config,
+                confined_contract,
+                address,
+                error,
+            )
+        if isinstance(execution, ConfiguredContractRefused):
+            return project_configured_contract_refusal(
+                execution,
+                operation=address.operation,
+                address=address,
+            )
+        return _operation_acknowledgement("worktree_integrate", execution)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
         strategy=strategy,
@@ -444,7 +650,10 @@ def worktree_integrate_tool(
         # exact delegated approval the master-handover channel produces.
         gate_policy=config.orchestration.gate_policy,
     )
-    result = _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
+    result = _worktree_result(
+        "worktree_integrate",
+        git_worktree_manager.integrate_result(args, configured.contract),
+    )
     if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
         result.update(
             auto_complete_seats(
@@ -457,24 +666,226 @@ def worktree_integrate_tool(
     return result
 
 
-def worktree_operation_cancel_tool(
+def worktree_operation_control_tool(
     config: McpRuntimeConfig,
-    *,
-    contract_path: str,
-    operation_kind: str,
-    intent_note: str,
-    dry_run: bool = False,
+    request: OperationControlRequest,
 ) -> dict[str, Any]:
-    if operation_kind not in {"closeout", "integrate"}:
-        raise ValueError("operation_kind must be 'closeout' or 'integrate'")
-    if not intent_note.replace("\n", " ").strip():
-        raise ValueError("operation cancellation requires a non-empty intent_note")
-    confined = _configured_contract_path(config, contract_path)
-    kind = cast(LifecycleOperationKind, operation_kind)
-    projection = observe_operation(confined, kind) if dry_run else cancel_operation(confined, kind)
-    if projection is None:
-        raise RuntimeError(f"no {operation_kind} operation exists for this task")
-    return _operation_acknowledgement("worktree_operation_cancel", projection)
+    invalid = _operation_control_request_refusal(request)
+    if invalid is not None:
+        return invalid
+    configured = admit_configured_contract(config, request.contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return _configured_control_refusal(config, request, configured)
+    caller_result = _resolve_control_caller(config, configured.contract, request)
+    if isinstance(caller_result, dict):
+        return caller_result
+    caller, disposition_authorized = caller_result
+    return _execute_operation_control(
+        config,
+        request,
+        configured,
+        caller,
+        disposition_authorized=disposition_authorized,
+    )
+
+
+def _operation_control_request_refusal(
+    request: OperationControlRequest,
+) -> dict[str, Any] | None:
+    try:
+        validate_lifecycle_control_request(
+            action=request.action,
+            expected_generation=request.expected_generation,
+            intent_note=request.intent_note,
+            commit_messages={
+                "code_commit_message": request.code_commit_message,
+                "memory_commit_message": request.memory_commit_message,
+                "ledger_commit_message": request.ledger_commit_message,
+            },
+        )
+    except LifecycleControlRequestError as error:
+        return {
+            "ok": False,
+            "operation": "worktree_operation_control",
+            "state": "refused",
+            "status": error.status,
+            "detail": error.detail,
+            "expected": error.expected,
+            "observed": error.observed,
+            "nextAction": "correct-request",
+        }
+    return None
+
+
+def _configured_control_refusal(
+    config: McpRuntimeConfig,
+    request: OperationControlRequest,
+    configured: ConfiguredContractRefused,
+) -> dict[str, Any]:
+    if configured.reason in {"authority-invalid", "contract-unreadable"}:
+        try:
+            resolve_lifecycle_caller(config, request.caller)
+        except LifecycleCallerError as exc:
+            return {
+                "ok": False,
+                "operation": "worktree_operation_control",
+                "state": "refused",
+                "status": exc.status,
+                "detail": exc.detail,
+            }
+    return project_configured_contract_refusal(
+        configured,
+        operation="worktree_operation_control",
+        address=LifecycleOperationPublicAddress(
+            "worktree_operation_control",
+            request.operation_kind,
+            request.expected_generation,
+        ),
+    )
+
+
+def _resolve_control_caller(
+    config: McpRuntimeConfig,
+    contract: WorktreeContract,
+    request: OperationControlRequest,
+) -> tuple[DeclaredCaller | None, bool] | dict[str, Any]:
+    try:
+        caller = resolve_lifecycle_caller(config, request.caller)
+        if request.action in {"retire", "supersede"}:
+            require_completed_disposition_authority(contract, caller)
+        return caller, completed_disposition_authorized(contract, caller)
+    except LifecycleCallerError as exc:
+        return {
+            "ok": False,
+            "operation": "worktree_operation_control",
+            "state": "refused",
+            "status": exc.status,
+            "detail": exc.detail,
+            "expected": {},
+            "observed": {},
+            "nextAction": "developer-decision",
+            "developerDecisionRequired": True,
+            "decisionSurface": exc.detail,
+        }
+
+
+def _execute_operation_control(
+    config: McpRuntimeConfig,
+    request: OperationControlRequest,
+    configured: ConfiguredContractAccepted,
+    caller: DeclaredCaller | None,
+    *,
+    disposition_authorized: bool,
+) -> dict[str, Any]:
+    confined = configured.contract_path
+    revision_messages = (
+        raw_closeout_messages(
+            code=request.code_commit_message,
+            memory=request.memory_commit_message,
+            ledger=request.ledger_commit_message,
+        )
+        if request.action == "revise"
+        else None
+    )
+    contract = configured.contract
+    try:
+        execution = execute_configured_contract_operation(
+            configured,
+            lambda: control_operation(
+                LifecycleControlCommand(
+                    admitted_contract=contract,
+                    admitted_location=configured.location,
+                    configured_authority=config.config_path.as_posix(),
+                    kind=request.operation_kind,
+                    action=request.action,
+                    expected_generation=request.expected_generation,
+                    intent_note=request.intent_note,
+                    dry_run=request.dry_run,
+                    revision_messages=revision_messages,
+                    revision_gate_policy=(
+                        _gate_policy_snapshot(config) if request.action == "revise" else None
+                    ),
+                    allow_completed_disposition=disposition_authorized,
+                    caller=caller,
+                )
+            ),
+        )
+    except LifecycleControlError as exc:
+        return {
+            "ok": False,
+            "operation": "worktree_operation_control",
+            "state": "refused",
+            "status": exc.status,
+            "detail": exc.detail,
+            **exc.response_fields(
+                contract_path=confined.as_posix(),
+                kind=request.operation_kind,
+                generation=request.expected_generation,
+                caller=caller,
+            ),
+        }
+    except LifecycleOperationReadError as exc:
+        return _journal_read_refusal(
+            "worktree_operation_control",
+            request.operation_kind,
+            exc,
+        )
+    if isinstance(execution, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            execution,
+            operation="worktree_operation_control",
+            address=LifecycleOperationPublicAddress(
+                "worktree_operation_control",
+                request.operation_kind,
+                request.expected_generation,
+            ),
+        )
+    return _operation_acknowledgement("worktree_operation_control", execution)
+
+
+def _journal_read_refusal(
+    operation: str,
+    kind: LifecycleOperationKind,
+    error: LifecycleOperationReadError,
+) -> dict[str, Any]:
+    decision = lifecycle_journal_read_decision(kind, error)
+    payload = decision.payload()
+    return {
+        "ok": False,
+        "operation": operation,
+        "state": "refused",
+        "status": decision.status,
+        "detail": decision.detail,
+        **{key: value for key, value in payload.items() if key != "state"},
+    }
+
+
+def _start_operation_refusal(
+    config: McpRuntimeConfig,
+    contract_path: Path,
+    address: LifecycleOperationPublicAddress,
+    error: Exception,
+) -> dict[str, Any]:
+    """Translate one start/admission failure without duplicating route classifiers."""
+
+    if isinstance(error, CloseoutInputError):
+        return _closeout_input_refusal(address.operation, error)
+    if isinstance(error, LifecycleControlError):
+        return {
+            "ok": False,
+            "operation": address.operation,
+            "state": "refused",
+            "status": error.status,
+            "detail": error.detail,
+            **error.response_fields(
+                contract_path=contract_path.as_posix(),
+                kind=address.kind,
+                generation=address.generation or 0,
+            ),
+        }
+    if isinstance(error, LifecycleOperationReadError):
+        return _journal_read_refusal(address.operation, address.kind, error)
+    return unreadable_operation_refusal(config, contract_path, address, error)
 
 
 def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:
@@ -512,9 +923,11 @@ def worktree_cleanup_tool(
     dry_run: bool = False,
     teardown_providers: bool = True,
 ) -> dict[str, Any]:
-    confined_contract = _configured_contract_path(config, contract_path)
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(configured, operation="worktree_cleanup")
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=confined_contract,
+        contract_path=configured.contract_path,
         approved=not dry_run,
         dry_run=dry_run,
         teardown_providers=teardown_providers,
@@ -529,9 +942,11 @@ def worktree_abandon_tool(
     dry_run: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
-    confined_contract = _configured_contract_path(config, contract_path)
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(configured, operation="worktree_abandon")
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=confined_contract,
+        contract_path=configured.contract_path,
         approved=not dry_run,
         dry_run=dry_run,
         force=force,
@@ -630,17 +1045,6 @@ def _worktree_result(
     return {**result.payload, "ok": result.returncode == 0, "operation": operation}
 
 
-def _configured_contract_path(config: McpRuntimeConfig, contract_path: str) -> Path:
-    """Confine a task contract and bind its Git identities to configured authority."""
-
-    confined = require_within_coordination(config, contract_path, "contract_path")
-    require_configured_contract_repositories(
-        load_contract(confined),
-        config.config_path.as_posix(),
-    )
-    return confined
-
-
 def _worktree_closeout(
     config: McpRuntimeConfig,
     *,
@@ -649,13 +1053,21 @@ def _worktree_closeout(
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
-    confined_contract = _configured_contract_path(config, contract_path)
+    configured = admit_configured_contract(config, contract_path)
+    address = LifecycleOperationPublicAddress(operation, "closeout")
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation=operation,
+            address=address,
+        )
+    confined_contract = configured.contract_path
     corrected_arguments = corrected_closeout_arguments(confined_contract.as_posix())
     if operation == "worktree_closeout_apply":
         corrected_arguments.update(intent_note="<developer intent>", dry_run=True)
     try:
         effective_input = _normalize_worktree_closeout(
-            confined_contract,
+            configured.contract,
             messages,
             tool_name=operation,
             corrected_arguments=corrected_arguments,
@@ -670,17 +1082,19 @@ def _worktree_closeout(
         dry_run=approval.dry_run,
         gate_policy=config.orchestration.gate_policy,
     )
-    return _worktree_result(operation, git_worktree_manager.closeout_result(args))
+    return _worktree_result(
+        operation,
+        git_worktree_manager.closeout_result(args, configured.contract),
+    )
 
 
 def _normalize_worktree_closeout(
-    contract_path: Path,
+    contract: WorktreeContract,
     messages: CloseoutCommitMessages,
     *,
     tool_name: str,
     corrected_arguments: dict[str, object],
 ) -> EffectiveCloseoutInput:
-    contract = load_contract(contract_path)
     plan = resolve_closeout_plan(
         contract,
         route="worktree",
@@ -704,6 +1118,6 @@ def _closeout_input_refusal(operation: str, error: CloseoutInputError) -> dict[s
         "operation": operation,
         "state": "refused",
         "status": error.status,
-        "detail": str(error),
+        "detail": "closeout input is invalid; use the corrected call",
         **error.response_fields(),
     }

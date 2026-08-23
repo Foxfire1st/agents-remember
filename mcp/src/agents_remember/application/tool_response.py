@@ -14,7 +14,7 @@ from typing import Any
 from agents_remember.application.next_step import next_step_for
 from agents_remember.kernel.agentic_settings import DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
 from agents_remember.models.base import ResponseEnvelope
-from agents_remember.models.tool_response import finalize_tool_response
+from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_staleness_banner
 

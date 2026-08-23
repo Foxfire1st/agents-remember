@@ -20,6 +20,15 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_parent_series_accepting_leaves,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocationError,
+    publish_new_lifecycle_operation_location,
+    require_matching_lifecycle_operation_location,
+    resume_new_lifecycle_operation_location,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
+)
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.context import resolve_context
@@ -36,10 +45,13 @@ from agents_remember.worktrees.modules.guidance import (
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.modules.start_contract import (
+from agents_remember.worktrees.modules.startup.start_contract import (
     build_start_contract,
 )
-from agents_remember.worktrees.modules.start_result import started_result
+from agents_remember.worktrees.modules.startup.start_provider_preflight import (
+    provider_enablement_state,
+)
+from agents_remember.worktrees.modules.startup.start_result import started_result
 from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from agents_remember.worktrees.reopen import reopen_required_start_result
@@ -59,10 +71,11 @@ from agents_remember.worktrees.start_progress import (
 from agents_remember.worktrees.task_resolver import resolve_leaf_enclosure_contract
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
+    ContractError,
     WorktreeContract,
     amend_contract,
+    contract_publication_text,
     load_contract,
-    write_contract,
 )
 
 
@@ -79,8 +92,14 @@ class ProviderStartPaths:
 
 
 def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
+    return load_contract(contract_path_from_args(args))
+
+
+def contract_path_from_args(args: WorktreeArgs) -> Path:
+    """Resolve the canonical enclosure path without requiring readable contract bytes."""
+
     if args.contract_path is not None:
-        return load_contract(args.contract_path)
+        return args.contract_path
     context = resolve_context(args)
     if not args.task_name:
         raise RuntimeError("--task-name or --contract-path is required")
@@ -101,16 +120,42 @@ def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
         )
     if contract_path is None:
         raise RuntimeError("--task-name resolved no leaf enclosure; pass --leaf-id")
-    return load_contract(contract_path)
+    return contract_path
 
 
 def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
-    contract = load_contract_from_args(args)
+    contract_path = contract_path_from_args(args)
+    try:
+        contract = load_contract(contract_path)
+    except (ContractError, OSError, UnicodeError, ValueError) as exc:
+        detail = "the canonical worktree contract is unreadable"
+        missing = isinstance(exc, FileNotFoundError) or not contract_path.exists()
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "worktree-contract-unreadable",
+                "status": "worktree-contract-unreadable",
+                "summary": detail,
+                "detail": detail,
+                "contract_path": contract_path.as_posix(),
+                "contractReadFailure": public_failure_evidence(
+                    stage="contract-read",
+                    side="contract",
+                    name=contract_path.name,
+                    error_type=type(exc).__name__,
+                    observed={"state": "missing" if missing else "unreadable"},
+                ),
+            },
+        )
     return WorktreeCommandResult(0, dict(status_payload(contract)))
 
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    try:
+        require_matching_lifecycle_operation_location(contract)
+    except LifecycleOperationLocationError as error:
+        return _location_refusal(error)
     if contract.kind == "series":
         raise RuntimeError(
             "worktree_attach refused: an atomic integration branch is not a resumable workbench"
@@ -440,8 +485,19 @@ def _existing_contract_result(
     existing = load_contract(contract.contract_path)
     if existing.cleanup in ("abandoned", "reopened"):
         return None
+    return _active_existing_contract_result(context, existing, args)
+
+
+def _active_existing_contract_result(
+    context,
+    existing: WorktreeContract,
+    args: WorktreeArgs,
+) -> WorktreeCommandResult:
     if existing.cleanup == "completed":
         return reopen_required_start_result(existing)
+    location_refusal = _resume_existing_location(existing)
+    if location_refusal is not None:
+        return location_refusal
     require_ordinary_worktree(existing, operation="worktree_start")
     lineage = source_lineage_for_contract(existing)
     refusal = lineage_refusal(lineage)
@@ -453,6 +509,28 @@ def _existing_contract_result(
     return WorktreeCommandResult(
         0, {"state": "attached-existing-contract", **status_payload(existing)}
     )
+
+
+def _resume_existing_location(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    try:
+        require_matching_lifecycle_operation_location(contract)
+        return None
+    except LifecycleOperationLocationError as error:
+        if error.status != "operation-location-publication-interrupted":
+            return _location_refusal(error)
+    try:
+        resume_new_lifecycle_operation_location(
+            contract,
+            contract_text=contract_publication_text(
+                contract.contract_path,
+                contract,
+            ),
+        )
+    except LifecycleOperationLocationError as error:
+        return _location_refusal(error)
+    return None
 
 
 def _preflighted_contract(
@@ -528,63 +606,10 @@ def _create_start_enclosure(
         else integration_authority_lock(contract.coordination_root, contract.repo_name)
     )
     with authority:
-        lineage_block = _parent_lineage_start_block(context, contract, args)
-        if lineage_block is not None:
-            return lineage_block
-        require_parent_series_accepting_leaves(contract, operation="worktree_start")
-        require_ordinary_worktree(contract, operation="worktree_start")
-        memory_preview = prepare_memory_for_start(contract, replace(args, dry_run=True))
-        if memory_preview["state"] == "blocked":
-            return _blocked_memory_start_result(
-                context,
-                args,
-                "not-created",
-                memory_preview,
-            )
-        code_state = ensure_worktree(contract, side="code", dry_run=args.dry_run)
-        _record_start_progress(
-            context,
-            contract,
-            args,
-            StartBeat(phase="code-worktree", completed_phases=("preflight",)),
-        )
-        memory_state = memory_preview if args.dry_run else prepare_memory_for_start(contract, args)
-        if memory_state["state"] == "blocked":
-            raw_choices = memory_state.get("choices")
-            _record_start_block(
-                context,
-                contract,
-                args,
-                StartBeat(
-                    phase="memory-blocked",
-                    completed_phases=("preflight", "code-worktree"),
-                    choices=tuple(str(choice) for choice in raw_choices)
-                    if isinstance(raw_choices, list)
-                    else (),
-                    blocked_reason=str(memory_state.get("reason", "")),
-                ),
-            )
-            return _blocked_memory_start_result(context, args, code_state, memory_state)
-        contract = _contract_after_memory_start(contract, memory_state)
-        provider_plan = plan_providers_for_start(context, contract, args)
-        if provider_plan["state"] == "blocked":
-            _record_start_block(
-                context,
-                contract,
-                args,
-                StartBeat(
-                    phase="provider-blocked",
-                    completed_phases=("preflight", "code-worktree", "memory-compatible"),
-                    blocked_reason=str(provider_plan.get("reason", "")),
-                ),
-            )
-            return _blocked_provider_start_result(
-                context, args, code_state, memory_state, provider_plan
-            )
-        # The contract is durable before task-doc restamp or provider setup begins.
-        if not args.dry_run:
-            write_contract(contract.contract_path, contract)
-            _clear_start_block(context, contract, args)
+        prepared = _prepare_start_under_authority(context, contract, args)
+    if isinstance(prepared, WorktreeCommandResult):
+        return prepared
+    contract = prepared.contract
     # Task-doc publication acquires queue then integration-authority locks in that order.
     if not args.dry_run and contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
         restamp_leaf_doc_lifecycle(
@@ -597,12 +622,121 @@ def _create_start_enclosure(
                 topology_stable=True,
             ),
         )
-    provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
+    provider_state = run_or_launch_provider_setup(
+        context,
+        contract,
+        args,
+        prepared.provider_plan,
+    )
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(
-            context, args, code_state, memory_state, provider_state
+            context,
+            args,
+            prepared.code_state,
+            prepared.memory_state,
+            provider_state,
         )
-    return started_result(contract, args, code_state, memory_state, provider_state)
+    return started_result(
+        contract,
+        args,
+        prepared.code_state,
+        prepared.memory_state,
+        provider_state,
+    )
+
+
+@dataclass(frozen=True)
+class _PreparedStartEnclosure:
+    contract: WorktreeContract
+    code_state: str
+    memory_state: dict[str, object]
+    provider_plan: dict[str, object]
+
+
+def _prepare_start_under_authority(
+    context,
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+) -> _PreparedStartEnclosure | WorktreeCommandResult:
+    lineage_block = _parent_lineage_start_block(context, contract, args)
+    if lineage_block is not None:
+        return lineage_block
+    require_parent_series_accepting_leaves(contract, operation="worktree_start")
+    require_ordinary_worktree(contract, operation="worktree_start")
+    memory_preview = prepare_memory_for_start(contract, replace(args, dry_run=True))
+    if memory_preview["state"] == "blocked":
+        return _blocked_memory_start_result(context, args, "not-created", memory_preview)
+    code_state = ensure_worktree(contract, side="code", dry_run=args.dry_run)
+    _record_start_progress(
+        context,
+        contract,
+        args,
+        StartBeat(phase="code-worktree", completed_phases=("preflight",)),
+    )
+    memory_state = memory_preview if args.dry_run else prepare_memory_for_start(contract, args)
+    if memory_state["state"] == "blocked":
+        raw_choices = memory_state.get("choices")
+        _record_start_block(
+            context,
+            contract,
+            args,
+            StartBeat(
+                phase="memory-blocked",
+                completed_phases=("preflight", "code-worktree"),
+                choices=tuple(str(choice) for choice in raw_choices)
+                if isinstance(raw_choices, list)
+                else (),
+                blocked_reason=str(memory_state.get("reason", "")),
+            ),
+        )
+        return _blocked_memory_start_result(context, args, code_state, memory_state)
+    contract = _contract_after_memory_start(contract, memory_state)
+    provider_plan = plan_providers_for_start(context, contract, args)
+    if provider_plan["state"] == "blocked":
+        _record_start_block(
+            context,
+            contract,
+            args,
+            StartBeat(
+                phase="provider-blocked",
+                completed_phases=("preflight", "code-worktree", "memory-compatible"),
+                blocked_reason=str(provider_plan.get("reason", "")),
+            ),
+        )
+        return _blocked_provider_start_result(
+            context,
+            args,
+            code_state,
+            memory_state,
+            provider_plan,
+        )
+    if not args.dry_run:
+        try:
+            publish_new_lifecycle_operation_location(
+                contract,
+                contract_text=contract_publication_text(contract.contract_path, contract),
+            )
+        except LifecycleOperationLocationError as error:
+            return _location_refusal(error)
+        _clear_start_block(context, contract, args)
+    return _PreparedStartEnclosure(contract, code_state, memory_state, provider_plan)
+
+
+def _location_refusal(error: LifecycleOperationLocationError) -> WorktreeCommandResult:
+    return WorktreeCommandResult(
+        2,
+        {
+            "state": error.status,
+            "status": error.status,
+            "summary": error.detail,
+            "detail": error.detail,
+            "expected": error.expected,
+            "observed": error.observed,
+            "nextAction": "developer-decision",
+            "developerDecisionRequired": True,
+            "decisionSurface": error.detail,
+        },
+    )
 
 
 def prepare_providers_for_start(
@@ -627,7 +761,7 @@ def plan_providers_for_start(
     if skipped:
         return skipped
     paths = _provider_start_paths(context, contract, args)
-    provider_state = _provider_enablement_state(
+    provider_state = provider_enablement_state(
         paths.target_coordination_root,
         paths.provider_settings_path,
         target_memory_root=paths.target_memory_root,
@@ -777,69 +911,6 @@ def _provider_start_paths(
         provider_runtime_root=(contract.worktree_group / "provider-runtime").resolve(),
         provider_settings_path=setup_config.settings_path.resolve(),
     )
-
-
-def _provider_enablement_state(
-    target_coordination_root: Path,
-    provider_settings_path: Path,
-    *,
-    target_memory_root: Path | None,
-) -> dict[str, object]:
-    try:
-        settings = worktree_services().provider_lifecycle.load_settings(provider_settings_path)
-    except RuntimeError as error:
-        return {
-            "state": "blocked",
-            "reason": str(error),
-            "targetCoordinationRoot": target_coordination_root.as_posix(),
-        }
-    cgc_enabled = bool(settings) and worktree_services().provider_lifecycle.provider_enabled(
-        settings, "codegraphcontext-code"
-    )
-    grepai_enabled = bool(settings) and worktree_services().provider_lifecycle.provider_enabled(
-        settings, "grepai-memory"
-    )
-    grepai_worktree_enabled = grepai_enabled and target_memory_root is not None
-    if cgc_enabled or grepai_worktree_enabled:
-        return _enabled_provider_state(cgc_enabled, grepai_worktree_enabled)
-    return {
-        "state": "skipped",
-        "reason": _provider_enablement_skip_reason(
-            cgc_enabled=cgc_enabled,
-            grepai_enabled=grepai_enabled,
-            target_memory_root=target_memory_root,
-        ),
-        "settingsFile": worktree_services()
-        .provider_lifecycle.settings_path(provider_settings_path)
-        .as_posix(),
-    }
-
-
-def _enabled_provider_state(
-    cgc_enabled: bool,
-    grepai_worktree_enabled: bool,
-) -> dict[str, object]:
-    return {
-        "state": "enabled",
-        "codegraphcontext-code": cgc_enabled,
-        "grepai-memory": grepai_worktree_enabled,
-    }
-
-
-def _provider_enablement_skip_reason(
-    *,
-    cgc_enabled: bool,
-    grepai_enabled: bool,
-    target_memory_root: Path | None,
-) -> str:
-    reasons = []
-    if not cgc_enabled:
-        reasons.append("codegraphcontext-code is not enabled")
-    if not grepai_enabled:
-        reasons.append("grepai-memory is not enabled")
-    elif target_memory_root is None:
-        reasons.append("grepai-memory requires worktree memory")
-    return "; ".join(reasons)
 
 
 def _grepai_target_memory_root(contract: WorktreeContract) -> Path | None:
@@ -1046,7 +1117,14 @@ def _load_memory_ledger(
             return disabled
         return {
             "state": "blocked",
-            "reason": str(error),
+            "reason": "the configured memory ledger is unreadable",
+            "failure": public_failure_evidence(
+                stage="worktree-start-ledger-read",
+                side="ledger",
+                name=(contract.ledger_path.name if contract.ledger_path else "memory.md"),
+                error_type=type(error).__name__,
+                observed={"state": "unreadable"},
+            ),
             # Only consumable choices (260703-L18 review L18R-3): "reconciliation" needs a
             # parseable ledger to map against, which a LedgerError path cannot supply, and
             # "custom" has no handler — advertising either here would be an F-R dead-end.

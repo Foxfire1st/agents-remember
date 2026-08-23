@@ -25,10 +25,7 @@ def canonical_local_branch(repository: Path, branch: str) -> str:
         if symbolic.returncode == 1 and not symbolic.stderr.strip():
             return normalized
         if symbolic.returncode != 0:
-            detail = (symbolic.stderr or symbolic.stdout).strip() or "unknown Git error"
-            raise RuntimeError(
-                f"cannot resolve local branch authority for {normalized!r}: {detail}"
-            )
+            raise RuntimeError("local branch authority is unreadable")
         target = symbolic.stdout.strip()
         prefix = "refs/heads/"
         if not target.startswith(prefix) or len(target) == len(prefix):
@@ -118,10 +115,7 @@ def branch_worktree_owners(repository: Path, branch: str) -> tuple[Path, ...]:
 
     result = run_git(repository, ["worktree", "list", "--porcelain"])
     if result.returncode != 0:
-        raise RuntimeError(
-            f"cannot enumerate linked worktrees for {repository}: "
-            f"{(result.stderr or result.stdout).strip()}"
-        )
+        raise RuntimeError("linked-worktree branch authority is unreadable")
     expected = canonical_local_branch(repository, branch)
     owners: list[Path] = []
     for block in result.stdout.strip().split("\n\n"):

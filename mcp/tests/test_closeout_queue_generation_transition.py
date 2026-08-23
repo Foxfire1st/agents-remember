@@ -8,18 +8,17 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.tasks import write_task_doc
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
-    cancel_operation,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
@@ -39,6 +38,7 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from closeout_input_test_support import closeout_operation_input, start_closeout_operation
+from lifecycle_control_test_support import cancel_current_generation
 from test_closeout_queue import LEAF_A, MASTER_A, QueueFixture, _leaf
 from test_worktree_support import git
 
@@ -56,7 +56,7 @@ class CloseoutQueueGenerationTransitionTests(unittest.TestCase):
                 "close original candidate",
             )
             integration_input, integration_store = _open_conflicting_integration(closed)
-            cancelled = cancel_operation(closed.contract_path, "integrate")
+            cancelled = cancel_current_generation(closed.contract_path, "integrate")
             self.assertEqual(cancelled.status, "cancelled")
             reset = load_contract(closed.contract_path)
             self.assertEqual((reset.closeout_status, reset.code_commit), ("not-started", ""))
@@ -92,7 +92,7 @@ def _open_conflicting_integration(
         contractPath=closed.contract_path.as_posix(),
         strategy="replay",
     )
-    start_or_observe_operation(operation_input, launcher=lambda *_: None)
+    start_or_observe_operation(operation_input, closed, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "integrate"))
     record = OperationRuntime(store).start()
     handoff = integrate_mod.integrate_result(
@@ -101,7 +101,8 @@ def _open_conflicting_integration(
             approved=True,
             strategy="replay",
             operation_key=record.operationKey,
-        )
+        ),
+        closed,
     )
     assert handoff.payload["state"] == "integration-resolution-required"
     assert handoff.payload["conflictTransaction"] is not None
@@ -117,7 +118,7 @@ def _finish_integration(
         configPath=previous.configPath,
         contractPath=previous.contractPath,
     )
-    start_or_observe_operation(next_input, launcher=lambda *_: None)
+    start_or_observe_operation(next_input, resolved, launcher=lambda *_: None)
     record = OperationRuntime(store).start()
     with mock.patch.object(
         integrate_mod,
@@ -129,7 +130,8 @@ def _finish_integration(
                 contract_path=resolved.contract_path,
                 approved=True,
                 operation_key=record.operationKey,
-            )
+            ),
+            resolved,
         )
 
 
@@ -143,12 +145,14 @@ def _close_and_certify_candidate(
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = OperationRuntime(store)
     record = runtime.start()
+    contract = load_contract(contract.contract_path)
     claim_queue_candidate_for_closeout(contract, record.operationKey)
     runtime.progress("approval-claim", {"approval_claimed": True})
     mutation_args = WorktreeArgs(
         contract_path=contract.contract_path,
         closeout_input=operation_input.effectiveInput,
         operation_progress=runtime.progress,
+        operation_key=record.operationKey,
     )
     intent = begin_git_mutation(
         mutation_args,
@@ -167,7 +171,7 @@ def _close_and_certify_candidate(
         commit=code_commit,
     )
     closed = replace(
-        contract,
+        load_contract(contract.contract_path),
         human_review_status="approved",
         approved_for_commit=True,
         commit_approval_note=operation_input.approvalNote,

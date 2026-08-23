@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from .document import DocStatus, SubTaskRef, TaskDocument
 from .readiness import completion_blockers
-from .store import markdown_path_for, read_task_doc
+from .store import TaskDocSourceSnapshot, capture_task_doc_source, markdown_path_for
 
 MasterSyncStatus = Literal["none", "created", "updated", "unchanged"]
 
@@ -25,6 +25,7 @@ class MasterSyncPlan:
     master: TaskDocument | None = None
     master_json_path: Path | None = None
     subtask_number: str | None = None
+    source_snapshot: TaskDocSourceSnapshot | None = None
 
     @property
     def changed(self) -> bool:
@@ -39,7 +40,10 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
     if master_json_path is None or not master_json_path.exists():
         return MasterSyncPlan(status="none")
     try:
-        master = read_task_doc(master_json_path)
+        source_snapshot = capture_task_doc_source(master_json_path)
+        if source_snapshot.json_bytes is None:
+            raise FileNotFoundError(master_json_path)
+        master = TaskDocument.model_validate_json(source_snapshot.json_bytes)
     except (OSError, ValidationError, ValueError) as exc:
         raise MasterSyncError(
             f"cannot read parent master task document: {master_json_path}"
@@ -61,6 +65,7 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
             master=master,
             master_json_path=master_json_path,
             subtask_number=leaf.id,
+            source_snapshot=source_snapshot,
         )
 
     data = master.model_dump(by_alias=True)
@@ -80,6 +85,7 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
         master=updated,
         master_json_path=master_json_path,
         subtask_number=leaf.id,
+        source_snapshot=source_snapshot,
     )
 
 

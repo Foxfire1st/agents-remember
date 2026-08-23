@@ -3,19 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
+    ledger_to_text,
     load_ledger,
     parse_ledger_text,
     prepend_mapping,
     write_ledger,
 )
 from agents_remember.models.closeout_input import EffectiveCloseoutInput
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
+from agents_remember.models.lifecycles.operation import (
+    LifecycleOperationRecord,
+    LifecycleOperationRecoveryCommits,
+)
+from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+    CloseoutLedgerRecoveryDecision,
+    classify_closeout_ledger_recovery,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    located_lifecycle_operation_store,
+)
 from agents_remember.worktrees.integration.mutation_evidence import (
+    begin_exact_file_git_mutation,
     begin_git_mutation,
-    bind_expected_output_tree,
     prove_git_commit,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
@@ -223,6 +236,16 @@ def resume_external_commits(
 ) -> tuple[str, str]:
     """Finish the exact ledger edge after a journaled memory-content commit."""
     assert contract.memory_worktree is not None and contract.ledger_path is not None
+    pending = _pending_ledger_record(contract, args)
+    if pending is not None:
+        ledger_commit = _resume_pending_ledger_commit(
+            contract,
+            args,
+            effective_input,
+            pending,
+            commits=(code_commit, memory_commit),
+        )
+        return memory_commit, ledger_commit
     require_clean(contract.memory_worktree, "resuming external-memory closeout")
     memory_head = head_commit(contract.memory_worktree)
     ledger = load_ledger(contract.ledger_path)
@@ -235,19 +258,16 @@ def resume_external_commits(
             raise RuntimeError(
                 "closeout recovery cannot prove the recorded memory commit at memory HEAD"
             )
-        intent = begin_git_mutation(
+        intended_ledger = prepend_mapping(ledger, code_commit, memory_commit)
+        intent = begin_exact_file_git_mutation(
             args,
             leg="ledger",
             repository=contract.memory_worktree,
-            expected_output_tree=None,
+            path=contract.ledger_path,
+            intended_text=ledger_to_text(intended_ledger),
         )
-        write_ledger(contract.ledger_path, prepend_mapping(ledger, code_commit, memory_commit))
+        write_ledger(contract.ledger_path, intended_ledger)
         require_git(contract.memory_worktree, ["add", "memory.md"])
-        intent = bind_expected_output_tree(
-            args,
-            intent,
-            repository=contract.memory_worktree,
-        )
         ledger_commit = commit_if_dirty(
             contract.memory_worktree,
             effective_input.message_for("ledger"),
@@ -274,3 +294,72 @@ def resume_external_commits(
             },
         )
     return memory_commit, ledger_commit
+
+
+def _pending_ledger_record(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+) -> LifecycleOperationRecord | None:
+    if not args.operation_key:
+        return None
+    record = located_lifecycle_operation_store(contract, "closeout").read()
+    if record is None or record.operationKey != args.operation_key:
+        return None
+    evidence = record.mutationEvidence.get("ledger")
+    if evidence is None or evidence.state != "mutation-intent":
+        return None
+    return record
+
+
+def _resume_pending_ledger_commit(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    effective_input: EffectiveCloseoutInput,
+    record: LifecycleOperationRecord,
+    *,
+    commits: tuple[str, str],
+) -> str:
+    repository = contract.memory_worktree
+    ledger_path = contract.ledger_path
+    assert repository is not None and ledger_path is not None
+    evidence = record.mutationEvidence["ledger"]
+    recovery = record.recoveryCommits
+    if recovery is None or (recovery.codeCommit, recovery.memoryContentCommit) != commits:
+        raise RuntimeError("closeout ledger recovery commits changed outside the journal")
+    before = evidence.before
+    if before is None or Path(evidence.repository).resolve() != repository.resolve():
+        raise RuntimeError("closeout ledger recovery lost its exact mutation authority")
+    classification = classify_closeout_ledger_recovery(contract, record)
+    if not classification.mechanically_convergent:
+        raise CloseoutLedgerRecoveryDecision(classification)
+    if classification.state == "commit-proven-pending-publication":
+        committed = head_commit(repository)
+        prove_git_commit(args, evidence, repository=repository, commit=committed)
+        return committed
+    if classification.state == "accepted-before":
+        write_ledger(ledger_path, parse_ledger_text(classification.intended_text))
+    if classification.state in {"accepted-before", "prepared-unstaged"}:
+        _require_only_ledger_change(repository)
+        require_git(repository, ["add", "memory.md"])
+    if classification.state not in {
+        "accepted-before",
+        "prepared-unstaged",
+        "prepared-staged",
+    }:
+        raise CloseoutLedgerRecoveryDecision(classification)
+    ledger_commit = commit_if_dirty(
+        repository,
+        effective_input.message_for("ledger"),
+    )
+    prove_git_commit(args, evidence, repository=repository, commit=ledger_commit)
+    return ledger_commit
+
+
+def _require_only_ledger_change(repository: Path) -> None:
+    status = run_git(repository, ["status", "--porcelain=v1", "-z"])
+    if status.returncode != 0:
+        raise RuntimeError("could not inspect ledger recovery state")
+    entries = [item for item in status.stdout.split("\0") if item]
+    paths = {item[3:] for item in entries if len(item) >= 4}
+    if not entries or paths != {"memory.md"}:
+        raise RuntimeError("closeout ledger recovery contains changes outside memory.md")

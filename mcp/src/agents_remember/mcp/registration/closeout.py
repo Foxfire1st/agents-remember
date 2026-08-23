@@ -4,13 +4,21 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.application.direct_landing import DirectLandingRequest
+from agents_remember.application.lifecycle.direct_landing import DirectLandingRequest
+from agents_remember.application.lifecycle.legacy_operation_tool import (
+    LegacyOperationAction,
+    LegacyOperationRequest,
+)
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
+    LifecycleControlAction,
+    OperationControlRequest,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import IntegrateStrategy
+from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
 
 from ..tools import (
     direct_landing_payload,
@@ -19,7 +27,8 @@ from ..tools import (
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
-    worktree_operation_cancel_payload,
+    worktree_legacy_operation_payload,
+    worktree_operation_control_payload,
 )
 
 
@@ -50,10 +59,10 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         contract (series-contract.md), verifies the exact code commit is the current
         series branch HEAD, commits external-memory content, and prepends the
         code-to-memory ledger row with the same ledger semantics as the worktree path.
-        Message intent is normalized before the integration authority lock. The two
-        synchronous Git commits are not a durable atomic operation; interruption can leave
-        memory content ahead of its ledger row and requires the separately sequenced
-        operation-recovery work. Policy-gated:
+        Message intent is normalized before lane authority. Apply persists one synchronous
+        direct-landing lifecycle generation before memory or ledger mutation, records Git
+        intent/proof per leg, and resumes the exact generation through the task-addressed
+        recover control after interruption. Policy-gated:
         directExecutionEnabled must be set in the MCP
         authority settings. The code commit is verified, never created. Pass
         candidate_tree (the staged candidate the owner gated through the Dagger
@@ -167,23 +176,74 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         )
 
     @server.tool()
-    def worktree_operation_cancel(
+    def worktree_operation_control(
         *,
         contract_path: str,
-        operation_kind: str,
+        operation_kind: LifecycleOperationKind,
+        action: LifecycleControlAction,
+        expected_generation: int,
         intent_note: str,
+        code_commit_message: str | None = None,
+        memory_commit_message: str | None = None,
+        ledger_commit_message: str | None = None,
+        dry_run: bool = False,
+        caller: DeclaredCaller | None = None,
+    ) -> dict[str, Any]:
+        """Retry, recover, cancel, revise, retire, or supersede one task generation.
+
+        The handler is addressed by canonical contract, operation kind, and public generation;
+        it never accepts an operation key or process id. Same-generation retry/recover preserves
+        immutable input. Cancellation proves worker exit and unchanged Git state first. Every
+        advertised action is revalidated against live journal, contract, and ref evidence.
+        Preview with dry_run=true."""
+        return worktree_operation_control_payload(
+            config,
+            OperationControlRequest(
+                contract_path=contract_path,
+                operation_kind=operation_kind,
+                action=action,
+                expected_generation=expected_generation,
+                intent_note=intent_note,
+                code_commit_message=code_commit_message,
+                memory_commit_message=memory_commit_message,
+                ledger_commit_message=ledger_commit_message,
+                dry_run=dry_run,
+                caller=caller,
+            ),
+        )
+
+    @server.tool()
+    def worktree_legacy_operation(
+        *,
+        contract_path: str,
+        operation_kind: LifecycleOperationKind,
+        action: LegacyOperationAction,
+        expected_digest: str = "",
+        memory_commit_message: str | None = None,
+        ledger_commit_message: str | None = None,
+        audit_reason: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Cancel a task's closeout or integration before its irreversible boundary.
-        Addressed only by contract plus operation kind; no job/process id exists at this
-        boundary. After approval claim or source merge begins, cancellation refuses and the
-        same durable operation must recover. Preview with dry_run=true."""
-        return worktree_operation_cancel_payload(
+        """Inspect, migrate, or archive one exact task-addressed schema-1 record.
+
+        Inspect never mutates. Migrate supports only the proven closeout incident with
+        blank unfinished memory/ledger message cells and publishes one current canonical
+        generation carrying the original bytes and live code-output proof. Archive requires
+        kind-specific terminal/no-live-authority Git and contract evidence. Apply binds the
+        exact digest returned by inspect. Normal lifecycle readers remain schema-3-only.
+        """
+        return worktree_legacy_operation_payload(
             config,
             contract_path,
-            operation_kind=operation_kind,
-            intent_note=intent_note,
-            dry_run=dry_run,
+            LegacyOperationRequest(
+                operation_kind=operation_kind,
+                action=action,
+                expected_digest=expected_digest,
+                memory_commit_message=memory_commit_message,
+                ledger_commit_message=ledger_commit_message,
+                audit_reason=audit_reason,
+                dry_run=dry_run,
+            ),
         )
 
 

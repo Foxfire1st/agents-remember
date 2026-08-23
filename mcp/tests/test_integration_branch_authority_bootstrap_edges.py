@@ -9,8 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.tasks import read_task_doc, write_task_doc
-from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.git import branch_exists
+from agents_remember.worktrees.modules.startup import start_contract
 from agents_remember.worktrees.worktree_contract import write_contract
 from integration_branch_authority_test_support import (
     _add_atomic_master_to_sprint,
@@ -66,7 +66,7 @@ class IntegrationBranchAuthorityBootstrapEdgeTests(unittest.TestCase):
             with (
                 mock.patch.object(
                     start_contract,
-                    "write_contract",
+                    "publish_new_lifecycle_operation_location",
                     side_effect=RuntimeError("crash after ref publication"),
                 ),
                 self.assertRaisesRegex(RuntimeError, "crash after ref publication"),

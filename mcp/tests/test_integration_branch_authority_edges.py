@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.application import memory_tools
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.errors import ConfiguredContractRereadError
 from agents_remember.kernel.memory_ledger import (
     load_ledger,
     prepend_mapping,
@@ -25,7 +26,6 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SprintExecutionNode, read_task_doc, write_task_doc
-from agents_remember.worktrees.integration import lifecycle_operations
 from agents_remember.worktrees.integration.integration_branch_authority import integration_surfaces
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
@@ -34,23 +34,20 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
     merge_integrated_commits,
     prepare_integration_ref_move,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import start as start_module
-from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.git import branch_exists, ensure_worktree
 from agents_remember.worktrees.modules.integrate import integrate_result
+from agents_remember.worktrees.modules.startup import start_contract
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    certify_queue_candidate_closeout,
-    claim_queue_candidate_for_closeout,
-)
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -62,9 +59,7 @@ from agents_remember.worktrees.worktree_contract import (
 )
 from closeout_input_test_support import (
     MutationEvidenceRecorder,
-    closeout_operation_input,
     closeout_worktree_args,
-    start_closeout_operation,
 )
 from integration_branch_authority_test_support import (
     _acquire_atomic_blocker,
@@ -78,11 +73,14 @@ from integration_branch_authority_test_support import (
     _land_two_external_atomic_leaves,
     _record_atomic_leaf_landing,
 )
-from test_closeout_queue import LEAF_A, MASTER_A, QueueFixture
+from test_cleanup_carryover import _allow_terminal_archive_for_downstream_unit
 from test_source_lineage import _commit_on, _git, _repo
 
 
 class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _allow_terminal_archive_for_downstream_unit(self)
+
     def test_carryover_authority_refuses_each_configured_repository_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -584,14 +582,19 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             write_contract(malicious.contract_path, malicious)
             record_path = operation_record_path(malicious.worktree_group, "integrate")
 
-            with self.assertRaisesRegex(RuntimeError, "does not match configured authority"):
+            with self.assertRaises(ConfiguredContractRereadError) as raised:
                 lifecycle_operations.start_or_observe_operation(
                     IntegrateOperationInput(
                         configPath=fixture.config_path.as_posix(),
                         contractPath=malicious.contract_path.as_posix(),
                     ),
+                    malicious,
                     launcher=lambda *_: None,
                 )
+            self.assertEqual(
+                (raised.exception.observed["side"], raised.exception.observed["name"]),
+                ("code", "repository"),
+            )
             self.assertFalse(record_path.exists())
 
     def test_configured_authority_refuses_foreign_coordination_and_task_roots(self) -> None:
@@ -613,18 +616,23 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 record_path = operation_record_path(closed.worktree_group, "integrate")
                 with (
                     self.subTest(task_root=malicious.task_root),
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "coordination root|task root|contract path",
-                    ),
+                    self.assertRaises(ConfiguredContractRereadError) as raised,
                 ):
                     lifecycle_operations.start_or_observe_operation(
                         IntegrateOperationInput(
                             configPath=fixture.config_path.as_posix(),
                             contractPath=closed.contract_path.as_posix(),
                         ),
+                        malicious,
                         launcher=lambda *_: None,
                     )
+                expected_name = (
+                    "coordination-root" if malicious.coordination_root == foreign else "task-root"
+                )
+                self.assertEqual(
+                    (raised.exception.observed["side"], raised.exception.observed["name"]),
+                    ("task", expected_name),
+                )
                 self.assertFalse(record_path.exists())
 
     def test_lifecycle_authority_requires_the_configured_memory_mode(self) -> None:
@@ -639,14 +647,19 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 with self.subTest(configured="external", contract=memory_mode):
                     forged = replace(external_contract, memory_mode=memory_mode)
                     write_contract(forged.contract_path, forged)
-                    with self.assertRaisesRegex(RuntimeError, "memory mode"):
+                    with self.assertRaises(ConfiguredContractRereadError) as raised:
                         lifecycle_operations.start_or_observe_operation(
                             IntegrateOperationInput(
                                 configPath=external.config_path.as_posix(),
                                 contractPath=forged.contract_path.as_posix(),
                             ),
+                            forged,
                             launcher=lambda *_: None,
                         )
+                    self.assertEqual(
+                        (raised.exception.observed["side"], raised.exception.observed["name"]),
+                        ("memory", "mode"),
+                    )
                     self.assertFalse(
                         operation_record_path(forged.worktree_group, "integrate").exists()
                     )
@@ -671,14 +684,19 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 ledger_path=memory_worktree / "memory.md",
             )
             write_contract(forged_external.contract_path, forged_external)
-            with self.assertRaisesRegex(RuntimeError, "memory mode"):
+            with self.assertRaises(ConfiguredContractRereadError) as raised:
                 lifecycle_operations.start_or_observe_operation(
                     IntegrateOperationInput(
                         configPath=disabled.config_path.as_posix(),
                         contractPath=forged_external.contract_path.as_posix(),
                     ),
+                    forged_external,
                     launcher=lambda *_: None,
                 )
+            self.assertEqual(
+                (raised.exception.observed["side"], raised.exception.observed["name"]),
+                ("memory", "mode"),
+            )
 
     def test_carryover_apply_cannot_commit_on_official_protected_memory_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -779,112 +797,6 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     options=CarryoverApplyOptions(intent_note="invalid shared repo"),
                 )
 
-    def test_contract_finalizes_before_queue_lane_release_and_retry_is_idempotent(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            fixture = QueueFixture(root)
-            fixture.declare(MASTER_A)
-            fixture.mutate("select", candidate=LEAF_A)
-            candidate = fixture.contracts[MASTER_A]
-            start_closeout_operation(
-                closeout_operation_input(
-                    candidate,
-                    config_path=fixture.config_path,
-                    code="close candidate",
-                    approval_note="approved",
-                ),
-                launcher=lambda *_: None,
-            )
-            closeout = LifecycleOperationStore(
-                operation_record_path(candidate.worktree_group, "closeout")
-            ).read()
-            assert closeout is not None
-            claim_queue_candidate_for_closeout(candidate, closeout.operationKey)
-            closed = fixture.close_contract(MASTER_A)
-            certify_queue_candidate_closeout(closed, closeout.operationKey)
-            closeout_store = LifecycleOperationStore(
-                operation_record_path(candidate.worktree_group, "closeout")
-            )
-            closeout_store.update(
-                lambda record: record.model_copy(
-                    update={"status": "running", "phase": "contract-finalization"}
-                )
-            )
-            closeout_store.update(
-                lambda record: record.model_copy(
-                    update={
-                        "status": "completed",
-                        "phase": "completed",
-                        "finishedAt": "2026-08-15T00:01:00+00:00",
-                    }
-                )
-            )
-            _git(closed.code_repo_path, "checkout", closed.code_source_branch)
-            assert closed.memory_repo_path is not None
-            _git(closed.memory_repo_path, "checkout", closed.memory_source_branch)
-            lifecycle_operations.start_or_observe_operation(
-                IntegrateOperationInput(
-                    configPath=fixture.config_path.as_posix(),
-                    contractPath=closed.contract_path.as_posix(),
-                ),
-                launcher=lambda *_: None,
-            )
-            store = LifecycleOperationStore(
-                operation_record_path(closed.worktree_group, "integrate")
-            )
-            runtime = OperationRuntime(store)
-            running = runtime.start()
-
-            def fail_after_contract(*_args, **_kwargs) -> None:
-                self.assertEqual(
-                    load_contract(closed.contract_path).integration_status,
-                    "completed",
-                )
-                raise RuntimeError("queue publication crash")
-
-            with (
-                mock.patch.object(
-                    integrate_module,
-                    "_run_integration_quality_gate",
-                    return_value=({"passed": True}, None),
-                ),
-                mock.patch.object(
-                    integrate_module,
-                    "complete_queue_candidate_integration",
-                    side_effect=fail_after_contract,
-                ),
-                self.assertRaisesRegex(RuntimeError, "queue publication crash"),
-            ):
-                integrate_result(
-                    WorktreeArgs(
-                        contract_path=closed.contract_path,
-                        approved=True,
-                        operation_key=running.operationKey,
-                        operation_progress=runtime.progress,
-                    )
-                )
-
-            recorded = store.read()
-            assert recorded is not None
-            recovered = integrate_result(
-                WorktreeArgs(
-                    contract_path=closed.contract_path,
-                    approved=True,
-                    operation_key=running.operationKey,
-                    recovery_commits=recorded.recoveryCommits,
-                )
-            )
-            self.assertEqual(recovered.payload["state"], "already-integrated")
-            self.assertEqual(
-                _git(closed.code_repo_path, "rev-parse", closed.code_source_branch),
-                closed.code_commit,
-            )
-            projected = fixture.status()
-            for lane in ("ready", "inFlight", "blocked"):
-                self.assertFalse(
-                    any(item["taskDocumentRef"] == LEAF_A.model_dump() for item in projected[lane])
-                )
-
     def test_clean_linked_owner_is_refreshed_after_exact_named_ref_cas(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -899,6 +811,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=closed.contract_path.as_posix(),
                 ),
+                closed,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -914,25 +827,18 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     integrate_module,
-                    "preview_organizational_completion",
-                    return_value=None,
+                    "preview_integration_boundary",
+                    return_value=integrate_module.IntegrationBoundaryFacts(None, None),
                 ),
-                mock.patch.object(integrate_module, "claim_queue_candidate_for_integration"),
-                mock.patch.object(
-                    integrate_module,
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(
-                        integrate_module.IntegrationBoundaryFacts(None, None)
-                    ),
-                ),
-                mock.patch.object(integrate_module, "complete_queue_candidate_integration"),
             ):
                 result = integrate_result(
                     WorktreeArgs(
                         contract_path=closed.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
-                    )
+                        operation_generation=running.generation,
+                    ),
+                    closed,
                 )
 
             self.assertEqual(result.payload["state"], "integrated")
@@ -969,7 +875,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             series = load_contract(fixture.master_contract.contract_path)
             _complete_atomic_master(fixture)
 
-            preview = closeout_result(closeout_worktree_args(series, dry_run=True))
+            preview = closeout_result(closeout_worktree_args(series, dry_run=True), series)
             _assert_exact_series_preview(self, preview)
 
             result = closeout_result(
@@ -980,7 +886,8 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     candidate_tree=code_candidate_tree(series),
                     recovery_commits=LifecycleOperationRecoveryCommits(codeCommit=code_commit),
                     operation_progress=MutationEvidenceRecorder(),
-                )
+                ),
+                series,
             )
             self.assertEqual(result.payload["code_commit"], code_commit)
             self.assertEqual(result.payload["memory_content_commit"], memory_commit)
@@ -1009,6 +916,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=series.contract_path.as_posix(),
                 ),
+                series,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -1028,7 +936,9 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                         contract_path=series.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
-                    )
+                        operation_generation=running.generation,
+                    ),
+                    series,
                 )
 
             self.assertEqual(result.payload["state"], "integrated")
@@ -1054,6 +964,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=series.contract_path.as_posix(),
                 ),
+                series,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -1075,7 +986,9 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                         contract_path=series.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
-                    )
+                        operation_generation=running.generation,
+                    ),
+                    series,
                 )
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), super_before)
 
@@ -1105,6 +1018,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=series.contract_path.as_posix(),
                 ),
+                series,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -1135,8 +1049,10 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                         contract_path=series.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
+                        operation_generation=running.generation,
                         operation_progress=runtime.progress,
-                    )
+                    ),
+                    series,
                 )
 
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), code_candidate)
@@ -1144,14 +1060,17 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             crashed = store.read()
             assert crashed is not None
             assert crashed.recoveryCommits is not None
+            current = load_contract(series.contract_path)
             recovered = integrate_result(
                 WorktreeArgs(
                     contract_path=series.contract_path,
                     approved=True,
                     operation_key=running.operationKey,
+                    operation_generation=running.generation,
                     recovery_commits=crashed.recoveryCommits,
                     operation_progress=runtime.progress,
-                )
+                ),
+                current,
             )
 
             self.assertEqual(recovered.payload["state"], "integrated")
@@ -1164,9 +1083,11 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     contract_path=series.contract_path,
                     approved=True,
                     operation_key=running.operationKey,
+                    operation_generation=running.generation,
                     recovery_commits=crashed.recoveryCommits,
                     operation_progress=runtime.progress,
-                )
+                ),
+                completed,
             )
             self.assertEqual(retried.payload["state"], "already-integrated")
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), code_candidate)

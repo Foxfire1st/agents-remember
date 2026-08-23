@@ -19,6 +19,9 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import repository_identity
@@ -36,6 +39,7 @@ from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
+    contract_publication_text,
     default_contract,
     default_series_contract,
     write_contract,
@@ -469,7 +473,12 @@ class _Fixture:
         self.leaf_ref = leaf_ref
 
 
-def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
+def _fixture(
+    root: Path,
+    *,
+    external_memory: bool = False,
+    publish_locations: bool = True,
+) -> _Fixture:
     coordination = root / "coordination"
     code_repo = _repo(root / "code")
     memory_repo = _repo(root / "memory") if external_memory else None
@@ -498,6 +507,11 @@ def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
         task_root=task_root,
     )
     write_contract(master.contract_path, master)
+    if publish_locations:
+        publish_new_lifecycle_operation_location(
+            master,
+            contract_text=contract_publication_text(master.contract_path, master),
+        )
     leaf_memory = (
         RepoBranchPlan(
             memory_repo,
@@ -527,6 +541,11 @@ def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
         memory=leaf_memory,
     )
     write_contract(leaf.contract_path, leaf)
+    if publish_locations:
+        publish_new_lifecycle_operation_location(
+            leaf,
+            contract_text=contract_publication_text(leaf.contract_path, leaf),
+        )
     return _Fixture(
         coordination,
         code_repo,
@@ -537,7 +556,11 @@ def _fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
 
 
 def _organizational_fixture(root: Path, *, external_memory: bool = False) -> _Fixture:
-    fixture = _fixture(root, external_memory=external_memory)
+    fixture = _fixture(
+        root,
+        external_memory=external_memory,
+        publish_locations=False,
+    )
     master_path = fixture.coordination / "tasks" / "repo" / "master"
     master_doc = read_task_doc(master_path / "task.json")
     write_task_doc(
@@ -558,6 +581,10 @@ def _organizational_fixture(root: Path, *, external_memory: bool = False) -> _Fi
         ),
     )
     write_contract(leaf.contract_path, leaf)
+    publish_new_lifecycle_operation_location(
+        leaf,
+        contract_text=contract_publication_text(leaf.contract_path, leaf),
+    )
     fixture.leaf_contract = leaf
     return fixture
 

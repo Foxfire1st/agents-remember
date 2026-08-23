@@ -400,6 +400,7 @@ class CloseoutQueueCandidateView(_StrictModel):
     candidateState: QueueCandidateState
     classification: QueueClassification
     reasons: list[str] = Field(max_length=MAX_QUEUE_REASONS)
+    blockerEvidence: list[dict[str, object]] = Field(default_factory=list)
     legalNextOperations: list[str] = Field(max_length=16)
     grade: SchedulingGrade | None = None
 

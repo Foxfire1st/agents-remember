@@ -13,6 +13,7 @@ from agents_remember.models.closeout_input import (
     EffectiveCloseoutInput,
     ResolvedCloseoutPlan,
 )
+from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 
 
 class DirectLandingResponse(ToolResponse):
@@ -38,3 +39,11 @@ class DirectLandingResponse(ToolResponse):
     invalidFields: list[CloseoutInvalidField] | None = None
     resolvedPlan: ResolvedCloseoutPlan | None = None
     correctedCall: CloseoutCorrectedCall | None = None
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    expected: dict[str, Any] | None = None
+    observed: dict[str, Any] | None = None
+    nextAction: str | None = None
+    nextTool: str | None = None
+    nextArgs: dict[str, Any] | None = None
+    developerDecisionRequired: bool | None = None
+    decisionSurface: str | None = Field(default=None, max_length=8192)

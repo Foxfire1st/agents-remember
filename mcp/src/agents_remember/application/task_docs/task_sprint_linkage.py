@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,7 +36,6 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature
@@ -46,13 +46,16 @@ from agents_remember.tasks import (
     SprintExecutionNode,
     SprintGraphTitles,
     SubTaskRef,
+    TaskDocSourceSnapshot,
     TaskDocument,
     build_graph_titles,
     completion_blockers,
     json_path_for,
     markdown_path_for,
+    missing_task_doc_source,
     read_graph_titles,
     read_task_doc,
+    read_task_doc_with_source,
     render_markdown,
     write_task_doc_batch,
 )
@@ -73,6 +76,12 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_topology_migration_authority,
 )
 
+from .task_doc_publication import (
+    TaskDocPublicationTransaction,
+    publish_task_doc_transaction,
+    validate_task_doc_transaction,
+)
+from .task_doc_queue_scope import QueuePublicationScope
 from .task_execution_topology import (
     ExecutionTopologyError,
     require_commanded_masters_completed,
@@ -109,6 +118,15 @@ class SprintLinkageRequest:
     slug: str | None
     fields: dict[str, Any]
     dry_run: bool
+
+
+@dataclass(frozen=True)
+class _LinkagePublication:
+    topology: TaskDocumentTopology
+    sprint_ref: TaskDocumentRef
+    overrides: dict[TaskDocumentRef, TaskDocument]
+    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]]
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...]
 
 
 class _Payload(BaseModel):
@@ -199,8 +217,8 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
 
     _require_serving_topology_schema()
     payload = _parse_payload(_AttachMasterPayload, request.fields, "attach_master")
-    topology, sprint_ref, sprint = _sprint_context(request, "attach_master")
-    master = _resolve_attach_target(topology, sprint_ref, payload.masterRef)
+    topology, sprint_ref, sprint, sprint_source = _sprint_context(request, "attach_master")
+    master, master_source = _resolve_attach_target(topology, sprint_ref, payload.masterRef)
     _require_not_attached(sprint, master)
     if any(row.number == payload.number for row in sprint.subTasks):
         raise SprintLinkageError(
@@ -230,14 +248,30 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "executionNatureAsserted": candidate_master is not None,
     }
     if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id, create=False):
-            _require_publication_authority(request, overrides)
+        validate_task_doc_transaction(
+            _publication_transaction(
+                request,
+                sprint_ref,
+                overrides,
+                (sprint_source, master_source),
+                lambda: [],
+            )
+        )
         result["dryRun"] = True
         result["documents"] = [
             _document_preview(ref, root, document) for ref, root, document in documents
         ]
         return result
-    result["documents"] = _publish(request, topology, sprint_ref, overrides, documents)
+    result["documents"] = _publish(
+        request,
+        _LinkagePublication(
+            topology=topology,
+            sprint_ref=sprint_ref,
+            overrides=overrides,
+            documents=documents,
+            source_snapshots=(sprint_source, master_source),
+        ),
+    )
     return result
 
 
@@ -246,14 +280,14 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
 
     _require_serving_topology_schema()
     payload = _parse_payload(_DetachMasterPayload, request.fields, "detach_master")
-    topology, sprint_ref, sprint = _sprint_context(request, "detach_master")
+    topology, sprint_ref, sprint, sprint_source = _sprint_context(request, "detach_master")
     master_ref = payload.masterRef
     if master_ref.repository != request.repo_id:
         raise SprintLinkageError(
             "task-sprint-linkage-cross-repo: cannot detach outside the sprint repository: "
             f"{master_ref.key}"
         )
-    master = _resolve_tolerantly(topology, master_ref)
+    master, master_source = _resolve_tolerantly(topology, master_ref)
     rows = [row for row in sprint.subTasks if row.masterRef == master_ref]
     if not rows:
         raise SprintLinkageError(
@@ -282,21 +316,37 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "masterResolved": master is not None,
     }
     if request.dry_run:
-        with integration_authority_lock(request.coordination_root, request.repo_id, create=False):
-            _require_publication_authority(request, overrides)
+        validate_task_doc_transaction(
+            _publication_transaction(
+                request,
+                sprint_ref,
+                overrides,
+                (sprint_source, master_source),
+                lambda: [],
+            )
+        )
         result["dryRun"] = True
         result["documents"] = [
             _document_preview(ref, root, document) for ref, root, document in documents
         ]
         return result
-    result["documents"] = _publish(request, topology, sprint_ref, overrides, documents)
+    result["documents"] = _publish(
+        request,
+        _LinkagePublication(
+            topology=topology,
+            sprint_ref=sprint_ref,
+            overrides=overrides,
+            documents=documents,
+            source_snapshots=(sprint_source, master_source),
+        ),
+    )
     return result
 
 
 def linkage_report(request: SprintLinkageRequest) -> dict[str, Any]:
     """The read-only sprint linkage drift report (L14-R5); never mutates anything."""
 
-    topology, sprint_ref, _sprint = _sprint_context(request, "linkage_report")
+    topology, sprint_ref, _sprint, _source = _sprint_context(request, "linkage_report")
     return {
         "ok": True,
         "operation": "task_doc.linkage_report",
@@ -397,11 +447,11 @@ def _parse_payload(model: type[_PayloadT], fields: dict[str, Any], operation: st
 
 def _sprint_context(
     request: SprintLinkageRequest, operation: str
-) -> tuple[TaskDocumentTopology, TaskDocumentRef, TaskDocument]:
+) -> tuple[TaskDocumentTopology, TaskDocumentRef, TaskDocument, TaskDocSourceSnapshot]:
     json_path = request.task_root / f"{request.slug or 'task'}.json"
     if not json_path.exists():
         raise SprintLinkageError(f"task document not found: {json_path} (create it first)")
-    sprint = read_task_doc(json_path)
+    sprint, source = read_task_doc_with_source(json_path)
     if sprint.kind != "master" or not sprint.orchestrates:
         raise SprintLinkageError(f"task_doc.{operation} requires an orchestration sprint document")
     topology = TaskDocumentTopology(request.coordination_root)
@@ -409,7 +459,7 @@ def _sprint_context(
         sprint_ref = topology.canonical_ref(request.repo_id, json_path)
     except TaskDocumentRefError as exc:
         raise SprintLinkageError(f"{exc.status}: {exc}") from exc
-    return topology, sprint_ref, sprint
+    return topology, sprint_ref, sprint, source
 
 
 # --- attach -------------------------------------------------------------------
@@ -417,7 +467,7 @@ def _sprint_context(
 
 def _resolve_attach_target(
     topology: TaskDocumentTopology, sprint_ref: TaskDocumentRef, master_ref: TaskDocumentRef
-) -> ResolvedTaskDocument:
+) -> tuple[ResolvedTaskDocument, TaskDocSourceSnapshot]:
     if master_ref.repository != sprint_ref.repository:
         raise SprintLinkageError(
             "task-sprint-linkage-cross-repo: orchestrates membership is same-repository; "
@@ -426,9 +476,15 @@ def _resolve_attach_target(
     if master_ref == sprint_ref:
         raise SprintLinkageError("task-sprint-linkage-self-attach: a sprint cannot attach itself")
     try:
-        master = topology.resolve(master_ref)
+        resolved = topology.resolve(master_ref)
     except TaskDocumentRefError as exc:
         raise SprintLinkageError(f"{exc.status}: {exc}") from exc
+    document, source = read_task_doc_with_source(resolved.path)
+    master = ResolvedTaskDocument(master_ref, resolved.path, document)
+    if master.document.repo != master_ref.repository:
+        raise SprintLinkageError(
+            f"task-document-repo-mismatch: {master_ref.key} changed repository identity"
+        )
     if master.document.kind != "master":
         raise SprintLinkageError(
             f"task-sprint-linkage-target-not-a-master: {master_ref.key} is a "
@@ -439,7 +495,7 @@ def _resolve_attach_target(
             f"task-sprint-linkage-target-is-sprint: {master_ref.key} itself orchestrates; "
             "a sprint cannot be commanded as a master"
         )
-    return master
+    return master, source
 
 
 def _require_not_attached(sprint: TaskDocument, master: ResolvedTaskDocument) -> None:
@@ -536,15 +592,21 @@ def _attach_candidate(
 
 def _resolve_tolerantly(
     topology: TaskDocumentTopology, master_ref: TaskDocumentRef
-) -> ResolvedTaskDocument | None:
+) -> tuple[ResolvedTaskDocument | None, TaskDocSourceSnapshot]:
     """Resolve the detach target; a deleted master document still allows cleanup."""
 
     try:
-        return topology.resolve(master_ref)
+        resolved = topology.resolve(master_ref)
     except TaskDocumentRefError as exc:
         if exc.status != "task-document-not-found":
             raise SprintLinkageError(f"{exc.status}: {exc}") from exc
-        return None
+        return None, missing_task_doc_source(topology.path_for_ref(master_ref))
+    document, source = read_task_doc_with_source(resolved.path)
+    if document.repo != master_ref.repository:
+        raise SprintLinkageError(
+            f"task-document-repo-mismatch: {master_ref.key} changed repository identity"
+        )
+    return ResolvedTaskDocument(master_ref, resolved.path, document), source
 
 
 def _detach_candidate(
@@ -622,7 +684,7 @@ def _validate_candidate(
 ) -> None:
     """Full topology validation on a graphed sprint; the linkage cross-check otherwise."""
 
-    sprint = topology.resolve_candidate(sprint_ref, overrides)
+    sprint = topology.resolve(sprint_ref, overrides)
     try:
         if sprint.document.executionGraph is not None:
             topology.validate_execution_topology(sprint_ref, overrides=overrides)
@@ -663,26 +725,29 @@ def _batch_graph_titles(
 
 def _publish(
     request: SprintLinkageRequest,
-    topology: TaskDocumentTopology,
-    sprint_ref: TaskDocumentRef,
-    overrides: dict[TaskDocumentRef, TaskDocument],
-    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]],
+    batch: _LinkagePublication,
 ) -> list[dict[str, Any]]:
     def publication() -> list[tuple[Path, Path]]:
-        with integration_authority_lock(request.coordination_root, request.repo_id):
-            _require_publication_authority(request, overrides)
-            return write_task_doc_batch(
-                [(root, document) for _ref, root, document in documents],
-                graph_titles=_batch_graph_titles(documents),
+        return publish_task_doc_transaction(
+            _publication_transaction(
+                request,
+                batch.sprint_ref,
+                batch.overrides,
+                batch.source_snapshots,
+                lambda: write_task_doc_batch(
+                    [(root, document) for _ref, root, document in batch.documents],
+                    graph_titles=_batch_graph_titles(batch.documents),
+                ),
             )
+        )
 
-    queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
+    queue = CloseoutQueueStore(request.coordination_root, batch.sprint_ref)
     written = queue.publish_sprint_update(
         publication,
-        completed=overrides[sprint_ref].status == "Completed",
+        completed=batch.overrides[batch.sprint_ref].status == "Completed",
         recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
         validate_completion=lambda: require_commanded_masters_completed(
-            topology, sprint_ref, overrides
+            batch.topology, batch.sprint_ref, batch.overrides
         ),
     )
     return [
@@ -692,9 +757,26 @@ def _publish(
             "renderedPath": markdown_path.as_posix(),
         }
         for (ref, _root, _document), (json_path, markdown_path) in zip(
-            documents, written, strict=True
+            batch.documents, written, strict=True
         )
     ]
+
+
+def _publication_transaction(
+    request: SprintLinkageRequest,
+    sprint_ref: TaskDocumentRef,
+    overrides: dict[TaskDocumentRef, TaskDocument],
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...],
+    publisher: Callable[[], list[tuple[Path, Path]]],
+) -> TaskDocPublicationTransaction:
+    return TaskDocPublicationTransaction(
+        request.coordination_root,
+        request.repo_id,
+        source_snapshots,
+        QueuePublicationScope(sprint_ref, None),
+        lambda: _require_publication_authority(request, overrides),
+        publisher,
+    )
 
 
 def _document_preview(

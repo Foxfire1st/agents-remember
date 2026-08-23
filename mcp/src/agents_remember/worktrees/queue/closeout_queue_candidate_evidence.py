@@ -21,9 +21,11 @@ from agents_remember.models.queue.closeout_queue import EvidenceFact, RouteRevie
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    located_lifecycle_operation_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
 )
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -31,7 +33,7 @@ from agents_remember.worktrees.modules.git import (
     repository_identity,
     worktree_candidate_tree,
 )
-from agents_remember.worktrees.modules.start_contract import memory_mode_for_repository
+from agents_remember.worktrees.modules.startup.start_contract import memory_mode_for_repository
 from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
 from agents_remember.worktrees.source_lineage import require_current_source_lineage
@@ -42,7 +44,7 @@ from agents_remember.worktrees.worktree_contract import (
     worktree_group_for,
 )
 
-from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,18 @@ class AtomicMasterLandingAuthority:
     code_repository: Path
     memory_mode: str
     memory_repository: Path | None
+
+
+def queue_candidate_failure_evidence(error: Exception) -> dict[str, object]:
+    """Bound one general candidate revalidation failure for public status."""
+
+    return public_failure_evidence(
+        stage="queue-candidate-revalidation",
+        side="candidate",
+        name="closeout-candidate",
+        error_type=type(error).__name__,
+        observed={"state": "blocked"},
+    )
 
 
 def atomic_master_landing_authority(
@@ -128,8 +142,8 @@ def route_review_blockers(contract: WorktreeContract, expected: RouteReviewFact)
         TerminalLeafResolutionError,
         ValidationError,
         ValueError,
-    ) as exc:
-        return [f"route-review-invalid: {exc}"]
+    ):
+        return ["route-review-invalid"]
     return [] if current == expected else ["route-review-stale"]
 
 
@@ -144,7 +158,15 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
     try:
         require_current_source_lineage(contract, operation="closeout queue declaration")
     except RuntimeError as exc:
-        raise CloseoutQueueError("closeout-candidate-source-lineage-stale", str(exc)) from exc
+        raise CloseoutQueueError(
+            "closeout-candidate-source-lineage-stale",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-source-lineage",
+                side="contract",
+                name="source-lineage",
+            ),
+        ) from exc
     if (
         branch_commit(contract.code_repo_path, contract.code_source_branch)
         != contract.code_base_commit
@@ -204,7 +226,12 @@ def commit_tree(repo: Path, commit: str) -> str:
     if result.returncode != 0:
         raise CloseoutQueueError(
             "closeout-candidate-commit-missing",
-            result.stderr.strip() or f"cannot resolve commit tree {commit}",
+            bounded_queue_failure_detail(
+                RuntimeError("Git commit tree lookup failed"),
+                stage="queue-commit-tree",
+                side="git",
+                name="candidate-commit",
+            ),
         )
     return result.stdout.strip()
 
@@ -226,7 +253,12 @@ def require_atomic_master_landed(
     except (OSError, RuntimeError, ValueError) as exc:
         raise CloseoutQueueError(
             "atomic-blocker-master-landing-unproven",
-            f"atomic master has no valid exact landing contract: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="atomic-master-contract-read",
+                side="contract",
+                name="series-contract",
+            ),
         ) from exc
     if not _atomic_contract_matches_master(contract, master, authority):
         raise CloseoutQueueError(
@@ -240,7 +272,12 @@ def require_atomic_master_landed(
     except (OSError, RuntimeError, ValueError) as exc:
         raise CloseoutQueueError(
             "atomic-blocker-master-landing-unproven",
-            f"atomic master has no valid exact landing contract: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="atomic-master-landing-proof",
+                side="integration",
+                name="protected-output",
+            ),
         ) from exc
     if not all(
         (
@@ -352,9 +389,7 @@ def _atomic_operation_landed(
     contract: WorktreeContract,
     authority: AtomicMasterLandingAuthority,
 ) -> bool:
-    record = LifecycleOperationStore(
-        operation_record_path(contract.worktree_group, "integrate")
-    ).read()
+    record = located_lifecycle_operation_store(contract, "integrate").read()
     if record is None or not isinstance(record.input, IntegrateOperationInput):
         return False
     journal = record.integrationAuthority

@@ -298,14 +298,16 @@ export interface LifecycleOperationProjection {
   elapsedSeconds: number;
   failure?: string;
   finishedAt?: string;
+  generation?: number;
   guidance?: string;
   heartbeatAt?: string;
-  kind: "closeout" | "integrate";
-  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "completed" | "failed" | "cancelled";
+  kind: "closeout" | "integrate" | "direct-landing";
+  legalControls: Record<string, unknown>[];
+  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "door-publication" | "termination-required" | "direct-preflight" | "direct-memory-commit" | "direct-ledger-commit" | "direct-terminal-publication" | "completed" | "failed" | "cancelled";
   reportPath: string;
   result?: Record<string, unknown>;
   startedAt?: string;
-  status: "queued" | "running" | "input-required" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "input-required" | "termination-required" | "completed" | "failed" | "cancelled" | "unreadable";
 }
 
 export interface LifecycleProjection {

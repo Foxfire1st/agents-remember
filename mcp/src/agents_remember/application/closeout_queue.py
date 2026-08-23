@@ -42,7 +42,10 @@ def closeout_queue_tool(
         caller = resolve_ambient_seat(catalog)
     except AmbientSeatError as exc:
         if exc.status != "ambient-seat-unavailable":
-            raise CloseoutQueueError(exc.status, str(exc)) from exc
+            raise CloseoutQueueError(
+                exc.status,
+                "the hosted closeout-queue caller identity could not be resolved",
+            ) from exc
         actor = _declared_queue_actor(request)
         return apply_closeout_queue(config, request, actor=actor)
     document = caller.binding_task_document_ref

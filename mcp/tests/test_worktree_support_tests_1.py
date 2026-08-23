@@ -32,9 +32,9 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as start_module
-from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.onboarding import _refresh_regenerated_documents
+from agents_remember.worktrees.modules.startup import start_contract
 from agents_remember.worktrees.task_resolver import (
     leaf_enclosure_path,
     series_contract_path,

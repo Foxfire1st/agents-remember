@@ -30,10 +30,14 @@ from agents_remember.serving.projections.snapshots import (
     read_enclosures,
     read_providers,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
+    WorktreeContract,
     default_contract,
     write_contract,
 )
@@ -63,6 +67,14 @@ class SnapshotReaderTests(unittest.TestCase):
                     scope="workspace",
                 )
             },
+        )
+
+    @staticmethod
+    def _write_addressable_contract(contract: WorktreeContract) -> None:
+        write_contract(contract.contract_path, contract)
+        publish_new_lifecycle_operation_location(
+            contract,
+            contract_text=contract.contract_path.read_text(encoding="utf-8"),
         )
 
     def test_inspect_result_map_parses_container_names(self) -> None:
@@ -421,7 +433,7 @@ class SnapshotReaderTests(unittest.TestCase):
             ),
         )
         contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
-        write_contract(contract.contract_path, contract)
+        self._write_addressable_contract(contract)
         nodes = read_enclosures(coord)
         self.assertEqual(len(nodes), 1)
         self.assertEqual(nodes[0].repoName, "repo-a")
@@ -454,7 +466,7 @@ class SnapshotReaderTests(unittest.TestCase):
             ),
         )
         contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
-        write_contract(contract.contract_path, contract)
+        self._write_addressable_contract(contract)
         return contract
 
     def test_read_enclosures_stat_worktree_existence(self) -> None:
@@ -491,9 +503,7 @@ class SnapshotReaderTests(unittest.TestCase):
         """
         coord = (self.tmp / "coord").resolve()
         contract = self._existence_contract(coord)
-        write_contract(
-            contract.contract_path, replace(contract, cleanup="reopened", lifecycle_id="")
-        )
+        write_contract(contract.contract_path, replace(contract, cleanup="reopened"))
 
         [reopened] = read_enclosures(coord)
         self.assertEqual(reopened.cleanup, "reopened")

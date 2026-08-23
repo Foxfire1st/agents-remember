@@ -23,8 +23,11 @@ from agents_remember.tasks import (
     read_task_doc,
     write_task_doc,
 )
-from agents_remember.worktrees.modules import start_contract
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.startup import start_contract
 from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueRequest,
     QueueActor,
@@ -35,6 +38,7 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     default_series_contract,
     write_contract,
@@ -109,7 +113,11 @@ def _closed_external_leaf_worktrees(fixture, _root: Path):
 
 
 def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
-    fixture: Any = _fixture(root, external_memory=external_memory)
+    fixture: Any = _fixture(
+        root,
+        external_memory=external_memory,
+        publish_locations=False,
+    )
     configured_code = root / "repo"
     configured_code.symlink_to(fixture.code_repo, target_is_directory=True)
     memory_mode = "external" if external_memory else "internal"
@@ -168,6 +176,13 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         ),
     )
     write_contract(master_contract.contract_path, master_contract)
+    publish_new_lifecycle_operation_location(
+        master_contract,
+        contract_text=contract_publication_text(
+            master_contract.contract_path,
+            master_contract,
+        ),
+    )
     fixture.master_contract = master_contract
     fixture.leaf_contract = replace(
         fixture.leaf_contract,
@@ -181,6 +196,13 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
         ),
     )
     write_contract(fixture.leaf_contract.contract_path, fixture.leaf_contract)
+    publish_new_lifecycle_operation_location(
+        fixture.leaf_contract,
+        contract_text=contract_publication_text(
+            fixture.leaf_contract.contract_path,
+            fixture.leaf_contract,
+        ),
+    )
     master_doc = read_task_doc(task_root / "master" / "task.json")
     write_task_doc(
         task_root / "master",

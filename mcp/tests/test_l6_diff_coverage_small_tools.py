@@ -13,7 +13,8 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.application import lifecycle_tools, operator_inbox_tools, orchestration_tools
+from agents_remember.application import operator_inbox_tools, orchestration_tools
+from agents_remember.application.lifecycle import lifecycle_tools
 from agents_remember.application.task_docs import task_doc_tools
 from agents_remember.application.task_docs.task_doc_tools import TaskDocError, _Edit
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry

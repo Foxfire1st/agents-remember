@@ -40,12 +40,16 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     default_series_contract,
     load_contract,
@@ -413,6 +417,10 @@ def open_external_contract_fixture(root: Path):
         ),
     )
     write_contract(parent.contract_path, parent)
+    publish_new_lifecycle_operation_location(
+        parent,
+        contract_text=contract_publication_text(parent.contract_path, parent),
+    )
     contract = replace(contract, parent_contract_path=parent.contract_path)
     assert contract.memory_worktree is not None
     git(
@@ -434,6 +442,10 @@ def open_external_contract_fixture(root: Path):
         "main",
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
     return contract
 
 
@@ -757,7 +769,8 @@ def run_authorized_closeout_mechanics(args: Namespace) -> int:
         ),
     )
     result = worktree_manager.closeout_result(
-        replace(worktree_args, closeout_input=effective, ledger_commit_message="")
+        replace(worktree_args, closeout_input=effective, ledger_commit_message=""),
+        contract,
     )
     print(json.dumps(result.payload, indent=2))
     return result.returncode

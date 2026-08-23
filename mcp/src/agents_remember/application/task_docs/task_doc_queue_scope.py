@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument, json_path_for
+from agents_remember.tasks import TaskDocSourceSnapshot, TaskDocument, json_path_for
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
@@ -26,12 +26,33 @@ class QueuePublicationScope:
 
 
 @dataclass(frozen=True)
+class PreparedQueuePublicationScope:
+    """Prepared queue identity without promoting projection reads into task CAS."""
+
+    scope: QueuePublicationScope | None
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...]
+
+
+@dataclass(frozen=True)
+class QueueScopePreparation:
+    """Accepted task candidate and source generation used to derive queue scope."""
+
+    coordination_root: Path
+    repo_id: str
+    task_root: Path
+    original: TaskDocument | None
+    candidate: TaskDocument
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...]
+
+
+@dataclass(frozen=True)
 class _ScopeContext:
     topology: TaskDocumentTopology
     repo_id: str
     task_root: Path
     repository_root: Path
     existing_path: Path
+    existing: bool
 
 
 def _single_scope(
@@ -76,10 +97,13 @@ def _existing_scope(
         if existing.document.orchestrates or candidate.orchestrates:
             return QueuePublicationScope(ref, None)
         return _master_edit_scope(context.topology, ref, original, candidate)
-    parent_path = (context.task_root / "task.json").resolve(strict=False)
-    if not parent_path.is_file():
+    master_ref = _existing_ref(
+        context.topology,
+        context.repo_id,
+        context.task_root / "task.json",
+    )
+    if master_ref is None:
         return None
-    master_ref = context.topology.canonical_ref(context.repo_id, parent_path)
     scope = _unchanged_master_scope(context.topology, master_ref)
     if scope is not None and context.topology.parent(ref) != master_ref:
         raise QueueScopeError("governed leaf does not resolve to its exact owning master")
@@ -97,31 +121,71 @@ def _new_scope(
             path=context.existing_path.relative_to(context.repository_root).as_posix(),
         )
         return _master_edit_scope(context.topology, candidate_ref, original, candidate)
-    parent_path = (context.task_root / "task.json").resolve(strict=False)
-    if not parent_path.is_file():
+    master_ref = _existing_ref(
+        context.topology,
+        context.repo_id,
+        context.task_root / "task.json",
+    )
+    if master_ref is None:
         return None
-    master_ref = context.topology.canonical_ref(context.repo_id, parent_path)
     return _unchanged_master_scope(context.topology, master_ref)
 
 
-def governing_queue_scope(
-    coordination_root: Path,
+def _existing_ref(
+    topology: TaskDocumentTopology,
     repo_id: str,
-    task_root: Path,
+    path: Path,
+) -> TaskDocumentRef | None:
+    """Resolve one source through the topology's accepted snapshot set, including absence."""
+
+    try:
+        return topology.canonical_ref(repo_id, path.resolve(strict=False))
+    except TaskDocumentRefError as exc:
+        if exc.status == "task-document-not-found":
+            return None
+        raise
+
+
+def prepare_governing_queue_scope(
+    request: QueueScopePreparation,
+) -> PreparedQueuePublicationScope:
+    """Prepare queue scope entirely from one captured topology generation."""
+
+    topology = TaskDocumentTopology(
+        request.coordination_root,
+        accepted_sources=request.source_snapshots,
+    )
+    repository_root = (request.coordination_root / "tasks" / request.repo_id).resolve(strict=False)
+    existing_path = json_path_for(
+        request.task_root,
+        request.original or request.candidate,
+    ).resolve(strict=False)
+    context = _ScopeContext(
+        topology,
+        request.repo_id,
+        request.task_root,
+        repository_root,
+        existing_path,
+        request.original is not None,
+    )
+    try:
+        scope = _resolve_governing_queue_scope(
+            context,
+            request.original,
+            request.candidate,
+        )
+    except (TaskDocumentRefError, ValueError) as exc:
+        raise QueueScopeError(f"cannot resolve governing sprint queue: {exc}") from exc
+    return PreparedQueuePublicationScope(scope, request.source_snapshots)
+
+
+def _resolve_governing_queue_scope(
+    context: _ScopeContext,
     original: TaskDocument | None,
     candidate: TaskDocument,
 ) -> QueuePublicationScope | None:
-    """Return the sole governing sprint queue, or None for a genuinely ungoverned task."""
-
     if candidate.kind == "light":
         return None
-    topology = TaskDocumentTopology(coordination_root)
-    repository_root = (coordination_root / "tasks" / repo_id).resolve(strict=False)
-    existing_path = json_path_for(task_root, original or candidate).resolve(strict=False)
-    context = _ScopeContext(topology, repo_id, task_root, repository_root, existing_path)
-    try:
-        if existing_path.is_file():
-            return _existing_scope(context, original, candidate)
-        return _new_scope(context, original, candidate)
-    except (TaskDocumentRefError, ValueError) as exc:
-        raise QueueScopeError(f"cannot resolve governing sprint queue: {exc}") from exc
+    if context.existing:
+        return _existing_scope(context, original, candidate)
+    return _new_scope(context, original, candidate)

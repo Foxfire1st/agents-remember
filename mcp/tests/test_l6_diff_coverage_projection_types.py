@@ -18,6 +18,7 @@ from agents_remember.code_quality.projection_types import (
     _nullable_variants,
     _object,
     _objects,
+    _property_line,
     _ref_name,
     _schema_allowed_keywords,
     _schema_type,
@@ -62,8 +63,29 @@ class TestPrimitiveValidation:
         assert _without_null({"anyOf": [{"type": "null"}, {"type": "string"}]}) == {
             "type": "string"
         }
-        with pytest.raises(ProjectionTypeGenerationError, match="exactly one non-null"):
-            _without_null({"anyOf": [{"type": "null"}, {"type": "string"}, {"type": "number"}]})
+        non_nullable_union = {
+            "title": "Lifecycle operation status",
+            "anyOf": [{"enum": ["queued", "running"]}, {"const": "unreadable"}],
+        }
+        assert _without_null(non_nullable_union) is non_nullable_union
+        assert (
+            _property_line("LifecycleOperationProjection", "status", non_nullable_union, {})
+            == '  status: "queued" | "running" | "unreadable";'
+        )
+        optional_union = {
+            "description": "one optional exact scalar union",
+            "anyOf": [{"type": "null"}, {"type": "string"}, {"type": "number"}],
+        }
+        assert _without_null(optional_union) == {
+            "description": "one optional exact scalar union",
+            "anyOf": [{"type": "string"}, {"type": "number"}],
+        }
+        assert (
+            _property_line("LifecycleOperationProjection", "value", optional_union, {})
+            == "  value?: string | number;"
+        )
+        with pytest.raises(ProjectionTypeGenerationError, match="contain a non-null"):
+            _without_null({"anyOf": [{"type": "null"}]})
 
     def test_json_literal_and_enum(self) -> None:
         assert _json_literal(1) == "1"

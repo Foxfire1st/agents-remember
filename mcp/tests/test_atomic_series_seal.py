@@ -44,6 +44,7 @@ from agents_remember.worktrees.modules.terminal_validation import (
 from agents_remember.worktrees.queue import closeout_queue_lifecycle as queue_lifecycle
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from test_cleanup_carryover import _allow_terminal_archive_for_downstream_unit
 from test_closeout_queue import LEAF_B, MASTER_B, SPRINT, QueueFixture
 from test_worktree_support import git
 
@@ -53,6 +54,7 @@ class AtomicSeriesSealTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
         self.series = load_contract(self.fixture.tasks / "master-b" / "series-contract.md")
+        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self.temp.cleanup()

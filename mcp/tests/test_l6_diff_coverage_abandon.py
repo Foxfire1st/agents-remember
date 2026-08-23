@@ -19,6 +19,9 @@ from agents_remember.memory_quality.style.citations import source_index_cache as
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TerminalNamespaceGuard,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules import abandon
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
@@ -84,6 +87,10 @@ def _abandon_authority(tmp_path: Path):
         code=RepoBranchPlan(repo, "main", "b", head),
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract.contract_path.read_text(encoding="utf-8"),
+    )
     return (
         repo,
         abandon._terminal_mutation_authority(contract, operation="worktree_abandon"),

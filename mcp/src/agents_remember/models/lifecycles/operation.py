@@ -10,15 +10,32 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.base import StrictResponseModel
 from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.lifecycles.direct_landing import (
+    DirectLandingLedgerIntent,
+    DirectLandingOperationInput,
+)
+from agents_remember.models.lifecycles.door import DoorPublicationEvidence
+from agents_remember.models.lifecycles.legacy import LegacyCloseoutMigrationProof
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationEvidence,
 )
+from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
+from agents_remember.models.lifecycles.policy import GatePolicyRuleSnapshot
+from agents_remember.models.lifecycles.termination import (
+    LifecycleCancellationEvidence,
+    WorkerTerminationEvidence,
+)
 
-LifecycleOperationKind = Literal["closeout", "integrate"]
 IntegrateStrategy = Literal["ff-only", "replay"]
 LifecycleOperationStatus = Literal[
-    "queued", "running", "input-required", "completed", "failed", "cancelled"
+    "queued",
+    "running",
+    "input-required",
+    "termination-required",
+    "completed",
+    "failed",
+    "cancelled",
 ]
 LifecycleOperationPhase = Literal[
     "queued",
@@ -35,6 +52,12 @@ LifecycleOperationPhase = Literal[
     "integration-quality",
     "source-merge",
     "contract-finalization",
+    "door-publication",
+    "termination-required",
+    "direct-preflight",
+    "direct-memory-commit",
+    "direct-ledger-commit",
+    "direct-terminal-publication",
     "completed",
     "failed",
     "cancelled",
@@ -51,13 +74,74 @@ class LifecycleOperationRecoveryCommits(BaseModel):
     ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
 
 
-class IntegrationQueueCompletionEvidence(BaseModel):
-    """Durable queue-removal intent persisted before consuming a candidate."""
+class OrganizationalTaskPublicationIntent(BaseModel):
+    """Exact before/intended bytes for one organizational master completion."""
 
     model_config = ConfigDict(extra="forbid")
 
-    requestId: str = Field(min_length=1, max_length=4096)
-    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    masterTaskDocument: str = Field(min_length=1, max_length=4096)
+    sprintTaskDocument: str = Field(min_length=1, max_length=4096)
+    candidateTaskDocument: str = Field(min_length=1, max_length=4096)
+    completionFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    certificationResultSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    completedAt: str = Field(min_length=1, max_length=128)
+    acceptedJson: str
+    acceptedJsonSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    intendedJson: str
+    intendedJsonSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acceptedMarkdown: str
+    acceptedMarkdownSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    intendedMarkdown: str
+    intendedMarkdownSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _bytes_match_hashes(self) -> OrganizationalTaskPublicationIntent:
+        for content, expected in (
+            (self.acceptedJson, self.acceptedJsonSha256),
+            (self.intendedJson, self.intendedJsonSha256),
+            (self.acceptedMarkdown, self.acceptedMarkdownSha256),
+            (self.intendedMarkdown, self.intendedMarkdownSha256),
+        ):
+            if hashlib.sha256(content.encode("utf-8")).hexdigest() != expected:
+                raise ValueError("organizational task publication byte digest does not match")
+        return self
+
+
+class IntegrationPublicationIntent(BaseModel):
+    """Journal authority transferred from one certified queue projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operationKey: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation: int = Field(ge=1)
+    preparedAt: str = Field(min_length=1, max_length=128)
+    claimState: Literal["not-applicable", "intent", "proven"]
+    claimTransferredAt: str | None = Field(default=None, min_length=1, max_length=128)
+    queueSprintTaskDocument: str = Field(default="", max_length=4096)
+    queueCandidateTaskDocument: str = Field(default="", max_length=4096)
+    queueCandidateSha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    closeoutDoorGenerationId: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    closeoutOperationFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    closeoutOperationKey: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    organizationalCompletion: OrganizationalTaskPublicationIntent | None = None
+
+    @model_validator(mode="after")
+    def _queue_identity_is_complete(self) -> IntegrationPublicationIntent:
+        cells = (
+            self.queueSprintTaskDocument,
+            self.queueCandidateTaskDocument,
+            self.queueCandidateSha256,
+            self.closeoutDoorGenerationId,
+            self.closeoutOperationFingerprint,
+            self.closeoutOperationKey,
+        )
+        if any(cells) != all(cells):
+            raise ValueError("integration publication queue claim identity is partial")
+        if bool(self.queueCandidateSha256) != (self.claimState != "not-applicable"):
+            raise ValueError("integration publication claim state contradicts queue identity")
+        if (self.claimState == "proven") != (self.claimTransferredAt is not None):
+            raise ValueError("proven integration claim transfer requires its timestamp")
+        return self
 
 
 class IntegrationConflictTransaction(BaseModel):
@@ -116,6 +200,7 @@ class OrganizationalCompletionRepairEvidence(BaseModel):
     codeCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     memoryContentCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+    acceptedContractSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     resetContractSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -207,14 +292,6 @@ def _require_quality_certification_memory(
         raise ValueError("integration quality certification memory policy does not match")
 
 
-class GatePolicyRuleSnapshot(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: str
-    delegatedRole: str | None = None
-    requireReviewerVerdict: bool = False
-
-
 class CloseoutOperationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -239,7 +316,8 @@ class IntegrateOperationInput(BaseModel):
 
 
 LifecycleOperationInput = Annotated[
-    CloseoutOperationInput | IntegrateOperationInput, Field(discriminator="kind")
+    CloseoutOperationInput | IntegrateOperationInput | DirectLandingOperationInput,
+    Field(discriminator="kind"),
 ]
 
 
@@ -257,6 +335,10 @@ class LifecycleOperationRecord(BaseModel):
     candidateTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     operationKey: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation: int = Field(default=1, ge=1)
+    predecessorFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    successorFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    generationDisposition: Literal["active", "cancelled", "retired", "superseded"] = "active"
     integrationAuthority: IntegrationOperationAuthority | None = None
     input: LifecycleOperationInput
     status: LifecycleOperationStatus
@@ -274,16 +356,32 @@ class LifecycleOperationRecord(BaseModel):
     irreversibleBoundaryEntered: bool = False
     approvalClaimed: bool = False
     mutationEvidence: dict[CloseoutMutationLeg, GitMutationEvidence] = Field(default_factory=dict)
+    mutationHistory: dict[CloseoutMutationLeg, list[GitMutationEvidence]] = Field(
+        default_factory=dict
+    )
     recoveryCommits: LifecycleOperationRecoveryCommits | None = None
     closeoutFinalizedContractSha256: str | None = Field(
         default=None,
         pattern=r"^[0-9a-f]{64}$",
     )
     qualityCertification: IntegrationQualityCertification | None = None
-    queueCompletion: IntegrationQueueCompletionEvidence | None = None
+    integrationPublication: IntegrationPublicationIntent | None = None
     organizationalRepair: OrganizationalCompletionRepairEvidence | None = None
+    doorPublication: DoorPublicationEvidence | None = None
+    doorPublicationHistory: list[DoorPublicationEvidence] = Field(default_factory=list)
+    directLandingLedgerIntent: DirectLandingLedgerIntent | None = None
     attempt: int = Field(default=1, ge=1)
     workerPid: int | None = Field(default=None, ge=1)
+    workerLease: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    workerProcessFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    workerTermination: WorkerTerminationEvidence | None = None
+    workerTerminationHistory: list[WorkerTerminationEvidence] = Field(default_factory=list)
+    terminationReturnStatus: (
+        Literal["queued", "running", "input-required", "failed", "completed"] | None
+    ) = None
+    terminationReturnPhase: LifecycleOperationPhase | None = None
+    cancellationEvidence: LifecycleCancellationEvidence | None = None
+    legacyMigration: LegacyCloseoutMigrationProof | None = None
 
     @model_validator(mode="after")
     def _require_altitude_authority(self) -> LifecycleOperationRecord:
@@ -292,10 +390,18 @@ class LifecycleOperationRecord(BaseModel):
 
 
 def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
+    if record.operationKind != record.input.kind:
+        raise ValueError("lifecycle operation kind must equal its accepted input kind")
+    if record.operationKind != "direct-landing" and record.directLandingLedgerIntent is not None:
+        raise ValueError("direct landing ledger intent belongs only to direct landing")
+    if record.operationKind != "closeout" and (
+        record.doorPublication is not None or record.doorPublicationHistory
+    ):
+        raise ValueError("closeout door publication belongs only to closeout operations")
     if record.operationKind == "integrate" and record.integrationAuthority is None:
         raise ValueError("integrate operation requires exact integrationAuthority")
-    if record.operationKind == "closeout" and record.integrationAuthority is not None:
-        raise ValueError("closeout operation has no integrationAuthority")
+    if record.operationKind != "integrate" and record.integrationAuthority is not None:
+        raise ValueError("only integrate operations may carry integrationAuthority")
     if record.operationKind != "closeout" and record.closeoutFinalizedContractSha256 is not None:
         raise ValueError("closeout finalized contract SHA-256 belongs to closeout operations only")
     if (
@@ -305,27 +411,39 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
     ):
         raise ValueError("organizational completion quality failure belongs to integration only")
     _require_organizational_repair_evidence(record)
-    if record.operationKind == "closeout":
+    _require_integration_publication(record)
+    if record.operationKind in {"closeout", "direct-landing"}:
         _require_closeout_mutation_evidence(record)
     elif record.mutationEvidence:
         raise ValueError("integration operation cannot carry closeout mutation evidence")
+    _require_worker_authority(record)
+    _require_cancellation_evidence(record)
+    _require_legacy_migration(record)
 
 
 def _require_closeout_mutation_evidence(record: LifecycleOperationRecord) -> None:
     closeout_input = record.input
-    if not isinstance(closeout_input, CloseoutOperationInput):
-        raise ValueError("closeout operation requires normalized closeout input")
+    if not isinstance(closeout_input, (CloseoutOperationInput, DirectLandingOperationInput)):
+        raise ValueError("commit operation requires normalized closeout input")
     expected_legs = {
         leg for leg in ("code", "memory", "ledger") if closeout_input.effectiveInput.enabled(leg)
     }
     if set(record.mutationEvidence) != expected_legs:
         raise ValueError("closeout mutation evidence must match every enabled commit leg")
+    if any(leg not in expected_legs for leg in record.mutationHistory):
+        raise ValueError("closeout mutation history must match an enabled commit leg")
+    for leg, attempts in record.mutationHistory.items():
+        if any(item.leg != leg or item.state != "reconciled-unchanged" for item in attempts):
+            raise ValueError(
+                "closeout mutation history may preserve only reconciled-unchanged attempts"
+            )
     commit_proven = any(
         evidence.state == "commit-proven" for evidence in record.mutationEvidence.values()
     )
-    if record.irreversibleBoundaryEntered != commit_proven:
+    irreversible = commit_proven or record.legacyMigration is not None
+    if record.irreversibleBoundaryEntered != irreversible:
         raise ValueError(
-            "closeout irreversible boundary must be derived from commit-proven evidence"
+            "closeout irreversible boundary must be derived from commit proof or legacy output proof"
         )
     if record.recoveryCommits is None:
         return
@@ -340,11 +458,114 @@ def _require_closeout_mutation_evidence(record: LifecycleOperationRecord) -> Non
             raise ValueError("closeout recovery commit contradicts commit-proven evidence")
 
 
+def _require_legacy_migration(record: LifecycleOperationRecord) -> None:
+    proof = record.legacyMigration
+    if proof is None:
+        return
+    if record.operationKind != "closeout" or not isinstance(record.input, CloseoutOperationInput):
+        raise ValueError("legacy migration proof belongs only to a closeout operation")
+    if (
+        record.operationKey != proof.legacyOperationKey
+        or record.fingerprint != proof.legacyFingerprint
+        or record.candidateState != proof.legacyCandidateState
+        or record.candidateTree != proof.legacyCandidateTree
+    ):
+        raise ValueError("legacy migration proof must retain the legacy generation identity")
+    commits = record.recoveryCommits
+    if commits is None or commits.codeCommit != proof.codeCommit:
+        raise ValueError("legacy migration recovery code commit must equal its live proof")
+    effective = record.input.effectiveInput
+    if effective.code.state != "not-applicable" or effective.code.reason != (
+        "verified-existing legacy code output"
+    ):
+        raise ValueError("legacy migration code leg must be typed verified-existing")
+    if (
+        effective.memory.state != "enabled"
+        or effective.ledger.state != "enabled"
+        or effective.memory.message != proof.memoryCommitMessage
+        or effective.ledger.message != proof.ledgerCommitMessage
+        or record.input.approvalNote != proof.legacyApprovalNote
+    ):
+        raise ValueError("legacy migration must bind both unfinished message cells exactly")
+    if record.status == "cancelled" or record.generationDisposition != "active":
+        raise ValueError("legacy migration proof cannot be cancelled, retired, or superseded")
+
+
+def _require_worker_authority(record: LifecycleOperationRecord) -> None:
+    if record.operationKind == "direct-landing":
+        _require_no_direct_worker_authority(record)
+        return
+    binding = (record.workerPid, record.workerLease, record.workerProcessFingerprint)
+    if any(value is not None for value in binding) and not all(
+        value is not None for value in binding
+    ):
+        raise ValueError("detached worker pid, lease, and process fingerprint are one authority")
+    termination = record.workerTermination
+    return_status = record.terminationReturnStatus
+    return_phase = record.terminationReturnPhase
+    if (record.status == "termination-required") != (
+        return_status is not None and return_phase is not None
+    ):
+        raise ValueError(
+            "termination-required status must retain the status and phase that requested "
+            "termination"
+        )
+    if (return_status is None) != (return_phase is None):
+        raise ValueError("termination return status and phase are one durable identity")
+    if termination is None:
+        if return_status is not None:
+            raise ValueError("termination return status requires durable termination evidence")
+        return
+    if termination.lease != record.workerLease and termination.state != "exited":
+        raise ValueError("worker termination intent must retain the exact worker lease")
+    if termination.state != "exited" and termination.pid != record.workerPid:
+        raise ValueError("unproven termination must retain the exact worker pid")
+    if termination.state == "exited" and any(value is not None for value in binding):
+        raise ValueError("proven worker exit must release pid and lease authority")
+
+
+def _require_no_direct_worker_authority(record: LifecycleOperationRecord) -> None:
+    if any(
+        value is not None
+        for value in (
+            record.workerPid,
+            record.workerLease,
+            record.workerProcessFingerprint,
+            record.workerTermination,
+            record.terminationReturnStatus,
+            record.terminationReturnPhase,
+        )
+    ):
+        raise ValueError("synchronous direct landing cannot carry detached worker authority")
+
+
+def _require_cancellation_evidence(record: LifecycleOperationRecord) -> None:
+    evidence = record.cancellationEvidence
+    if evidence is None:
+        return
+    if (
+        evidence.operationKind != record.operationKind
+        or evidence.generation != record.generation
+        or not evidence.workerExitProven
+    ):
+        raise ValueError("cancellation evidence must bind this generation and proven worker exit")
+    if record.status != "cancelled":
+        raise ValueError("cancellation evidence belongs only to a cancelled generation")
+
+
 def _require_organizational_repair_evidence(record: LifecycleOperationRecord) -> None:
     if record.organizationalRepair is None:
         return
     if record.operationKind != "integrate":
         raise ValueError("organizational completion repair evidence belongs to integration")
+    if (
+        record.integrationPublication is not None
+        or record.recoveryCommits is not None
+        or record.irreversibleBoundaryEntered
+    ):
+        raise ValueError(
+            "organizational repair is an exact preclaim mode without publication or output"
+        )
     if record.status not in {"queued", "running", "input-required", "cancelled"}:
         raise ValueError("organizational repair evidence has an invalid lifecycle status")
     if (
@@ -355,12 +576,45 @@ def _require_organizational_repair_evidence(record: LifecycleOperationRecord) ->
     _require_canonical_cancellation_handoff(
         record.result,
         record.organizationalRepair.contractPath,
+        record.generation,
     )
+
+
+def _require_integration_publication(record: LifecycleOperationRecord) -> None:
+    publication = record.integrationPublication
+    if publication is None:
+        return
+    if record.operationKind != "integrate" or record.integrationAuthority is None:
+        raise ValueError("integration publication intent belongs only to integration")
+    if (
+        publication.operationKey != record.operationKey
+        or publication.generation != record.generation
+        or record.recoveryCommits is None
+    ):
+        raise ValueError("integration publication intent does not bind this generation")
+    authority = record.integrationAuthority
+    commits = record.recoveryCommits
+    if (
+        commits.codeCommit != authority.codeCandidateCommit
+        or commits.memoryContentCommit != authority.memoryContentCommit
+        or commits.ledgerCommit != authority.ledgerCommit
+    ):
+        raise ValueError("integration publication ref intent contradicts accepted authority")
+    organizational = publication.organizationalCompletion
+    if organizational is None:
+        return
+    certification = record.qualityCertification
+    if certification is None or (
+        certification.completionFingerprint != organizational.completionFingerprint
+        or certification.resultSha256 != organizational.certificationResultSha256
+    ):
+        raise ValueError("organizational publication lacks its exact quality certification")
 
 
 def _require_canonical_cancellation_handoff(
     result: dict[str, Any],
     expected_path: str,
+    expected_generation: int,
 ) -> None:
     next_args = result.get("nextArgs")
     apply_step = result.get("applyStep")
@@ -370,18 +624,22 @@ def _require_canonical_cancellation_handoff(
     apply_args = apply_args if isinstance(apply_args, dict) else {}
     canonical = all(
         (
-            result.get("developer_decision_required") is True,
+            result.get("developerDecisionRequired") is True,
             result.get("safeToReplace") is False,
             result.get("superRefsMoved") is False,
             result.get("ok") is False,
             result.get("operation") == "worktree_integrate",
-            result.get("nextTool") == "worktree_operation_cancel",
+            result.get("nextTool") == "worktree_operation_control",
             next_args.get("contract_path") == expected_path,
             next_args.get("operation_kind") == "integrate",
+            next_args.get("action") == "cancel",
+            next_args.get("expected_generation") == expected_generation,
             next_args.get("dry_run") is True,
-            apply_step.get("nextTool") == "worktree_operation_cancel",
+            apply_step.get("nextTool") == "worktree_operation_control",
             apply_args.get("contract_path") == expected_path,
             apply_args.get("operation_kind") == "integrate",
+            apply_args.get("action") == "cancel",
+            apply_args.get("expected_generation") == expected_generation,
             apply_args.get("dry_run") is False,
         )
     )
@@ -395,7 +653,7 @@ class LifecycleOperationProjection(StrictResponseModel):
     """Public task-addressed view; process and resume identities never cross the wire."""
 
     kind: LifecycleOperationKind
-    status: LifecycleOperationStatus
+    status: LifecycleOperationStatus | Literal["unreadable"]
     phase: LifecycleOperationPhase
     startedAt: str | None = None
     heartbeatAt: str | None = None
@@ -407,3 +665,5 @@ class LifecycleOperationProjection(StrictResponseModel):
     failure: str | None = None
     guidance: str | None = None
     cancellable: bool = False
+    generation: int | None = None
+    legalControls: list[dict[str, Any]] = Field(default_factory=list)

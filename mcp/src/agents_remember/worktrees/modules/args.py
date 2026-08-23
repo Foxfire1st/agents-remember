@@ -20,6 +20,7 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.models.closeout_input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
+    IntegrationPublicationIntent,
     IntegrationQualityCertification,
     LifecycleOperationRecoveryCommits,
 )
@@ -78,10 +79,12 @@ class WorktreeArgs:
     # Plane-owned lifecycle execution. Never populated from an agent/CLI namespace:
     # the detached worker injects these after resolving the task-bound operation record.
     operation_key: str = ""
+    operation_generation: int = 0
     candidate_tree: str | None = None
     approval_claimed: bool = False
     recovery_commits: LifecycleOperationRecoveryCommits | None = None
     quality_certification: IntegrationQualityCertification | None = None
+    integration_publication: IntegrationPublicationIntent | None = None
     operation_progress: Callable[[str, Mapping[str, object]], None] | None = None
 
     @classmethod

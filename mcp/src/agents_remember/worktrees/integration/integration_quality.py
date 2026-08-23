@@ -12,6 +12,9 @@ from agents_remember.models.lifecycles.operation import IntegrationQualityCertif
 from agents_remember.worktrees.integration.integration_quality_checkout import (
     integration_quality_checkout,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
+)
 from agents_remember.worktrees.integration.organizational_completion import (
     OrganizationalCompletionPlan,
 )
@@ -30,13 +33,46 @@ from agents_remember.worktrees.modules.code_quality_gate import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
+INTEGRATION_QUALITY_DECISION_SURFACE = (
+    "The required integration quality gate failed for the exact integration candidate."
+)
+
 
 class IntegrationQualityFailure(RuntimeError):
     """The exact integration candidate failed its required acceptance."""
 
-    def __init__(self, message: str, *, organizational_completion: bool) -> None:
+    def __init__(
+        self,
+        *,
+        stage: str,
+        error_type: str,
+        organizational_completion: bool,
+    ) -> None:
         self.organizational_completion = organizational_completion
-        super().__init__(message)
+        self.evidence = public_failure_evidence(
+            stage=stage,
+            side="quality-gate",
+            name="integration-quality",
+            error_type=error_type,
+            expected={"state": "accepted"},
+            observed={"state": "failed"},
+        )
+        super().__init__("the required integration quality gate failed")
+
+
+def integration_quality_failure(
+    error: Exception,
+    *,
+    stage: str,
+    organizational_completion: bool,
+) -> IntegrationQualityFailure:
+    """Classify a private backend cause into the one stable public quality vocabulary."""
+
+    return IntegrationQualityFailure(
+        stage=stage,
+        error_type=type(error).__name__,
+        organizational_completion=organizational_completion,
+    )
 
 
 @dataclass(frozen=True)
@@ -107,8 +143,9 @@ def run_integration_quality_gate(
         try:
             _require_matching_certification(contract, completion, certification, plan=plan)
         except RuntimeError as error:
-            raise IntegrationQualityFailure(
-                str(error),
+            raise integration_quality_failure(
+                error,
+                stage="integration-quality-certification",
                 organizational_completion=True,
             ) from error
         return IntegrationQualityOutcome(
@@ -158,8 +195,9 @@ def run_integration_quality_gate(
                 attestation=attestation,
             )
     except RuntimeError as error:
-        raise IntegrationQualityFailure(
-            str(error),
+        raise integration_quality_failure(
+            error,
+            stage="integration-quality-execution",
             organizational_completion=completion is not None,
         ) from error
     if completion is None:
@@ -196,7 +234,9 @@ def quality_gate_settings(contract: WorktreeContract):
 
 def organizational_quality_failure_payload(
     contract: WorktreeContract,
-    reason: str,
+    failure: IntegrationQualityFailure,
+    *,
+    expected_generation: int,
 ) -> dict[str, object]:
     """Return the repair handoff for a failed exact final-leaf gate."""
 
@@ -206,29 +246,45 @@ def organizational_quality_failure_payload(
         "leaf, repair it there, then declare and close the leaf again."
     )
     cancel_note = (
-        "Cancel the failed organizational completion so its certified candidate is retired "
-        "and the same leaf closeout is reset for repair."
+        "Cancel the failed organizational completion so its journal authority is released "
+        "and the same leaf contract and claimed door are reset for repair."
     )
+    if expected_generation <= 0:
+        return {
+            "state": "organizational-completion-gate-planning-failed",
+            "reason": "the required integration quality gate failed",
+            "failureEvidence": failure.evidence,
+            "summary": summary,
+            "developerDecisionRequired": True,
+            "decisionSurface": INTEGRATION_QUALITY_DECISION_SURFACE,
+            "safeToReplace": False,
+            "superRefsMoved": False,
+            "nextOperation": "admit_integration_before_cancellation",
+        }
     cancel_args = {
         "contract_path": contract.contract_path.as_posix(),
         "operation_kind": "integrate",
+        "action": "cancel",
+        "expected_generation": expected_generation,
         "intent_note": cancel_note,
         "dry_run": False,
     }
     return {
         "state": "organizational-completion-gate-failed",
-        "reason": reason,
+        "reason": "the required integration quality gate failed",
+        "failureEvidence": failure.evidence,
         "summary": summary,
-        "developer_decision_required": True,
+        "developerDecisionRequired": True,
+        "decisionSurface": INTEGRATION_QUALITY_DECISION_SURFACE,
         "safeToReplace": False,
         "superRefsMoved": False,
         "nextOperation": "cancel_failed_completion_for_leaf_repair",
-        "nextTool": "worktree_operation_cancel",
+        "nextTool": "worktree_operation_control",
         "nextArgs": {**cancel_args, "dry_run": True},
         "applyStep": {
             "summary": cancel_note,
             "nextOperation": "cancel_failed_completion_for_leaf_repair",
-            "nextTool": "worktree_operation_cancel",
+            "nextTool": "worktree_operation_control",
             "nextArgs": cancel_args,
         },
     }

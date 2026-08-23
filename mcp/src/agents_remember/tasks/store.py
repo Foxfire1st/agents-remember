@@ -8,6 +8,8 @@ publish -- the same call the observer drift snapshot makes. Reading goes through
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
@@ -15,6 +17,39 @@ from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write
 from .document import TaskDocument
 from .execution_graph_titles import SprintGraphTitles
 from .render import render_markdown
+
+
+@dataclass(frozen=True)
+class TaskDocSourceSnapshot:
+    """Exact JSON/Markdown bytes accepted before a task publication is prepared."""
+
+    json_path: Path
+    json_bytes: bytes | None
+    markdown_path: Path
+    markdown_bytes: bytes | None
+
+    def evidence(self) -> dict[str, object]:
+        return {
+            "json": _source_evidence(self.json_path, self.json_bytes),
+            "markdown": _source_evidence(self.markdown_path, self.markdown_bytes),
+        }
+
+
+class TaskDocSourceReadError(OSError):
+    """One exact task-document source side could not be read for publication CAS."""
+
+    def __init__(self, *, side: str, name: str, error_type: str) -> None:
+        self.side = side
+        self.name = name
+        self.error_type = error_type
+        super().__init__(f"{side} task-document source is unreadable")
+
+    def evidence(self) -> dict[str, str]:
+        return {
+            "side": self.side,
+            "name": self.name,
+            "errorType": self.error_type,
+        }
 
 
 def doc_stem(doc: TaskDocument) -> str:
@@ -32,6 +67,41 @@ def markdown_path_for(task_root: Path, doc: TaskDocument) -> Path:
 
 def read_task_doc(json_path: Path) -> TaskDocument:
     return TaskDocument.model_validate_json(json_path.read_text(encoding="utf-8"))
+
+
+def capture_task_doc_source(json_path: Path) -> TaskDocSourceSnapshot:
+    """Read one task JSON and rendered Markdown as a single accepted source pair."""
+
+    markdown_path = json_path.with_suffix(".md")
+    return TaskDocSourceSnapshot(
+        json_path=json_path,
+        json_bytes=_optional_source_bytes(json_path, side="json"),
+        markdown_path=markdown_path,
+        markdown_bytes=_optional_source_bytes(markdown_path, side="markdown"),
+    )
+
+
+def read_task_doc_with_source(
+    json_path: Path,
+) -> tuple[TaskDocument, TaskDocSourceSnapshot]:
+    """Parse the exact JSON bytes retained with their paired Markdown CAS source."""
+
+    snapshot = capture_task_doc_source(json_path)
+    if snapshot.json_bytes is None:
+        raise FileNotFoundError(json_path)
+    return TaskDocument.model_validate_json(snapshot.json_bytes), snapshot
+
+
+def missing_task_doc_source(json_path: Path) -> TaskDocSourceSnapshot:
+    """Bind a create request to exact absence without reading a later competing file."""
+
+    return TaskDocSourceSnapshot(json_path, None, json_path.with_suffix(".md"), None)
+
+
+def current_task_doc_source(snapshot: TaskDocSourceSnapshot) -> TaskDocSourceSnapshot:
+    """Re-read one accepted pair at its exact publication boundary."""
+
+    return capture_task_doc_source(snapshot.json_path)
 
 
 def write_task_doc(task_root: Path, doc: TaskDocument) -> tuple[Path, Path]:
@@ -104,3 +174,27 @@ def _restore_task_doc_batch(originals: dict[Path, bytes | None]) -> None:
             path.unlink(missing_ok=True)
         else:
             atomic_write_bytes(path, payload)
+
+
+def _source_evidence(path: Path, payload: bytes | None) -> dict[str, object]:
+    if payload is None:
+        return {"name": path.name, "state": "missing"}
+    return {
+        "name": path.name,
+        "state": "present",
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size": len(payload),
+    }
+
+
+def _optional_source_bytes(path: Path, *, side: str) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise TaskDocSourceReadError(
+            side=side,
+            name=path.name,
+            error_type=type(exc).__name__,
+        ) from exc

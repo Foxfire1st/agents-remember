@@ -149,7 +149,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(RuntimeError, "contract write interrupted"),
             ):
-                closeout_module.closeout_result(first)
+                closeout_module.closeout_result(first, contract)
 
             code_head = git(contract.code_worktree, "rev-parse", "HEAD")
             memory_head = git(contract.memory_worktree, "rev-parse", "HEAD")
@@ -165,7 +165,8 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     first,
                     recovery_commits=LifecycleOperationRecoveryCommits.model_validate(captured),
                     operation_progress=progress,
-                )
+                ),
+                contract,
             )
 
             self.assertEqual(recovered.payload["state"], "closed")
@@ -208,7 +209,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(RuntimeError, "ledger write interrupted"),
             ):
-                closeout_module.closeout_result(first)
+                closeout_module.closeout_result(first, contract)
 
             code_commit = mutation_recorder.evidence["code"].commit
             memory_commit = mutation_recorder.evidence["memory"].commit
@@ -338,7 +339,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "accepted_code_commit") as commit,
                 self.assertRaisesRegex(RuntimeError, "candidate changed after quality"),
             ):
-                closeout_module.closeout_result(args)
+                closeout_module.closeout_result(args, contract)
 
             claim.assert_not_called()
             commit.assert_not_called()
@@ -381,7 +382,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
                 self.assertRaisesRegex(RuntimeError, "cannot create code, memory, or ledger"),
             ):
-                closeout_module.closeout_result(args)
+                closeout_module.closeout_result(args, contract)
 
             claim.assert_not_called()
 
@@ -433,7 +434,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
                 self.assertRaisesRegex(RuntimeError, "cannot create code, memory, or ledger"),
             ):
-                closeout_module.closeout_result(args)
+                closeout_module.closeout_result(args, contract)
 
             quality.assert_not_called()
             claim.assert_not_called()
@@ -456,7 +457,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "_closeout_quality_preflight") as quality,
                 self.assertRaisesRegex(RuntimeError, "missing its accepted candidate tree"),
             ):
-                closeout_module.closeout_result(args)
+                closeout_module.closeout_result(args, contract)
 
             quality.assert_not_called()
 

@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.application import lifecycle_operation_worker
+from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
@@ -22,28 +22,40 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees import series_closeout
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import start_or_observe_operation
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
+    start_or_observe_operation,
+)
+from agents_remember.worktrees.integration.organizational_completion_integration import (
+    preview_integration_boundary,
+)
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.queue import closeout_queue as queue
 from agents_remember.worktrees.queue import closeout_queue_lifecycle as lifecycle
-from agents_remember.worktrees.queue.closeout_queue_blocker import _stale_sibling_facts
+from agents_remember.worktrees.queue.closeout_queue_blocker import (
+    _boundary_recovery,
+    _stale_sibling_facts,
+)
 from agents_remember.worktrees.queue.closeout_queue_candidate_evidence import (
     require_source_bases_current,
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    _boundary_recovery,
     certify_queue_candidate_closeout,
     claim_queue_candidate_for_closeout,
 )
+from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from closeout_input_test_support import closeout_operation_input, start_closeout_operation
+from closeout_input_test_support import (
+    closeout_operation_input,
+    publish_closeout_finalization,
+    start_closeout_operation,
+)
 from test_closeout_queue import LEAF_A, LEAF_B, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
 from test_worktree_support import git
 
@@ -69,10 +81,12 @@ def _close_and_certify(fixture: QueueFixture, master) -> WorktreeContract:
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     record = runtime.start()
+    contract = load_contract(contract.contract_path)
     claim_queue_candidate_for_closeout(contract, record.operationKey)
     closed = fixture.close_contract(master)
+    publish_closeout_finalization(runtime, closed)
     certify_queue_candidate_closeout(closed, record.operationKey)
-    runtime.finish({"ok": True}, ok=True)
+    runtime.finish({"state": "closed"}, ok=True)
     git(closed.code_repo_path, "checkout", closed.code_source_branch)
     assert closed.memory_repo_path is not None
     git(closed.memory_repo_path, "checkout", closed.memory_source_branch)
@@ -88,6 +102,7 @@ def _integrate(fixture: QueueFixture, contract):
             contractPath=contract.contract_path.as_posix(),
             autoCompleteSeats=False,
         ),
+        contract,
         launcher=lambda *_: None,
     )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
@@ -98,11 +113,12 @@ def _integrate(fixture: QueueFixture, contract):
         approved=True,
         strategy="ff-only",
         operation_key=record.operationKey,
+        operation_generation=record.generation,
         recovery_commits=record.recoveryCommits,
         quality_certification=record.qualityCertification,
         operation_progress=runtime.progress,
     )
-    return runtime, integrate_mod.integrate_result(args)
+    return runtime, integrate_mod.integrate_result(args, contract)
 
 
 class CloseoutLaneSyncFirstTests(unittest.TestCase):
@@ -157,7 +173,7 @@ class CloseoutLaneSyncFirstTests(unittest.TestCase):
         topology = TaskDocumentTopology(self.fixture.coord)
         graph = queue._graph_context(topology, SPRINT)
         state = CloseoutQueueStore(self.fixture.coord, SPRINT).read(
-            queue._initial_state(SPRINT, graph.revision, NOW)
+            initial_queue_state(SPRINT, graph.revision, NOW)
         )
         self.fixture.contracts[MASTER_B].contract_path.unlink()
         facts = _stale_sibling_facts(state)
@@ -179,7 +195,7 @@ class CloseoutLaneSyncFirstTests(unittest.TestCase):
         topology = TaskDocumentTopology(self.fixture.coord)
         graph = queue._graph_context(topology, SPRINT)
         state = CloseoutQueueStore(self.fixture.coord, SPRINT).read(
-            queue._initial_state(SPRINT, graph.revision, NOW)
+            initial_queue_state(SPRINT, graph.revision, NOW)
         )
         self.assertEqual(_stale_sibling_facts(state), [])
 
@@ -200,7 +216,7 @@ class CloseoutLaneSerializationTests(unittest.TestCase):
         topology = TaskDocumentTopology(self.fixture.coord)
         graph = queue._graph_context(topology, SPRINT)
         state = CloseoutQueueStore(self.fixture.coord, SPRINT).read(
-            queue._initial_state(SPRINT, graph.revision, NOW)
+            initial_queue_state(SPRINT, graph.revision, NOW)
         )
         lane_holder = state.candidates[LEAF_A.key].model_copy(
             update={
@@ -222,14 +238,15 @@ class CloseoutLaneSerializationTests(unittest.TestCase):
         state = state.model_copy(
             update={"candidates": {LEAF_A.key: lane_holder, LEAF_B.key: waiting}}
         )
-        context = lifecycle._LifecycleCandidateContext(
-            topology, graph, state, self.fixture.contracts[MASTER_B], "0" * 64
-        )
         with (
-            mock.patch.object(lifecycle, "_post_closeout_blockers", return_value=[]),
+            mock.patch.object(
+                CloseoutQueueStore,
+                "inspect",
+                new=lambda _store, _initial, reader: reader(state),
+            ),
             self.assertRaises(CloseoutQueueError) as raised,
         ):
-            lifecycle._claim_integration(context, waiting)
+            preview_integration_boundary(self.fixture.contracts[MASTER_B])
         self.assertIn("integration-lane-owned-by", str(raised.exception))
         self.assertIn(LEAF_A.key, str(raised.exception))
 

@@ -60,6 +60,9 @@ from agents_remember.serving.projections.snapshots import (
 )
 from agents_remember.serving.projections.snapshots_impl import _common as snapshots_common
 from agents_remember.serving.projections.snapshots_impl import _runtime as snapshots_runtime
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.task_resolver import ENCLOSURES_DIR, SERIES_CONTRACT_FILENAME
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -630,6 +633,10 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)
+            publish_new_lifecycle_operation_location(
+                contract,
+                contract_text=contract.contract_path.read_text(encoding="utf-8"),
+            )
             contracts.append(contract)
         return contracts
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_RESERVED_DECISION_WIRE_KEYS = frozenset({"developer_decision_required", "decision_surface"})
 
 
 class StrictResponseModel(BaseModel):
@@ -17,6 +20,28 @@ class FlexibleResponseModel(BaseModel):
     """Base class for intentionally provider-native diagnostic payloads."""
 
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_reserved_snake_decision_keys(cls, value: Any) -> Any:
+        """Keep camelCase decision vocabulary singular without narrowing other extras."""
+
+        _require_no_reserved_decision_keys(value)
+        return value
+
+
+def _require_no_reserved_decision_keys(value: object) -> None:
+    if isinstance(value, Mapping):
+        rejected = sorted(_RESERVED_DECISION_WIRE_KEYS.intersection(value))
+        if rejected:
+            raise ValueError(
+                "reserved lifecycle decision keys must use camelCase: " + ", ".join(rejected)
+            )
+        for nested in value.values():
+            _require_no_reserved_decision_keys(nested)
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for nested in value:
+            _require_no_reserved_decision_keys(nested)
 
 
 class NextStep(StrictResponseModel):

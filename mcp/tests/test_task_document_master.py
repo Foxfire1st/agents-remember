@@ -16,7 +16,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
 from agents_remember.mcp.tools import task_doc_payload
 from agents_remember.mcp.tools.base import PUBLIC_TOOLS
 from agents_remember.models.task_doc import TaskDocResponse
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.observer.ambient import reset_ambient
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc

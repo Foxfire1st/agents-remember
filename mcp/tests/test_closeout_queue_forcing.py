@@ -9,6 +9,9 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.application import closeout_queue as public_queue
+from agents_remember.application.lifecycle.lifecycle_operation_worker import (
+    OperationRuntime,
+)
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
@@ -39,11 +42,19 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import start_or_observe_operation
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
+    start_or_observe_operation,
+)
+from agents_remember.worktrees.integration.organizational_completion_integration import (
+    IntegrationBoundaryFacts,
+    prepare_integration_publication_intent,
+    preview_integration_boundary,
+    transfer_integration_claim,
+)
 from agents_remember.worktrees.queue.closeout_queue import (
     CloseoutQueueError,
     CloseoutQueueRequest,
@@ -54,12 +65,12 @@ from agents_remember.worktrees.queue.closeout_queue_graph import incomplete_pred
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
     certify_queue_candidate_closeout,
     claim_queue_candidate_for_closeout,
-    claim_queue_candidate_for_integration,
 )
 from agents_remember.worktrees.reopen import reopen_task
-from agents_remember.worktrees.worktree_contract import write_contract
+from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from closeout_input_test_support import (
     closeout_operation_input,
+    publish_closeout_finalization,
     start_closeout_operation,
     with_commit_proven,
     with_mutation_intent,
@@ -445,9 +456,13 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         )
         closeout_record = closeout_store.read()
         assert closeout_record is not None
+        contract = load_contract(contract.contract_path)
         claim_queue_candidate_for_closeout(contract, closeout_record.operationKey)
+        closed = fixture.close_contract(MASTER_A)
         closeout_store.update(with_mutation_intent)
-        closeout_store.update(with_commit_proven)
+        closeout_store.update(
+            lambda current: with_commit_proven(current, commit=closed.code_commit)
+        )
         active_closeout = fixture.status(QueueActor(role="manager", task_document_ref=MASTER_A))[
             "inFlight"
         ][0]
@@ -455,7 +470,7 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
             active_closeout["legalNextOperations"],
             ["worktree_closeout_apply"],
         )
-        closed = fixture.close_contract(MASTER_A)
+        publish_closeout_finalization(OperationRuntime(closeout_store), closed)
         certify_queue_candidate_closeout(closed, closeout_record.operationKey)
         closeout_store.update(
             lambda current: current.model_copy(
@@ -468,6 +483,7 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
                     "status": "completed",
                     "phase": "completed",
                     "finishedAt": "2026-08-15T00:01:00+00:00",
+                    "result": {"state": "closed"},
                 }
             )
         )
@@ -482,19 +498,34 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
                 configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
                 contractPath=contract.contract_path.as_posix(),
             ),
+            closed,
             launcher=lambda *_: None,
         )
         integration_record = LifecycleOperationStore(
             operation_record_path(contract.worktree_group, "integrate")
         ).read()
         assert integration_record is not None
-        claim_queue_candidate_for_integration(closed, integration_record.operationKey)
-        integrating = fixture.status(QueueActor(role="manager", task_document_ref=MASTER_A))[
-            "inFlight"
-        ][0]
+        facts = preview_integration_boundary(closed)
+        intent = prepare_integration_publication_intent(
+            closed,
+            operation_key=integration_record.operationKey,
+            generation=integration_record.generation,
+            facts=IntegrationBoundaryFacts(facts.candidate, None),
+            certification=None,
+        )
+        proven = transfer_integration_claim(
+            closed,
+            intent,
+            commits=(
+                closed.code_commit,
+                closed.memory_content_commit,
+                closed.ledger_commit,
+            ),
+        )
+        self.assertEqual(proven.claimState, "proven")
         self.assertEqual(
-            integrating["legalNextOperations"],
-            ["worktree_integrate", "worktree_operation_cancel"],
+            fixture.status(QueueActor(role="manager", task_document_ref=MASTER_A))["inFlight"],
+            [],
         )
 
         blocked_fixture = QueueFixture(self.root / "blocked")
@@ -514,12 +545,22 @@ class CloseoutQueueEvidenceForcingTests(unittest.TestCase):
         fixture = QueueFixture(self.root / "post-refresh")
         fixture.declare(MASTER_A)
         fixture.mutate("select", candidate=LEAF_A)
-        closeout_key = "e" * 64
         contract = fixture.contracts[MASTER_A]
-        claim_queue_candidate_for_closeout(contract, closeout_key)
+        start_closeout_operation(
+            closeout_operation_input(contract, code="close candidate", approval_note="approved"),
+            launcher=lambda *_: None,
+        )
+        closeout_store = LifecycleOperationStore(
+            operation_record_path(contract.worktree_group, "closeout")
+        )
+        runtime = OperationRuntime(closeout_store)
+        closeout = runtime.start()
+        contract = load_contract(contract.contract_path)
+        claim_queue_candidate_for_closeout(contract, closeout.operationKey)
         _write_curator_evidence(contract, _curator_report() + "\nPost-refresh proof.\n")
         closed = fixture.close_contract(MASTER_A)
-        certify_queue_candidate_closeout(closed, closeout_key)
+        publish_closeout_finalization(runtime, closed)
+        certify_queue_candidate_closeout(closed, closeout.operationKey)
         certified = fixture.status()["inFlight"][0]
         self.assertEqual(certified["candidateState"], "certified")
 

@@ -120,7 +120,8 @@ class CloseoutRecoveryTests(unittest.TestCase):
                         contract_path=requested_path,
                         operation_key="a" * 64,
                         operation_progress=MutationEvidenceRecorder(),
-                    )
+                    ),
+                    contract,
                 )
 
             authority.assert_not_called()
@@ -541,14 +542,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
             stack.enter_context(
                 mock.patch.object(
                     closeout_external,
-                    "begin_git_mutation",
-                    return_value=ledger_intent,
-                )
-            )
-            stack.enter_context(
-                mock.patch.object(
-                    closeout_external,
-                    "bind_expected_output_tree",
+                    "begin_exact_file_git_mutation",
                     return_value=ledger_intent,
                 )
             )

@@ -10,7 +10,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.tools import PUBLIC_TOOLS
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 
 
 class PublicToolResponseModelTests(unittest.TestCase):

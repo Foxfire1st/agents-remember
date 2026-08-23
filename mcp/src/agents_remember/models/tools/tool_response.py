@@ -7,7 +7,7 @@ from typing import Any
 
 from agents_remember.models.base import ResponseEnvelope
 from agents_remember.models.tokens import finalize_payload_tokens
-from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 
 ResponseEnricher = Callable[[ResponseEnvelope], None]
 

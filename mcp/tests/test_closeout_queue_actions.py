@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
+from agents_remember.controlplane.closeout_queue_store import (
+    CloseoutQueueStore,
+    queue_store_paths,
+)
 from agents_remember.models.queue.closeout_queue import (
     CandidateAdmissionFacts,
     CloseoutQueueRequest,
@@ -37,13 +40,9 @@ from agents_remember.worktrees.queue.closeout_queue import (
     _graph_context,
     _group_name,
     _in_flight_legal_operations,
-    _initial_state,
     _leaf_identity,
     _lifecycle_operation_legal,
-    _owned_lifecycle_operation,
-    _queue_action,
     _release_selection,
-    _request_fingerprint,
     _required_candidate_ref,
     closeout_queue_tool,
 )
@@ -55,7 +54,18 @@ from agents_remember.worktrees.queue.closeout_queue_blocker import (
 from agents_remember.worktrees.queue.closeout_queue_candidate_evidence import (
     operation_owner_fingerprint,
 )
+from agents_remember.worktrees.queue.closeout_queue_door import (
+    owned_candidate_lifecycle_operation,
+)
 from agents_remember.worktrees.queue.closeout_queue_errors import queue_task_ref
+from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
+    claim_queue_candidate_for_closeout,
+)
+from agents_remember.worktrees.queue.closeout_queue_state import (
+    initial_queue_state,
+    queue_action,
+    queue_request_fingerprint,
+)
 from test_closeout_queue import (
     LEAF_A,
     MASTER_A,
@@ -64,6 +74,7 @@ from test_closeout_queue import (
     RATIONALE,
     SPRINT,
     QueueFixture,
+    _grade,
 )
 
 
@@ -83,7 +94,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
     ) -> tuple[TaskDocumentTopology, Any, CloseoutQueueState]:
         topology = TaskDocumentTopology(fixture.coord)
         graph = _graph_context(topology, SPRINT)
-        initial = _initial_state(SPRINT, graph.revision, NOW)
+        initial = initial_queue_state(SPRINT, graph.revision, NOW)
         state = CloseoutQueueStore(fixture.coord, SPRINT).read(initial)
         return topology, graph, state
 
@@ -592,6 +603,37 @@ class CloseoutQueueActionTests(unittest.TestCase):
         )
         self.assertEqual(_in_flight_legal_operations(graph, certified, orchestrator), [])
 
+    def test_in_flight_candidate_is_immutable_and_operator_release_refusal_is_read_only(
+        self,
+    ) -> None:
+        fixture = self._fixture()
+        fixture.declare(MASTER_A)
+        fixture.mutate("select", candidate=LEAF_A)
+        for action, values in (
+            ("withdraw", {}),
+            ("set-grade", {"grade": _grade("low", LEAF_A)}),
+            ("set-admission", {"admission": {}}),
+        ):
+            with (
+                self.subTest(action=action),
+                self.assertRaisesRegex(
+                    CloseoutQueueError,
+                    "frozen",
+                ),
+            ):
+                fixture.mutate(action, candidate=LEAF_A, **values)
+        with self.assertRaisesRegex(CloseoutQueueError, "existing candidate"):
+            fixture.declare(MASTER_A)
+        claim_queue_candidate_for_closeout(fixture.contracts[MASTER_A], "a" * 64)
+        state_path, pending_path = queue_store_paths(fixture.coord, SPRINT)
+        before = {path: path.read_bytes() for path in (state_path, pending_path) if path.is_file()}
+        with self.assertRaisesRegex(CloseoutQueueError, "task-addressed cancellation"):
+            fixture.mutate("release-selection", candidate=LEAF_A)
+        self.assertEqual(
+            {path: path.read_bytes() for path in (state_path, pending_path) if path.is_file()},
+            before,
+        )
+
     def test_lifecycle_legal_operations_follow_exact_owner_record_and_boundary(self) -> None:
         fixture = self._fixture()
         fixture.declare(MASTER_A)
@@ -605,7 +647,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
         manager = QueueActor(role="manager", task_document_ref=MASTER_A)
         orchestrator = QueueActor(role="orchestrator", task_document_ref=SPRINT)
         with mock.patch(
-            "agents_remember.worktrees.queue.closeout_queue._owned_lifecycle_operation",
+            "agents_remember.worktrees.queue.closeout_queue.owned_candidate_lifecycle_operation",
             return_value=None,
         ):
             self.assertEqual(_lifecycle_operation_legal(graph, candidate, manager), [])
@@ -615,7 +657,7 @@ class CloseoutQueueActionTests(unittest.TestCase):
             (
                 "running",
                 False,
-                ["worktree_closeout_apply", "worktree_operation_cancel"],
+                ["worktree_closeout_apply"],
             ),
             ("running", True, ["worktree_closeout_apply"]),
             ("completed", True, []),
@@ -628,15 +670,15 @@ class CloseoutQueueActionTests(unittest.TestCase):
             with (
                 self.subTest(status=status, crossed=crossed),
                 mock.patch(
-                    "agents_remember.worktrees.queue.closeout_queue._owned_lifecycle_operation",
+                    "agents_remember.worktrees.queue.closeout_queue.owned_candidate_lifecycle_operation",
                     return_value=record,
                 ),
             ):
                 self.assertEqual(_lifecycle_operation_legal(graph, candidate, manager), expected)
         self.assertEqual(_lifecycle_operation_legal(graph, candidate, orchestrator), [])
-        self.assertIsNone(_owned_lifecycle_operation(candidate))
+        self.assertIsNone(owned_candidate_lifecycle_operation(candidate))
         missing_contract = candidate.model_copy(update={"contractPath": "/missing.md"})
-        self.assertIsNone(_owned_lifecycle_operation(missing_contract))
+        self.assertIsNone(owned_candidate_lifecycle_operation(missing_contract))
 
     def test_owned_lifecycle_operation_requires_exact_kind_contract_and_fingerprint(self) -> None:
         fixture = self._fixture()
@@ -659,10 +701,11 @@ class CloseoutQueueActionTests(unittest.TestCase):
             store = mock.Mock()
             store.read.return_value = record
             with mock.patch(
-                "agents_remember.worktrees.queue.closeout_queue.LifecycleOperationStore",
+                "agents_remember.worktrees.queue.closeout_queue_door."
+                "located_lifecycle_operation_store",
                 return_value=store,
             ):
-                return _owned_lifecycle_operation(candidate)
+                return owned_candidate_lifecycle_operation(candidate)
 
         self.assertIs(owned(valid), valid)
         for changed in (
@@ -687,17 +730,17 @@ class CloseoutQueueActionTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(CloseoutQueueError, "closeout-candidate-not-declared"):
             _candidate_or_error(
-                _initial_state(SPRINT, "a" * 64, NOW),
+                initial_queue_state(SPRINT, "a" * 64, NOW),
                 LEAF_A,
             )
-        self.assertEqual(_queue_action(" status "), "status")
+        self.assertEqual(queue_action(" status "), "status")
         with self.assertRaisesRegex(CloseoutQueueError, "unsupported"):
-            _queue_action("unknown")
+            queue_action("unknown")
         with self.assertRaisesRegex(CloseoutQueueError, "admission-invalid"):
             _admission(cast(Any, {"resourceReady": False, "resourceReason": ""}))
         self.assertEqual(_group_name("in-flight"), "inFlight")
         self.assertEqual(_group_name("ready"), "ready")
-        self.assertIsNone(_active_lane_owner(_initial_state(SPRINT, "a" * 64, NOW)))
+        self.assertIsNone(_active_lane_owner(initial_queue_state(SPRINT, "a" * 64, NOW)))
         fixture = self._fixture()
         topology, _graph, _state = self._context(fixture)
         with (
@@ -710,13 +753,13 @@ class CloseoutQueueActionTests(unittest.TestCase):
             _leaf_identity(topology, fixture.contracts[MASTER_A])
         actor = QueueActor(role="manager", task_document_ref=MASTER_A)
         request = CloseoutQueueRequest(action="status", sprint_task_document_ref=SPRINT)
-        fingerprint = _request_fingerprint(request, actor)
+        fingerprint = queue_request_fingerprint(request, actor.identity)
         self.assertEqual(len(fingerprint), 64)
-        self.assertEqual(fingerprint, _request_fingerprint(request, actor))
+        self.assertEqual(fingerprint, queue_request_fingerprint(request, actor.identity))
         self.assertNotEqual(
             fingerprint,
-            _request_fingerprint(
+            queue_request_fingerprint(
                 request,
-                QueueActor(role="orchestrator", task_document_ref=SPRINT),
+                QueueActor(role="orchestrator", task_document_ref=SPRINT).identity,
             ),
         )

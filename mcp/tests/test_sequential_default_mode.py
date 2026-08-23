@@ -21,10 +21,10 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.modules.start_contract import (
+from agents_remember.worktrees.modules.startup import start_contract
+from agents_remember.worktrees.modules.startup.start_contract import (
     MasterSeriesContractSpec,
     _existing_master_series_contract,
     ensure_master_series_contract,

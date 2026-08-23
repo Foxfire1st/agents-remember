@@ -25,7 +25,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.kernel.memory_ledger import LedgerError, create_initial_ledger, write_ledger
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
@@ -33,6 +33,9 @@ from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
     direct_landing,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
 )
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -57,16 +60,37 @@ from agents_remember.worktrees.worktree_contract import (
 from test_worktree_support import git, init_repo
 
 
-def _scratch_config(root: Path, code: Path, memory: Path | None) -> McpRuntimeConfig:
-    return cast(
-        McpRuntimeConfig,
-        SimpleNamespace(
-            config_path=root / "settings.json",
-            coordination_root=root / "coord",
-            repositories={"repo-a": SimpleNamespace(path=code, memory_root=memory)},
-            direct_execution_enabled=True,
-        ),
+def _scratch_config(
+    root: Path,
+    code: Path,
+    memory: Path | None,
+    *,
+    direct_execution_enabled: bool = True,
+) -> McpRuntimeConfig:
+    configured_code = root / "repo-a"
+    if not configured_code.exists():
+        configured_code.symlink_to(code, target_is_directory=True)
+    if memory is not None:
+        configured_memory = root / "coord" / "memory-repos" / "ar-repo-a"
+        configured_memory.parent.mkdir(parents=True, exist_ok=True)
+        if not configured_memory.exists():
+            configured_memory.symlink_to(memory, target_is_directory=True)
+    config_path = root / (
+        "settings.json" if direct_execution_enabled else "settings-direct-disabled.json"
     )
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "coordinationRoot": (root / "coord").as_posix(),
+                "workspaceRoot": root.as_posix(),
+                "repositories": {"repo-a": {}},
+                "directExecutionEnabled": direct_execution_enabled,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return load_config(config_path)
 
 
 def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> dict:
@@ -118,13 +142,26 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
         ),
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract.contract_path.read_text(encoding="utf-8"),
+    )
     return {
         "config": _scratch_config(root, code, memory),
         "contract": contract,
         "code": code,
         "memory": memory,
         "code_head": code_head,
+        "candidate_tree": require_git(code, ["rev-parse", f"{code_head}^{{tree}}"]),
         "tasks": tasks,
+    }
+
+
+def _byte_tree(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
     }
 
 
@@ -138,33 +175,46 @@ class DirectLandingTests(unittest.TestCase):
     def test_direct_landing_is_policy_gated(self) -> None:
         root = Path(self.temp.name)
         fixture = _series_fixture(root / "fx")
-        config = fixture["config"]
-        config.direct_execution_enabled = False
+        config = _scratch_config(
+            root / "fx",
+            fixture["code"],
+            fixture["memory"],
+            direct_execution_enabled=False,
+        )
         with self.assertRaisesRegex(DirectLandingError, "disabled by policy"):
             direct_landing(
                 config,
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                fixture["contract"],
             )
 
     def test_direct_landing_refuses_leaf_contracts(self) -> None:
         root = Path(self.temp.name)
         fixture = _series_fixture(root / "fx")
+        leaf = replace(
+            fixture["contract"],
+            kind="leaf",
+            contract_path=Path(fixture["contract"].contract_path.as_posix() + ".leaf"),
+        )
         with self.assertRaisesRegex(DirectLandingError, "series contract"):
             direct_landing(
                 fixture["config"],
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix() + ".leaf",
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                leaf,
             )
 
     def test_direct_landing_verifies_code_commit_then_ledger(self) -> None:
@@ -175,32 +225,45 @@ class DirectLandingTests(unittest.TestCase):
         memory = fixture["memory"]
 
         # A mismatch between the requested commit and the series branch HEAD refuses.
-        with self.assertRaisesRegex(DirectLandingError, "not the current series branch HEAD"):
+        with (
+            mock.patch(
+                "agents_remember.worktrees.direct_landing.require_git",
+                side_effect=AssertionError("foreign commit must not be dereferenced"),
+            ) as tree_read,
+            self.assertRaisesRegex(DirectLandingError, "not the current series branch HEAD"),
+        ):
             direct_landing(
                 config,
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit="0" * 40,
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                contract,
             )
+        tree_read.assert_not_called()
 
         # Preview reports the would-land facts without mutating.
+        before_preview = _byte_tree(root)
         preview = direct_landing(
             config,
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
                 memory_commit_message="direct memory content",
                 ledger_commit_message="direct ledger mapping",
                 intent_note="approve",
                 dry_run=True,
             ),
+            contract,
         )
         self.assertEqual(preview["state"], "would-land")
         self.assertEqual(preview["codeCommit"], fixture["code_head"])
+        self.assertEqual(_byte_tree(root), before_preview)
         before = git(memory, "rev-parse", "HEAD")
 
         # Add dirty memory content, then land: code verified + memory + ledger row.
@@ -211,10 +274,12 @@ class DirectLandingTests(unittest.TestCase):
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
                 memory_commit_message="direct memory",
                 ledger_commit_message="direct ledger",
                 intent_note="approved by owner",
             ),
+            contract,
         )
         self.assertEqual(landed["state"], "landed")
         self.assertEqual(landed["codeCommit"], fixture["code_head"])
@@ -254,6 +319,7 @@ class DirectLandingTests(unittest.TestCase):
                     candidate_tree=gated_tree,
                     intent_note="approve",
                 ),
+                contract,
             )
 
     def test_direct_landing_requires_intent_note(self) -> None:
@@ -265,9 +331,11 @@ class DirectLandingTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=fixture["contract"].contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                 ),
+                fixture["contract"],
             )
 
 
@@ -325,6 +393,7 @@ class DirectLandingBranchTests(unittest.TestCase):
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                leaf,
             )
 
     def test_blank_code_commit_is_refused(self) -> None:
@@ -340,6 +409,7 @@ class DirectLandingBranchTests(unittest.TestCase):
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                fixture["contract"],
             )
 
     def test_contract_changed_under_the_lock_is_refused(self) -> None:
@@ -350,8 +420,8 @@ class DirectLandingBranchTests(unittest.TestCase):
         changed = replace(contract, task_name="moved")
         with (
             mock.patch(
-                "agents_remember.worktrees.direct_landing.load_contract",
-                side_effect=[contract, changed],
+                "agents_remember.worktrees.direct_landing.reread_configured_contract",
+                return_value=(changed, mock.sentinel.location),
             ),
             self.assertRaisesRegex(DirectLandingError, "direct-landing-contract-changed"),
         ):
@@ -360,10 +430,12 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                contract,
             )
 
     def test_unresolvable_commit_tree_is_refused(self) -> None:
@@ -383,10 +455,12 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                contract,
             )
 
     def test_preview_with_internal_memory_reports_mode(self) -> None:
@@ -395,8 +469,8 @@ class DirectLandingBranchTests(unittest.TestCase):
         config = fixture["config"]
         contract = replace(fixture["contract"], memory_mode="internal")
         with mock.patch(
-            "agents_remember.worktrees.direct_landing.load_contract",
-            return_value=contract,
+            "agents_remember.worktrees.direct_landing.reread_configured_contract",
+            return_value=(contract, mock.sentinel.location),
         ):
             preview = direct_landing(
                 config,
@@ -406,6 +480,7 @@ class DirectLandingBranchTests(unittest.TestCase):
                     intent_note="approve",
                     dry_run=True,
                 ),
+                contract,
             )
         self.assertEqual(preview["memory"], {"memoryMode": "internal"})
         effective_input = cast(dict[str, dict[str, str]], preview["effectiveInput"])
@@ -419,8 +494,8 @@ class DirectLandingBranchTests(unittest.TestCase):
         contract = replace(fixture["contract"], memory_repo_path=None, ledger_path=None)
         with (
             mock.patch(
-                "agents_remember.worktrees.direct_landing.load_contract",
-                return_value=contract,
+                "agents_remember.worktrees.direct_landing.reread_configured_contract",
+                return_value=(contract, mock.sentinel.location),
             ),
             self.assertRaisesRegex(DirectLandingError, "direct-landing-memory-authority-missing"),
         ):
@@ -429,11 +504,13 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                     dry_run=True,
                 ),
+                contract,
             )
 
     def test_invalid_ledger_is_refused(self) -> None:
@@ -453,11 +530,28 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                     dry_run=True,
                 ),
+                contract,
+            )
+
+    def test_apply_requires_exact_gated_candidate_tree(self) -> None:
+        fixture = _series_fixture(Path(self.temp.name) / "fx")
+        with self.assertRaisesRegex(DirectLandingError, "direct-landing-candidate-tree-required"):
+            direct_landing(
+                fixture["config"],
+                DirectLandingRequest(
+                    contract_path=fixture["contract"].contract_path.as_posix(),
+                    code_commit=fixture["code_head"],
+                    memory_commit_message="direct memory content",
+                    ledger_commit_message="direct ledger mapping",
+                    intent_note="approve",
+                ),
+                fixture["contract"],
             )
 
     def test_apply_with_internal_memory_is_refused(self) -> None:
@@ -467,8 +561,8 @@ class DirectLandingBranchTests(unittest.TestCase):
         contract = replace(fixture["contract"], memory_mode="internal")
         with (
             mock.patch(
-                "agents_remember.worktrees.direct_landing.load_contract",
-                return_value=contract,
+                "agents_remember.worktrees.direct_landing.reread_configured_contract",
+                return_value=(contract, mock.sentinel.location),
             ),
             self.assertRaisesRegex(DirectLandingError, "direct-landing-memory-required"),
         ):
@@ -479,6 +573,7 @@ class DirectLandingBranchTests(unittest.TestCase):
                     code_commit=fixture["code_head"],
                     intent_note="approve",
                 ),
+                contract,
             )
 
     def test_apply_with_missing_memory_paths_is_refused(self) -> None:
@@ -488,8 +583,8 @@ class DirectLandingBranchTests(unittest.TestCase):
         contract = replace(fixture["contract"], memory_repo_path=None, ledger_path=None)
         with (
             mock.patch(
-                "agents_remember.worktrees.direct_landing.load_contract",
-                return_value=contract,
+                "agents_remember.worktrees.direct_landing.reread_configured_contract",
+                return_value=(contract, mock.sentinel.location),
             ),
             self.assertRaisesRegex(DirectLandingError, "direct-landing-memory-authority-missing"),
         ):
@@ -498,10 +593,12 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                contract,
             )
 
     def test_apply_refuses_memory_branch_mismatch(self) -> None:
@@ -511,17 +608,26 @@ class DirectLandingBranchTests(unittest.TestCase):
         contract = fixture["contract"]
         memory = fixture["memory"]
         git(memory, "checkout", "main")
-        with self.assertRaisesRegex(DirectLandingError, "direct-landing-memory-branch-mismatch"):
+        with (
+            mock.patch(
+                "agents_remember.worktrees.direct_landing.load_ledger",
+                side_effect=AssertionError("ledger must follow memory branch authority"),
+            ) as ledger_read,
+            self.assertRaisesRegex(DirectLandingError, "direct-landing-memory-branch-mismatch"),
+        ):
             direct_landing(
                 config,
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
+                contract,
             )
+        ledger_read.assert_not_called()
 
     def test_reland_with_matching_memory_commit_is_idempotent(self) -> None:
         root = Path(self.temp.name)
@@ -536,27 +642,26 @@ class DirectLandingBranchTests(unittest.TestCase):
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
                 memory_commit_message="direct memory content",
                 ledger_commit_message="direct ledger mapping",
                 intent_note="approved by owner",
             ),
+            contract,
         )
-        mapped = landed["memoryContentCommit"]
-        with mock.patch(
-            "agents_remember.worktrees.direct_landing.commit_if_dirty",
-            return_value=mapped,
-        ):
-            again = direct_landing(
-                config,
-                DirectLandingRequest(
-                    contract_path=contract.contract_path.as_posix(),
-                    code_commit=fixture["code_head"],
-                    memory_commit_message="direct memory content",
-                    ledger_commit_message="direct ledger mapping",
-                    intent_note="approved by owner",
-                ),
-            )
-        self.assertEqual(again["state"], "landed")
+        again = direct_landing(
+            config,
+            DirectLandingRequest(
+                contract_path=contract.contract_path.as_posix(),
+                code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
+                memory_commit_message="direct memory content",
+                ledger_commit_message="direct ledger mapping",
+                intent_note="approved by owner",
+            ),
+            contract,
+        )
+        self.assertEqual(again, landed)
 
     def test_reland_with_conflicting_ledger_mapping_is_refused(self) -> None:
         root = Path(self.temp.name)
@@ -566,28 +671,36 @@ class DirectLandingBranchTests(unittest.TestCase):
         memory = fixture["memory"]
         (memory / "onboarding").mkdir(exist_ok=True)
         (memory / "onboarding" / "feature.py.md").write_text("# feature\n", encoding="utf-8")
-        direct_landing(
+        landed = direct_landing(
             config,
             DirectLandingRequest(
                 contract_path=contract.contract_path.as_posix(),
                 code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
                 memory_commit_message="direct memory content",
                 ledger_commit_message="direct ledger mapping",
                 intent_note="approved by owner",
             ),
+            contract,
         )
         (memory / "onboarding" / "feature.py.md").write_text("# changed\n", encoding="utf-8")
-        with self.assertRaisesRegex(DirectLandingError, "direct-landing-ledger-conflict"):
-            direct_landing(
-                config,
-                DirectLandingRequest(
-                    contract_path=contract.contract_path.as_posix(),
-                    code_commit=fixture["code_head"],
-                    memory_commit_message="direct memory content",
-                    ledger_commit_message="direct ledger mapping",
-                    intent_note="approved by owner",
-                ),
-            )
+        observed = direct_landing(
+            config,
+            DirectLandingRequest(
+                contract_path=contract.contract_path.as_posix(),
+                code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
+                memory_commit_message="direct memory content",
+                ledger_commit_message="direct ledger mapping",
+                intent_note="approved by owner",
+            ),
+            contract,
+        )
+        self.assertEqual(observed, landed)
+        self.assertEqual(
+            (memory / "onboarding" / "feature.py.md").read_text(encoding="utf-8"),
+            "# changed\n",
+        )
 
     def test_unreachable_ledger_commit_is_refused(self) -> None:
         root = Path(self.temp.name)
@@ -599,7 +712,7 @@ class DirectLandingBranchTests(unittest.TestCase):
         (memory / "onboarding" / "feature.py.md").write_text("# feature\n", encoding="utf-8")
         with (
             mock.patch(
-                "agents_remember.worktrees.direct_landing.is_ancestor",
+                "agents_remember.worktrees.integration.direct_landing.direct_landing_execution.is_ancestor",
                 return_value=False,
             ),
             self.assertRaisesRegex(DirectLandingError, "direct-landing-ledger-unreachable"),
@@ -609,10 +722,12 @@ class DirectLandingBranchTests(unittest.TestCase):
                 DirectLandingRequest(
                     contract_path=contract.contract_path.as_posix(),
                     code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
                     ledger_commit_message="direct ledger mapping",
                     intent_note="approved by owner",
                 ),
+                contract,
             )
 
 
@@ -689,8 +804,12 @@ class BranchAddressedRouteReviewTests(unittest.TestCase):
     def test_record_route_review_branch_addressed_is_policy_gated(self) -> None:
         root = Path(self.temp.name)
         fixture = _series_fixture(root / "fx")
-        config = fixture["config"]
-        config.direct_execution_enabled = False
+        config = _scratch_config(
+            root / "fx",
+            fixture["code"],
+            fixture["memory"],
+            direct_execution_enabled=False,
+        )
         tasks = fixture["tasks"]
         self._leaf_doc(tasks)
 

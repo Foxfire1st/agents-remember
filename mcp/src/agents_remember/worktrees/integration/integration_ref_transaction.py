@@ -49,9 +49,16 @@ class IntegrationSources:
 class IntegrationRefRace(RuntimeError):
     """A named-ref compare-and-swap failed at the protected boundary."""
 
-    def __init__(self, message: str, *, safe_to_replace: bool) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        expected: dict[str, dict[str, str]],
+        observed: dict[str, str],
+    ) -> None:
         super().__init__(message)
-        self.safe_to_replace = safe_to_replace
+        self.expected = expected
+        self.observed = observed
 
 
 _PREPARED_MOVE_AUTHORITY = object()
@@ -178,7 +185,11 @@ def merge_integrated_commits(
     ):
         raise IntegrationRefRace(
             "code integration ref moved before its compare-and-swap",
-            safe_to_replace=True,
+            expected={
+                "before": {"codeRef": snapshot.code_before},
+                "intended": {"codeRef": commits.code},
+            },
+            observed={},
         )
     if contract.memory_mode != "external":
         refresh_owned_checkout(
@@ -198,17 +209,20 @@ def merge_integrated_commits(
         commits.ledger,
         authority=_PREPARED_MOVE_AUTHORITY,
     ):
-        rolled_back = _compare_and_swap_ref(
-            contract.code_repo_path,
-            snapshot.code_branch,
-            commits.code,
-            snapshot.code_before,
-            authority=_PREPARED_MOVE_AUTHORITY,
-        )
         raise IntegrationRefRace(
-            "memory integration ref moved before its compare-and-swap; code rollback "
-            + ("succeeded" if rolled_back else "was refused by a concurrent ref move"),
-            safe_to_replace=rolled_back,
+            "memory integration ref moved before its compare-and-swap; retain the landed "
+            "code ref as same-generation recovery evidence",
+            expected={
+                "before": {
+                    "codeRef": snapshot.code_before,
+                    "memoryRef": snapshot.memory_before,
+                },
+                "intended": {
+                    "codeRef": commits.code,
+                    "memoryRef": commits.ledger,
+                },
+            },
+            observed={},
         )
     refresh_owned_checkout(
         contract.code_repo_path,

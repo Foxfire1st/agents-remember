@@ -25,6 +25,9 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.mcp.tools.core import context_packet_payload
 from agents_remember.worktrees.git_worktree_manager import status_payload
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -168,6 +171,10 @@ class ContextPacketTests(unittest.TestCase):
                 ),
             )
             write_contract(contract.contract_path, contract)
+            publish_new_lifecycle_operation_location(
+                contract,
+                contract_text=contract.contract_path.read_text(encoding="utf-8"),
+            )
             payload = settings_payload(root)
             payload["repositories"]["agents-remember"]["contractPath"] = str(contract.contract_path)
             config_path = root / "mcp-settings.json"

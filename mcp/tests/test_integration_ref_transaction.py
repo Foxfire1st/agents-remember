@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.kernel.memory_ledger import (
     LedgerRow,
     load_ledger,
@@ -18,9 +18,10 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
+    IntegrationPublicationIntent,
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.worktrees.integration import integration_ref_transaction, lifecycle_operations
+from agents_remember.worktrees.integration import integration_ref_transaction
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     CheckoutRefresh,
     IntegratedCommits,
@@ -28,7 +29,8 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
     prepare_integration_ref_move,
     refresh_recovered_checkout,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -60,6 +62,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 configPath=fixture.config_path.as_posix(),
                 contractPath=contract.contract_path.as_posix(),
             ),
+            contract,
             launcher=lambda *_: None,
         )
         store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
@@ -72,12 +75,18 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             memoryContentCommit=contract.memory_content_commit,
             ledgerCommit=contract.ledger_commit,
         )
-        runtime.progress(
+        running = runtime.progress(
             "source-merge",
             {
                 "current_command": "recover exact external integration pair",
                 "irreversible_boundary": True,
                 "recovery_commits": recovery.model_dump(mode="json"),
+                "integration_publication": IntegrationPublicationIntent(
+                    operationKey=running.operationKey,
+                    generation=running.generation,
+                    preparedAt="2026-08-22T00:00:00+00:00",
+                    claimState="not-applicable",
+                ).model_dump(mode="json"),
             },
         )
         _git(
@@ -171,7 +180,16 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 ) as caught,
             ):
                 merge_integrated_commits(closed, commits, snapshot)
-            self.assertTrue(caught.exception.safe_to_replace)
+            self.assertEqual(
+                caught.exception.expected,
+                {
+                    "before": {"codeRef": closed.code_base_commit},
+                    "intended": {"codeRef": closed.code_commit},
+                },
+            )
+            # The raw CAS exception deliberately carries no live ref snapshot.  The
+            # protected/public owner immediately rereads through IntegrationRefState.
+            self.assertEqual(caught.exception.observed, {})
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -478,6 +496,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=forged.contract_path.as_posix(),
                 ),
+                forged,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -501,7 +520,9 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                         contract_path=forged.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
-                    )
+                        operation_generation=running.generation,
+                    ),
+                    forged,
                 )
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), code_super)
             self.assertEqual(_git(memory_repo, "rev-parse", "super"), memory_super)
@@ -556,24 +577,17 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             running, recovery = self._land_external_recovery_pair(fixture, forged)
             contract_bytes = forged.contract_path.read_bytes()
 
-            with (
-                mock.patch.object(
-                    integrate_module,
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(
-                        integrate_module.IntegrationBoundaryFacts(None, None)
-                    ),
-                ),
-                mock.patch.object(integrate_module, "complete_queue_candidate_integration"),
-                self.assertRaisesRegex(RuntimeError, "exactly one landed code mapping"),
-            ):
+            with self.assertRaisesRegex(RuntimeError, "exactly one landed code mapping"):
                 integrate_result(
                     WorktreeArgs(
                         contract_path=forged.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
+                        operation_generation=running.generation,
                         recovery_commits=recovery,
-                    )
+                        integration_publication=running.integrationPublication,
+                    ),
+                    forged,
                 )
             self.assertEqual(forged.contract_path.read_bytes(), contract_bytes)
 
@@ -631,24 +645,17 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             running, recovery = self._land_external_recovery_pair(fixture, forged)
             contract_bytes = forged.contract_path.read_bytes()
 
-            with (
-                mock.patch.object(
-                    integrate_module,
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(
-                        integrate_module.IntegrationBoundaryFacts(None, None)
-                    ),
-                ),
-                mock.patch.object(integrate_module, "complete_queue_candidate_integration"),
-                self.assertRaisesRegex(RuntimeError, "not based on the exact memory source"),
-            ):
+            with self.assertRaisesRegex(RuntimeError, "not based on the exact memory source"):
                 integrate_result(
                     WorktreeArgs(
                         contract_path=forged.contract_path,
                         approved=True,
                         operation_key=running.operationKey,
+                        operation_generation=running.generation,
                         recovery_commits=recovery,
-                    )
+                        integration_publication=running.integrationPublication,
+                    ),
+                    forged,
                 )
             self.assertEqual(forged.contract_path.read_bytes(), contract_bytes)
 
@@ -829,6 +836,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=closed.contract_path.as_posix(),
                 ),
+                closed,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -917,6 +925,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=closed.contract_path.as_posix(),
                 ),
+                closed,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -947,14 +956,21 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 memoryContentCommit=commits.memory_content,
                 ledgerCommit=commits.ledger,
             )
-            OperationRuntime(store).progress(
+            running = OperationRuntime(store).progress(
                 "source-merge",
                 {
                     "current_command": "recover exact external integration pair",
                     "irreversible_boundary": True,
                     "recovery_commits": recovery.model_dump(mode="json"),
+                    "integration_publication": IntegrationPublicationIntent(
+                        operationKey=running.operationKey,
+                        generation=running.generation,
+                        preparedAt="2026-08-22T00:00:00+00:00",
+                        claimState="not-applicable",
+                    ).model_dump(mode="json"),
                 },
             )
+            assert running is not None
             refresh = integration_ref_transaction.refresh_owned_checkout
 
             def fail_memory_refresh(
@@ -981,27 +997,17 @@ class IntegrationRefTransactionTests(unittest.TestCase):
 
             self.assertTrue((code_owner / "candidate.txt").is_file())
             self.assertFalse((memory_owner / "candidate.md").exists())
-            with (
-                mock.patch(
-                    "agents_remember.worktrees.modules.integrate."
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(
-                        integrate_module.IntegrationBoundaryFacts(None, None)
-                    ),
+            recovered = integrate_result(
+                WorktreeArgs(
+                    contract_path=closed.contract_path,
+                    approved=True,
+                    operation_key=running.operationKey,
+                    operation_generation=running.generation,
+                    recovery_commits=recovery,
+                    integration_publication=running.integrationPublication,
                 ),
-                mock.patch(
-                    "agents_remember.worktrees.modules.integrate."
-                    "complete_queue_candidate_integration"
-                ),
-            ):
-                recovered = integrate_result(
-                    WorktreeArgs(
-                        contract_path=closed.contract_path,
-                        approved=True,
-                        operation_key=running.operationKey,
-                        recovery_commits=recovery,
-                    )
-                )
+                closed,
+            )
             self.assertEqual(recovered.payload["state"], "integrated")
             completed = load_contract(closed.contract_path)
             self.assertEqual(

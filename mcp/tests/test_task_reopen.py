@@ -33,9 +33,9 @@ from agents_remember.tasks.leaf_doc import (
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees import reopen as reopen_module
 from agents_remember.worktrees.modules import start as start_module
-from agents_remember.worktrees.modules import start_contract as start_contract_module
-from agents_remember.worktrees.modules import start_result as start_result_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.startup import start_contract as start_contract_module
+from agents_remember.worktrees.modules.startup import start_result as start_result_module
 from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from agents_remember.worktrees.worktree_contract import (
@@ -874,7 +874,10 @@ class StartAfterReopenTests(unittest.TestCase):
                     mock.patch.object(
                         start_contract_module, "_require_bootstrap_ref"
                     ) as publish_branch,
-                    mock.patch.object(start_contract_module, "write_contract") as publish_contract,
+                    mock.patch.object(
+                        start_module,
+                        "publish_new_lifecycle_operation_location",
+                    ) as publish_contract,
                     mock.patch.object(start_module, "ensure_worktree") as ensure_worktree,
                     mock.patch.object(start_module, "prepare_memory_for_start") as prepare_memory,
                     mock.patch.object(start_module, "plan_providers_for_start") as plan_providers,

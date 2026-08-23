@@ -38,16 +38,20 @@ from agents_remember.serving.structural_seats import StructuralSeatError, Struct
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.modules import start_contract as start_contract_mod
 from agents_remember.worktrees.modules.git import branch_commit, branch_exists
-from agents_remember.worktrees.modules.start_contract import (
+from agents_remember.worktrees.modules.startup import start_contract as start_contract_mod
+from agents_remember.worktrees.modules.startup.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
 )
 from agents_remember.worktrees.route_review import RouteReviewError
 from agents_remember.worktrees.source_lineage import lineage_refusal, source_lineage_for_task
 from agents_remember.worktrees.task_resolver import series_contract_path
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    write_contract,
+)
 
 
 class _Host:
@@ -359,7 +363,7 @@ class StructuralAgentToolTests(unittest.TestCase):
             check=True,
             capture_output=True,
         )
-        start_contract_mod.write_contract(
+        write_contract(
             contract.contract_path,
             replace(
                 contract,
@@ -493,7 +497,9 @@ class StructuralAgentToolTests(unittest.TestCase):
 
         with (
             mock.patch.object(
-                start_contract_mod, "write_contract", side_effect=OSError("publish red")
+                start_contract_mod,
+                "publish_new_lifecycle_operation_location",
+                side_effect=OSError("publish red"),
             ),
             self.assertRaisesRegex(OSError, "publish red"),
         ):
@@ -672,7 +678,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "does not match the sprint integrationBranch"):
             ensure_master_series_contract(replace(spec, protected_branch="main"))
 
-        start_contract_mod.write_contract(
+        write_contract(
             contract.contract_path,
             replace(
                 contract,
@@ -705,7 +711,7 @@ class StructuralAgentToolTests(unittest.TestCase):
             memory_worktree=sibling_memory,
             ledger_path=sibling_memory / "memory.md",
         )
-        start_contract_mod.write_contract(contract.contract_path, sibling_contract)
+        write_contract(contract.contract_path, sibling_contract)
         adopted = ensure_master_series_contract(spec)
         assert isinstance(adopted, WorktreeContract)
         self.assertEqual(adopted.code_repo_path, sibling_code)
@@ -762,7 +768,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         )
         for changes in identity_variants:
             with self.subTest(changes=changes):
-                start_contract_mod.write_contract(
+                write_contract(
                     contract.contract_path,
                     replace(sibling_contract, **changes),
                 )
@@ -780,18 +786,22 @@ class StructuralAgentToolTests(unittest.TestCase):
         spec = self._series_bootstrap_spec(code_repo, memory_repo)
         publish_entered = threading.Event()
         allow_publish = threading.Event()
-        real_write = start_contract_mod.write_contract
+        real_publish = start_contract_mod.publish_new_lifecycle_operation_location
         writes = 0
 
-        def paused_write(path: Path, contract: WorktreeContract) -> None:
+        def paused_publish(contract: WorktreeContract, *, contract_text: str):
             nonlocal writes
             writes += 1
             publish_entered.set()
             self.assertTrue(allow_publish.wait(timeout=5))
-            real_write(path, contract)
+            return real_publish(contract, contract_text=contract_text)
 
         with (
-            mock.patch.object(start_contract_mod, "write_contract", side_effect=paused_write),
+            mock.patch.object(
+                start_contract_mod,
+                "publish_new_lifecycle_operation_location",
+                side_effect=paused_publish,
+            ),
             ThreadPoolExecutor(max_workers=2) as pool,
         ):
             first = pool.submit(ensure_master_series_contract, spec)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -19,10 +19,7 @@ from agents_remember.controlplane.closeout_queue_store import (
     QueueTransaction,
 )
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.models.lifecycles.operation import (
-    IntegrationOperationAuthority,
-    IntegrationQueueCompletionEvidence,
-)
+from agents_remember.models.lifecycles.operation import IntegrationOperationAuthority
 from agents_remember.models.queue.closeout_queue import (
     CloseoutCandidateRecord,
     CloseoutQueueState,
@@ -31,10 +28,6 @@ from agents_remember.models.queue.closeout_queue import (
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
 from agents_remember.worktrees.modules.terminal_validation import (
     require_series_children_retired,
 )
@@ -53,19 +46,20 @@ from .closeout_queue import (
     _candidate_blockers,
     _candidate_or_error,
     _graph_context,
-    _initial_state,
     _post_closeout_blockers,
     _waiting_reasons,
     now_iso,
 )
-from .closeout_queue_blocker import _boundary_recovery, _stale_sibling_facts
 from .closeout_queue_candidate_evidence import (
     commit_tree,
 )
 from .closeout_queue_candidate_evidence import (
     operation_owner_fingerprint as _operation_owner,
 )
+from .closeout_queue_door import closeout_door_candidate_evidence
+from .closeout_queue_errors import bounded_queue_failure_detail
 from .closeout_queue_evidence import curator_evidence
+from .closeout_queue_state import initial_queue_state
 
 T = TypeVar("T")
 AtomicSeriesTerminalOperation = Literal["worktree_cleanup", "worktree_abandon"]
@@ -135,16 +129,6 @@ class _LifecycleCandidateContext:
     operation_key: str
 
 
-@dataclass(frozen=True)
-class _IntegrationBoundaryContext:
-    topology: TaskDocumentTopology
-    binding: QueueBinding
-    contract: WorktreeContract
-    operation_key: str
-    owner: str
-    commits: tuple[str, str, str]
-
-
 def contract_queue_binding(contract: WorktreeContract) -> QueueBinding | None:
     """Resolve queue scope from the explicit sprint graph introduced by L1/L3."""
 
@@ -163,7 +147,12 @@ def contract_queue_binding(contract: WorktreeContract) -> QueueBinding | None:
             return None
         raise CloseoutQueueError(
             "closeout-queue-bound-topology-invalid",
-            f"queue-managed contract lost its canonical sprint: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-binding-resolution",
+                side="task-document",
+                name="sprint",
+            ),
         ) from exc
     if sprint.document.executionGraph is None:
         # Explicit staged boundary: L9 owns the one-time cutover of legacy task trees.
@@ -267,7 +256,12 @@ def _atomic_series_terminal_publication(
         )
     except TaskDocumentRefError as exc:
         raise RuntimeError(
-            f"cannot resolve atomic terminal authority: {exc.status}: {exc}"
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-atomic-terminal-authority",
+                side="task-document",
+                name="execution-nature",
+            )
         ) from exc
     if nature != "atomic":
         raise RuntimeError("atomic terminal authority requires an effective atomic master nature")
@@ -278,7 +272,7 @@ def _atomic_series_terminal_publication(
         # sprint, so no queue authority remains to release.
         return publication()
     graph = _graph_context(topology, sprint_ref)
-    initial = _initial_state(sprint_ref, graph.revision, now_iso())
+    initial = initial_queue_state(sprint_ref, graph.revision, now_iso())
 
     def validate_and_publish(state: CloseoutQueueState) -> T:
         current_graph = _graph_context(topology, sprint_ref)
@@ -363,7 +357,12 @@ def _live_parent_refs(
             return None
         raise CloseoutQueueError(
             "closeout-queue-bound-topology-invalid",
-            f"queue-managed contract lost its canonical topology: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-binding-resolution",
+                side="task-document",
+                name="topology",
+            ),
         ) from exc
     if sprint_ref is None and stored is not None:
         raise CloseoutQueueError(
@@ -392,7 +391,12 @@ def _stored_queue_binding(contract: WorktreeContract) -> QueueBinding | None:
     except (TypeError, ValidationError, ValueError) as exc:
         raise CloseoutQueueError(
             "closeout-queue-contract-binding-invalid",
-            f"queue-managed contract binding is malformed: {exc}",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-binding-validation",
+                side="contract",
+                name="task-document-binding",
+            ),
         ) from exc
 
 
@@ -439,374 +443,6 @@ def certify_queue_candidate_closeout(
     )
 
 
-def claim_queue_candidate_for_integration(
-    contract: WorktreeContract, operation_key: str
-) -> CloseoutCandidateRecord | None:
-    """Atomically bind one certified candidate to the integration lifecycle operation."""
-
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        return None
-    key = _required_operation_key(operation_key, "integration")
-    owner = _operation_owner(key)
-    return _transition_candidate(
-        contract,
-        binding,
-        _LifecycleTransition(
-            "claim-integration", f"integration-claim:{owner}", key, _claim_integration
-        ),
-    )
-
-
-def require_queue_candidate_for_integration(
-    contract: WorktreeContract,
-    *,
-    operation_key: str,
-    code_commit: str,
-    memory_content_commit: str,
-    ledger_commit: str,
-) -> CloseoutCandidateRecord | None:
-    """Recompute the complete legal claim immediately before source refs move."""
-
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        return None
-    context, initial = _integration_boundary_context(
-        contract,
-        binding,
-        operation_key=operation_key,
-        commits=(code_commit, memory_content_commit, ledger_commit),
-    )
-
-    def inspect(state: CloseoutQueueState) -> CloseoutCandidateRecord:
-        return _require_integration_boundary_candidate(context, state)
-
-    return CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).inspect(
-        initial, inspect
-    )
-
-
-def publish_queue_candidate_integration_under_authority(
-    contract: WorktreeContract,
-    publication: Callable[[], T],
-    *,
-    operation_key: str,
-    commits: tuple[str, str, str],
-) -> T:
-    """Hold queue then repository authority through one governed leaf landing."""
-
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            return publication()
-    context, initial = _integration_boundary_context(
-        contract,
-        binding,
-        operation_key=operation_key,
-        commits=commits,
-    )
-
-    def validate_and_publish(state: CloseoutQueueState) -> T:
-        _require_integration_boundary_candidate(context, state)
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            return publication()
-
-    return CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).inspect(
-        initial, validate_and_publish
-    )
-
-
-def _integration_boundary_context(
-    contract: WorktreeContract,
-    binding: QueueBinding,
-    *,
-    operation_key: str,
-    commits: tuple[str, str, str],
-) -> tuple[_IntegrationBoundaryContext, CloseoutQueueState]:
-    topology = TaskDocumentTopology(contract.coordination_root)
-    key = _required_operation_key(operation_key, "integration")
-    graph = _graph_context(topology, binding.sprint_ref)
-    context = _IntegrationBoundaryContext(
-        topology=topology,
-        binding=binding,
-        contract=contract,
-        operation_key=key,
-        owner=_operation_owner(key),
-        commits=commits,
-    )
-    return context, _initial_state(binding.sprint_ref, graph.revision, now_iso())
-
-
-def _require_integration_boundary_candidate(
-    context: _IntegrationBoundaryContext,
-    state: CloseoutQueueState,
-    *,
-    graph: Any | None = None,
-) -> CloseoutCandidateRecord:
-    if graph is None:
-        graph = _graph_context(context.topology, context.binding.sprint_ref)
-    candidate = _candidate_or_error(state, context.binding.candidate_ref)
-    if (
-        candidate.state != "integration-in-flight"
-        or candidate.inFlightOwnerFingerprint != context.owner
-    ):
-        raise CloseoutQueueError(
-            "closeout-candidate-integration-claim-required",
-            "integration requires the exact candidate claimed by this lifecycle operation",
-        )
-    blockers = _candidate_blockers(context.topology, graph, candidate)
-    blockers.extend(_integration_commit_blockers(candidate, context.contract, *context.commits))
-    blockers.extend(
-        _waiting_reasons(
-            graph,
-            candidate,
-            _active_lane_owner(state),
-            state.activeBlocker,
-        )
-    )
-    if blockers:
-        raise CloseoutQueueError(
-            "closeout-candidate-integration-blocked",
-            f"candidate is not legal at the irreversible integration boundary: {blockers!r}"
-            f"{_boundary_recovery(blockers)}",
-        )
-    return candidate
-
-
-def complete_queue_candidate_integration(
-    contract: WorktreeContract,
-    *,
-    operation_key: str,
-    code_commit: str,
-    memory_content_commit: str,
-    ledger_commit: str,
-) -> list[dict[str, Any]]:
-    """Consume the in-flight queue record after landing; safe on recovery retry.
-
-    Returns the stale-by-evidence sibling facts (L13-R2): after the lane releases,
-    every remaining candidate whose recorded base pair no longer matches the new
-    source tips is reported with ``worktree_sync`` as its recovery.
-    """
-
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        return []
-    key = _required_operation_key(operation_key, "integration")
-    owner = _operation_owner(key)
-    evidence = integration_queue_completion_evidence(
-        contract,
-        operation_key=key,
-        commits=(code_commit, memory_content_commit, ledger_commit),
-    )
-    assert evidence is not None
-    topology = TaskDocumentTopology(contract.coordination_root)
-    graph = _graph_context(topology, binding.sprint_ref)
-    initial = _initial_state(binding.sprint_ref, graph.revision, now_iso())
-    store = CloseoutQueueStore(contract.coordination_root, binding.sprint_ref)
-
-    def complete(state: CloseoutQueueState) -> CloseoutQueueState:
-        candidate = state.candidates.get(binding.candidate_ref.key)
-        if candidate is None:
-            _require_durable_queue_completion(contract, key, evidence)
-            return state
-        if (
-            candidate.state != "integration-in-flight"
-            or candidate.inFlightOwnerFingerprint != owner
-        ):
-            raise CloseoutQueueError(
-                "closeout-candidate-integration-owner-mismatch",
-                "only the owning integration lifecycle may consume this candidate",
-            )
-        expected = (
-            candidate.closeoutCodeCommit or "",
-            candidate.closeoutMemoryContentCommit or "",
-            candidate.closeoutLedgerCommit or "",
-        )
-        if expected != (code_commit, memory_content_commit, ledger_commit):
-            raise CloseoutQueueError(
-                "closeout-candidate-integration-commit-mismatch",
-                "landed commits do not match the queue-certified closeout commits",
-            )
-        candidates = dict(state.candidates)
-        candidates.pop(binding.candidate_ref.key)
-        return state.model_copy(update={"candidates": candidates})
-
-    updated = store.transact(
-        initial=initial,
-        event=_integration_completion_event(
-            binding,
-            owner,
-            (code_commit, memory_content_commit, ledger_commit),
-        ),
-        transform=complete,
-    )
-    return _stale_sibling_facts(updated)
-
-
-def integration_queue_completion_evidence(
-    contract: WorktreeContract,
-    *,
-    operation_key: str,
-    commits: tuple[str, str, str],
-) -> IntegrationQueueCompletionEvidence | None:
-    """Build the exact queue-removal WAL identity for a governed leaf."""
-
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        return None
-    key = _required_operation_key(operation_key, "integration")
-    event = _integration_completion_event(binding, _operation_owner(key), commits)
-    return IntegrationQueueCompletionEvidence(
-        requestId=event.request_id,
-        fingerprint=event.fingerprint,
-    )
-
-
-def record_queue_candidate_integration_completion(
-    contract: WorktreeContract,
-    operation_key: str,
-    commits: tuple[str, str, str],
-    progress: Callable[[str, Mapping[str, object]], None] | None,
-) -> None:
-    """Persist exact candidate-removal intent before the queue transaction."""
-
-    evidence = integration_queue_completion_evidence(
-        contract,
-        operation_key=operation_key,
-        commits=commits,
-    )
-    if evidence is not None and progress is not None:
-        progress(
-            "contract-finalization",
-            {
-                "current_command": "persist exact queue candidate removal intent",
-                "queue_completion": evidence.model_dump(mode="json"),
-            },
-        )
-
-
-def _require_durable_queue_completion(
-    contract: WorktreeContract,
-    operation_key: str,
-    expected: IntegrationQueueCompletionEvidence,
-) -> None:
-    record = LifecycleOperationStore(
-        operation_record_path(contract.worktree_group, "integrate")
-    ).read()
-    if record is None or record.operationKey != operation_key or record.queueCompletion != expected:
-        raise CloseoutQueueError(
-            "closeout-candidate-not-declared",
-            "queue completion has no candidate and no exact durable removal intent",
-        )
-
-
-def _queue_candidate_integration_was_completed(
-    state: CloseoutQueueState,
-    binding: QueueBinding,
-    *,
-    owner: str,
-    commits: tuple[str, str, str],
-) -> bool:
-    event = _integration_completion_event(binding, owner, commits)
-    receipt = next(
-        (item for item in state.appliedRequests if item.requestId == event.request_id),
-        None,
-    )
-    if receipt is None:
-        return False
-    if receipt.fingerprint != event.fingerprint:
-        raise CloseoutQueueError(
-            "closeout-candidate-integration-receipt-mismatch",
-            "the queue completion receipt does not match this exact candidate and commit tuple",
-        )
-    return True
-
-
-def _integration_completion_event(
-    binding: QueueBinding,
-    owner: str,
-    commits: tuple[str, str, str],
-) -> QueueTransaction:
-    return _internal_event(
-        "complete-integration",
-        f"integration-complete:{owner}",
-        {
-            "candidate": binding.candidate_ref.key,
-            "commits": list(commits),
-        },
-    )
-
-
-def release_queue_candidate_after_reversible_operation(
-    contract: WorktreeContract,
-    *,
-    operation_key: str,
-    operation_kind: str,
-) -> None:
-    """Release task-addressed lifecycle ownership after cancellation or reversible failure."""
-
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        return
-    if operation_kind not in {"closeout", "integrate"}:
-        raise CloseoutQueueError(
-            "closeout-queue-operation-kind-invalid",
-            f"unsupported lifecycle operation kind: {operation_kind!r}",
-        )
-    key = _required_operation_key(operation_key, operation_kind)
-    owner = _operation_owner(key)
-    topology = TaskDocumentTopology(contract.coordination_root)
-    graph = _graph_context(topology, binding.sprint_ref)
-    initial = _initial_state(binding.sprint_ref, graph.revision, now_iso())
-
-    def release(state: CloseoutQueueState) -> CloseoutQueueState:
-        candidate = _candidate_or_error(state, binding.candidate_ref)
-        if operation_kind == "closeout":
-            if candidate.state == "selected":
-                target = candidate.model_copy(update={"state": "declared"})
-            elif (
-                candidate.state == "closeout-in-flight"
-                and candidate.inFlightOwnerFingerprint == owner
-            ):
-                target = candidate.model_copy(
-                    update={"state": "declared", "inFlightOwnerFingerprint": None}
-                )
-            elif candidate.state == "certified":
-                return state
-            else:
-                raise CloseoutQueueError(
-                    "closeout-candidate-closeout-owner-mismatch",
-                    "reversible closeout release does not own the candidate",
-                )
-        elif candidate.state == "certified":
-            return state
-        elif (
-            candidate.state == "integration-in-flight"
-            and candidate.inFlightOwnerFingerprint == owner
-        ):
-            target = candidate.model_copy(
-                update={"state": "certified", "inFlightOwnerFingerprint": None}
-            )
-        else:
-            raise CloseoutQueueError(
-                "closeout-candidate-integration-owner-mismatch",
-                "reversible integration release does not own the candidate",
-            )
-        candidates = dict(state.candidates)
-        candidates[binding.candidate_ref.key] = target
-        return state.model_copy(update={"candidates": candidates})
-
-    CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).transact(
-        initial=initial,
-        event=_internal_event(
-            "release-selection",
-            f"{operation_kind}-release:{owner}",
-            {"candidate": binding.candidate_ref.key, "operationKind": operation_kind},
-        ),
-        transform=release,
-    )
-
-
 def prepare_queue_candidate_conflict_resolution(
     contract: WorktreeContract,
     *,
@@ -844,7 +480,7 @@ def prepare_queue_candidate_conflict_resolution(
 
     topology = TaskDocumentTopology(contract.coordination_root)
     graph = _graph_context(topology, binding.sprint_ref)
-    initial = _initial_state(binding.sprint_ref, graph.revision, now_iso())
+    initial = initial_queue_state(binding.sprint_ref, graph.revision, now_iso())
 
     def retire(state: CloseoutQueueState) -> CloseoutQueueState:
         candidate = state.candidates.get(binding.candidate_ref.key)
@@ -975,7 +611,7 @@ def _transition_candidate(
 ) -> CloseoutCandidateRecord:
     topology = TaskDocumentTopology(contract.coordination_root)
     initial_graph = _graph_context(topology, binding.sprint_ref)
-    initial = _initial_state(binding.sprint_ref, initial_graph.revision, now_iso())
+    initial = initial_queue_state(binding.sprint_ref, initial_graph.revision, now_iso())
 
     def apply(state: CloseoutQueueState) -> CloseoutQueueState:
         graph = _graph_context(topology, binding.sprint_ref)
@@ -1044,6 +680,14 @@ def _certify_closeout(
     operation_key = context.operation_key
     owner = _operation_owner(operation_key)
     if candidate.state == "certified":
+        evidence = closeout_door_candidate_evidence(context.contract, candidate)
+        if not evidence.valid:
+            public = evidence.public_pair()
+            raise CloseoutQueueError(
+                "closeout-candidate-door-not-claimed",
+                "certified candidate lost its claimed closeout door: "
+                + json.dumps(public.observed, sort_keys=True),
+            )
         return candidate
     if candidate.state != "closeout-in-flight" or candidate.inFlightOwnerFingerprint != owner:
         raise CloseoutQueueError(
@@ -1065,7 +709,7 @@ def _certify_closeout(
             "closeout-candidate-certification-blocked",
             f"closeout result does not preserve the declared candidate: {blockers!r}",
         )
-    return candidate.model_copy(
+    certified = candidate.model_copy(
         update={
             "state": "certified",
             "inFlightOwnerFingerprint": None,
@@ -1075,35 +719,15 @@ def _certify_closeout(
             "memoryEvidence": refreshed_memory_evidence,
         }
     )
-
-
-def _claim_integration(
-    context: _LifecycleCandidateContext,
-    candidate: CloseoutCandidateRecord,
-) -> CloseoutCandidateRecord:
-    operation_key = context.operation_key
-    owner = _operation_owner(operation_key)
-    if candidate.state == "integration-in-flight" and candidate.inFlightOwnerFingerprint == owner:
-        return candidate
-    if candidate.state != "certified":
+    evidence = closeout_door_candidate_evidence(context.contract, certified)
+    if not evidence.valid:
+        public = evidence.public_pair()
         raise CloseoutQueueError(
-            "closeout-candidate-certification-required",
-            "integration requires an exact certified closeout candidate",
+            "closeout-candidate-door-not-claimed",
+            "closeout certification requires its exact claimed door: "
+            + json.dumps(public.observed, sort_keys=True),
         )
-    blockers = _post_closeout_blockers(context.topology, context.graph, candidate, context.contract)
-    # Certified candidates no longer occupy the lane (L13-R2): the lane serializes
-    # landings, so claiming integration while another candidate is in flight refuses.
-    lane_owner = _active_lane_owner(context.state)
-    if lane_owner is not None and lane_owner != candidate.taskDocumentRef:
-        blockers.append(f"integration-lane-owned-by: {lane_owner.key}")
-    if blockers:
-        raise CloseoutQueueError(
-            "closeout-candidate-integration-blocked",
-            f"certified candidate changed before integration: {blockers!r}",
-        )
-    return candidate.model_copy(
-        update={"state": "integration-in-flight", "inFlightOwnerFingerprint": owner}
-    )
+    return certified
 
 
 def _integration_commit_blockers(

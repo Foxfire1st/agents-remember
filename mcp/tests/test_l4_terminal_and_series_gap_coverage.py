@@ -222,7 +222,7 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                     stack.enter_context(
                         mock.patch.object(
                             series_closeout,
-                            "_initial_state",
+                            "initial_queue_state",
                             return_value=object(),
                         )
                     )

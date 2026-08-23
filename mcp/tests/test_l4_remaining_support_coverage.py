@@ -12,17 +12,28 @@ from typing import Any, cast
 from unittest import mock
 
 from agents_remember.application import memory_tools
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.application.structural import agent_tools
-from agents_remember.application.task_docs import task_doc_tools, task_execution_topology
+from agents_remember.application.task_docs import (
+    task_doc_publication,
+    task_doc_tools,
+    task_execution_topology,
+)
 from agents_remember.controlplane import closeout_queue_store
+from agents_remember.errors import ConfiguredContractAuthorityError
 from agents_remember.kernel import memory_init
 from agents_remember.memory import baseline, carryover
-from agents_remember.models.lifecycles.operation import IntegrateOperationInput
+from agents_remember.models.lifecycles.operation import (
+    IntegrateOperationInput,
+    IntegrationPublicationIntent,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import document_refs
 from agents_remember.worktrees import atomic_series_seal, series_closeout, source_lineage
-from agents_remember.worktrees.integration import integration_quality_checkout, lifecycle_operations
+from agents_remember.worktrees.integration import (
+    configured_contract_authority,
+    integration_quality_checkout,
+)
 from agents_remember.worktrees.integration.integration_ref_transaction import IntegratedCommits
 from agents_remember.worktrees.modules import (
     abandon,
@@ -51,7 +62,10 @@ class ApplicationAuthorityRemainderTests(unittest.TestCase):
     def test_worker_refuses_a_queued_record_reserved_for_another_process(self) -> None:
         record = SimpleNamespace(status="queued", workerPid=99_999_999)
         store = SimpleNamespace(update=lambda callback: callback(record))
-        with self.assertRaisesRegex(RuntimeError, "reserved for another worker"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "inline lifecycle execution cannot replace detached worker authority",
+        ):
             OperationRuntime(cast(Any, store)).start()
 
     def test_memory_scope_and_carryover_shape_refusals(self) -> None:
@@ -164,15 +178,19 @@ class ApplicationAuthorityRemainderTests(unittest.TestCase):
     def test_task_document_publication_rejects_escape_and_wraps_authority_error(self) -> None:
         context = SimpleNamespace(
             config=SimpleNamespace(coordination_root=Path("/coordination")),
-            target=SimpleNamespace(repo_id="repo"),
+            target_repo_id="repo",
             task_root=Path("/coordination/tasks/repo/master"),
             documents=(SimpleNamespace(),),
         )
         with (
-            mock.patch.object(task_doc_tools, "json_path_for", return_value=Path("/outside.json")),
+            mock.patch.object(
+                task_doc_publication,
+                "json_path_for",
+                return_value=Path("/outside.json"),
+            ),
             self.assertRaisesRegex(task_doc_tools.TaskDocError, "escapes tasks root"),
         ):
-            task_doc_tools._task_doc_publication_overrides(cast(Any, context))
+            task_doc_publication._task_doc_publication_overrides(cast(Any, context))
 
         request = SimpleNamespace(
             coordination_root=Path("/coordination"),
@@ -501,7 +519,7 @@ class SealEvidenceAndRecoveryRemainderTests(unittest.TestCase):
         store = SimpleNamespace(read=lambda: None)
         with mock.patch.object(
             closeout_queue_candidate_evidence,
-            "LifecycleOperationStore",
+            "located_lifecycle_operation_store",
             return_value=store,
         ):
             self.assertFalse(
@@ -518,7 +536,7 @@ class SealEvidenceAndRecoveryRemainderTests(unittest.TestCase):
         )
         with mock.patch.object(
             closeout_queue_candidate_evidence,
-            "LifecycleOperationStore",
+            "located_lifecycle_operation_store",
             return_value=store,
         ):
             self.assertFalse(
@@ -676,29 +694,36 @@ class SealEvidenceAndRecoveryRemainderTests(unittest.TestCase):
             repositories={"repo": SimpleNamespace(path=Path("/code"), memory_root=None)},
         )
         with (
-            mock.patch.object(lifecycle_operations, "load_config", return_value=config),
+            mock.patch.object(configured_contract_authority, "load_config", return_value=config),
             mock.patch.object(
-                lifecycle_operations, "require_repo", return_value=config.repositories["repo"]
+                configured_contract_authority,
+                "require_repo",
+                return_value=config.repositories["repo"],
             ),
-            mock.patch.object(lifecycle_operations, "_require_configured_task_identity"),
+            mock.patch.object(configured_contract_authority, "_require_configured_task_identity"),
             mock.patch.object(
-                lifecycle_operations,
+                configured_contract_authority,
                 "repository_identity",
                 side_effect=[Path("/identity"), Path("/identity"), Path("/foreign")],
             ),
-            self.assertRaisesRegex(RuntimeError, "candidate belongs to another repository"),
+            self.assertRaises(ConfiguredContractAuthorityError) as raised,
         ):
-            lifecycle_operations.require_configured_contract_repositories(
+            configured_contract_authority.require_configured_contract_repositories(
                 cast(Any, contract), "/config"
             )
+        self.assertEqual((raised.exception.side, raised.exception.name), ("code", "candidate"))
 
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp), external_memory=True)
             external = replace(fixture.leaf_contract, memory_worktree=Path(tmp) / "wrong")
-            with self.assertRaisesRegex(RuntimeError, "memory worktree is not owned"):
-                lifecycle_operations._require_configured_task_identity(
+            with self.assertRaises(ConfiguredContractAuthorityError) as raised:
+                configured_contract_authority._require_configured_task_identity(
                     external, fixture.coordination
                 )
+            self.assertEqual(
+                (raised.exception.side, raised.exception.name),
+                ("memory", "candidate-owner"),
+            )
 
 
 class TerminalAndCloseoutRemainderTests(unittest.TestCase):
@@ -989,25 +1014,39 @@ class TerminalAndCloseoutRemainderTests(unittest.TestCase):
             fixture = _authority_fixture(Path(tmp))
             contract = fixture.leaf_contract
             changed = replace(contract, cleanup="completed")
+            operation_key = "a" * 64
+            publication = IntegrationPublicationIntent(
+                operationKey=operation_key,
+                generation=1,
+                preparedAt="2026-08-23T00:00:00+00:00",
+                claimState="not-applicable",
+            )
             with (
                 mock.patch.object(
                     integrate,
                     "_prepare_integration_commits",
-                    return_value=(IntegratedCommits("code", "", ""), {}, None, False),
-                ),
-                mock.patch.object(integrate, "load_contract", return_value=changed),
-                mock.patch.object(
-                    integrate,
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(
-                        SimpleNamespace(organizational_completion=None)
+                    return_value=(
+                        IntegratedCommits("code", "", ""),
+                        {},
+                        None,
+                        integrate.IntegrationBoundaryFacts(None, None),
                     ),
                 ),
+                mock.patch.object(
+                    integrate,
+                    "transfer_and_publish_integration_claim",
+                    return_value=publication,
+                ),
+                mock.patch.object(integrate, "load_contract", return_value=changed),
                 self.assertRaisesRegex(RuntimeError, "changed before protected-ref movement"),
             ):
                 integrate._apply_integration(
                     contract,
-                    WorktreeArgs(operation_key="a" * 64),
+                    WorktreeArgs(
+                        operation_key=operation_key,
+                        operation_generation=1,
+                        integration_publication=publication,
+                    ),
                     cast(Any, SimpleNamespace()),
                     handover_warning=None,
                 )

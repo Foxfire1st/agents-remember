@@ -11,7 +11,8 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from agents_remember.application.lifecycle_operation_worker import OperationRuntime
+from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
+from agents_remember.errors import ConfiguredContractAuthorityError
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationRecord,
@@ -21,10 +22,12 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees import series_closeout, source_lineage
 from agents_remember.worktrees.integration import (
+    configured_contract_authority,
     integration_branch_authority,
     integration_branch_repository,
+    integration_claim_transfer,
     integration_operation_authority,
-    lifecycle_operations,
+    integration_ref_state,
 )
 from agents_remember.worktrees.integration.integration_branch_types import (
     IntegrationSurface,
@@ -32,7 +35,11 @@ from agents_remember.worktrees.integration.integration_branch_types import (
     _BranchScope,
     _RepositorySide,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_store import (
+from agents_remember.worktrees.integration.integration_ref_state import (
+    IntegrationRefDecisionError,
+)
+from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -209,6 +216,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                 configPath=fixture.config_path.as_posix(),
                 contractPath=contract.contract_path.as_posix(),
             ),
+            contract,
             launcher=lambda *_: None,
         )
         store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "integrate"))
@@ -390,7 +398,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     external_authority,
                 )
 
-    def test_final_preparation_race_refuses_before_irreversible_progress(self) -> None:
+    def test_final_preparation_race_refuses_after_intent_before_ref_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root)
@@ -401,6 +409,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     configPath=fixture.config_path.as_posix(),
                     contractPath=closed.contract_path.as_posix(),
                 ),
+                closed,
                 launcher=lambda *_: None,
             )
             store = LifecycleOperationStore(
@@ -411,19 +420,18 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
             assert authority is not None
             progress: list[dict[str, object]] = []
 
-            def raced_publication(_contract, publication, **_kwargs):
+            def raced_transfer(_contract, intent, **_kwargs):
                 _commit_on(fixture.code_repo, "ar/master", "pre-cas-race.txt")
-                return publication(SimpleNamespace(organizational_completion=None))
+                return intent
 
             with (
-                mock.patch.object(integrate_module, "claim_queue_candidate_for_integration"),
                 mock.patch.object(
-                    integrate_module,
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=raced_publication,
+                    integration_claim_transfer,
+                    "transfer_integration_claim",
+                    side_effect=raced_transfer,
                 ),
                 mock.patch.object(
-                    integrate_module,
+                    integration_claim_transfer,
                     "report_operation_progress",
                     side_effect=lambda _args, _phase, **facts: progress.append(facts),
                 ),
@@ -443,7 +451,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "source-moved-during-quality")
             merge.assert_not_called()
-            self.assertFalse(any(item.get("irreversible_boundary") for item in progress))
+            self.assertTrue(any(item.get("integration_publication") for item in progress))
 
     def test_configured_contract_identity_refuses_every_foreign_edge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -452,97 +460,120 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
             contract = _closed_leaf_worktree(fixture, root, candidate_commit=True)
 
             task_identity_cases = (
-                (replace(contract, task_artifact=root / "wrong.md"), "task artifact"),
-                (replace(contract, contract_path=root / "wrong.md"), "contract path"),
+                (replace(contract, task_artifact=root / "wrong.md"), "task", "task-artifact"),
+                (replace(contract, contract_path=root / "wrong.md"), "task", "contract-path"),
                 (
                     replace(contract, worktree_group=root / "outside"),
-                    "worktree group is outside",
+                    "task",
+                    "worktree-group",
                 ),
                 (
                     replace(contract, code_worktree=contract.worktree_group / "nested" / "code"),
-                    "code worktree is not owned",
+                    "code",
+                    "candidate-owner",
                 ),
                 (
                     replace(
                         fixture.master_contract,
                         worktree_group=root / "wrong-series-group",
                     ),
-                    "series contract worktree group",
+                    "task",
+                    "worktree-group",
                 ),
             )
-            for changed, reason in task_identity_cases:
-                with self.subTest(reason=reason), self.assertRaisesRegex(RuntimeError, reason):
-                    lifecycle_operations._require_configured_task_identity(
+            for changed, side, name in task_identity_cases:
+                with (
+                    self.subTest(name=name),
+                    self.assertRaises(ConfiguredContractAuthorityError) as raised,
+                ):
+                    configured_contract_authority._require_configured_task_identity(
                         changed,
                         fixture.coordination,
                     )
+                self.assertEqual((raised.exception.side, raised.exception.name), (side, name))
 
             external_fixture = _authority_fixture(root / "external", external_memory=True)
             external = _closed_external_leaf_worktrees(external_fixture, root / "external")
-            configured = lifecycle_operations.require_repo(
-                lifecycle_operations.load_config(external_fixture.config_path),
+            configured = configured_contract_authority.require_repo(
+                configured_contract_authority.load_config(external_fixture.config_path),
                 external.repo_name,
             )
-            with self.assertRaisesRegex(RuntimeError, "does not match configured"):
-                lifecycle_operations._require_external_memory_authority(
+            with self.assertRaises(ConfiguredContractAuthorityError) as raised:
+                configured_contract_authority._require_external_memory_authority(
                     replace(external, memory_repo_path=None),
                     configured,
                     Path("/code"),
                 )
+            self.assertEqual(
+                (raised.exception.side, raised.exception.name), ("memory", "repository")
+            )
             with (
                 mock.patch.object(
-                    lifecycle_operations,
+                    configured_contract_authority,
                     "repository_identity",
                     side_effect=[Path("/memory"), Path("/other")],
                 ),
-                self.assertRaisesRegex(RuntimeError, "memory repository does not match"),
+                self.assertRaises(ConfiguredContractAuthorityError) as raised,
             ):
-                lifecycle_operations._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_authority(
                     external,
                     configured,
                     Path("/code"),
                 )
+            self.assertEqual(
+                (raised.exception.side, raised.exception.name), ("memory", "repository")
+            )
             with (
                 mock.patch.object(
-                    lifecycle_operations,
+                    configured_contract_authority,
                     "repository_identity",
                     side_effect=[Path("/same"), Path("/same")],
                 ),
-                self.assertRaisesRegex(RuntimeError, "must not share"),
+                self.assertRaises(ConfiguredContractAuthorityError) as raised,
             ):
-                lifecycle_operations._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_authority(
                     external,
                     configured,
                     Path("/same"),
                 )
+            self.assertEqual(
+                (raised.exception.side, raised.exception.name),
+                ("memory", "repository-separation"),
+            )
             with (
                 mock.patch.object(
-                    lifecycle_operations,
+                    configured_contract_authority,
                     "repository_identity",
                     side_effect=[Path("/memory"), Path("/memory")],
                 ),
-                self.assertRaisesRegex(RuntimeError, "missing its candidate worktree"),
+                self.assertRaises(ConfiguredContractAuthorityError) as raised,
             ):
-                lifecycle_operations._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_authority(
                     replace(external, memory_worktree=None),
                     configured,
                     Path("/code"),
                 )
+            self.assertEqual(
+                (raised.exception.side, raised.exception.name), ("memory", "candidate")
+            )
             with (
                 mock.patch.object(
-                    lifecycle_operations,
+                    configured_contract_authority,
                     "repository_identity",
                     side_effect=[Path("/memory"), Path("/memory"), Path("/foreign")],
                 ),
-                self.assertRaisesRegex(RuntimeError, "memory candidate belongs"),
+                self.assertRaises(ConfiguredContractAuthorityError) as raised,
             ):
-                lifecycle_operations._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_authority(
                     external,
                     configured,
                     Path("/code"),
                 )
+            self.assertEqual(
+                (raised.exception.side, raised.exception.name), ("memory", "candidate")
+            )
 
-    def test_lifecycle_recovery_predicates_cover_process_and_terminal_states(self) -> None:
+    def test_lifecycle_stale_predicate_covers_process_and_terminal_states(self) -> None:
         now = datetime.now(UTC)
         with mock.patch.object(lifecycle_operations.os, "killpg", side_effect=ProcessLookupError):
             self.assertFalse(lifecycle_operations._worker_process_group_alive(42))
@@ -572,35 +603,6 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                         now,
                     )
                 )
-            self.assertTrue(
-                lifecycle_operations._should_recover(
-                    running.model_copy(
-                        update={
-                            "status": "input-required",
-                            "irreversibleBoundaryEntered": True,
-                        }
-                    ),
-                    now,
-                )
-            )
-            self.assertTrue(
-                lifecycle_operations._should_recover(
-                    running.model_copy(update={"status": "cancelled"}),
-                    now,
-                )
-            )
-            self.assertTrue(
-                lifecycle_operations._should_recover(
-                    running.model_copy(
-                        update={
-                            "status": "failed",
-                            "irreversibleBoundaryEntered": True,
-                            "result": {"safeToReplace": True},
-                        }
-                    ),
-                    now,
-                )
-            )
 
 
 class IntegrationBranchAuthorityCoverageTests(unittest.TestCase):
@@ -831,9 +833,12 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(
-                    integrate_module,
-                    "branch_commit",
-                    return_value=internal_authority.codeSourceCommit,
+                    integration_ref_state,
+                    "run_git",
+                    side_effect=[
+                        _git_result(stdout=".git\n"),
+                        _git_result(stdout=f"{internal_authority.codeSourceCommit}\n"),
+                    ],
                 ),
                 self.assertRaisesRegex(RuntimeError, "recorded external-memory commits"),
             ):
@@ -848,9 +853,12 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                 codeCommit=internal_authority.codeCandidateCommit,
             )
             with mock.patch.object(
-                integrate_module,
-                "branch_commit",
-                return_value=internal_authority.codeSourceCommit,
+                integration_ref_state,
+                "run_git",
+                side_effect=[
+                    _git_result(stdout=".git\n"),
+                    _git_result(stdout=f"{internal_authority.codeSourceCommit}\n"),
+                ],
             ):
                 self.assertFalse(
                     integrate_module._recover_landed_refs(
@@ -861,8 +869,15 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                     )
                 )
             with (
-                mock.patch.object(integrate_module, "branch_commit", return_value="f" * 40),
-                self.assertRaisesRegex(RuntimeError, "unowned code ref"),
+                mock.patch.object(
+                    integration_ref_state,
+                    "run_git",
+                    side_effect=[
+                        _git_result(stdout=".git\n"),
+                        _git_result(stdout=f"{'f' * 40}\n"),
+                    ],
+                ),
+                self.assertRaises(IntegrationRefDecisionError) as conflict,
             ):
                 integrate_module._recover_landed_refs(
                     internal,
@@ -870,14 +885,23 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                     internal_recovery,
                     internal_authority,
                 )
+            self.assertEqual(
+                conflict.exception.classification.decision_payload()["state"],
+                "integration-ref-conflict",
+            )
 
             with (
                 mock.patch.object(
-                    integrate_module,
-                    "branch_commit",
-                    side_effect=[external_authority.codeCandidateCommit, "f" * 40],
+                    integration_ref_state,
+                    "run_git",
+                    side_effect=[
+                        _git_result(stdout=".git\n"),
+                        _git_result(stdout=f"{external_authority.codeCandidateCommit}\n"),
+                        _git_result(stdout=".git\n"),
+                        _git_result(stdout=f"{'f' * 40}\n"),
+                    ],
                 ),
-                self.assertRaisesRegex(RuntimeError, "torn or concurrently changed"),
+                self.assertRaises(IntegrationRefDecisionError),
             ):
                 integrate_module._recover_landed_refs(
                     external,

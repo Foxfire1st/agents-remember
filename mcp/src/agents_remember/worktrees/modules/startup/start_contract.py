@@ -25,6 +25,9 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     repository_default_branch,
     require_proposed_work_branches,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -35,12 +38,12 @@ from agents_remember.worktrees.modules.git import (
     repository_identity,
     run_git,
 )
-from agents_remember.worktrees.modules.leaf_ref_start import (
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.startup.leaf_ref_start import (
     invalid_contract_request_result,
     invalid_leaf_ref_result,
     resolve_start_leaf_doc_id,
 )
-from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.scheduling_mode import (
     TERMINAL_SERIES_CLEANUP,
     commanded_sprint_masters,
@@ -60,11 +63,11 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     default_series_contract,
     load_contract,
     worktree_group_for,
-    write_contract,
 )
 
 MASTER_SERIES_BOOTSTRAP_OWNERSHIP = StoreOwnership(
@@ -689,8 +692,10 @@ def _finish_master_series_bootstrap(
             raise RuntimeError(
                 "series bootstrap contract was published with different task or repository facts"
             )
-    else:
-        write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
     _master_series_bootstrap_record_path(spec).unlink(missing_ok=True)
     return contract
 

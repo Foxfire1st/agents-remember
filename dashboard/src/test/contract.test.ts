@@ -233,6 +233,8 @@ const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, "project
     "the contract-addressed worktree_sync call's own kwargs",
   "projection.enclosures[].lifecycleOperation.result":
     "the lifecycle operation result is the underlying closeout or integration payload",
+  "projection.enclosures[].lifecycleOperation.legalControls[]":
+    "each advertised operation control is an opaque tool invocation payload",
 };
 
 // ── the string vocabularies ──────────────────────────────────────────────────

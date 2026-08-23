@@ -29,11 +29,17 @@ from agents_remember.worktrees.integration.integration_branch_types import (
     _MasterAuthority,
     _RepositorySide,
 )
-from agents_remember.worktrees.integration.integration_ref_transaction import IntegratedCommits
-from agents_remember.worktrees.modules import integrate, start_contract
+from agents_remember.worktrees.modules import integrate, integration_recovery
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.startup import start_contract
 from agents_remember.worktrees.queue import closeout_queue_lifecycle
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    RepoBranchPlan,
+    default_series_contract,
+    write_contract,
+)
 from integration_branch_authority_test_support import _authority_fixture
 
 
@@ -240,7 +246,7 @@ class IntegrationBranchAuthorityRemainderTests(unittest.TestCase):
             with (
                 mock.patch.object(
                     topology,
-                    "resolve_candidate",
+                    "resolve",
                     return_value=SimpleNamespace(
                         document=SimpleNamespace(id="wrong", kind="subTask")
                     ),
@@ -480,7 +486,7 @@ class QueueLifecycleRemainderTests(unittest.TestCase):
                     side_effect=[SimpleNamespace(revision="1"), SimpleNamespace(revision="2")],
                 ),
                 mock.patch.object(
-                    closeout_queue_lifecycle, "_initial_state", return_value=object()
+                    closeout_queue_lifecycle, "initial_queue_state", return_value=object()
                 ),
                 mock.patch.object(
                     closeout_queue_lifecycle, "CloseoutQueueStore", return_value=store
@@ -503,7 +509,7 @@ class QueueLifecycleRemainderTests(unittest.TestCase):
                     return_value=SimpleNamespace(revision="1"),
                 ),
                 mock.patch.object(
-                    closeout_queue_lifecycle, "_initial_state", return_value=object()
+                    closeout_queue_lifecycle, "initial_queue_state", return_value=object()
                 ),
                 mock.patch.object(
                     closeout_queue_lifecycle, "CloseoutQueueStore", return_value=store
@@ -637,7 +643,7 @@ class QueueLifecycleRemainderTests(unittest.TestCase):
                         return_value=SimpleNamespace(revision="1"),
                     ),
                     mock.patch.object(
-                        closeout_queue_lifecycle, "_initial_state", return_value=object()
+                        closeout_queue_lifecycle, "initial_queue_state", return_value=object()
                     ),
                     mock.patch.object(
                         closeout_queue_lifecycle, "CloseoutQueueStore", return_value=store
@@ -855,8 +861,25 @@ class BootstrapRemainderTests(unittest.TestCase):
                 "sprint",
                 "super",
             )
+            contract = default_series_contract(
+                ContractTask(
+                    name="master",
+                    repo_name="repo",
+                    coordination_root=root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                    parent_task_name="sprint",
+                ),
+                code=RepoBranchPlan(
+                    repo_path=root / "code",
+                    source_branch="super",
+                    work_branch="ar/master",
+                    base_commit="1" * 40,
+                ),
+                task_root=root / "tasks" / "repo" / "master",
+            )
             record = start_contract._SeriesBootstrapRecord(
-                contractPath=(root / "contract.md").as_posix(),
+                contractPath=contract.contract_path.as_posix(),
                 codeRepository=(root / "code").as_posix(),
                 codeSourceBranch="super",
                 codeWorkBranch="ar/master",
@@ -868,9 +891,7 @@ class BootstrapRemainderTests(unittest.TestCase):
             )
             journal = root / "journal.json"
             journal.write_text(record.model_dump_json(), encoding="utf-8")
-            contract_path = root / "contract.md"
-            contract_path.write_text("published", encoding="utf-8")
-            contract = SimpleNamespace(contract_path=contract_path)
+            write_contract(contract.contract_path, contract)
             with (
                 mock.patch.object(
                     start_contract,
@@ -926,71 +947,6 @@ class BootstrapRemainderTests(unittest.TestCase):
 
 
 class IntegrationRecoveryRemainderTests(unittest.TestCase):
-    def test_external_recovery_refuses_missing_repo_and_unfinished_memory_cas(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = _authority_fixture(Path(tmp), external_memory=True)
-            contract = fixture.leaf_contract
-            commits = LifecycleOperationRecoveryCommits(
-                codeCommit="2" * 40,
-                memoryContentCommit="3" * 40,
-                ledgerCommit="4" * 40,
-            )
-            operation_authority = SimpleNamespace(
-                codeSourceBranch="ar/master",
-                codeSourceCommit="1" * 40,
-                memorySourceBranch="ar/master",
-                memorySourceCommit="5" * 40,
-            )
-            with (
-                mock.patch.object(integrate, "branch_commit", return_value="1" * 40),
-                self.assertRaisesRegex(RuntimeError, "requires a memory repo"),
-            ):
-                integrate._recover_landed_refs(
-                    replace(contract, memory_repo_path=None),
-                    WorktreeArgs(),
-                    commits,
-                    cast(Any, operation_authority),
-                )
-
-            with mock.patch.object(
-                integrate,
-                "branch_commit",
-                side_effect=["1" * 40, "5" * 40],
-            ):
-                self.assertFalse(
-                    integrate._recover_landed_refs(
-                        contract,
-                        WorktreeArgs(),
-                        commits,
-                        cast(Any, operation_authority),
-                    )
-                )
-
-            with self.assertRaisesRegex(RuntimeError, "recorded external-memory commits"):
-                integrate._recover_landed_refs(
-                    replace(contract, memory_mode="disabled", memory_repo_path=None),
-                    WorktreeArgs(),
-                    commits,
-                    cast(Any, operation_authority),
-                )
-
-            with (
-                mock.patch.object(
-                    integrate,
-                    "branch_commit",
-                    side_effect=["2" * 40, "5" * 40, "5" * 40],
-                ),
-                mock.patch.object(integrate, "require_integrated_ledger_mapping"),
-                mock.patch.object(integrate, "recover_integration_ref", return_value=False),
-                self.assertRaisesRegex(RuntimeError, "could not finish"),
-            ):
-                integrate._recover_landed_refs(
-                    contract,
-                    WorktreeArgs(),
-                    commits,
-                    cast(Any, operation_authority),
-                )
-
     def test_external_recovery_proof_refuses_unreadable_ledger_and_wrong_code_head(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp), external_memory=True)
@@ -1001,10 +957,14 @@ class IntegrationRecoveryRemainderTests(unittest.TestCase):
                 ledgerCommit="4" * 40,
             )
             with (
-                mock.patch.object(integrate, "branch_commit", return_value="wrong-memory-head"),
+                mock.patch.object(
+                    integration_recovery,
+                    "branch_commit",
+                    return_value="wrong-memory-head",
+                ),
                 self.assertRaisesRegex(RuntimeError, "found task memory HEAD"),
             ):
-                integrate._prove_external_memory_recovery(contract, commits)
+                integration_recovery.prove_external_memory_recovery(contract, commits)
 
             with (
                 mock.patch.object(integrate, "_recover_landed_refs", return_value=True),
@@ -1115,64 +1075,6 @@ class IntegrationRecoveryRemainderTests(unittest.TestCase):
             integrate._completed_integration_result(
                 cast(Any, contract), WorktreeArgs(), cast(Any, operation)
             )
-
-    def test_recovery_publication_and_apply_recheck_current_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = _authority_fixture(Path(tmp))
-            contract = fixture.leaf_contract
-            with (
-                mock.patch.object(
-                    integrate, "load_contract", return_value=replace(contract, cleanup="completed")
-                ),
-                mock.patch.object(
-                    integrate,
-                    "publish_queue_candidate_integration_result_under_authority",
-                    side_effect=lambda _contract, publication, **_kwargs: publication(),
-                ),
-                self.assertRaisesRegex(RuntimeError, "changed before recovery finalization"),
-            ):
-                integrate._recover_integration_under_authority(
-                    contract,
-                    WorktreeArgs(operation_key="a" * 64),
-                    cast(
-                        Any,
-                        SimpleNamespace(
-                            codeCandidateCommit="code",
-                            memoryContentCommit="",
-                            ledgerCommit="",
-                        ),
-                    ),
-                )
-
-            blocker = WorktreeCommandResult(2, {"state": "blocked"})
-            series = fixture.master_contract
-            with (
-                mock.patch.object(
-                    integrate,
-                    "_prepare_integration_commits",
-                    return_value=(IntegratedCommits("code", "", ""), {}, None, False),
-                ),
-                mock.patch.object(integrate, "load_contract", return_value=series),
-                mock.patch.object(integrate, "require_series_contract_authority") as require,
-                mock.patch.object(
-                    integrate, "_integration_source_state_block", return_value=blocker
-                ),
-                mock.patch.object(
-                    integrate,
-                    "publish_series_integration_under_authority",
-                    side_effect=lambda _contract, publication: publication(),
-                ),
-            ):
-                self.assertIs(
-                    integrate._apply_integration(
-                        series,
-                        WorktreeArgs(),
-                        cast(Any, SimpleNamespace()),
-                        handover_warning=None,
-                    ),
-                    blocker,
-                )
-            require.assert_called_once()
 
     def test_ff_only_replay_is_structurally_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

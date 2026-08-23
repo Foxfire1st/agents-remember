@@ -22,7 +22,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_series_contract_authority,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
@@ -933,10 +933,13 @@ def _closeout_commit_phase(
     return _CloseoutCommitPhase(code_commit, memory, integration_reopen, gate_guard)
 
 
-def _closeout_contract(args: WorktreeArgs) -> tuple[Path, WorktreeContract]:
+def _closeout_contract(
+    args: WorktreeArgs,
+    current_contract: WorktreeContract,
+) -> tuple[Path, WorktreeContract]:
     contract_path = args.contract_path
     assert contract_path is not None
-    contract = load_contract(contract_path)
+    contract = current_contract
     if contract_path.resolve() != contract.contract_path.resolve():
         raise RuntimeError(
             "closeout contract path does not match the path claimed by the contract document"
@@ -996,16 +999,19 @@ def _closeout_quality_facts(
     )
 
 
-def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
+def closeout_result(
+    args: WorktreeArgs,
+    current_contract: WorktreeContract,
+) -> WorktreeCommandResult:
     """Run closeout for real, in the order the preview promised.
 
     Nothing moved across the claim on line "THE CLAIM" below, and nothing may: the ordering
     it enforces is the whole point of 260731-EFA-L5 R3.
     """
-    report_operation_progress(args, "preflight", current_command="validate closeout eligibility")
-    contract, effective_input, early_result = _closeout_entry(args)
+    contract, effective_input, early_result = _closeout_entry(args, current_contract)
     if early_result is not None:
         return early_result
+    report_operation_progress(args, "preflight", current_command="validate closeout eligibility")
     if args.operation_key and not args.candidate_tree:
         raise RuntimeError("closeout operation is missing its accepted candidate tree")
     if not args.candidate_tree:
@@ -1087,10 +1093,11 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
 def _closeout_entry(
     args: WorktreeArgs,
+    current_contract: WorktreeContract,
 ) -> tuple[WorktreeContract, EffectiveCloseoutInput, WorktreeCommandResult | None]:
     if not args.dry_run:
         require_closeout_mutation_authority(args)
-    contract_path, contract = _closeout_contract(args)
+    contract_path, contract = _closeout_contract(args, current_contract)
     effective_input = _effective_closeout_input(args)
     if args.recovery_commits is None:
         require_effective_closeout_plan(contract, effective_input, route="worktree")

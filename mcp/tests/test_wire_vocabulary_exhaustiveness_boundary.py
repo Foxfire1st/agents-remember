@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from typing import Any, cast, get_args
 from agents_remember.application.worktree_status import worktree_status_packet
 from agents_remember.kernel.git_facts import git_facts_to_packet, read_git_facts
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
+from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.context_packet import BranchFreshness as WireBranchFreshness
 from agents_remember.models.context_packet import MemorySummary, RepoSummary
 from agents_remember.models.structural.agent import (
@@ -19,8 +21,12 @@ from agents_remember.models.structural.agent import (
     RenameSelfResponse,
     RetireChildResponse,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    lifecycle_operation_locator_path,
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules.guidance import recovery_guidance
-from agents_remember.worktrees.modules.leaf_ref_start import invalid_contract_request_result
+from agents_remember.worktrees.modules.startup.leaf_ref_start import invalid_contract_request_result
 from agents_remember.worktrees.worktree_contract import (
     VALID_MEMORY_MODES,
     CleanupStatus,
@@ -203,11 +209,34 @@ class ContractBoundaryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.root = Path(self._td.name)
+        self.coordination_root = self.root / "coordination"
         self.addCleanup(self._td.cleanup)
+        config_path = self.root / "settings.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "coordinationRoot": self.coordination_root.as_posix(),
+                    "workspaceRoot": self.root.as_posix(),
+                    "repositories": {"r": {}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.config = load_config(config_path)
 
     def _written(self, **overrides: Any) -> Path:
-        contract = _contract(self.root, **overrides)
+        contract = _contract(self.coordination_root, **overrides)
         write_contract(contract.contract_path, contract)
+        locator = lifecycle_operation_locator_path(
+            contract.coordination_root,
+            contract.contract_path,
+        )
+        if not locator.exists():
+            publish_new_lifecycle_operation_location(
+                contract,
+                contract_text=contract.contract_path.read_text(encoding="utf-8"),
+            )
         return contract.contract_path
 
     def _written_with_cell(self, line: str, replacement: str) -> Path:
@@ -240,7 +269,7 @@ class ContractBoundaryTests(unittest.TestCase):
     def test_every_vocabulary_cell_degrades_rather_than_stranding_the_task(self) -> None:
         for line, edit, (wire_field, raw, expected) in self.OFF_VOCABULARY_CELLS:
             with self.subTest(cell=edit.strip()):
-                summary = worktree_status_packet(self._written_with_cell(line, edit))
+                summary = worktree_status_packet(self.config, self._written_with_cell(line, edit))
                 # `active`, not `invalidContract`: the lifecycle tools can read this file, so
                 # the packet says where the task stands rather than only that it is broken.
                 self.assertEqual(summary.state, "active")
@@ -257,7 +286,7 @@ class ContractBoundaryTests(unittest.TestCase):
         external topology, and that is what the degrade reads.
         """
         external = _contract(
-            self.root,
+            self.coordination_root,
             memory_mode="external",
             memory_repo_path=self.root / "memory",
             memory_worktree=self.root / "wt" / "memory",
@@ -290,7 +319,10 @@ class ContractBoundaryTests(unittest.TestCase):
         Reached only through a deliberate `cast` -- which is the point: the type says this
         cannot happen, and this is what happens when someone overrides the type anyway.
         """
-        smuggled = replace(_contract(self.root), cleanup=cast(CleanupStatus, "reclaimed-ish"))
+        smuggled = replace(
+            _contract(self.coordination_root),
+            cleanup=cast(CleanupStatus, "reclaimed-ish"),
+        )
         with self.assertRaises(ContractError) as raised:
             write_contract(smuggled.contract_path, smuggled)
         # The detail first, the destination after it: the write gate names the file it was
@@ -303,10 +335,15 @@ class ContractBoundaryTests(unittest.TestCase):
         path = self._written_with_cell(
             "schema: ar-series-contract/v1", "schema: ar-series-contract/v99"
         )
-        summary = worktree_status_packet(path)
+        summary = worktree_status_packet(self.config, path)
         self.assertEqual(summary.state, "invalidContract")
-        self.assertIn("unsupported series contract schema", summary.error or "")
-        self.assertIn(f"(in {path.resolve()})", summary.error or "")
+        self.assertEqual(summary.status, "operation-contract-publication-lost")
+        self.assertTrue(summary.developerDecisionRequired)
+        self.assertEqual(summary.nextAction, "developer-decision")
+        assert summary.errorEvidence is not None
+        self.assertEqual(summary.errorEvidence["stage"], "contract-read")
+        self.assertEqual(summary.errorEvidence["errorType"], "ContractError")
+        self.assertNotIn("unsupported series contract schema", str(summary.model_dump()))
 
     def test_every_refusal_names_the_contract_it_was_reading(self) -> None:
         """The one thing an operator needs from a refusal, on every cell that can provoke one.
@@ -321,7 +358,8 @@ class ContractBoundaryTests(unittest.TestCase):
         Each row is a legal contract with one front-matter cell emptied or made unreadable, the
         way a hand edit leaves one.
         """
-        root = self.root.as_posix()
+        root = self.coordination_root.as_posix()
+        code_worktree = (self.coordination_root / "worktrees" / "r" / "t" / "code").as_posix()
         empty = "required contract path field is empty"
         for line, edit, refusal in (
             ("task_name: t", "task_name:", "contract missing required fields: task_name"),
@@ -330,7 +368,7 @@ class ContractBoundaryTests(unittest.TestCase):
             # `repo_path` and `worktree` exist under both `code:` and `memory:`, so these two
             # name the section as well -- a bare key would not say which line to open.
             (f"  root: {root}", "  root:", f"{empty}: coordination.root"),
-            (f"  worktree: {root}/wt/code", "  worktree:", f"{empty}: code.worktree"),
+            (f"  worktree: {code_worktree}", "  worktree:", f"{empty}: code.worktree"),
         ):
             with self.subTest(cell=edit.strip()):
                 path = self._written_with_cell(line, edit)
@@ -359,15 +397,17 @@ class ContractBoundaryTests(unittest.TestCase):
     def test_an_external_memory_contract_with_no_ledger_names_the_file(self) -> None:
         """The last refusal on the read path, and the one furthest from the cell it is about."""
         external = _contract(
-            self.root,
+            self.coordination_root,
             memory_mode="external",
             memory_repo_path=self.root / "memory",
-            memory_worktree=self.root / "wt" / "memory",
-            ledger_path=self.root / "wt" / "memory" / "memory.md",
+            memory_worktree=self.coordination_root / "worktrees" / "r" / "t" / "memory",
+            ledger_path=(self.coordination_root / "worktrees" / "r" / "t" / "memory" / "memory.md"),
         )
         write_contract(external.contract_path, external)
         path = external.contract_path
-        ledger = (self.root / "wt" / "memory" / "memory.md").as_posix()
+        ledger = (
+            self.coordination_root / "worktrees" / "r" / "t" / "memory" / "memory.md"
+        ).as_posix()
         path.write_text(
             path.read_text(encoding="utf-8").replace(f"  ledger: {ledger}", "  ledger:", 1),
             encoding="utf-8",
@@ -387,17 +427,21 @@ class ContractBoundaryTests(unittest.TestCase):
         pointed at, and the message is the file the refusal is about.
         """
         path = self._written_with_cell("task_name: t", "task_name:")
-        summary = worktree_status_packet(path)
+        summary = worktree_status_packet(self.config, path)
         self.assertEqual(summary.state, "invalidContract")
-        self.assertIn("contract missing required fields: task_name", summary.error or "")
-        self.assertIn(f"(in {path.resolve()})", summary.error or "")
+        self.assertEqual(summary.status, "operation-contract-publication-lost")
+        self.assertTrue(summary.developerDecisionRequired)
+        self.assertEqual(summary.nextAction, "developer-decision")
+        assert summary.errorEvidence is not None
+        self.assertEqual(summary.errorEvidence["name"], path.name)
+        self.assertNotIn("contract missing required fields: task_name", str(summary.model_dump()))
 
     def test_an_unknown_workflow_kind_request_is_refused(self) -> None:
         """A *request* is not a legacy file: refuse it before it is written down."""
         task = ContractTask(
             name="t",
             repo_name="r",
-            coordination_root=self.root,
+            coordination_root=self.coordination_root,
             workflow_kind="master-task",
             memory_mode="internal",
         )
@@ -412,12 +456,26 @@ class ContractBoundaryTests(unittest.TestCase):
         self.assertEqual(refused.payload["state"], "invalid-request")
         self.assertIn("workflow_kind must be one of", str(refused.payload["summary"]))
 
-    def test_a_contract_path_that_is_not_there_becomes_missing_contract(self) -> None:
-        summary = worktree_status_packet(self.root / "nope" / "series-contract.md")
+    def test_a_configured_missing_contract_requires_locator_adoption(self) -> None:
+        missing = self.coordination_root / "tasks" / "r" / "missing" / "series-contract.md"
+        summary = worktree_status_packet(self.config, missing)
         self.assertEqual(summary.state, "missingContract")
+        self.assertEqual(summary.status, "operation-location-adoption-required")
+        self.assertTrue(summary.developerDecisionRequired)
+        self.assertEqual(summary.nextAction, "developer-decision")
+        self.assertEqual(
+            summary.expected,
+            {
+                "contractPath": missing.as_posix(),
+                "route": "locator -> root manifest -> root journal",
+            },
+        )
+        observed = summary.observed
+        assert observed is not None
+        self.assertEqual(observed["state"], "missing")
 
     def test_no_contract_path_is_the_inactive_state(self) -> None:
-        self.assertEqual(worktree_status_packet(None).state, "inactive")
+        self.assertEqual(worktree_status_packet(self.config, None).state, "inactive")
 
     def test_a_live_contract_projects_onto_the_wire_model(self) -> None:
         """The whole seam end to end, offline: no worktrees, no repo, no remote probe.
@@ -425,7 +483,7 @@ class ContractBoundaryTests(unittest.TestCase):
         A pre-closeout contract keeps `landing_active` false, so this exercises the real
         `status_payload` -> `WorktreeSummary` projection without touching the network.
         """
-        summary = worktree_status_packet(self._written())
+        summary = worktree_status_packet(self.config, self._written())
         self.assertEqual(summary.state, "active")
         self.assertEqual(summary.phase, "worktree-started")
         self.assertEqual(summary.nextTool, "worktree_status")
@@ -443,11 +501,13 @@ class ContractBoundaryTests(unittest.TestCase):
         `[]` meant, that the next call needs nothing beyond `nextArgs`. There is no third state
         for it to be confused with.
         """
-        body = worktree_status_packet(self._written()).model_dump(mode="json", exclude_none=True)
+        body = worktree_status_packet(self.config, self._written()).model_dump(
+            mode="json", exclude_none=True
+        )
         self.assertIn("nextTool", body)  # there IS a next move...
         self.assertIn("nextArgs", body)
         self.assertNotIn("nextRequiredArgs", body)  # ...and it asks nothing of the caller
-        done = worktree_status_packet(self._written(cleanup="completed")).model_dump(
+        done = worktree_status_packet(self.config, self._written(cleanup="completed")).model_dump(
             mode="json", exclude_none=True
         )
         self.assertEqual({"nextTool", "nextArgs", "nextRequiredArgs"} & set(done), set())

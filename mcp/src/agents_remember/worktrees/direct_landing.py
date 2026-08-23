@@ -6,7 +6,8 @@ leaf worktree candidate, this operation binds the task-root series contract and
 verifies the exact code commit on the series branch, then commits external-
 memory content and prepends the code-to-memory ledger row with the same ledger
 semantics as the worktree path. Input is normalized before the integration
-authority lock; the synchronous memory/ledger durability seam remains separate.
+authority lock. Apply records a durable direct-landing generation before the
+first memory or ledger mutation.
 
 The gate stays strictly pre-commit: pass the staged ``candidate_tree`` that the
 owner already gated through the Dagger module's ``--source``/``--repository-bundle``
@@ -15,50 +16,70 @@ memory or ledger commit. Commit-then-gate is the accepted-risk exception only
 where the developer rules it.
 
 The operation is policy-gated (``directExecutionEnabled``) and deliberately
-synchronous: direct mode has no worktree group and does not use the
-``start_or_observe_operation`` detached worker. It uses a lock-serialized synchronous
-validate-then-mutate execution pattern. The lock prevents concurrent lane use only; it
-provides neither rollback nor durable crash recovery across memory/ledger outputs.
-L2-R11 and L5-R15 own that durability work.
+synchronous: direct mode does not use the ``start_or_observe_operation`` detached
+worker. The lane lock serializes execution; the canonical lifecycle journal owns
+crash recovery across memory and ledger outputs.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.kernel.authority import require_within_coordination
-from agents_remember.kernel.memory_ledger import (
-    LedgerError,
-    find_mapping,
-    load_ledger,
-    prepend_mapping,
-    write_ledger,
-)
+from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
+from agents_remember.models.lifecycles.operation import (
+    GatePolicyRuleSnapshot,
+    LifecycleOperationRecord,
+)
 from agents_remember.worktrees.closeout_input import (
     corrected_closeout_arguments,
     normalize_closeout_input,
     raw_closeout_messages,
 )
+from agents_remember.worktrees.integration.configured_contract_authority import (
+    reread_configured_contract,
+)
+from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
+    DirectLandingError,
+)
+from agents_remember.worktrees.integration.direct_landing.direct_landing_execution import (
+    direct_landing_input,
+    execute_or_require_direct_landing_recovery,
+)
+from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
+    DirectLandingRuntime,
+    direct_landing_record,
+    direct_landing_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
+    lifecycle_operation_candidate,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
+    operation_state_fingerprint,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
+    contract_lifecycle_lease,
+    require_lifecycle_operation_compatible,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_projection import (
+    operation_projection,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
+    public_failure_evidence,
+)
+from agents_remember.worktrees.integration.mutation_evidence import git_mutation_snapshot
 from agents_remember.worktrees.modules.git import (
     branch_commit,
-    commit_if_dirty,
     current_branch,
-    ensure_git_identity,
     is_ancestor,
     require_git,
 )
-from agents_remember.worktrees.worktree_contract import ContractError, load_contract
-
-
-class DirectLandingError(ValueError):
-    """The direct landing request is malformed or violates the current facts."""
-
-    def __init__(self, status: str, detail: str) -> None:
-        self.status = status
-        super().__init__(f"{status}: {detail}")
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True)
@@ -79,9 +100,20 @@ class DirectLandingRequest:
     dry_run: bool = False
 
 
+@dataclass(frozen=True)
+class _DirectRequestIdentity:
+    config: McpRuntimeConfig
+    contract: WorktreeContract
+    request: DirectLandingRequest
+    effective_input: EffectiveCloseoutInput
+    code_commit: str
+    candidate_tree: str
+
+
 def direct_landing(
     config: McpRuntimeConfig,
     request: DirectLandingRequest,
+    admitted_contract: WorktreeContract,
 ) -> dict[str, object]:
     """Run the direct landing under the integration authority lock.
 
@@ -89,20 +121,28 @@ def direct_landing(
     commit itself is verified, never created: the developer has already
     committed the candidate on the series branch in direct mode.
     """
+    require_direct_landing_enabled(config)
+    return _direct_landing_after_policy(config, request, admitted_contract)
+
+
+def require_direct_landing_enabled(config: McpRuntimeConfig) -> None:
+    """Refuse disabled direct execution before inspecting a contract address."""
+
     if not config.direct_execution_enabled:
         raise DirectLandingError(
             "direct-landing-policy-disabled",
             "direct landing is disabled by policy; enable directExecutionEnabled "
             "in the MCP authority settings for sanctioned direct execution",
         )
-    contract_path = require_within_coordination(config, request.contract_path, "contract_path")
-    try:
-        contract = load_contract(contract_path)
-    except ContractError as exc:
-        raise DirectLandingError(
-            "direct-landing-contract-invalid",
-            f"direct landing requires the task-root series contract: {exc}",
-        ) from exc
+
+
+def _direct_landing_after_policy(
+    config: McpRuntimeConfig,
+    request: DirectLandingRequest,
+    admitted_contract: WorktreeContract,
+) -> dict[str, object]:
+    contract = admitted_contract
+    contract_path = contract.contract_path
     if contract.kind != "series":
         raise DirectLandingError(
             "direct-landing-series-required",
@@ -140,8 +180,14 @@ def direct_landing(
             "direct-landing-code-commit-required",
             "direct landing requires the exact series code commit to verify",
         )
-    with integration_authority_lock(config.coordination_root, contract.repo_name):
-        current = load_contract(contract_path)
+    with (
+        contract_lifecycle_lease(contract),
+        integration_authority_lock(config.coordination_root, contract.repo_name),
+    ):
+        current, _location = reread_configured_contract(
+            contract,
+            config.config_path.as_posix(),
+        )
         if current != contract:
             raise DirectLandingError(
                 "direct-landing-contract-changed",
@@ -149,7 +195,10 @@ def direct_landing(
             )
         if request.dry_run:
             return _direct_landing_preview(current, request, effective_input, code_commit)
-        return _direct_landing_apply(current, request, effective_input, code_commit)
+        require_lifecycle_operation_compatible(current, operation_kind="direct-landing")
+        return _start_or_observe_direct_landing(
+            config, current, request, effective_input, code_commit
+        )
 
 
 def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) -> str:
@@ -160,7 +209,20 @@ def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) 
     gate ran over that exact tree before this landing, so a moved branch after
     the gate is refused pre-commit.
     """
-    series_head = branch_commit(contract.code_repo_path, contract.code_work_branch)
+    try:
+        series_head = branch_commit(contract.code_repo_path, contract.code_work_branch)
+    except RuntimeError as exc:
+        raise DirectLandingError(
+            "direct-landing-code-git-unreadable",
+            "direct landing cannot read the accepted code ref",
+            observed=public_failure_evidence(
+                stage="direct-code-proof",
+                side="code",
+                name=contract.code_work_branch,
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
+        ) from exc
     if code_commit != series_head:
         raise DirectLandingError(
             "direct-landing-code-commit-mismatch",
@@ -168,7 +230,22 @@ def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) 
             f"({series_head}); direct landing verifies the branch HEAD commit, "
             "it does not create one",
         )
-    committed_tree = require_git(contract.code_repo_path, ["rev-parse", f"{code_commit}^{{tree}}"])
+    try:
+        committed_tree = require_git(
+            contract.code_repo_path, ["rev-parse", f"{code_commit}^{{tree}}"]
+        )
+    except RuntimeError as exc:
+        raise DirectLandingError(
+            "direct-landing-code-git-unreadable",
+            "direct landing cannot read the accepted code tree",
+            observed=public_failure_evidence(
+                stage="direct-code-proof",
+                side="code",
+                name=contract.code_work_branch,
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
+        ) from exc
     if not committed_tree:
         raise DirectLandingError(
             "direct-landing-code-commit-invalid",
@@ -196,15 +273,24 @@ def _memory_facts(contract) -> dict[str, object]:
             "repository and ledger path",
         )
     try:
-        load_ledger(contract.ledger_path)
-    except LedgerError as exc:
+        memory_head = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
+    except (OSError, RuntimeError) as exc:
         raise DirectLandingError(
-            "direct-landing-ledger-invalid", f"direct landing cannot read the ledger: {exc}"
+            "direct-landing-memory-evidence-unreadable",
+            "direct landing cannot read the accepted memory ref",
+            observed=public_failure_evidence(
+                stage="direct-memory-proof",
+                side="memory",
+                name=contract.memory_work_branch,
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
         ) from exc
+    _load_direct_ledger(contract.ledger_path)
     return {
         "memoryMode": "external",
         "memoryBranch": contract.memory_work_branch,
-        "memoryHead": branch_commit(contract.memory_repo_path, contract.memory_work_branch),
+        "memoryHead": memory_head,
         "ledgerParsed": True,
     }
 
@@ -233,13 +319,56 @@ def _direct_landing_preview(
     }
 
 
-def _direct_landing_apply(
+def _direct_memory_admission_snapshot(contract: WorktreeContract):
+    memory_repo = contract.memory_repo_path
+    assert memory_repo is not None
+    try:
+        observed_branch = current_branch(memory_repo)
+    except RuntimeError as exc:
+        raise DirectLandingError(
+            "direct-landing-memory-git-unreadable",
+            "direct landing cannot read the accepted memory branch",
+            observed=public_failure_evidence(
+                stage="direct-memory-admission",
+                side="memory",
+                name=contract.memory_work_branch,
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
+        ) from exc
+    if contract.memory_work_branch and observed_branch != contract.memory_work_branch:
+        raise DirectLandingError(
+            "direct-landing-memory-branch-mismatch",
+            "the memory repository checkout is not on the accepted memory branch",
+            expected={"branch": contract.memory_work_branch},
+            observed={"branch": observed_branch},
+        )
+    try:
+        return git_mutation_snapshot(
+            memory_repo,
+            contract.worktree_group / "reports" / ".direct-admission.index",
+        )
+    except (OSError, RuntimeError) as exc:
+        raise DirectLandingError(
+            "direct-landing-memory-git-unreadable",
+            "direct landing cannot capture the accepted memory Git state",
+            observed=public_failure_evidence(
+                stage="direct-memory-admission",
+                side="memory",
+                name="git-state",
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
+        ) from exc
+
+
+def _start_or_observe_direct_landing(
+    config: McpRuntimeConfig,
     contract,
     request: DirectLandingRequest,
     effective_input: EffectiveCloseoutInput,
     code_commit: str,
 ) -> dict[str, object]:
-    _verify_code_commit(contract, code_commit, request.candidate_tree)
     if contract.memory_mode != "external":
         raise DirectLandingError(
             "direct-landing-memory-required",
@@ -252,63 +381,184 @@ def _direct_landing_apply(
             "external-memory direct landing requires the configured memory "
             "repository and ledger path",
         )
+    candidate_tree = (request.candidate_tree or "").strip()
+    if not candidate_tree:
+        raise DirectLandingError(
+            "direct-landing-candidate-tree-required",
+            "direct landing apply requires the exact pre-commit gated candidate tree",
+        )
     memory_repo = contract.memory_repo_path
-    ensure_git_identity(memory_repo)
-    if contract.memory_work_branch and (current_branch(memory_repo) != contract.memory_work_branch):
-        raise DirectLandingError(
-            "direct-landing-memory-branch-mismatch",
-            "the memory repository checkout is not on the series memory branch "
-            f"({contract.memory_work_branch}); direct landing commits the ledger "
-            "on the exact series memory branch",
-        )
-
-    # Memory content commit (only when dirty) -- same semantics as the worktree
-    # external closeout path.
-    memory_commit = commit_if_dirty(
-        memory_repo,
-        effective_input.message_for("memory"),
+    store = direct_landing_store(contract)
+    current = store.read()
+    code_tree = _verify_code_commit(contract, code_commit, candidate_tree)
+    memory_before = _direct_memory_admission_snapshot(contract)
+    _load_direct_ledger(contract.ledger_path)
+    ledger_text = _read_direct_ledger_text(contract.ledger_path)
+    operation_input = DirectLandingOperationInput(
+        configPath=config.config_path.as_posix(),
+        contractPath=contract.contract_path.as_posix(),
+        effectiveInput=effective_input,
+        approvalNote=request.intent_note.strip(),
+        gatePolicy=_gate_policy_snapshot(config),
+        codeCommit=code_commit,
+        codeTree=code_tree,
+        candidateTree=candidate_tree,
+        memoryRepository=memory_repo.resolve().as_posix(),
+        memoryBranch=contract.memory_work_branch,
+        memoryRef=memory_before.headRef,
+        memoryBefore=memory_before,
+        ledgerPath=contract.ledger_path.resolve().as_posix(),
+        ledgerBeforeText=ledger_text,
+        ledgerBeforeSha256=_text_sha256(ledger_text),
     )
-    ledger = load_ledger(contract.ledger_path)
-    existing = find_mapping(ledger, code_commit)
-    if existing is not None and existing.memory_commit == memory_commit:
-        ledger_commit = branch_commit(memory_repo, contract.memory_work_branch)
-    else:
-        if existing is not None:
+    candidate = lifecycle_operation_candidate(
+        operation_input,
+        candidate_state=operation_state_fingerprint(contract),
+        candidate_tree=candidate_tree,
+        integration_authority=None,
+    )
+    proposed = direct_landing_record(contract, operation_input, candidate)
+    if current is not None:
+        identity = _DirectRequestIdentity(
+            config,
+            contract,
+            request,
+            effective_input,
+            code_commit,
+            candidate_tree,
+        )
+        if _same_direct_request(current, identity):
+            if current.status == "completed" and current.result is not None:
+                return dict(current.result)
+            return _direct_landing_observation(contract, current)
+        cancelled_successor = (
+            current.status == "cancelled" and current.cancellationEvidence is not None
+        )
+        completed_successor = _completed_direct_candidate_advanced(
+            contract,
+            current,
+            code_commit=code_commit,
+        )
+        if not cancelled_successor and not completed_successor:
             raise DirectLandingError(
-                "direct-landing-ledger-conflict",
-                f"ledger already maps code commit {code_commit} to "
-                f"{existing.memory_commit}, not {memory_commit}; reconcile the "
-                "memory branch before landing",
+                "direct-landing-input-conflict",
+                "changed direct-landing intent cannot amend the accepted generation; "
+                "recover or safely dispose that generation first",
+                expected={
+                    "acceptedFingerprint": current.fingerprint,
+                    "acceptedCodeCommit": direct_landing_input(current).codeCommit,
+                },
+                observed={
+                    "candidateFingerprint": proposed.fingerprint,
+                    "candidateCodeCommit": code_commit,
+                },
             )
-        write_ledger(
-            contract.ledger_path,
-            prepend_mapping(ledger, code_commit, memory_commit),
-        )
-        require_git(memory_repo, ["add", "memory.md"])
-        ledger_commit = commit_if_dirty(
-            memory_repo,
-            effective_input.message_for("ledger"),
-        )
-    if not ledger_commit or not is_ancestor(memory_repo, memory_commit, ledger_commit):
-        raise DirectLandingError(
-            "direct-landing-ledger-unreachable",
-            "the committed ledger row does not reach the memory content commit",
-        )
+        record = store.replace_terminal(proposed)
+        created = True
+    else:
+        record, created = store.create(proposed)
+    if not created:
+        raise RuntimeError("direct landing generation appeared during serialized admission")
+    runtime = DirectLandingRuntime(contract, record)
+    return execute_or_require_direct_landing_recovery(contract, runtime)
+
+
+def _completed_direct_candidate_advanced(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    *,
+    code_commit: str,
+) -> bool:
+    if record.status != "completed" or record.result is None:
+        return False
+    accepted = direct_landing_input(record)
+    return code_commit != accepted.codeCommit and is_ancestor(
+        contract.code_repo_path,
+        accepted.codeCommit,
+        code_commit,
+    )
+
+
+def _same_direct_request(
+    record: LifecycleOperationRecord,
+    identity: _DirectRequestIdentity,
+) -> bool:
+    accepted = direct_landing_input(record)
+    expected = {
+        "configPath": identity.config.config_path.as_posix(),
+        "contractPath": identity.contract.contract_path.as_posix(),
+        "effectiveInput": identity.effective_input,
+        "approvalNote": identity.request.intent_note.strip(),
+        "gatePolicy": _gate_policy_snapshot(identity.config),
+        "codeCommit": identity.code_commit,
+        "candidateTree": identity.candidate_tree,
+    }
+    return not any(getattr(accepted, field) != value for field, value in expected.items())
+
+
+def _direct_landing_observation(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> dict[str, object]:
+    projection = operation_projection(record, contract=contract).model_dump(
+        mode="json", exclude_none=True
+    )
     return {
         "ok": True,
         "operation": "direct_landing",
-        "state": "landed",
-        "summary": "Direct landing: code commit verified and the memory + ledger "
-        "commits landed on the series memory branch.",
-        "contractPath": contract.contract_path.as_posix(),
-        "codeCommit": code_commit,
-        "memoryContentCommit": memory_commit,
-        "ledgerCommit": ledger_commit,
+        "state": record.status,
+        "summary": "The accepted direct-landing generation already exists; use its "
+        "advertised task-addressed action.",
+        "contractPath": record.contractPath,
         "dryRun": False,
-        "memory": {
-            "memoryMode": "external",
-            "memoryBranch": contract.memory_work_branch,
-            "memoryHead": ledger_commit,
-        },
-        "effectiveInput": effective_input.model_dump(mode="json"),
+        "lifecycleOperation": projection,
     }
+
+
+def _load_direct_ledger(path: Path):
+    try:
+        return load_ledger(path)
+    except (LedgerError, OSError) as exc:
+        raise DirectLandingError(
+            "direct-landing-ledger-invalid",
+            "direct landing cannot parse the accepted ledger",
+            observed=public_failure_evidence(
+                stage="direct-ledger-read",
+                side="ledger",
+                name=path.name,
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
+        ) from exc
+
+
+def _read_direct_ledger_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DirectLandingError(
+            "direct-landing-ledger-unreadable",
+            "direct landing cannot read the accepted ledger bytes",
+            observed=public_failure_evidence(
+                stage="direct-ledger-read",
+                side="ledger",
+                name=path.name,
+                error_type=type(exc).__name__,
+                observed={"state": "unreadable"},
+            ),
+        ) from exc
+
+
+def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:
+    return [
+        GatePolicyRuleSnapshot(
+            kind=rule.kind,
+            delegatedRole=rule.delegated_role,
+            requireReviewerVerdict=rule.require_reviewer_verdict,
+        )
+        for rule in config.orchestration.gate_policy.rules
+    ]
+
+
+def _text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

@@ -82,6 +82,15 @@ class _GitRun:
     environment: dict[str, str]
 
 
+@dataclass(frozen=True)
+class IsolatedGitState:
+    """Disposable Git state with the repository object database as read-only input."""
+
+    index_path: Path
+    object_directory: Path
+    alternate_object_directory: Path
+
+
 def git_environment() -> dict[str, str]:
     """Return the ambient environment without Git repository selectors."""
 
@@ -157,6 +166,32 @@ def run_git_with_index(
         _GitRun(
             work_dir=repo_root,
             input_text=None,
+            timeout=GIT_LOCAL_TIMEOUT_SECONDS,
+            environment=environment,
+        ),
+    )
+
+
+def run_git_with_isolated_index_and_objects(
+    repo_root: Path,
+    args: list[str],
+    *,
+    state: IsolatedGitState,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run Git against disposable index/object storage and a read-only real ODB."""
+
+    state.object_directory.mkdir(parents=True, exist_ok=True)
+    environment = git_environment()
+    environment["GIT_INDEX_FILE"] = state.index_path.as_posix()
+    environment["GIT_OBJECT_DIRECTORY"] = state.object_directory.as_posix()
+    environment["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = state.alternate_object_directory.as_posix()
+    return _run_git(
+        repo_root,
+        args,
+        _GitRun(
+            work_dir=repo_root,
+            input_text=input_text,
             timeout=GIT_LOCAL_TIMEOUT_SECONDS,
             environment=environment,
         ),

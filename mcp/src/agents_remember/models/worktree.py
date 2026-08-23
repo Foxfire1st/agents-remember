@@ -137,6 +137,15 @@ class WorktreeSummary(StrictResponseModel):
     # that they were substituted, and the file heals the next time a lifecycle tool writes it.
     unknownContractCells: list[str] | None = None
     error: str | None = None
+    errorEvidence: dict[str, object] | None = None
+    status: str | None = None
+    summary: str | None = Field(default=None, max_length=8192)
+    detail: str | None = Field(default=None, max_length=8192)
+    expected: dict[str, object] | None = None
+    observed: dict[str, object] | None = None
+    nextAction: Literal["developer-decision"] | None = None
+    developerDecisionRequired: bool | None = None
+    decisionSurface: str | None = Field(default=None, max_length=8192)
     lifecycleOperation: LifecycleOperationProjection | None = None
     sourceLineage: SourceLineageProjection | None = None
 
@@ -161,7 +170,6 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # progress as running / stale (dead heartbeat) / ok /
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
-    lifecycleOperation: LifecycleOperationProjection | None = None
     source_lineage: SourceLineageProjection | None = None
     status: str | None = None
     detail: str | None = Field(default=None, max_length=8192)
@@ -180,6 +188,18 @@ class WorktreeAttachResponse(WorktreeCommandResponse):
 
 class WorktreeStatusResponse(WorktreeCommandResponse):
     operation: Literal["worktree_status"] = "worktree_status"
+    lifecycleOperations: list[LifecycleOperationProjection] = Field(default_factory=list)
+
+
+class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_enclosure_adopt"] = "worktree_enclosure_adopt"
+    publicationRequestId: str | None = None
+    locatorPath: str | None = None
+    manifestPath: str | None = None
+    contractSha256: str | None = None
+    manifestSha256: str | None = None
+    artifacts: list[dict[str, object]] = Field(default_factory=list)
+    removalCondition: str | None = None
 
 
 class WorktreeSyncResponse(WorktreeCommandResponse):
@@ -192,10 +212,12 @@ class WorktreeCloseoutPreviewResponse(WorktreeCommandResponse):
 
 class WorktreeCloseoutApplyResponse(WorktreeCommandResponse):
     operation: Literal["worktree_closeout_apply"] = "worktree_closeout_apply"
+    lifecycleOperation: LifecycleOperationProjection | None = None
 
 
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
+    lifecycleOperation: LifecycleOperationProjection | None = None
     # Declared even though the worktree envelope is intentionally flexible: these are stable
     # completion-cleanup products, not incidental worktree-module details.
     autoClosedSeats: list[str] = Field(default_factory=list)
@@ -204,8 +226,40 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
     autoLandedSeats: list[str] = Field(default_factory=list)
 
 
-class WorktreeOperationCancelResponse(WorktreeCommandResponse):
-    operation: Literal["worktree_operation_cancel"] = "worktree_operation_cancel"
+class WorktreeOperationControlResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_operation_control"] = "worktree_operation_control"
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    expected: dict[str, object] = Field(default_factory=dict)
+    observed: dict[str, object] = Field(default_factory=dict)
+    nextAction: str = ""
+    nextTool: (
+        Literal["worktree_operation_control", "worktree_integrate", "direct_landing"] | None
+    ) = None
+    nextArgs: dict[str, object] | None = None
+    developerDecisionRequired: bool = False
+    decisionSurface: str | None = None
+
+
+class WorktreeLegacyOperationResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_legacy_operation"] = "worktree_legacy_operation"
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    operationKind: str | None = None
+    legacyDigest: str | None = None
+    migratable: bool | None = None
+    migrationReason: str | None = None
+    archivable: bool | None = None
+    archiveReason: str | None = None
+    archivePath: str | None = None
+    terminalEvidence: dict[str, object] | None = None
+    removalCondition: str | None = None
+    removalGuard: dict[str, object] | None = None
+    expected: dict[str, object] = Field(default_factory=dict)
+    observed: dict[str, object] = Field(default_factory=dict)
+    nextAction: str = ""
+    nextTool: str | None = None
+    nextArgs: dict[str, object] | None = None
+    developerDecisionRequired: bool = False
+    decisionSurface: str | None = None
 
 
 class WorktreeCleanupResponse(WorktreeCommandResponse):

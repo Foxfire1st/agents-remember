@@ -15,9 +15,12 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     repository_default_branch,
     require_terminal_worktree,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_lease import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
     contract_lifecycle_lease,
     require_lifecycle_operation_compatible,
+)
+from agents_remember.worktrees.integration.terminal_enclosure_archive import (
+    terminal_archive_required_result,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity
@@ -623,6 +626,13 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("cleanup requires --approved after successful integration")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    archive_refusal = terminal_archive_required_result(
+        contract,
+        operation="worktree_cleanup",
+        dry_run=args.dry_run,
+    )
+    if archive_refusal.returncode != 0:
+        return archive_refusal
     if contract.kind == "series":
         require_atomic_series_terminal_release(contract)
     require_terminal_worktree(contract, operation="worktree_cleanup")
@@ -711,7 +721,11 @@ def _cleanup_with_guard(
     # The exact leaf fence remains held through every terminal output and publication.
     try:
         with contract_lifecycle_lease(contract):
-            require_lifecycle_operation_compatible(contract, operation_kind=None)
+            require_lifecycle_operation_compatible(
+                contract,
+                operation_kind=None,
+                publish_worker_exits=not args.dry_run,
+            )
 
             def publish(
                 series_permit: AtomicSeriesTerminalPermit | None = None,

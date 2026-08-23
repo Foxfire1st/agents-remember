@@ -37,6 +37,7 @@ class GitMutationEvidence(BaseModel):
     leg: CloseoutMutationLeg
     repository: str
     state: MutationEvidenceState = "pre-mutation"
+    acceptedBefore: GitMutationSnapshot | None = None
     before: GitMutationSnapshot | None = None
     observed: GitMutationSnapshot | None = None
     expectedOutputTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
@@ -65,13 +66,13 @@ def _require_empty_pre_mutation(evidence: GitMutationEvidence) -> None:
     if any(
         value is not None
         for value in (
-            evidence.before,
             evidence.observed,
+            evidence.before,
             evidence.expectedOutputTree,
             evidence.commit,
         )
     ):
-        raise ValueError("pre-mutation evidence cannot claim Git attempt facts")
+        raise ValueError("pre-mutation evidence may carry only accepted Git snapshot evidence")
 
 
 def _require_commit_proof(evidence: GitMutationEvidence) -> None:

@@ -51,6 +51,7 @@ from agents_remember.worktrees.modules.guidance import (
     carryover_done,
     lifecycle_guidance,
 )
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -96,6 +97,23 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
     }
     base.update(over)
     return WorktreeContract(**base)  # type: ignore[arg-type]
+
+
+def _allow_terminal_archive_for_downstream_unit(test: unittest.TestCase) -> None:
+    """Let pre-L5 unit tests exercise owners below the fail-closed archive gate."""
+
+    cleanup_permit = patch(
+        "agents_remember.worktrees.modules.cleanup.terminal_archive_required_result",
+        return_value=WorktreeCommandResult(0, {}),
+    )
+    abandon_permit = patch(
+        "agents_remember.worktrees.modules.abandon.terminal_archive_required_result",
+        return_value=WorktreeCommandResult(0, {}),
+    )
+    cleanup_permit.start()
+    abandon_permit.start()
+    test.addCleanup(cleanup_permit.stop)
+    test.addCleanup(abandon_permit.stop)
 
 
 def _real_external_contract(tmp: Path, name: str) -> WorktreeContract:
@@ -304,6 +322,7 @@ class CleanupCarryoverGuardTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
+        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -411,6 +430,7 @@ class CleanupChildEdgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
+        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -579,6 +599,7 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
+        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -618,6 +639,7 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
+        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -909,6 +931,7 @@ class CitationCacheLifecycleTests(unittest.TestCase):
         self._td = tempfile.TemporaryDirectory()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
+        _allow_terminal_archive_for_downstream_unit(self)
 
     def contract(self, name: str) -> WorktreeContract:
         return _real_external_contract(self.tmp, name)

@@ -16,10 +16,14 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     TASK_DOCUMENT_SUMMARY_LIMIT,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
+    WorktreeContract,
     default_contract,
     write_contract,
 )
@@ -43,6 +47,14 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         }
         base.update(over)
         return TaskDocument.model_validate(base)
+
+    @staticmethod
+    def _write_addressable_contract(contract: WorktreeContract) -> None:
+        write_contract(contract.contract_path, contract)
+        publish_new_lifecycle_operation_location(
+            contract,
+            contract_text=contract.contract_path.read_text(encoding="utf-8"),
+        )
 
     def test_reads_lifecycle_keyed_progress(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "demo"
@@ -282,7 +294,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                 base_commit="abc123",
             ),
         )
-        write_contract(contract.contract_path, contract)
+        self._write_addressable_contract(contract)
 
         self.assertEqual(
             read_task_documents(self.coord, enclosures=read_enclosures(self.coord), now=FRESH),
@@ -308,7 +320,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                 base_commit="abc123",
             ),
         )
-        write_contract(contract.contract_path, contract)
+        self._write_addressable_contract(contract)
         write_task_doc(
             root,
             self._doc(
@@ -349,7 +361,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                 base_commit="abc123",
             ),
         )
-        write_contract(contract.contract_path, contract)
+        self._write_addressable_contract(contract)
         write_task_doc(
             root,
             self._doc(

@@ -294,11 +294,14 @@ def _without_null(node: Mapping[str, object]) -> Mapping[str, object]:
     if variants is None:
         return node
     non_null = [variant for variant in variants if not _is_null(variant)]
-    if len(non_null) != 1:
-        raise ProjectionTypeGenerationError(
-            "nullable fields must contain exactly one non-null type"
-        )
-    return non_null[0]
+    if len(non_null) == len(variants):
+        return node
+    if not non_null:
+        raise ProjectionTypeGenerationError("nullable fields must contain a non-null type")
+    annotations = {key: value for key, value in node.items() if key != "anyOf"}
+    if len(non_null) == 1:
+        return {**non_null[0], **annotations}
+    return {**annotations, "anyOf": non_null}
 
 
 def _property_line(

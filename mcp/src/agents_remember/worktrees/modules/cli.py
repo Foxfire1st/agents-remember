@@ -76,14 +76,19 @@ def command_closeout(args: argparse.Namespace) -> int:
         ),
     )
     result = closeout_result(
-        replace(worktree_args, closeout_input=effective, ledger_commit_message="")
+        replace(worktree_args, closeout_input=effective, ledger_commit_message=""),
+        contract,
     )
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 
 
 def command_integrate(args: argparse.Namespace) -> int:
-    result = integrate_result(WorktreeArgs.from_namespace(args))
+    worktree_args = WorktreeArgs.from_namespace(args)
+    if worktree_args.contract_path is None:
+        raise RuntimeError("integration requires a contract path")
+    contract = load_contract(worktree_args.contract_path)
+    result = integrate_result(worktree_args, contract)
     print(json.dumps(result.payload, indent=2))
     return result.returncode
 

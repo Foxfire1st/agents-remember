@@ -40,7 +40,9 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     STATUS_PAYLOAD_TTL_SECONDS,
     _status_payload_cache,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import latest_operation_projection
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
+    latest_operation_projection,
+)
 from agents_remember.worktrees.modules.guidance import (
     contract_payload,
     lifecycle_guidance,

@@ -21,10 +21,14 @@ from agents_remember.worktrees.integration.closeout_operation_admission import (
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     derive_closeout_recovery_commits,
 )
-from agents_remember.worktrees.integration.lifecycle_operations import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
+    closeout_contract_sha256,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_closeout_operation,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.worktree_contract import load_contract
 
 
 class MutationEvidenceRecorder:
@@ -85,7 +89,25 @@ def start_closeout_operation(
                 },
             ),
         ),
+        load_contract(Path(operation_input.contractPath)),
         **options,
+    )
+
+
+def publish_closeout_finalization(runtime, contract) -> None:
+    """Publish the exact proof production records before queue certification."""
+
+    runtime.progress(
+        "contract-finalization",
+        {
+            "approval_claimed": True,
+            "recovery_commits": {
+                "codeCommit": contract.code_commit,
+                "memoryContentCommit": contract.memory_content_commit,
+                "ledgerCommit": contract.ledger_commit,
+            },
+            "closeout_finalized_contract_sha256": closeout_contract_sha256(contract),
+        },
     )
 
 
@@ -170,16 +192,22 @@ def with_mutation_intent(record, *, leg: CloseoutMutationLeg | None = None):
     return record.model_copy(update={"mutationEvidence": evidence})
 
 
-def with_commit_proven(record, *, leg: CloseoutMutationLeg | None = None):
+def with_commit_proven(
+    record,
+    *,
+    leg: CloseoutMutationLeg | None = None,
+    commit: str | None = None,
+):
     """Advance one enabled fixture leg through intent and durable proof."""
     selected = leg or next(iter(record.mutationEvidence))
     if record.mutationEvidence[selected].state == "pre-mutation":
         record = with_mutation_intent(record, leg=selected)
     current = record.mutationEvidence[selected]
     assert current.before is not None
+    proof_commit = commit or "e" * 40
     observed = current.before.model_copy(
         update={
-            "head": "e" * 40,
+            "head": proof_commit,
             "headTree": current.expectedOutputTree,
             "refLogFingerprint": "1" * 64,
             "indexTree": current.expectedOutputTree,
@@ -188,7 +216,7 @@ def with_commit_proven(record, *, leg: CloseoutMutationLeg | None = None):
         }
     )
     proven = current.model_copy(
-        update={"state": "commit-proven", "observed": observed, "commit": "e" * 40}
+        update={"state": "commit-proven", "observed": observed, "commit": proof_commit}
     )
     evidence = dict(record.mutationEvidence)
     evidence[selected] = proven

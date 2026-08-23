@@ -149,6 +149,7 @@ describe("Hangar renders worktree truth (L11)", () => {
             currentCommand,
             elapsedSeconds: 42,
             kind: "closeout",
+            legalControls: [],
             phase: "quality",
             reportPath: "reports/closeout-operation.log",
             status: "running",

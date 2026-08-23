@@ -1714,6 +1714,18 @@
           "default": null,
           "title": "Finishedat"
         },
+        "generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation"
+        },
         "guidance": {
           "anyOf": [
             {
@@ -1741,10 +1753,19 @@
         "kind": {
           "enum": [
             "closeout",
-            "integrate"
+            "integrate",
+            "direct-landing"
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "legalControls": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Legalcontrols",
+          "type": "array"
         },
         "phase": {
           "enum": [
@@ -1762,6 +1783,12 @@
             "integration-quality",
             "source-merge",
             "contract-finalization",
+            "door-publication",
+            "termination-required",
+            "direct-preflight",
+            "direct-memory-commit",
+            "direct-ledger-commit",
+            "direct-terminal-publication",
             "completed",
             "failed",
             "cancelled"
@@ -1799,16 +1826,25 @@
           "title": "Startedat"
         },
         "status": {
-          "enum": [
-            "queued",
-            "running",
-            "input-required",
-            "completed",
-            "failed",
-            "cancelled"
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "running",
+                "input-required",
+                "termination-required",
+                "completed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "unreadable",
+              "type": "string"
+            }
           ],
-          "title": "Status",
-          "type": "string"
+          "title": "Status"
         }
       },
       "required": [

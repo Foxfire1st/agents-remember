@@ -65,7 +65,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     repository_default_branch,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.modules.start_contract import (
+from agents_remember.worktrees.modules.startup.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
 )
@@ -432,22 +432,40 @@ def dispatch_agent_tool(
                 cast(str | None, spawned.get("detail")),
             )
         )
+    return _brief_spawned_child(
+        config,
+        request,
+        StructuralMessageContext(catalog, caller, runtime),
+        document=document,
+        target_session_id=cast(str, spawned["session"]),
+    )
 
-    target_session_id = cast(str, spawned["session"])
+
+def _brief_spawned_child(
+    config: McpRuntimeConfig,
+    request: DispatchAgentRequest,
+    context: StructuralMessageContext,
+    *,
+    document: TaskDocumentRef,
+    target_session_id: str,
+) -> dict[str, Any]:
     child = UnbriefedChild(
-        caller.id if caller is not None else None, target_session_id, document, request.role
+        context.sender.id if context.sender is not None else None,
+        target_session_id,
+        document,
+        request.role,
     )
     try:
         posted = _post_initial_dispatch_brief(
             config,
-            StructuralMessageContext(catalog, caller, runtime),
+            context,
             StructuralMessageTarget(document, request.role, target_session_id),
             request.brief,
         )
     except (OSError, ValueError):
         return _failed_initial_dispatch(
             config,
-            runtime,
+            context.runtime,
             child,
             status="dispatch-persistence-refused",
             detail="durable initial brief was refused",
@@ -455,7 +473,7 @@ def dispatch_agent_tool(
     if posted.get("ok") is not True:
         return _failed_initial_dispatch(
             config,
-            runtime,
+            context.runtime,
             child,
             status=str(posted.get("status", "dispatch-persistence-refused")),
             detail="durable initial brief was not accepted",

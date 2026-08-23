@@ -28,7 +28,8 @@ def test_closeout_apply_refuses_missing_normalized_input_before_candidate_work(
                 approved=True,
                 approval_note="approved",
                 operation_progress=MutationEvidenceRecorder(),
-            )
+            ),
+            contract,
         )
 
 
@@ -55,7 +56,8 @@ def test_closeout_apply_requires_journaled_explicit_approval(tmp_path: Path) -> 
             closeout_worktree_args(
                 contract,
                 operation_progress=recorder,
-            )
+            ),
+            contract,
         )
 
     assert head_commit(contract.code_worktree) == before_head

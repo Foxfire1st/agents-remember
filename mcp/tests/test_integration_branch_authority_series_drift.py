@@ -8,8 +8,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
-from agents_remember.worktrees.integration import lifecycle_operations
-from agents_remember.worktrees.integration.lifecycle_operation_store import operation_record_path
+from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    operation_record_path,
+)
 from agents_remember.worktrees.worktree_contract import write_contract
 from integration_branch_authority_test_support import (
     _acquire_atomic_blocker,
@@ -46,6 +48,7 @@ class IntegrationBranchAuthoritySeriesDriftTests(unittest.TestCase):
                         contractPath=series.contract_path.as_posix(),
                         strategy="replay",
                     ),
+                    series,
                     launcher=lambda *_: None,
                 )
             self.assertFalse(record_path.exists())

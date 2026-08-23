@@ -12,7 +12,7 @@ import agents_remember.tasks.store as task_store
 from agents_remember.application.worktree_tools import FinalizeTaskDocs
 from agents_remember.mcp.tools.lifecycle_finalize import lifecycle_finalize_task_payload
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
-from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.tasks import CompletionBlocker, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult

@@ -5,19 +5,22 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
 import test_organizational_completion_integration as fixture_mod
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
+from agents_remember.models.lifecycles.operation import IntegrationQualityCertification
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.integration import lifecycle_operations
+from agents_remember.worktrees.integration import integration_claim_transfer as claim_transfer_mod
 from agents_remember.worktrees.integration import organizational_completion as completion
 from agents_remember.worktrees.integration import (
     organizational_completion_integration as integration,
 )
 from agents_remember.worktrees.queue.closeout_queue_lifecycle import contract_queue_binding
+from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
 from agents_remember.worktrees.worktree_contract import write_contract
 from test_closeout_queue import LEAF_A, NOW, SPRINT
 from test_worktree_support import git
@@ -42,7 +45,7 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
         assert binding is not None
         topology = TaskDocumentTopology(contract.coordination_root)
         graph = integration._graph_context(topology, binding.sprint_ref)
-        initial = integration._initial_state(binding.sprint_ref, graph.revision, NOW)
+        initial = initial_queue_state(binding.sprint_ref, graph.revision, NOW)
         state = CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).read(initial)
         candidate = state.candidates[binding.candidate_ref.key]
         master = graph.masters[candidate.owningMaster]
@@ -168,18 +171,33 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
             completion.organizational_completion_plan(context, contract=final)
         first.contract_path.write_bytes(original_contract)
 
+        certification = cast(
+            IntegrationQualityCertification,
+            SimpleNamespace(
+                completionFingerprint=plan.fingerprint,
+                resultSha256="1" * 64,
+            ),
+        )
         with self.assertRaisesRegex(completion.OrganizationalCompletionError, "certificate"):
-            completion.publish_organizational_master_completion(
+            completion.prepare_organizational_master_completion(
                 plan,
-                certified_fingerprint="0" * 64,
+                certification=cast(
+                    IntegrationQualityCertification,
+                    SimpleNamespace(
+                        completionFingerprint="0" * 64,
+                        resultSha256="1" * 64,
+                    ),
+                ),
+                completed_at=NOW,
             )
 
         changed = plan.master_document.model_copy(update={"objective": "raced edit"})
         write_task_doc(plan.master_path.parent, changed)
         with self.assertRaisesRegex(completion.OrganizationalCompletionError, "changed before"):
-            completion.publish_organizational_master_completion(
+            completion.prepare_organizational_master_completion(
                 plan,
-                certified_fingerprint=plan.fingerprint,
+                certification=certification,
+                completed_at=NOW,
             )
 
         blocked_rows = [
@@ -189,9 +207,10 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
         blocked_plan = replace(plan, master_document=blocked)
         write_task_doc(plan.master_path.parent, blocked)
         with self.assertRaisesRegex(completion.OrganizationalCompletionError, "regained"):
-            completion.publish_organizational_master_completion(
+            completion.prepare_organizational_master_completion(
                 blocked_plan,
-                certified_fingerprint=blocked_plan.fingerprint,
+                certification=certification,
+                completed_at=NOW,
             )
 
         with self.assertRaisesRegex(completion.OrganizationalCompletionError, "not durably"):
@@ -347,15 +366,11 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
     def test_under_authority_master_drift_returns_structured_no_ref_failure(self) -> None:
         contract = self.owner._certified_contract(final=True)
         _store, runtime, record = self.owner._integration_runtime(contract)
-        code_before = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
         assert contract.memory_repo_path is not None
-        memory_before = git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch)
         contract_before = contract.contract_path.read_bytes()
-        real_publisher = (
-            fixture_mod.integrate_mod.publish_queue_candidate_integration_result_under_authority
-        )
+        real_transfer = claim_transfer_mod.transfer_integration_claim
 
-        def race_master_before_queue_authority(*args, **kwargs):
+        def race_master_after_journal_intent(*args, **kwargs):
             master_path = self.fixture.tasks / "master-a" / "task.json"
             master = read_task_doc(master_path)
             payload = master.model_dump(mode="json", by_alias=True)
@@ -371,7 +386,7 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
                 master_path.parent,
                 type(master).model_validate(payload),
             )
-            return real_publisher(*args, **kwargs)
+            return real_transfer(*args, **kwargs)
 
         with (
             mock.patch.object(
@@ -380,43 +395,41 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
                 return_value=fixture_mod._full_gate(contract),
             ) as full_gate,
             mock.patch.object(
-                fixture_mod.integrate_mod,
-                "publish_queue_candidate_integration_result_under_authority",
-                side_effect=race_master_before_queue_authority,
+                claim_transfer_mod,
+                "transfer_integration_claim",
+                side_effect=race_master_after_journal_intent,
             ),
         ):
             refused = fixture_mod.integrate_mod.integrate_result(
-                self.owner._args(contract, runtime, record)
+                self.owner._args(contract, runtime, record),
+                contract,
             )
 
         assert refused.returncode == 2
-        assert refused.payload["state"] == "organizational-completion-gate-failed"
+        assert refused.payload["state"] == "organizational-completion-publication-conflict"
+        assert refused.payload["developerDecisionRequired"] is True
+        assert refused.payload["nextAction"] == "developer-decision"
         full_gate.assert_called_once()
-        assert self.owner._candidate_projection(LEAF_A)["candidateState"] == (
-            "integration-in-flight"
-        )
+        with self.assertRaises(StopIteration):
+            self.owner._candidate_projection(LEAF_A)
         self.assertEqual(contract.contract_path.read_bytes(), contract_before)
         self.assertEqual(
             git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
-            code_before,
+            contract.code_base_commit,
         )
         self.assertEqual(
             git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-            memory_before,
+            contract.memory_base_commit,
         )
 
     def _assert_completion_scope_drift(self, *, initially_final: bool) -> None:
         contract = self.owner._certified_contract(final=initially_final)
-        store, runtime, record = self.owner._integration_runtime(contract)
-        code_before = git(contract.code_repo_path, "rev-parse", contract.code_source_branch)
+        _store, runtime, record = self.owner._integration_runtime(contract)
         assert contract.memory_repo_path is not None
-        memory_before = git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch)
         contract_before = contract.contract_path.read_bytes()
-        real_publisher = (
-            fixture_mod.integrate_mod.publish_queue_candidate_integration_result_under_authority
-        )
+        real_transfer = claim_transfer_mod.transfer_integration_claim
 
-        def race_finality_before_queue_authority(*args, **kwargs):
+        def race_finality_after_journal_intent(*args, **kwargs):
             master_path = self.fixture.tasks / "master-a" / "task.json"
             if initially_final:
                 master = read_task_doc(master_path)
@@ -424,7 +437,7 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
                 write_task_doc(master_path.parent, master.model_copy(update={"subTasks": rows}))
             else:
                 self.owner._mark_master_work_complete()
-            return real_publisher(*args, **kwargs)
+            return real_transfer(*args, **kwargs)
 
         with (
             mock.patch.object(
@@ -433,39 +446,33 @@ class OrganizationalCompletionBranchTests(unittest.TestCase):
                 return_value=fixture_mod._full_gate(contract),
             ) as full_gate,
             mock.patch.object(
-                fixture_mod.integrate_mod,
-                "publish_queue_candidate_integration_result_under_authority",
-                side_effect=race_finality_before_queue_authority,
+                claim_transfer_mod,
+                "transfer_integration_claim",
+                side_effect=race_finality_after_journal_intent,
             ),
         ):
             refused = fixture_mod.integrate_mod.integrate_result(
-                self.owner._args(contract, runtime, record)
+                self.owner._args(contract, runtime, record),
+                contract,
             )
 
-        assert refused.returncode == 2
-        assert refused.payload["state"] == "organizational-completion-scope-changed"
-        assert refused.payload["developer_decision_required"] is False
-        self.assertEqual(full_gate.call_count, 1 if initially_final else 0)
-        assert self.owner._candidate_projection(LEAF_A)["candidateState"] == (
-            "integration-in-flight"
+        assert refused.returncode == (2 if initially_final else 0)
+        assert refused.payload["state"] == (
+            "organizational-completion-publication-conflict" if initially_final else "integrated"
         )
-        self.assertEqual(contract.contract_path.read_bytes(), contract_before)
+        self.assertEqual(full_gate.call_count, 1 if initially_final else 0)
+        with self.assertRaises(StopIteration):
+            self.owner._candidate_projection(LEAF_A)
+        comparison = self.assertEqual if initially_final else self.assertNotEqual
+        comparison(contract.contract_path.read_bytes(), contract_before)
         self.assertEqual(
             git(contract.code_repo_path, "rev-parse", contract.code_source_branch),
-            code_before,
+            contract.code_base_commit if initially_final else contract.code_commit,
         )
         self.assertEqual(
             git(contract.memory_repo_path, "rev-parse", contract.memory_source_branch),
-            memory_before,
+            contract.memory_base_commit if initially_final else contract.ledger_commit,
         )
-        runtime.finish(refused.payload, ok=False)
-        failed = store.read()
-        assert failed is not None and failed.status == "failed"
-        retry = lifecycle_operations.start_or_observe_operation(
-            record.input,
-            launcher=lambda _contract, _record: None,
-        )
-        assert retry.status == "queued"
 
     def test_final_preflight_refuses_locked_nonfinal_scope(self) -> None:
         self._assert_completion_scope_drift(initially_final=True)

@@ -43,7 +43,7 @@ from agents_remember.worktrees.modules.onboarding import (
     refresh_route_overview_metadata_for_context,
     route_overview_metadata_refresh_plan_for_context,
 )
-from agents_remember.worktrees.modules.start_contract import _parent_series_contract
+from agents_remember.worktrees.modules.startup.start_contract import _parent_series_contract
 from agents_remember.worktrees.task_resolver import (
     archive_completed_root_task,
     series_contract_path,

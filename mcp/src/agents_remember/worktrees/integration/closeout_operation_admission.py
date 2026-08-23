@@ -27,11 +27,11 @@ from agents_remember.worktrees.closeout_input import (
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     closeout_generation_retained,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_candidate import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
     LifecycleOperationCandidate,
     lifecycle_operation_candidate,
 )
-from agents_remember.worktrees.integration.lifecycle_operation_identity import (
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
@@ -149,7 +149,14 @@ def _validate_existing_closeout_request(
             "conflicting closeout intent targets an existing accepted generation; "
             "observe or recover it with the exact accepted input"
         )
-    if retained:
+    door_publication = current.doorPublication
+    door_state_is_accepted = bool(
+        door_publication is not None
+        and door_publication.state == "proven"
+        and closeout_contract_sha256(contract) == door_publication.expectedPublishedContractSha256
+        and contract.closeout_door == door_publication.generation
+    )
+    if retained or door_state_is_accepted:
         _require_recovery_identity(contract, current)
         return operation_input, LifecycleOperationCandidate(
             current.candidateState,
@@ -213,10 +220,12 @@ def _require_recovery_identity(
     current: LifecycleOperationRecord,
 ) -> None:
     contract_state = closeout_contract_sha256(contract)
-    if contract_state != current.candidateState and (
-        current.closeoutFinalizedContractSha256 is None
-        or contract_state != current.closeoutFinalizedContractSha256
-    ):
+    accepted_states = {current.candidateState}
+    if current.closeoutFinalizedContractSha256 is not None:
+        accepted_states.add(current.closeoutFinalizedContractSha256)
+    if current.doorPublication is not None:
+        accepted_states.add(current.doorPublication.expectedPublishedContractSha256)
+    if contract_state not in accepted_states:
         raise RuntimeError(
             "closeout contract identity changed outside the accepted generation's proven output"
         )
