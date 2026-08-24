@@ -43,9 +43,14 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     load_contract,
     write_contract,
+)
+from lifecycle_enclosure_test_support import (
+    publish_test_enclosure,
+    terminalize_test_enclosure,
 )
 from test_worktree_support import git, init_repo
 
@@ -88,6 +93,11 @@ def _completed_leaf_contract(workspace: Path):
         cleanup="completed",
     )
     write_contract(contract.contract_path, contract)
+    location = publish_test_enclosure(
+        contract,
+        contract.contract_path.read_text(encoding="utf-8"),
+    )
+    terminalize_test_enclosure(location)
     return contract
 
 
@@ -777,9 +787,11 @@ class StartAfterReopenTests(unittest.TestCase):
             result = start_result_module.started_result(
                 contract,
                 WorktreeArgs(),
-                "created",
-                {"state": "disabled"},
-                {"state": "starting", "progressFile": "/tmp/provider-progress.json"},
+                start_result_module.StartedWorktreeState(
+                    "created",
+                    {"state": "disabled"},
+                    {"state": "starting", "progressFile": "/tmp/provider-progress.json"},
+                ),
             )
 
             self.assertEqual(result.payload["state"], "started")
@@ -792,9 +804,11 @@ class StartAfterReopenTests(unittest.TestCase):
             result = start_result_module.started_result(
                 contract,
                 WorktreeArgs(dry_run=True, parent_task="parent-task"),
-                "would-create",
-                {"state": "disabled"},
-                {"state": "skipped"},
+                start_result_module.StartedWorktreeState(
+                    "would-create",
+                    {"state": "disabled"},
+                    {"state": "skipped"},
+                ),
             )
 
             self.assertEqual(result.payload["state"], "would-start")
@@ -815,9 +829,11 @@ class StartAfterReopenTests(unittest.TestCase):
             result = start_result_module.started_result(
                 planned_parent,
                 WorktreeArgs(dry_run=True, source_branch="protected"),
-                "would-create",
-                {"state": "disabled"},
-                {"state": "skipped"},
+                start_result_module.StartedWorktreeState(
+                    "would-create",
+                    {"state": "disabled"},
+                    {"state": "skipped"},
+                ),
             )
 
             next_args = cast("dict[str, object]", result.payload["nextArgs"])
@@ -876,8 +892,12 @@ class StartAfterReopenTests(unittest.TestCase):
                     ) as publish_branch,
                     mock.patch.object(
                         start_module,
-                        "publish_new_lifecycle_operation_location",
-                    ) as publish_contract,
+                        "reserve_new_lifecycle_operation_location",
+                    ) as reserve_contract,
+                    mock.patch.object(
+                        start_module,
+                        "resume_new_lifecycle_operation_location",
+                    ) as resume_contract,
                     mock.patch.object(start_module, "ensure_worktree") as ensure_worktree,
                     mock.patch.object(start_module, "prepare_memory_for_start") as prepare_memory,
                     mock.patch.object(start_module, "plan_providers_for_start") as plan_providers,
@@ -886,7 +906,7 @@ class StartAfterReopenTests(unittest.TestCase):
                     ) as launch_providers,
                     mock.patch.object(start_module, "_record_start_progress") as start_progress,
                     mock.patch.object(
-                        start_module, "restamp_leaf_doc_lifecycle"
+                        start_module, "plan_leaf_doc_lifecycle_restamp"
                     ) as persist_restamp,
                 ):
                     result = worktree_manager.start_result(
@@ -935,7 +955,8 @@ class StartAfterReopenTests(unittest.TestCase):
                 self.assertFalse(series_contract_path(task_root).exists())
                 self.assertFalse(contract.code_worktree.exists())
                 publish_branch.assert_not_called()
-                publish_contract.assert_not_called()
+                reserve_contract.assert_not_called()
+                resume_contract.assert_not_called()
                 ensure_worktree.assert_not_called()
                 prepare_memory.assert_not_called()
                 plan_providers.assert_not_called()
@@ -976,6 +997,12 @@ class StartAfterReopenTests(unittest.TestCase):
                     base_commit=base_commit,
                 ),
             )
+            terminal_source = replace(contract, cleanup="completed")
+            location = publish_test_enclosure(
+                terminal_source,
+                contract_publication_text(terminal_source.contract_path, terminal_source),
+            )
+            terminalize_test_enclosure(location)
             contract = replace(contract, cleanup="reopened")
             write_contract(contract.contract_path, contract)
 

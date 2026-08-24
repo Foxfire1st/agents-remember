@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -27,12 +26,7 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     worktree_dirty,
 )
-from agents_remember.worktrees.queue.closeout_queue import (
-    CloseoutQueueError,
-    _graph_context,
-    now_iso,
-)
-from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
@@ -48,18 +42,21 @@ class _AtomicLandingFacts:
 
 
 def publish_closeout_under_authority(contract: WorktreeContract, publication: Callable[[], T]) -> T:
-    """Hold the exact task/ref authority through closeout contract publication."""
+    """Re-prove atomic completion before closeout publication.
+
+    Closeout does not move a protected integration ref, so it must not acquire
+    the landing-only integration authority lock.
+    """
 
     if contract.kind == "leaf":
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            return publication()
+        return publication()
     if contract.kind != "series":
         raise RuntimeError("atomic series closeout authority requires a series contract")
-    return _publish_atomic_series_edge(
-        contract,
-        publication,
-        edge="closeout",
-    )
+    topology = TaskDocumentTopology(contract.coordination_root)
+    master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
+    _require_atomic_master_complete(topology, master_ref)
+    _require_every_atomic_leaf_landed(contract)
+    return publication()
 
 
 def publish_series_integration_under_authority(
@@ -70,68 +67,16 @@ def publish_series_integration_under_authority(
 
     if contract.kind != "series":
         raise RuntimeError("atomic series integration authority requires a series contract")
-    return _publish_atomic_series_edge(
-        contract,
-        publication,
-        edge="integration",
-    )
-
-
-def _publish_atomic_series_edge(
-    contract: WorktreeContract,
-    publication: Callable[[], T],
-    *,
-    edge: str,
-) -> T:
     topology = TaskDocumentTopology(contract.coordination_root)
     master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
     _require_atomic_master_complete(topology, master_ref)
-    sprint_ref = topology.parent(master_ref)
-
-    def repository_publication() -> T:
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            _require_atomic_master_complete(topology, master_ref)
-            _require_every_atomic_leaf_landed(contract)
-            return publication()
-
-    if sprint_ref is None:
-        return repository_publication()
-    sprint = topology.resolve(sprint_ref)
-    if sprint.document.executionGraph is None:
-        # Atomic-sequential default (L13-R1): no queue graph exists; the master
-        # already owns the sequential lane through its live series contract.
-        return repository_publication()
-    graph = _graph_context(topology, sprint_ref)
-    initial = initial_queue_state(sprint_ref, graph.revision, now_iso())
-
-    def validate_and_publish(state):
-        current_graph = _graph_context(topology, sprint_ref)
-        if current_graph.revision != graph.revision:
-            raise CloseoutQueueError(
-                f"atomic-series-{edge}-graph-moved",
-                f"atomic master {edge} graph changed before protected publication",
-            )
-        blocker = state.activeBlocker
-        if blocker is None or blocker.master != master_ref:
-            raise CloseoutQueueError(
-                f"atomic-series-{edge}-blocker-required",
-                f"atomic master {edge} requires its exact active sprint landing blocker",
-            )
-        candidates = [
-            candidate.taskDocumentRef.key
-            for candidate in state.candidates.values()
-            if candidate.owningMaster == master_ref
-        ]
-        if candidates:
-            raise CloseoutQueueError(
-                f"atomic-series-{edge}-candidates-remain",
-                f"atomic master {edge} requires every own leaf landing: {candidates!r}",
-            )
-        return repository_publication()
-
-    return CloseoutQueueStore(contract.coordination_root, sprint_ref).inspect(
-        initial, validate_and_publish
-    )
+    with integration_authority_lock(contract.coordination_root, contract.repo_name):
+        current = load_contract(contract.contract_path)
+        if current != contract:
+            raise RuntimeError("atomic series contract changed before protected landing")
+        _require_atomic_master_complete(topology, master_ref)
+        _require_every_atomic_leaf_landed(current)
+        return publication()
 
 
 def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:
@@ -313,8 +258,9 @@ def _atomic_leaf_code_matches(
 ) -> bool:
     code_commit = leaf.integrated_code_commit
     parent_path = leaf.parent_contract_path.resolve() if leaf.parent_contract_path else None
-    queue_sprint = facts.sprint_ref.key if facts.sprint_ref is not None else ""
-    queue_candidate = facts.leaf_ref.key if facts.sprint_ref is not None else ""
+    door = leaf.closeout_door
+    door_sprint = door.sprintTaskDocumentRef.key if door is not None else ""
+    door_candidate = door.taskDocumentRef.key if door is not None else ""
     found = (
         leaf.repo_name,
         leaf.coordination_root.resolve(),
@@ -322,8 +268,8 @@ def _atomic_leaf_code_matches(
         leaf.contract_path.resolve(),
         parent_path,
         leaf.memory_mode,
-        leaf.queue_candidate_task_document,
-        leaf.queue_sprint_task_document,
+        door_candidate,
+        door_sprint,
         leaf.integration_status,
         leaf.code_source_branch,
         code_commit,
@@ -335,8 +281,8 @@ def _atomic_leaf_code_matches(
         leaf_enclosure_path(series.task_root, leaf.leaf_id).resolve(),
         series.contract_path.resolve(),
         series.memory_mode,
-        queue_candidate,
-        queue_sprint,
+        facts.leaf_ref.key if facts.sprint_ref is not None else "",
+        facts.sprint_ref.key if facts.sprint_ref is not None else "",
         "completed",
         series.code_work_branch,
         leaf.code_commit,

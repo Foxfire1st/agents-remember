@@ -127,7 +127,8 @@ def run_integration_quality_gate(
     Ordinary leaf integration consumes its targeted closeout certification. A final
     organizational leaf and an atomic series use a detached checkout of the exact commit.
     Only the organizational result is persisted for crash-safe reuse because its gate and
-    logical-master publication occur inside the queue-owned leaf transaction.
+    logical-master publication occur inside the journal-owned organizational landing
+    transaction.
     """
 
     if contract.kind == "leaf" and completion is None:

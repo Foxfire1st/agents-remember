@@ -9,6 +9,7 @@ from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
     DirectLandingOperationInput,
 )
+from agents_remember.models.lifecycles.door import DoorPublicationEvidence
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationEvidence,
@@ -19,6 +20,9 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     derive_closeout_recovery_commits,
+)
+from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
+    classify_direct_landing_recovery,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
     LifecycleOperationCandidate,
@@ -165,8 +169,9 @@ def direct_landing_record(
     contract: WorktreeContract,
     operation_input: DirectLandingOperationInput,
     candidate: LifecycleOperationCandidate,
+    door_publication: DoorPublicationEvidence | None,
 ) -> LifecycleOperationRecord:
-    """Create the initial journal snapshot before either direct Git mutation."""
+    """Build a journal snapshot; callers attach the claim intent before persistence."""
 
     stamp = _stamp()
     return LifecycleOperationRecord(
@@ -189,6 +194,7 @@ def direct_landing_record(
         startedAt=stamp,
         heartbeatAt=stamp,
         currentCommand="verify direct landing durable inputs",
+        doorPublication=door_publication,
         reportPath=located_lifecycle_operation_report_path(
             contract,
             "direct-landing",
@@ -201,6 +207,7 @@ def direct_landing_record(
 
 
 def reconcile_direct_landing(
+    contract: WorktreeContract,
     store: LifecycleOperationStore,
 ) -> LifecycleOperationRecord:
     """Reconcile launched Git commands and atomically project proven commits."""
@@ -211,8 +218,6 @@ def reconcile_direct_landing(
             raise RuntimeError("direct landing operation record does not exist")
         reconciled = reconcile_closeout_mutations(current)
         recovery = derive_closeout_recovery_commits(current, mutations=reconciled)
-        if reconciled == current.mutationEvidence and recovery == current.recoveryCommits:
-            return current
         projected = current.model_copy(
             update={
                 "mutationEvidence": reconciled,
@@ -223,6 +228,21 @@ def reconcile_direct_landing(
                 ),
             }
         )
+        classification = classify_direct_landing_recovery(contract, projected)
+        if classification.mechanically_convergent and classification.memory_commit:
+            assert recovery is not None
+            reported = LifecycleOperationRecoveryCommits(
+                codeCommit=recovery.codeCommit,
+                memoryContentCommit=classification.memory_commit,
+                ledgerCommit=classification.ledger_commit,
+            )
+            recovery = derive_closeout_recovery_commits(
+                projected,
+                reported=reported,
+            )
+            projected = projected.model_copy(update={"recoveryCommits": recovery})
+        if projected == current:
+            return current
         updated, matched = store.update_if_current(
             current,
             lambda _record, projected=projected: projected,

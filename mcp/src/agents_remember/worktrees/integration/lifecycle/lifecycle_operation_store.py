@@ -18,10 +18,8 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationStatus,
 )
-from agents_remember.models.lifecycles.successor import (
-    LifecycleSuccessorPublicationIntent,
-)
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
+    closeout_generation_retained,
     require_closeout_finalization_evidence,
     require_closeout_recovery_projection,
 )
@@ -336,22 +334,7 @@ def operation_report_path(worktree_group: Path, operation_kind: LifecycleOperati
     return worktree_group / ".lifecycle" / f"{operation_kind}-operation.log"
 
 
-def successor_publication_path(operation_path: Path) -> Path:
-    """The deterministic journal WAL adjacent to one current operation record."""
-
-    return operation_path.with_name(f"{operation_path.stem}.successor-intent.json")
-
-
-class LifecycleSuccessorConflict(RuntimeError):
-    """A caller proposed a different N+1 after one successor was accepted."""
-
-    def __init__(self, intent: LifecycleSuccessorPublicationIntent, requested: str) -> None:
-        self.intent = intent
-        self.requested = requested
-        super().__init__("terminal lifecycle generation already accepted a different successor")
-
-
-JournalReadSide = Literal["current-record", "successor-intent"]
+JournalReadSide = Literal["current-record"]
 
 
 class LifecycleOperationReadError(RuntimeError):
@@ -453,47 +436,11 @@ class LifecycleOperationStore:
                 observed={"state": "invalid-schema-3", "sizeBytes": len(raw.encode("utf-8"))},
             ) from error
 
-    def read_successor_intent(self) -> LifecycleSuccessorPublicationIntent | None:
-        """Read the one transient successor WAL without mutating journal state."""
-
-        path = successor_publication_path(self.path)
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        except OSError as error:
-            raise LifecycleOperationReadError(
-                path,
-                side="successor-intent",
-                error_type=type(error).__name__,
-                expected={"state": "readable", "schemaVersion": "1.0"},
-                observed={"state": "unreadable"},
-            ) from error
-        try:
-            return LifecycleSuccessorPublicationIntent.model_validate_json(raw)
-        except ValidationError as error:
-            raise LifecycleOperationReadError(
-                path,
-                side="successor-intent",
-                error_type=type(error).__name__,
-                expected={"state": "readable", "schemaVersion": "1.0"},
-                observed={
-                    "state": "invalid-successor-intent",
-                    "sizeBytes": len(raw.encode("utf-8")),
-                },
-            ) from error
-
-    def effective_read(self) -> LifecycleOperationRecord | None:
-        """Project an accepted N+1 even while archive/current publication is incomplete."""
-
-        intent = self.read_successor_intent()
-        return intent.successor if intent is not None else self.read()
-
     def observe_current(self) -> LifecycleOperationRecord | None:
-        """Read the effective current generation under the record's sole authority lock."""
+        """Read the current generation under the record's sole authority lock."""
 
         with exclusive_access(self.path, _OWNERSHIP):
-            return self.effective_read()
+            return self.read()
 
     def update_if_current(
         self,
@@ -503,13 +450,10 @@ class LifecycleOperationStore:
         """Apply a transform only while the complete observed record remains current."""
 
         with exclusive_access(self.path, _OWNERSHIP):
-            # A successor WAL is already the effective record but cannot receive an
-            # unrelated current-record publication before its transaction completes.
-            pending = self.read_successor_intent()
-            current = pending.successor if pending is not None else self.read()
+            current = self.read()
             if current is None:
                 raise RuntimeError(f"lifecycle operation record does not exist: {self.path}")
-            if current != observed or pending is not None:
+            if current != observed:
                 return current, False
             updated = LifecycleOperationRecord.model_validate(
                 transform(current).model_dump(mode="json")
@@ -520,8 +464,7 @@ class LifecycleOperationStore:
 
     def create(self, record: LifecycleOperationRecord) -> tuple[LifecycleOperationRecord, bool]:
         with exclusive_access(self.path, _OWNERSHIP):
-            pending = self.read_successor_intent()
-            current = pending.successor if pending is not None else self.read()
+            current = self.read()
             if current is not None:
                 return current, False
             self._write(record)
@@ -565,7 +508,11 @@ class LifecycleOperationStore:
                 raise RuntimeError("lifecycle operation resume must increment attempt exactly once")
             expected_status = "running" if current.operationKind == "direct-landing" else "queued"
             expected_phase = (
-                "direct-preflight" if current.operationKind == "direct-landing" else "queued"
+                "direct-preflight"
+                if current.operationKind == "direct-landing"
+                else "recovering-after-claim"
+                if closeout_generation_retained(current)
+                else "queued"
             )
             if updated.status != expected_status or updated.phase != expected_phase:
                 raise RuntimeError(
@@ -580,23 +527,9 @@ class LifecycleOperationStore:
             return updated, True
 
     def replace_terminal(self, candidate: LifecycleOperationRecord) -> LifecycleOperationRecord:
-        """Accept N+1 in a WAL, then publish archive/current and retire the WAL."""
+        """Archive one exact terminal predecessor, then atomically publish N+1."""
         with exclusive_access(self.path, _OWNERSHIP):
             current = self.read()
-            pending = self.read_successor_intent()
-            if pending is not None:
-                stale_predecessor_request = (
-                    candidate.predecessorFingerprint == pending.predecessor.fingerprint
-                )
-                if current == pending.successor and not stale_predecessor_request:
-                    self._archive_generation(pending.predecessor)
-                    self._retire_successor_intent()
-                    current = pending.successor
-                    pending = None
-                elif pending.successor.fingerprint != candidate.fingerprint:
-                    raise LifecycleSuccessorConflict(pending, candidate.fingerprint)
-                else:
-                    return self._complete_successor_publication(pending, current)
             if (
                 current is not None
                 and current.fingerprint == candidate.fingerprint
@@ -629,58 +562,9 @@ class LifecycleOperationStore:
                     update={"successorFingerprint": validated.fingerprint}
                 ).model_dump(mode="json")
             )
-            intent = LifecycleSuccessorPublicationIntent(
-                predecessor=predecessor,
-                successor=validated,
-            )
-            self._write_successor_intent(intent)
-            return self._complete_successor_publication(intent, current)
-
-    def complete_successor_publication(self) -> LifecycleOperationRecord:
-        """Resume the exact accepted successor without caller-supplied input."""
-
-        with exclusive_access(self.path, _OWNERSHIP):
-            intent = self.read_successor_intent()
-            if intent is None:
-                current = self.read()
-                if current is None:
-                    raise RuntimeError("lifecycle successor publication does not exist")
-                return current
-            return self._complete_successor_publication(intent, self.read())
-
-    def _complete_successor_publication(
-        self,
-        intent: LifecycleSuccessorPublicationIntent,
-        current: LifecycleOperationRecord | None,
-    ) -> LifecycleOperationRecord:
-        predecessor_without_link = intent.predecessor.model_copy(
-            update={"successorFingerprint": ""}
-        )
-        if current not in (predecessor_without_link, intent.predecessor, intent.successor):
-            raise RuntimeError(
-                "current lifecycle record contradicts the accepted successor publication"
-            )
-        self._archive_generation(intent.predecessor)
-        if current != intent.successor:
-            self._write(intent.successor)
-        self._retire_successor_intent()
-        return intent.successor
-
-    def _write_successor_intent(self, intent: LifecycleSuccessorPublicationIntent) -> None:
-        path = successor_publication_path(self.path)
-        payload = intent.model_dump_json(indent=2, exclude_none=True) + "\n"
-        if path.exists():
-            if path.read_text(encoding="utf-8") != payload:
-                raise RuntimeError("lifecycle successor intent contradicts accepted N+1")
-            return
-        atomic_write_text(path, payload)
-
-    def _retire_successor_intent(self) -> None:
-        path = successor_publication_path(self.path)
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            return
+            self._archive_generation(predecessor)
+            self._write(validated)
+            return validated
 
     def _archive_generation(self, record: LifecycleOperationRecord) -> None:
         archive = self.path.with_name(f"{self.path.stem}.generation-{record.generation}.json")

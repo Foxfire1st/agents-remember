@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-import test_organizational_completion_integration as fixture_mod
+import organizational_completion_test_support as fixture_mod
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.worktrees.integration import integration_quality as quality
 from agents_remember.worktrees.integration import integration_ref_transaction as ref_transaction
@@ -24,9 +24,7 @@ from agents_remember.worktrees.series_closeout import atomic_series_ledger_prefi
 
 class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.owner = fixture_mod.OrganizationalCompletionIntegrationTests(
-            "test_nonfinal_leaf_reuses_targeted_closeout_without_full_gate"
-        )
+        self.owner = fixture_mod.OrganizationalCompletionFixture()
         self.owner.setUp()
 
     def tearDown(self) -> None:

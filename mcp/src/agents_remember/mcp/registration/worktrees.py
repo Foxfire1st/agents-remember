@@ -51,8 +51,11 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         retry_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Create or load a task contract plus code (and external-memory) git worktrees. Mutating:
-        creates branches/worktrees on disk. Preview with dry_run=true. Driven by the
+        """Create or load a task contract plus code (and external-memory) git worktrees. Publishes
+        one exact address-only locator, immutable enclosure-root manifest, and initial contract
+        generation before the checkout is exposed; exact crash retries converge and conflicting
+        reservations refuse. Mutating: creates branches/worktrees on disk. Preview with
+        dry_run=true. Driven by the
         c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
         memory_mode is 'internal', 'external', or 'disabled'.
 
@@ -141,7 +144,9 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         *,
         on_unsaved: str | None = None,
     ) -> dict[str, Any]:
-        """Re-attach to an existing task contract without mutating git, resuming its lifecycle.
+        """Re-attach to an existing task contract without mutating git, resuming its lifecycle
+        through the strict contract-addressed locator -> enclosure-root manifest chain. Normal
+        attach never scans task/worktree paths, infers a root, or uses reports as authority.
         Read-only; resume a task by task_name or contract_path. If an unsaved fleeting lifecycle is
         active, on_unsaved='save' (promote) or 'discard' (abandon) resolves the save gate."""
         return worktree_attach_payload(
@@ -170,7 +175,10 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         parent_task: str | None = None,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Report a task's worktree lifecycle phase, dirty flags, and next-step hints. Read-only.
+        """Resolve the exact independent locator and enclosure-root manifest/journal, then report a
+        task's operation generation, lifecycle phase, dirty flags, source freshness, and executable
+        next-step hints. Queue presence is neither required nor operation authority. A missing,
+        unreadable, or mismatched address chain refuses without scanning or inference. Read-only.
         While background provider setup runs, the providers block carries the live phase,
         heartbeat age, and seedFallback; terminal states are ok / ready-with-failed-phases /
         failed (stale = setup thread died; retry via worktree_start retry_provider_setup)."""

@@ -11,22 +11,46 @@ from pathlib import Path
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocation,
+    lifecycle_operation_locator_path,
     located_lifecycle_operation_store,
-    require_matching_lifecycle_operation_location,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _ACTIVE = frozenset({"queued", "running", "input-required", "termination-required"})
 
 
+class LifecycleOperationCompatibilityError(RuntimeError):
+    """A terminal mutation observed another operation that still owns authority."""
+
+    def __init__(
+        self,
+        *,
+        operation: str,
+        blockers: list[LifecycleOperationKind],
+    ) -> None:
+        self.operation = operation
+        self.blockers = tuple(blockers)
+        super().__init__(
+            f"{operation} cannot proceed while task lifecycle operation(s) are active: "
+            f"{', '.join(blockers)}"
+        )
+
+
 def _lease_path(
     contract: WorktreeContract,
     location: LifecycleOperationLocation | None,
 ) -> Path:
-    identity = contract.contract_path.resolve().as_posix()
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
-    current_location = location or require_matching_lifecycle_operation_location(contract)
-    return current_location.lifecycle_directory / f"lifecycle-{digest}.lock"
+    """Return a transient lock outside the enclosure that terminal cleanup may delete."""
+
+    identity = contract.contract_path.resolve(strict=False).as_posix()
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    locator = lifecycle_operation_locator_path(
+        contract.coordination_root,
+        contract.contract_path,
+    )
+    if location is not None and location.locator_path != locator:
+        raise RuntimeError("lifecycle lease location disagrees with the stable locator address")
+    return locator.parent / "locks" / f"{digest}.lock"
 
 
 def _active_operation_kinds(
@@ -45,7 +69,7 @@ def _active_operation_kinds(
         if kind == exclude:
             continue
         store = located_lifecycle_operation_store(contract, kind)
-        record = reconcile_worker_exit(store) if publish_worker_exits else store.effective_read()
+        record = reconcile_worker_exit(store) if publish_worker_exits else store.read()
         if record is not None and not publish_worker_exits:
             record = project_worker_exit(record)
         if record is not None and (
@@ -96,9 +120,9 @@ def require_lifecycle_operation_compatible(
     blockers = [kind for kind in active if kind != operation_kind]
     if blockers:
         label = "terminal mutation" if operation_kind is None else operation_kind
-        raise RuntimeError(
-            f"{label} cannot proceed while task lifecycle operation(s) are active: "
-            f"{', '.join(blockers)}"
+        raise LifecycleOperationCompatibilityError(
+            operation=label,
+            blockers=blockers,
         )
 
 

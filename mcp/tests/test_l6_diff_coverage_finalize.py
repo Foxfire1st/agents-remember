@@ -171,7 +171,8 @@ class TestAssertAndRead:
         with pytest.raises(FinalizeTaskDocumentError, match="not a master"):
             finalize._read_parent(path)
         path.write_text(_master().model_dump_json(), encoding="utf-8")
-        assert finalize._read_parent(path).kind == "master"
+        parent, _source = finalize._read_parent(path)
+        assert parent.kind == "master"
 
     def test_exact_parent_row(self) -> None:
         parent = _master()
@@ -210,11 +211,12 @@ class TestAssertAndRead:
 
 class TestReconcileAndCandidates:
     def test_reconcile_skips(self) -> None:
-        updates = finalize._reconcile_task_documents(
+        updates, effects = finalize._reconcile_task_documents(
             _contract(Path("/root")), FinalizeTaskTargets(), dry_run=True
         )
         assert updates["leaf"]["state"] == "skipped"
         assert updates["parent"]["state"] == "skipped"
+        assert effects == []
 
     def test_reconcile_missing_candidates(self, tmp_path: Path) -> None:
         leaf = _doc()
@@ -248,16 +250,20 @@ class TestReconcileAndCandidates:
         with (
             mock.patch.object(
                 finalize,
-                "publish_queue_bound_task_facts",
-                side_effect=lambda _contract, publication, **_kwargs: publication(),
+                "publish_contract_task_facts",
+                side_effect=lambda _contract, publication, **_kwargs: (
+                    publication(),
+                    SimpleNamespace(projection_effects=[]),
+                )[1],
             ),
             mock.patch.object(finalize, "write_task_docs", return_value=[]),
         ):
-            updates = finalize._reconcile_task_documents(
+            updates, effects = finalize._reconcile_task_documents(
                 _contract(tmp_path), targets, dry_run=False
             )
         assert updates["leaf"]["state"] == "updated"
         assert updates["parent"]["subtaskNumber"] == "L1"
+        assert effects == []
 
     def test_candidates(self) -> None:
         leaf = _doc(status="inProgress")

@@ -6,7 +6,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -196,7 +195,7 @@ class SourceLineageTests(unittest.TestCase):
             self.assertFalse(contract.memory_worktree.exists())
             self.assertEqual(contract.contract_path.read_bytes(), contract_before)
 
-    def test_start_rechecks_exact_source_tips_inside_repository_authority(self) -> None:
+    def test_start_rechecks_exact_source_tips_before_start_effects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _organizational_fixture(Path(tmp), external_memory=True)
             contract = fixture.leaf_contract
@@ -214,13 +213,9 @@ class SourceLineageTests(unittest.TestCase):
                 contract,
             )
 
-            @contextmanager
-            def raced_authority(*_args):
-                _commit_on(fixture.code_repo, "super", "raced-super.txt")
-                yield
+            _commit_on(fixture.code_repo, "super", "raced-super.txt")
 
             with (
-                mock.patch.object(start_module, "integration_authority_lock", raced_authority),
                 mock.patch.object(start_module, "_record_start_progress"),
                 mock.patch.object(start_module, "_record_start_block"),
                 mock.patch.object(start_module, "ensure_worktree") as ensure,

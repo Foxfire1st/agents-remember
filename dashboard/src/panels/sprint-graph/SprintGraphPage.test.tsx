@@ -31,13 +31,18 @@ function queue(over: Partial<CloseoutQueueNode> = {}): CloseoutQueueNode {
   return {
     sprintRef: SPRINT_REF,
     revision: 3,
-    graphRevision: "ab".repeat(32),
-    candidates: [
+    serviceCondition: "valid-built",
+    sourceClassification: "active",
+    sourceFingerprint: "ab".repeat(32),
+    sourceProblems: [],
+    members: [
       {
+        generationId: "cd".repeat(32),
         taskDocumentRef: { repository: "repo-a", path: "master-a/leaf-a.json" },
         owningMaster: { repository: "repo-a", path: "master-a/task.json" },
-        candidateState: "declared",
-        gradePriority: "high",
+        classification: "ready",
+        priority: "high",
+        order: 0,
         reasons: [],
       },
     ],
@@ -69,7 +74,7 @@ describe("sprint page shell (L12-R5)", () => {
     expect(screen.getByText("Wave 1")).toBeTruthy();
     // the CloseoutQueue panel is mounted here, scoped to this sprint, with its revision meta
     expect(screen.getByTestId("closeout-queue")).toBeTruthy();
-    expect(screen.getByText("rev 3 · graph abababab")).toBeTruthy();
+    expect(screen.getByText("rev 3 · valid-built · active")).toBeTruthy();
   });
 
   it("scopes the queue to the viewed sprint when another sprint has a queue", () => {
@@ -95,7 +100,26 @@ describe("sprint page shell (L12-R5)", () => {
     render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
 
     expect(screen.getByTestId("closeout-queue")).toBeTruthy();
-    expect(screen.getByText("rev 3 · graph abababab")).toBeTruthy();
-    expect(screen.queryByText("rev 9 · graph abababab")).toBeNull();
+    expect(screen.getByText("rev 3 · valid-built · active")).toBeTruthy();
+    expect(screen.queryByText("rev 9 · valid-built · active")).toBeNull();
+  });
+
+  it("keeps a graphless atomic-sequential sprint queue reachable", () => {
+    const sprint = taskDoc({
+      id: "SPRINT",
+      kind: "master",
+      title: "Graphless sprint",
+      orchestrates: ["master-a"],
+      docPath: "/tasks/repo-a/sprint/task.json",
+      executionGraphView: undefined,
+    });
+    seedTaskDocuments([sprint]);
+    dashboardStore.setState({ closeoutQueues: [queue()] });
+
+    render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
+
+    expect(screen.queryByTestId("sprint-graph")).toBeNull();
+    expect(screen.getByTestId("closeout-queue")).toBeTruthy();
+    expect(screen.getByText("rev 3 · valid-built · active")).toBeTruthy();
   });
 });

@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
+from agents_remember.controlplane.task_publication_lock import task_publication_lock
+from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.closeout_input import (
     CloseoutCorrectedCall,
     CloseoutMessageInput,
 )
+from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
-from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
     LifecycleOperationKind,
@@ -27,12 +29,12 @@ from agents_remember.worktrees.closeout_input import (
 )
 from agents_remember.worktrees.integration.closeout_door import (
     DoorPublicationClassification,
-    DoorPublicationError,
     classify_door_publication,
-    door_generation_for_operation,
     prepare_door_publication,
-    publish_door_intent,
     successor_waiting_door,
+)
+from agents_remember.worktrees.integration.closeout_door_source import (
+    superseding_door_generation,
 )
 from agents_remember.worktrees.integration.closeout_ledger_recovery import (
     classify_closeout_ledger_recovery,
@@ -61,6 +63,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_completed_disposi
 from agents_remember.worktrees.integration.lifecycle.lifecycle_generation_resume import (
     requeued_same_generation,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
+    fingerprint_payload,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
@@ -71,8 +76,12 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
     LifecycleControlProjectionContext,
     generation_requires_recovery,
     legal_operation_controls,
-    pending_door_action,
-    revision_successor_publication_pending,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_door_control import (
+    complete_pending_door,
+    complete_pending_door_locked,
+    project_closeout_refresh,
+    record_door_intent,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
@@ -92,20 +101,13 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_project
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_recovery import (
     reconcile_control_mutations,
-    recover_direct_landing,
+    recover_direct_landing_under_authority,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    ensure_initial_closeout_door_intent,
     launch_detached_worker,
-    queued_operation_record,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_successor_control import (
-    AcceptedSuccessorReplay,
-    accept_revision_successor,
-    resume_accepted_revision_successor,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state import (
     project_worker_exit,
@@ -140,6 +142,8 @@ class LifecycleControlCommand:
     dry_run: bool = False
     revision_messages: CloseoutMessageInput | None = None
     revision_gate_policy: list[GatePolicyRuleSnapshot] | None = None
+    supersede_grade: SchedulingGradeInput | None = None
+    supersede_admission: CandidateAdmissionFacts | None = None
     allow_completed_disposition: bool = False
     caller: DeclaredCaller | None = None
 
@@ -151,6 +155,14 @@ class _ControlObservation:
     record: LifecycleOperationRecord
     integration: IntegrationOperationObservation | None
     door: DoorPublicationClassification | None
+
+
+@dataclass(frozen=True)
+class _SupersedeSource:
+    grade: SchedulingGradeInput
+    admission: CandidateAdmissionFacts
+    caller: DeclaredCaller
+    declaration_fingerprint: str
 
 
 def _reload_control_contract(
@@ -184,26 +196,6 @@ def control_operation(
             publish_worker_exits=not command.dry_run,
         )
         store = LifecycleOperationStore(location.journal_path(command.kind))
-        pending_successor = store.read_successor_intent()
-        if (
-            command.action == "revise"
-            and pending_successor is not None
-            and command.expected_generation == pending_successor.predecessor.generation
-        ):
-            validated = _validated_revision(contract, pending_successor.predecessor, command)
-            return resume_accepted_revision_successor(
-                contract,
-                store,
-                pending_successor,
-                AcceptedSuccessorReplay(
-                    operation_input=validated.operation_input,
-                    candidate_fingerprint=validated.candidate.fingerprint,
-                    dry_run=command.dry_run,
-                    complete_publications=_complete_revision_successor_publications,
-                    prove_publications=_require_proven_closeout_door_for_launch,
-                    launch_worker=launch_detached_worker,
-                ),
-            )
         observed = _observe_control_under_lease(command, contract=contract, store=store)
         legal_rows = legal_operation_controls(
             observed.contract,
@@ -339,16 +331,14 @@ def _execute_legal_control(
             contract,
             store,
             record,
-            action="retire",
-            dry_run=command.dry_run,
+            command=command,
         )
     if action == "supersede":
         return _dispose_completed(
             contract,
             store,
             record,
-            action="supersede",
-            dry_run=command.dry_run,
+            command=command,
         )
     return _revise_closeout(
         contract,
@@ -366,13 +356,15 @@ def _cancel(
     dry_run: bool,
 ) -> LifecycleOperationProjection:
     if record.status == "cancelled":
-        completed = _complete_pending_door(contract, store, record, dry_run=dry_run)
+        completed = complete_pending_door(contract, store, record, dry_run=dry_run)
+        observed_contract = contract if dry_run else load_contract(contract.contract_path)
         current_contract = _complete_organizational_repair(
-            contract,
+            observed_contract,
             completed,
             dry_run=dry_run,
         )
-        return operation_projection(completed, contract=current_contract)
+        projection = operation_projection(completed, contract=current_contract)
+        return project_closeout_refresh(projection, current_contract, completed, dry_run=dry_run)
     if record.status == "completed":
         if record.workerPid is not None:
             terminated = _terminate_worker(
@@ -396,21 +388,16 @@ def _cancel(
     evidence, record = prove_cancellable_git(store, record, publish=not dry_run)
     if dry_run:
         return operation_projection(record, contract=contract)
-    contract = load_contract(contract.contract_path)
-    intent = None
-    if record.operationKind == "closeout":
-        door = door_generation_for_operation(contract, record, "cancelled")
-        intent = prepare_door_publication(contract, door)
     stamp = _stamp()
 
-    def publish_cancelled(current: LifecycleOperationRecord) -> LifecycleOperationRecord:
-        terminal = current.model_copy(
+    def cancelled_record(current: LifecycleOperationRecord) -> LifecycleOperationRecord:
+        return current.model_copy(
             update={
                 "status": "cancelled",
                 "phase": "cancelled",
                 "finishedAt": stamp,
                 "cancelRequested": True,
-                "currentCommand": "publish cancelled closeout-door disposition",
+                "currentCommand": "publish cancelled journal outcome",
                 "generationDisposition": "cancelled",
                 "cancellationEvidence": evidence,
                 "terminationReturnStatus": None,
@@ -418,26 +405,63 @@ def _cancel(
                 "guidance": _cancelled_guidance(record.operationKind),
             }
         )
-        if intent is None:
-            return terminal
-        return _record_door_intent(
-            terminal,
-            intent,
-            generation_disposition="cancelled",
-        )
 
-    cancelled = store.update(publish_cancelled)
+    if record.operationKind in {"closeout", "direct-landing"}:
+        operation_input = record.input
+        with task_publication_lock(contract.coordination_root, contract.repo_name):
+            contract, _location = reread_configured_contract(
+                contract,
+                operation_input.configPath,
+            )
+            claimed = record.doorPublication
+            if (
+                claimed is None
+                or claimed.state != "proven"
+                or claimed.generation.disposition != "claimed"
+                or claimed.generation.operationKind != record.operationKind
+                or claimed.generation.operationFingerprint != record.fingerprint
+                or claimed.generation.claimedOperationKey != record.operationKey
+                or contract.closeout_door != claimed.generation
+            ):
+                raise LifecycleControlError(
+                    "closeout-cancel-claim-mismatch",
+                    "closeout cancellation requires its exact claimed journal/door owner",
+                    expected={
+                        "operationFingerprint": record.fingerprint,
+                        "doorDisposition": "claimed",
+                    },
+                    observed={
+                        "doorDisposition": (
+                            contract.closeout_door.disposition if contract.closeout_door else ""
+                        ),
+                        "publicationState": claimed.state if claimed is not None else "",
+                    },
+                    next_action="developer-decision",
+                )
+            successor = successor_waiting_door(
+                claimed.generation,
+                declared_by="lifecycle-cancel",
+                declared_at=stamp,
+            )
+            intent = prepare_door_publication(contract, successor)
+            cancelled = store.update(
+                lambda current: record_door_intent(
+                    cancelled_record(current),
+                    intent,
+                    generation_disposition="cancelled",
+                )
+            )
+            cancelled = complete_pending_door_locked(contract, store, cancelled)
+            contract = load_contract(contract.contract_path)
+    else:
+        cancelled = store.update(cancelled_record)
     contract = _complete_organizational_repair(
         contract,
         cancelled,
         dry_run=False,
     )
-    if intent is None:
-        return operation_projection(cancelled, contract=contract)
-    return operation_projection(
-        _complete_pending_door(contract, store, cancelled, dry_run=False),
-        contract=load_contract(contract.contract_path),
-    )
+    projection = operation_projection(cancelled, contract=contract)
+    return project_closeout_refresh(projection, contract, cancelled, dry_run=False)
 
 
 def _complete_organizational_repair(
@@ -548,7 +572,10 @@ def _request_worker_termination(
 
 def _cancelled_guidance(kind: LifecycleOperationKind) -> str:
     if kind == "closeout":
-        return "Use revise to create one fresh approved successor."
+        return (
+            "A distinct waiting door successor is schedulable; use worktree_closeout_preview "
+            "then worktree_closeout_apply for the next journal generation."
+        )
     if kind == "direct-landing":
         return "Use direct_landing with freshly validated input to create one successor."
     return "Advance the task state, then use worktree_integrate for one fresh successor."
@@ -572,42 +599,22 @@ def _resume(
                 observed=ledger_recovery.observed,
                 next_action="developer-decision",
             )
-    pending_successor = store.read_successor_intent()
-    if pending_successor is not None:
-        if record.fingerprint != pending_successor.successor.fingerprint:
-            raise LifecycleControlError(
-                "lifecycle-successor-publication-conflict",
-                "the requested generation does not match the accepted successor intent",
-                expected={
-                    "generation": pending_successor.successor.generation,
-                    "fingerprint": pending_successor.successor.fingerprint,
-                },
-                observed={
-                    "generation": record.generation,
-                    "fingerprint": record.fingerprint,
-                },
-                next_action="developer-decision",
-            )
-        return resume_accepted_revision_successor(
-            contract,
-            store,
-            pending_successor,
-            AcceptedSuccessorReplay(
-                operation_input=record.input,
-                candidate_fingerprint=record.fingerprint,
-                dry_run=dry_run,
-                complete_publications=_complete_revision_successor_publications,
-                prove_publications=_require_proven_closeout_door_for_launch,
-                launch_worker=launch_detached_worker,
-            ),
-        )
     _require_resumable(record, action)
     if dry_run:
         return operation_projection(record, contract=contract)
     contract, record = _resume_closeout_publications(contract, store, record)
     if record.operationKind == "direct-landing":
-        current = recover_direct_landing(contract, store, record)
-        return operation_projection(current, contract=load_contract(contract.contract_path))
+        with integration_authority_lock(contract.coordination_root, contract.repo_name):
+            current_contract, _location = reread_configured_contract(
+                contract,
+                record.input.configPath,
+            )
+            _require_proven_closeout_door_for_launch(current_contract, record)
+            current = recover_direct_landing_under_authority(current_contract, store, record)
+            return operation_projection(
+                current,
+                contract=load_contract(current_contract.contract_path),
+            )
     requeued, changed = store.resume_generation(
         requeued_same_generation,
         expected_generation=record.generation,
@@ -630,7 +637,7 @@ def _resume_closeout_publications(
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
 ) -> tuple[WorktreeContract, LifecycleOperationRecord]:
-    if record.operationKind != "closeout":
+    if record.operationKind not in {"closeout", "direct-landing"}:
         return contract, record
     if record.legacyMigration is not None and record.doorPublication is None:
         # The explicit schema-1 bridge proves a retained generation that predates
@@ -638,12 +645,15 @@ def _resume_closeout_publications(
         # claimed-door launch gate.
         return contract, record
     if record.doorPublication is None:
-        record = ensure_initial_closeout_door_intent(contract, store, record)
-    if revision_successor_publication_pending(contract, record):
-        record = _complete_revision_successor_publications(contract, store, record)
-        contract = load_contract(contract.contract_path)
-    elif record.doorPublication is not None and record.doorPublication.state == "intent":
-        record = _complete_pending_door(contract, store, record, dry_run=False)
+        raise LifecycleControlError(
+            "closeout-initial-door-intent-missing",
+            "the canonical closeout record is missing its create-time claimed-door intent",
+            expected={"doorPublication": "create-time-claimed-intent-or-proof"},
+            observed={"doorPublication": "absent", "generation": record.generation},
+            next_action="developer-decision",
+        )
+    elif record.doorPublication.state == "intent":
+        record = complete_pending_door(contract, store, record, dry_run=False)
         contract = load_contract(contract.contract_path)
     _require_proven_closeout_door_for_launch(contract, record)
     return contract, record
@@ -659,6 +669,9 @@ def _require_proven_closeout_door_for_launch(
         publication is not None
         and publication.state == "proven"
         and publication.generation.disposition == "claimed"
+        and publication.generation.operationKind == record.operationKind
+        and publication.generation.operationFingerprint == record.fingerprint
+        and publication.generation.claimedOperationKey == record.operationKey
         and observed_door == publication.generation
     ):
         return
@@ -728,131 +741,289 @@ def _dispose_completed(
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
     *,
-    action: Literal["retire", "supersede"],
-    dry_run: bool,
+    command: LifecycleControlCommand,
 ) -> LifecycleOperationProjection:
-    require_completed_disposition(contract, record, action)
-    resumed = _resume_disposition_publication(
-        contract,
-        store,
-        record,
-        action=action,
-        dry_run=dry_run,
-    )
-    if resumed is not None:
-        return operation_projection(
-            resumed,
-            contract=load_contract(contract.contract_path),
-        )
-    if dry_run:
-        return operation_projection(record, contract=contract)
-    updated = _publish_completed_disposition(contract, store, record, action)
-    return operation_projection(updated, contract=load_contract(contract.contract_path))
-
-
-def _publish_completed_disposition(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    action: Literal["retire", "supersede"],
-) -> LifecycleOperationRecord:
-    disposition = "retired" if action == "retire" else "superseded"
-    generation = door_generation_for_operation(contract, record, disposition)
-    if action == "supersede":
-        successor = successor_waiting_door(contract, generation)
-        generation = generation.model_copy(update={"successorGenerationId": successor.generationId})
-    intent = prepare_door_publication(contract, generation)
-    updated = store.update(
-        lambda current: _record_door_intent(
-            current,
-            intent,
-            generation_disposition=disposition,
-        )
-    )
-    updated = _complete_pending_door(contract, store, updated, dry_run=False)
-    if action == "supersede":
-        resumed = _resume_disposition_publication(
-            load_contract(contract.contract_path),
-            store,
-            updated,
-            action="supersede",
-            dry_run=False,
-        )
-        if resumed is None:
-            raise RuntimeError("supersede predecessor proof lost its successor publication")
-        updated = resumed
-    return updated
-
-
-def _resume_disposition_publication(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    *,
-    action: Literal["retire", "supersede"],
-    dry_run: bool,
-) -> LifecycleOperationRecord | None:
-    expected_disposition = "retired" if action == "retire" else "superseded"
-    publication = record.doorPublication
-    if record.generationDisposition != expected_disposition or publication is None:
-        return None
-    if action == "retire":
-        return _resume_retire_publication(
+    if command.action == "retire":
+        return _retire_completed(contract, store, record, dry_run=command.dry_run)
+    assert command.action == "supersede"
+    source = _supersede_source(command, record)
+    if record.generationDisposition == "superseded":
+        return _resume_completed_supersede(
             contract,
             store,
             record,
-            dry_run=dry_run,
+            declaration_fingerprint=source.declaration_fingerprint,
+            dry_run=command.dry_run,
         )
-    return _resume_supersede_publication(
+    require_completed_disposition(contract, record, "supersede")
+    runtime = load_config(command.configured_authority)
+    if command.dry_run:
+        return _preview_completed_supersede(
+            runtime,
+            contract,
+            record,
+            source,
+        )
+    return _publish_completed_supersede(
+        runtime,
         contract,
         store,
+        record,
+        source,
+    )
+
+
+def _retire_completed(
+    contract: WorktreeContract,
+    store: LifecycleOperationStore,
+    record: LifecycleOperationRecord,
+    *,
+    dry_run: bool,
+) -> LifecycleOperationProjection:
+    if record.generationDisposition == "retired":
+        return operation_projection(record, contract=contract)
+    require_completed_disposition(contract, record, "retire")
+    if dry_run:
+        return operation_projection(record, contract=contract)
+    updated = store.update(
+        lambda current: current.model_copy(
+            update={
+                "generationDisposition": "retired",
+                "guidance": "This completed generation is retired for audit only.",
+            }
+        )
+    )
+    return operation_projection(updated, contract=contract)
+
+
+def _supersede_source(
+    command: LifecycleControlCommand,
+    record: LifecycleOperationRecord,
+) -> _SupersedeSource:
+    grade = command.supersede_grade
+    admission = command.supersede_admission
+    caller = command.caller
+    if grade is None or admission is None or caller is None:
+        raise LifecycleControlError(
+            "lifecycle-supersede-source-required",
+            "supersede requires fresh scheduling, admission, and authorized caller evidence",
+            next_action="supersede",
+        )
+    return _SupersedeSource(
+        grade,
+        admission,
+        caller,
+        _supersede_declaration_fingerprint(
+            record,
+            grade=grade,
+            admission=admission,
+            caller=caller,
+        ),
+    )
+
+
+def _resume_completed_supersede(
+    contract: WorktreeContract,
+    store: LifecycleOperationStore,
+    record: LifecycleOperationRecord,
+    *,
+    declaration_fingerprint: str,
+    dry_run: bool,
+) -> LifecycleOperationProjection:
+    _require_supersede_declaration_match(record, declaration_fingerprint)
+    current_contract = contract
+    if not dry_run:
+        operation_input = record.input
+        with task_publication_lock(contract.coordination_root, contract.repo_name):
+            current_contract, _location = reread_configured_contract(
+                contract,
+                operation_input.configPath,
+            )
+            current_record = store.read()
+            if current_record is None or current_record.generationDisposition != "superseded":
+                raise LifecycleControlError(
+                    "lifecycle-generation-changed",
+                    "the superseded generation changed before replay",
+                    next_action="developer-decision",
+                )
+            _require_supersede_declaration_match(current_record, declaration_fingerprint)
+            record = complete_pending_door_locked(current_contract, store, current_record)
+            current_contract = load_contract(current_contract.contract_path)
+    _require_waiting_supersede_proof(current_contract, record)
+    projection = operation_projection(record, contract=current_contract)
+    return project_closeout_refresh(
+        projection,
+        current_contract,
         record,
         dry_run=dry_run,
     )
 
 
-def _resume_retire_publication(
+def _require_waiting_supersede_proof(
     contract: WorktreeContract,
-    store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-) -> LifecycleOperationRecord | None:
+) -> None:
     publication = record.doorPublication
-    if publication is None or publication.generation.disposition != "retired":
-        return None
-    return _complete_pending_door(contract, store, record, dry_run=dry_run)
-
-
-def _resume_supersede_publication(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-) -> LifecycleOperationRecord | None:
-    publication = record.doorPublication
-    if publication is None:
-        return None
-    door = publication.generation
-    if door.disposition == "waiting":
-        return _complete_pending_door(contract, store, record, dry_run=dry_run)
-    if door.disposition != "superseded":
-        return None
-    predecessor = _complete_pending_door(contract, store, record, dry_run=dry_run)
-    if dry_run:
-        return predecessor
-    current_contract = load_contract(contract.contract_path)
-    successor = successor_waiting_door(current_contract, door)
-    successor_intent = prepare_door_publication(current_contract, successor)
-    pending = store.update(
-        lambda current: _record_door_intent(
-            current,
-            successor_intent,
-            generation_disposition="superseded",
+    if (
+        publication is None
+        or publication.generation.disposition != "waiting"
+        or (publication.state == "proven" and contract.closeout_door != publication.generation)
+    ):
+        raise LifecycleControlError(
+            "closeout-door-supersede-proof-required",
+            "superseded journal history does not retain its exact waiting door successor",
+            next_action="developer-decision",
         )
+
+
+def _preview_completed_supersede(
+    runtime,
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    source: _SupersedeSource,
+) -> LifecycleOperationProjection:
+    try:
+        successor = superseding_door_generation(
+            runtime,
+            contract,
+            actor=source.caller,
+            grade=source.grade,
+            admission=source.admission,
+        )
+    except CloseoutQueueError as exc:
+        raise LifecycleControlError(
+            exc.status,
+            "fresh supersede door evidence is not admissible",
+            next_action="supersede",
+        ) from exc
+    projection = operation_projection(record, contract=contract)
+    return projection.model_copy(
+        update={
+            "result": {
+                "state": "would-supersede",
+                "doorGeneration": successor.model_dump(mode="json"),
+            }
+        }
     )
-    return _complete_pending_door(current_contract, store, pending, dry_run=False)
+
+
+def _publish_completed_supersede(
+    runtime,
+    contract: WorktreeContract,
+    store: LifecycleOperationStore,
+    record: LifecycleOperationRecord,
+    source: _SupersedeSource,
+) -> LifecycleOperationProjection:
+
+    operation_input = record.input
+    with task_publication_lock(contract.coordination_root, contract.repo_name):
+        current_contract, _location = reread_configured_contract(
+            contract,
+            operation_input.configPath,
+        )
+        current_record = store.read()
+        if current_record is not None and current_record.generationDisposition == "superseded":
+            _require_supersede_declaration_match(
+                current_record,
+                source.declaration_fingerprint,
+            )
+            updated = complete_pending_door_locked(
+                current_contract,
+                store,
+                current_record,
+            )
+            current_contract = load_contract(current_contract.contract_path)
+        elif current_record is None or current_record != record:
+            raise LifecycleControlError(
+                "lifecycle-generation-changed",
+                "the completed generation changed before supersede publication",
+                expected={"generation": record.generation, "fingerprint": record.fingerprint},
+                observed={
+                    "generation": current_record.generation if current_record is not None else 0,
+                    "fingerprint": current_record.fingerprint if current_record is not None else "",
+                },
+                next_action="developer-decision",
+            )
+        else:
+            require_completed_disposition(current_contract, current_record, "supersede")
+            try:
+                successor = superseding_door_generation(
+                    runtime,
+                    current_contract,
+                    actor=source.caller,
+                    grade=source.grade,
+                    admission=source.admission,
+                )
+            except CloseoutQueueError as exc:
+                raise LifecycleControlError(
+                    exc.status,
+                    "fresh supersede door evidence is not admissible",
+                    next_action="supersede",
+                ) from exc
+            intent = prepare_door_publication(current_contract, successor)
+            updated = store.update(
+                lambda current: record_door_intent(
+                    current.model_copy(
+                        update={
+                            "generationDisposition": "superseded",
+                            "supersedeDeclarationFingerprint": source.declaration_fingerprint,
+                            "guidance": (
+                                "A distinct current-source waiting door successor is published."
+                            ),
+                        }
+                    ),
+                    intent,
+                    generation_disposition="superseded",
+                )
+            )
+            updated = complete_pending_door_locked(current_contract, store, updated)
+            current_contract = load_contract(current_contract.contract_path)
+    projection = operation_projection(updated, contract=current_contract)
+    return project_closeout_refresh(
+        projection,
+        current_contract,
+        updated,
+        dry_run=False,
+    )
+
+
+def _supersede_declaration_fingerprint(
+    record: LifecycleOperationRecord,
+    *,
+    grade: SchedulingGradeInput,
+    admission: CandidateAdmissionFacts,
+    caller: DeclaredCaller,
+) -> str:
+    return fingerprint_payload(
+        {
+            "schema": "closeout-supersede-declaration/v1",
+            "operationFingerprint": record.fingerprint,
+            "grade": grade.model_dump(mode="json"),
+            "admission": admission.model_dump(mode="json"),
+            "caller": caller.model_dump(mode="json"),
+        }
+    )
+
+
+def _require_supersede_declaration_match(
+    record: LifecycleOperationRecord,
+    requested: str,
+) -> None:
+    accepted = record.supersedeDeclarationFingerprint
+    if accepted is None:
+        raise LifecycleControlError(
+            "lifecycle-supersede-declaration-proof-missing",
+            "the canonical superseded journal is missing its accepted declaration fingerprint",
+            next_action="developer-decision",
+        )
+    if accepted != requested:
+        raise LifecycleControlError(
+            "lifecycle-supersede-declaration-conflict",
+            "a competing supersede declaration cannot replay the accepted successor",
+            expected={"supersedeDeclarationFingerprint": accepted},
+            observed={"supersedeDeclarationFingerprint": requested},
+            next_action="developer-decision",
+        )
 
 
 def _revise_closeout(
@@ -869,7 +1040,7 @@ def _revise_closeout(
             next_action="revise",
         )
     if record.status == "cancelled":
-        record = _complete_pending_door(contract, store, record, dry_run=command.dry_run)
+        record = complete_pending_door(contract, store, record, dry_run=command.dry_run)
         cancellation_projection = operation_projection(record, contract=contract)
     else:
         cancellation_projection = _cancel(
@@ -881,18 +1052,26 @@ def _revise_closeout(
         record = store.read() or record
     current_contract = load_contract(contract.contract_path)
     validated = _validated_revision(current_contract, record, command)
-    if command.dry_run:
-        return cancellation_projection
-    successor = _revision_successor_record(current_contract, record, validated)
-    successor = accept_revision_successor(contract, store, successor)
-    successor = _complete_revision_successor_publications(
-        current_contract,
-        store,
-        successor,
+    state = "would-revise" if command.dry_run else "revision-ready"
+    result = {
+        "state": state,
+        "summary": (
+            "Cancellation would publish a distinct waiting door successor; apply the "
+            "validated closeout input through worktree_closeout_apply."
+            if command.dry_run
+            else "A distinct waiting door successor is published; apply the validated "
+            "closeout input through worktree_closeout_apply."
+        ),
+        "nextAction": "apply-closeout-successor",
+        "nextTool": "worktree_closeout_apply",
+        "nextArgs": _revision_apply_args(validated),
+    }
+    return cancellation_projection.model_copy(
+        update={
+            "result": result,
+            "guidance": str(result["summary"]),
+        }
     )
-    current_contract = load_contract(contract.contract_path)
-    launch_detached_worker(current_contract, successor)
-    return operation_projection(store.read() or successor, contract=current_contract)
 
 
 def _validated_revision(
@@ -922,84 +1101,22 @@ def _validated_revision(
     return validated
 
 
-def _revision_successor_record(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    validated: ValidatedCloseoutAdmission,
-) -> LifecycleOperationRecord:
-    successor = queued_operation_record(
-        contract,
-        validated.operation_input,
-        validated.candidate,
-        None,
-        datetime.now(UTC).replace(microsecond=0),
-    ).model_copy(
-        update={
-            "generation": record.generation + 1,
-            "predecessorFingerprint": record.fingerprint,
-        }
-    )
-    predecessor_door = contract.closeout_door
-    if predecessor_door is None:
-        raise LifecycleControlError(
-            "closeout-door-publication-missing",
-            "cancelled predecessor has no proven door generation",
-            next_action="revise",
-        )
-    successor_door = door_generation_for_operation(
-        contract,
-        successor,
-        "claimed",
-        predecessor_generation_id=predecessor_door.generationId,
-    )
-    linked_predecessor = CloseoutDoorGeneration.model_validate(
-        {
-            **predecessor_door.model_dump(mode="json"),
-            "disposition": "superseded",
-            "successorGenerationId": successor_door.generationId,
-            "operationKind": None,
-            "operationFingerprint": "",
-            "claimedOperationKey": "",
-        }
-    )
-    predecessor_intent = prepare_door_publication(
-        contract,
-        linked_predecessor,
-    )
-    return successor.model_copy(
-        update={
-            "doorPublication": predecessor_intent,
-            "generationDisposition": "active",
-        }
-    )
-
-
-def _complete_revision_successor_publications(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-) -> LifecycleOperationRecord:
-    if not revision_successor_publication_pending(contract, record):
-        return record
-    record = _complete_pending_door(contract, store, record, dry_run=False)
-    current_contract = load_contract(contract.contract_path)
-    predecessor = record.doorPublication
-    assert predecessor is not None
-    successor_door = door_generation_for_operation(
-        current_contract,
-        record,
-        "claimed",
-        predecessor_generation_id=predecessor.generation.generationId,
-    )
-    successor_intent = prepare_door_publication(current_contract, successor_door)
-    pending = store.update(
-        lambda current: _record_door_intent(
-            current,
-            successor_intent,
-            generation_disposition="active",
-        )
-    )
-    return _complete_pending_door(current_contract, store, pending, dry_run=False)
+def _revision_apply_args(validated: ValidatedCloseoutAdmission) -> dict[str, object]:
+    operation_input = validated.operation_input
+    args: dict[str, object] = {
+        "contract_path": operation_input.contractPath,
+        "intent_note": operation_input.approvalNote,
+        "dry_run": False,
+    }
+    for leg, field in (
+        ("code", "code_commit_message"),
+        ("memory", "memory_commit_message"),
+        ("ledger", "ledger_commit_message"),
+    ):
+        accepted = getattr(operation_input.effectiveInput, leg)
+        if accepted.state == "enabled":
+            args[field] = accepted.message
+    return args
 
 
 def _closeout_revision_admission(
@@ -1036,115 +1153,13 @@ def _closeout_revision_admission(
     )
 
 
-def _publish_record_door(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    generation,
-    *,
-    generation_disposition: str,
-) -> LifecycleOperationRecord:
-    current = store.read()
-    if (
-        current is not None
-        and current.doorPublication is not None
-        and current.doorPublication.generation == generation
-    ):
-        return _complete_pending_door(contract, store, current, dry_run=False)
-    intent = prepare_door_publication(contract, generation)
-    updated = store.update(
-        lambda current: _record_door_intent(
-            current,
-            intent,
-            generation_disposition=generation_disposition,
-        )
-    )
-    return _complete_pending_door(contract, store, updated, dry_run=False)
-
-
-def _record_door_intent(
-    record: LifecycleOperationRecord,
-    intent,
-    *,
-    generation_disposition: str,
-) -> LifecycleOperationRecord:
-    history = list(record.doorPublicationHistory)
-    if record.doorPublication is not None:
-        if record.doorPublication.state != "proven":
-            raise RuntimeError("unfinished door publication must complete before another begins")
-        history.append(record.doorPublication)
-    return record.model_copy(
-        update={
-            "doorPublication": intent,
-            "doorPublicationHistory": history,
-            "generationDisposition": generation_disposition,
-        }
-    )
-
-
-def _complete_pending_door(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-) -> LifecycleOperationRecord:
-    intent = record.doorPublication
-    if intent is None or intent.state == "proven" or dry_run:
-        return record
-    try:
-        proof = publish_door_intent(contract.contract_path, intent)
-    except DoorPublicationError as exc:
-        classification = exc.classification
-        if classification.state == "accepted-before":
-            action = pending_door_action(record, contract) or "recover"
-            next_row = next(
-                (
-                    item
-                    for item in legal_operation_controls(
-                        contract,
-                        record,
-                        context=LifecycleControlProjectionContext(
-                            allow_completed_disposition=True,
-                            door=classification,
-                        ),
-                    )
-                    if item["action"] == action
-                ),
-                None,
-            )
-            raise LifecycleControlError(
-                "closeout-door-publication-interrupted",
-                "the journaled closeout-door publication did not change contract bytes",
-                expected=classification.expected,
-                observed=classification.observed,
-                next_action=action,
-                next_tool=next_row["tool"] if next_row else None,
-                next_args=next_row["arguments"] if next_row else None,
-            ) from exc
-        raise LifecycleControlError(
-            "closeout-door-publication-conflict",
-            exc.detail,
-            expected=classification.expected,
-            observed=classification.observed,
-            next_action="developer-decision",
-        ) from exc
-    return store.update(lambda current: current.model_copy(update={"doorPublication": proof}))
-
-
 def _require_generation(
     store: LifecycleOperationStore,
     command: LifecycleControlCommand,
     *,
     contract: WorktreeContract,
 ) -> LifecycleOperationRecord:
-    pending = store.read_successor_intent()
-    if (
-        pending is not None
-        and command.action == "revise"
-        and command.expected_generation == pending.predecessor.generation
-    ):
-        return pending.predecessor
-    record = store.effective_read()
+    record = store.read()
     if record is None:
         raise LifecycleControlError(
             "lifecycle-operation-missing",

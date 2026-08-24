@@ -134,6 +134,14 @@ class _PendingInteractionSync:
 Clock = Callable[[], datetime]
 
 
+@dataclass(frozen=True)
+class TerminalLivenessActions:
+    on_turn_state_change: Callable[[TerminalLivenessObservation], None] | None = None
+    register_execution_evidence: (
+        Callable[[tuple[TerminalCatalogEntry, ...]], frozenset[str]] | None
+    ) = None
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -148,13 +156,17 @@ class TerminalCatalogLivenessSweeper:
         *,
         now: Clock | None = None,
         probe: LivenessProbe = DEFAULT_LIVENESS_PROBE,
-        on_turn_state_change: Callable[[TerminalLivenessObservation], None] | None = None,
+        actions: TerminalLivenessActions | None = None,
     ) -> None:
+        actions = actions or TerminalLivenessActions()
         self._catalog = catalog
         self._host = host
         self._now = now or utc_now
         self._probe = probe
-        self._on_turn_state_change = on_turn_state_change
+        self._on_turn_state_change = actions.on_turn_state_change
+        # No registrar authorizes no reclamation of task-bound leaf seats. That is a
+        # fail-closed dependency-injection state, never a second evidence reader.
+        self._register_execution_evidence = actions.register_execution_evidence
         self._lock = threading.Lock()
         self._last_sweep_at: datetime | None = None
         self._last_starting_sweep_at: datetime | None = None
@@ -170,10 +182,10 @@ class TerminalCatalogLivenessSweeper:
             if self._rate_limited(moment):
                 return self._catalog.list()
             self._last_sweep_at = moment
-            # One disk read + one disk write for the whole sweep. The
-            # per-entry probes' read-modify-writes and the terminated-row reclamation all hit the batch's
-            # in-memory buffer; the single atomic commit lands on ``batch()`` exit. Without this each of
-            # the n probes re-read and rewrote the full catalog file -- O(n^2) disk work per sweep.
+            # One batch owns the liveness observations. Reclamation happens only after that lock
+            # is released, because durable task registration takes the task CAS and no process may
+            # nest that beneath the catalog lock. Without the batch the n probes would still
+            # re-read and rewrite the full catalog file -- O(n^2) disk work per sweep.
             # The hosted-interaction synchronizer is NOT run inside the batch: its inbox/gate locks
             # must never be taken under the catalog lock, so its evidence is
             # collected here and drained by ``_run_deferred_interaction_syncs`` after the commit.
@@ -185,7 +197,20 @@ class TerminalCatalogLivenessSweeper:
                     )
                     for entry in self._catalog.list()
                 ]
-                self._catalog.compact(now=moment)
+            terminal_rows = tuple(
+                entry
+                for entry in self._catalog.list(include_terminated=True)
+                if entry.status == "terminated"
+            )
+            registered_execution_ids = (
+                self._register_execution_evidence(terminal_rows)
+                if self._register_execution_evidence is not None
+                else frozenset()
+            )
+            self._catalog.compact(
+                now=moment,
+                registered_execution_ids=registered_execution_ids,
+            )
             self._run_deferred_interaction_syncs(pending_syncs)
             if self._on_turn_state_change is not None:
                 for observation in observations:

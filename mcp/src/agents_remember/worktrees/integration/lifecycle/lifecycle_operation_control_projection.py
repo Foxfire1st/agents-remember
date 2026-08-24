@@ -11,7 +11,6 @@ from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.worktrees.integration.closeout_door import (
     DoorPublicationClassification,
     classify_door_publication,
-    door_generation_for_operation,
 )
 from agents_remember.worktrees.integration.closeout_ledger_recovery import (
     classify_closeout_ledger_recovery,
@@ -35,6 +34,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identit
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     located_lifecycle_operation_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationReadError,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     classify_migrated_lifecycle,
@@ -120,7 +122,7 @@ def _evidence_controls(
     base: dict[str, object],
     observation: IntegrationOperationObservation | None,
 ) -> tuple[IntegrationOperationObservation | None, list[dict[str, Any]] | None]:
-    recovery_controls = _recovery_evidence_controls(contract, record, base)
+    recovery_controls = _recovery_evidence_controls(contract, record)
     if recovery_controls is not None:
         return observation, recovery_controls
     observation = _integration_observation(
@@ -136,33 +138,18 @@ def _evidence_controls(
     door_blocked = bool(
         observation is not None and observation.door is not None and not observation.door.valid
     )
-    revision_pending = revision_successor_publication_pending(contract, record)
-    if door_blocked or revision_pending:
-        controls = (
-            []
-            if door_blocked
-            else [
-                _control(
-                    "recover",
-                    base,
-                    "Finish the accepted successor's predecessor link and claimed door.",
-                )
-            ]
-        )
-        return observation, controls
+    if door_blocked:
+        return observation, []
     return observation, None
 
 
 def _recovery_evidence_controls(
     contract: WorktreeContract,
     record: LifecycleOperationRecord,
-    base: dict[str, object],
 ) -> list[dict[str, Any]] | None:
     initial_door = classify_initial_closeout_door_recovery(contract, record)
     if initial_door.state == "developer-decision":
         return []
-    if initial_door.state == "synthesizable":
-        return [_control("recover", base, "Publish and prove the accepted claimed door.")]
     ledger_recovery = classify_closeout_ledger_recovery(contract, record)
     direct_recovery = classify_direct_landing_recovery(contract, record)
     if (
@@ -266,13 +253,15 @@ def _pending_door_control(
     if publication is None or publication.state != "intent":
         return None
     disposition = publication.generation.disposition
-    action = pending_door_action(record, contract)
+    action = pending_door_action(record)
     if action is None:
         return None
     if action in {"retire", "supersede"} and not allow_completed_disposition:
         return None
     if action == "revise":
         return _revise_control(record, base)
+    if action == "supersede":
+        return _supersede_control(contract, record, base)
     return _control(
         action,
         base,
@@ -282,47 +271,20 @@ def _pending_door_control(
 
 def pending_door_action(
     record: LifecycleOperationRecord,
-    contract: WorktreeContract,
 ) -> str | None:
     """Return the one same-handler action that resumes a journaled door intent."""
 
     publication = record.doorPublication
     if publication is None or publication.state != "intent":
         return None
-    if revision_successor_publication_pending(contract, record):
+    if publication.generation.disposition == "claimed":
         return "recover"
-    return {
-        "cancelled": "cancel",
-        "retired": "retire",
-        "superseded": "revise" if record.status == "cancelled" else "supersede",
-        "waiting": "supersede",
-        "claimed": "recover",
-    }.get(publication.generation.disposition)
-
-
-def revision_successor_publication_pending(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-) -> bool:
-    """Whether N+1 durably owns unfinished predecessor/successor door publication."""
-
-    publication = record.doorPublication
-    if (
-        record.operationKind != "closeout"
-        or not record.predecessorFingerprint
-        or publication is None
-        or publication.generation.disposition != "superseded"
-        or not publication.generation.successorGenerationId
-    ):
-        return False
-    predecessor_id = publication.generation.generationId
-    expected_successor = door_generation_for_operation(
-        contract,
-        record,
-        "claimed",
-        predecessor_generation_id=predecessor_id,
-    )
-    return publication.generation.successorGenerationId == expected_successor.generationId
+    if publication.generation.disposition == "waiting":
+        if record.generationDisposition == "superseded":
+            return "supersede"
+        if record.status == "cancelled":
+            return "cancel"
+    return None
 
 
 def _cancelled_controls(
@@ -375,11 +337,75 @@ def _completed_controls(
     allow_completed_disposition: bool,
 ) -> list[dict[str, Any]]:
     if record.operationKind == "direct-landing":
-        if _direct_code_candidate_advanced(contract, record):
-            return [_direct_successor_control(contract, record)]
-        return []
+        return _completed_direct_controls(
+            contract,
+            record,
+            base,
+            allow_completed_disposition=allow_completed_disposition,
+        )
     if record.operationKind != "closeout":
         return []
+    return _completed_closeout_controls(
+        contract,
+        record,
+        base,
+        allow_completed_disposition=allow_completed_disposition,
+    )
+
+
+def _completed_direct_controls(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    base: dict[str, object],
+    *,
+    allow_completed_disposition: bool,
+) -> list[dict[str, Any]]:
+    publication = record.doorPublication
+    exact_successor = bool(
+        record.generationDisposition == "superseded"
+        and publication is not None
+        and publication.state == "proven"
+        and publication.generation.disposition == "waiting"
+        and contract.closeout_door == publication.generation
+    )
+    if exact_successor:
+        return [_direct_successor_control(contract, record)]
+    exact_owner = bool(
+        record.generationDisposition == "active"
+        and publication is not None
+        and publication.state == "proven"
+        and publication.generation.disposition == "claimed"
+        and publication.generation.operationFingerprint == record.fingerprint
+        and publication.generation.claimedOperationKey == record.operationKey
+        and contract.closeout_door == publication.generation
+    )
+    if not exact_owner or not allow_completed_disposition:
+        return []
+    controls = [_control("retire", base, "Retire this completed direct generation for audit.")]
+    if _direct_code_candidate_advanced(contract, record):
+        controls.append(_supersede_control(contract, record, base))
+    return controls
+
+
+def _completed_closeout_controls(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    base: dict[str, object],
+    *,
+    allow_completed_disposition: bool,
+) -> list[dict[str, Any]]:
+    if record.generationDisposition == "superseded":
+        publication = record.doorPublication
+        exact_successor = bool(
+            publication is not None
+            and publication.generation.disposition == "waiting"
+            and (publication.state == "intent" or contract.closeout_door == publication.generation)
+        )
+        return (
+            [_supersede_control(contract, record, base)]
+            if allow_completed_disposition and exact_successor
+            else []
+        )
     exact_owner = (
         contract.integration_status != "completed"
         and record.generationDisposition == "active"
@@ -393,19 +419,53 @@ def _completed_controls(
         controls.extend(
             (
                 _control("retire", base, "Retire the completed unintegrated generation."),
-                _control("supersede", base, "Publish a distinct future closeout door."),
+                _supersede_control(contract, record, base),
             )
         )
     return controls
 
 
 def _integration_claim_active(contract: WorktreeContract) -> bool:
-    record = located_lifecycle_operation_store(contract, "integrate").read()
+    try:
+        record = located_lifecycle_operation_store(contract, "integrate").read()
+    except LifecycleOperationReadError:
+        return True
     return bool(
         record is not None
         and record.integrationPublication is not None
         and record.status not in {"cancelled", "failed"}
     )
+
+
+def _supersede_control(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    base: dict[str, object],
+) -> dict[str, Any]:
+    publication = record.doorPublication
+    door = (
+        publication.generation
+        if publication is not None and publication.generation.disposition == "waiting"
+        else contract.closeout_door
+    )
+    if door is None:
+        return _control("supersede", base, "Publish one fresh waiting door successor.")
+    control = _control("supersede", base, "Publish one fresh waiting door successor.")
+    control["arguments"].update(
+        {
+            "grade": {
+                "priority": door.schedulingProvenance.priority,
+                "judgmentId": door.schedulingProvenance.judgmentId,
+            },
+            "admission": {
+                "resourceReady": door.admissionProvenance.resourceReady,
+                "resourceReason": door.admissionProvenance.resourceReason,
+                "admissionReady": door.admissionProvenance.admissionReady,
+                "admissionReason": door.admissionProvenance.admissionReason,
+            },
+        }
+    )
+    return control
 
 
 def _direct_code_candidate_advanced(
@@ -430,7 +490,7 @@ def _control(action: str, base: dict[str, object], summary: str) -> dict[str, An
         "cancel": "terminal-disposition",
         "revise": "successor",
         "retire": "terminal-disposition",
-        "supersede": "successor",
+        "supersede": "terminal-disposition",
     }[action]
     return {
         "action": action,

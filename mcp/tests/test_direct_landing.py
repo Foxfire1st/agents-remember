@@ -13,7 +13,6 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
@@ -26,14 +25,14 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.kernel.memory_ledger import LedgerError, create_initial_ledger, write_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
-from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.models.lifecycles.door import CloseoutDoorRequest
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
 from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
-    direct_landing,
+    direct_landing as _production_direct_landing,
 )
+from agents_remember.worktrees.integration.closeout_door_source import door_task_context
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
@@ -42,22 +41,35 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     require_git,
 )
-from agents_remember.worktrees.queue.closeout_queue import (
-    CloseoutQueueRequest,
-    _ActionContext,
-    _declaration_identity,
-)
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.queue.closeout_queue_graph import QueueGraphContext
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
     default_contract,
     default_series_contract,
+    load_contract,
     write_contract,
 )
+from closeout_input_test_support import _ensure_fixture_waiting_door
 from test_worktree_support import git, init_repo
+
+
+def direct_landing(*args, **kwargs):
+    """Exercise direct landing below the independently covered scheduling fence."""
+
+    with mock.patch(
+        "agents_remember.worktrees.direct_landing.require_first_ready_generation"
+    ):
+        return _production_direct_landing(*args, **kwargs)
+
+
+def _without_projection_effects(result: dict) -> dict:
+    """Compare durable operation output without per-call projection telemetry."""
+
+    durable = dict(result)
+    durable.pop("projectionEffects", None)
+    return durable
 
 
 def _scratch_config(
@@ -99,7 +111,7 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
     tasks = coord / "tasks" / "repo-a" / "direct-task"
     tasks.mkdir(parents=True)
     code = root / "code"
-    memory = root / "memory"
+    memory = coord / "memory-repos" / "ar-repo-a"
     code_base = init_repo(code, "main")
     git(code, "checkout", "-b", "ar/direct-task", "main")
     (code / "feature.py").write_text("def f():\n    return 1\n", encoding="utf-8")
@@ -142,6 +154,7 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
         ),
     )
     write_contract(contract.contract_path, contract)
+    contract, _fixture_bypass = _ensure_fixture_waiting_door(contract)
     publish_new_lifecycle_operation_location(
         contract,
         contract_text=contract.contract_path.read_text(encoding="utf-8"),
@@ -659,9 +672,12 @@ class DirectLandingBranchTests(unittest.TestCase):
                 ledger_commit_message="direct ledger mapping",
                 intent_note="approved by owner",
             ),
-            contract,
+            load_contract(contract.contract_path),
         )
-        self.assertEqual(again, landed)
+        self.assertEqual(
+            _without_projection_effects(again),
+            _without_projection_effects(landed),
+        )
 
     def test_reland_with_conflicting_ledger_mapping_is_refused(self) -> None:
         root = Path(self.temp.name)
@@ -694,9 +710,12 @@ class DirectLandingBranchTests(unittest.TestCase):
                 ledger_commit_message="direct ledger mapping",
                 intent_note="approved by owner",
             ),
-            contract,
+            load_contract(contract.contract_path),
         )
-        self.assertEqual(observed, landed)
+        self.assertEqual(
+            _without_projection_effects(observed),
+            _without_projection_effects(landed),
+        )
         self.assertEqual(
             (memory / "onboarding" / "feature.py.md").read_text(encoding="utf-8"),
             "# changed\n",
@@ -919,34 +938,18 @@ class BranchAddressedRouteReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(TerminalLeafResolutionError, "re-stamp the series contract"):
             resolve_terminal_leaf_doc(root, "  ")
 
-    def test_closeout_declare_refusal_names_recovery(self) -> None:
-        """R9: candidate declaration without a leaf contract names the recovery."""
+    def test_closeout_door_declare_refusal_names_direct_landing_recovery(self) -> None:
+        """R9: a series door without its branch-addressed candidate names the route."""
         root = Path(self.temp.name)
         fixture = _series_fixture(root / "fx")
-        contract = fixture["contract"]
-
-        sprint = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
-        graph = SimpleNamespace(
-            sprint=SimpleNamespace(ref=sprint),
-            masters={},
-            revision="0" * 64,
-            grade_authority=None,
-            leaf_facts=[],
-        )
-
-        context = _ActionContext(
-            config=fixture["config"],
-            topology=cast(TaskDocumentTopology, SimpleNamespace()),
-            graph=cast(QueueGraphContext, graph),
-            request=CloseoutQueueRequest(
-                action="declare",
-                sprint_task_document_ref=sprint,
-                contract_path=contract.contract_path.as_posix(),
-                request_id="r",
-                expected_revision=0,
-            ),
-            action="declare",
-            timestamp="2026-08-20T00:00:00+00:00",
+        contract = replace(fixture["contract"], closeout_door=None)
+        request = CloseoutDoorRequest.model_validate(
+            {
+                "action": "declare",
+                "contract_path": contract.contract_path.as_posix(),
+                "grade": {"priority": "normal", "judgmentId": "J-direct"},
+                "admission": {},
+            }
         )
         with self.assertRaisesRegex(CloseoutQueueError, "direct landing"):
-            _declaration_identity(context)
+            door_task_context(fixture["config"], contract, request)

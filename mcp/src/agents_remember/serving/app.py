@@ -146,6 +146,7 @@ from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
+    TerminalLivenessActions,
     utc_now,
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
@@ -190,6 +191,7 @@ def _build_serving_runtime(
     )
     liveness_config = TerminalCatalogLivenessConfig()
     interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
+    terminal_execution_registrar = collaborators.register_terminal_execution_evidence
     liveness_sweeper = TerminalCatalogLivenessSweeper(
         catalog,
         host,
@@ -198,8 +200,18 @@ def _build_serving_runtime(
             hysteresis=liveness_config,
             on_control_snapshot=interaction_synchronizer.observe,
         ),
-        on_turn_state_change=lambda observation: log_turn_state_change_event(
-            config, observation.entry
+        actions=TerminalLivenessActions(
+            on_turn_state_change=lambda observation: log_turn_state_change_event(
+                config, observation.entry
+            ),
+            register_execution_evidence=(
+                None
+                if terminal_execution_registrar is None
+                else lambda entries: terminal_execution_registrar(
+                    config.coordination_root,
+                    entries,
+                )
+            ),
         ),
     )
     runtime = _ServingRuntime(
@@ -218,6 +230,7 @@ def _build_serving_runtime(
         # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
         # ExpectationRowStore DIRECTLY, never the projection.
         heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
+        register_inbox_execution_evidence=collaborators.register_inbox_execution_evidence,
         interval=cadence.interval,
     )
     # The serving daemon samples labeled provider

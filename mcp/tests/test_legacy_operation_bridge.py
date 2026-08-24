@@ -10,6 +10,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -225,6 +226,24 @@ class LegacyOperationBridgeTests(unittest.TestCase):
         original = json.dumps(payload, sort_keys=True).encode()
         path.write_bytes(original)
         return fixture, contract, path, hashlib.sha256(original).hexdigest()
+
+    @staticmethod
+    def _start_unrelated_integration_below_source_admission(fixture, contract) -> None:
+        """Seed the other-kind journal for tests scoped strictly to legacy arbitration."""
+
+        with mock.patch(
+            "agents_remember.worktrees.integration.lifecycle.lifecycle_operations."
+            "classify_integration_door_authority",
+            return_value=SimpleNamespace(valid=True),
+        ):
+            start_or_observe_operation(
+                IntegrateOperationInput(
+                    configPath=fixture.config_path.as_posix(),
+                    contractPath=contract.contract_path.as_posix(),
+                ),
+                contract,
+                launcher=lambda _contract, _record: None,
+            )
 
     @staticmethod
     def _request(
@@ -725,14 +744,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
         fixture, contract, path, digest = self._terminal_fixture()
         original = path.read_bytes()
         path.unlink()
-        start_or_observe_operation(
-            IntegrateOperationInput(
-                configPath=fixture.config_path.as_posix(),
-                contractPath=contract.contract_path.as_posix(),
-            ),
-            contract,
-            launcher=lambda _contract, _record: None,
-        )
+        self._start_unrelated_integration_below_source_admission(fixture, contract)
         path.write_bytes(original)
         inspected = worktree_legacy_operation_tool(
             fixture.cfg,
@@ -754,14 +766,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
         fixture, contract, path, digest = self._terminal_fixture()
         original = path.read_bytes()
         path.unlink()
-        start_or_observe_operation(
-            IntegrateOperationInput(
-                configPath=fixture.config_path.as_posix(),
-                contractPath=contract.contract_path.as_posix(),
-            ),
-            contract,
-            launcher=lambda _contract, _record: None,
-        )
+        self._start_unrelated_integration_below_source_admission(fixture, contract)
         integrate_path = operation_record_path(contract.worktree_group, "integrate")
         integrate_store = LifecycleOperationStore(integrate_path)
         runtime = lifecycle_operation_worker.OperationRuntime(integrate_store)

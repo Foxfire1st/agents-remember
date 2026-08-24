@@ -148,23 +148,34 @@ def inbox_keep_ids(
     now: datetime,
     max_rows: int = INBOX_MAX_CURRENT_ROWS,
     current: dict[str, OperatorInboxEntry] | None = None,
+    protected_ids: frozenset[str] = frozenset(),
 ) -> set[str]:
     """Inbox ids whose current snapshot still belongs in the compacted log."""
     latest = fold_operator_inbox_entries(entries) if current is None else current
-    kept = [entry for entry in latest.values() if _keep_inbox_entry(entry, now=now)]
+    kept = [
+        entry
+        for entry in latest.values()
+        if entry.id in protected_ids or _keep_inbox_entry(entry, now=now)
+    ]
     if len(kept) > max_rows:
         # Hard bounded-store cap (D4): pending rows survive before terminal markers, so the
         # eviction class is terminal-oldest-first; only an overflowing pending set itself
         # loses pending rows (oldest first). Dropping a pending row at the bound is accepted
         # behavior, and the sweep counts/surfaces the drop.
-        pending = [entry for entry in kept if entry.state == "pending"]
-        terminal = [entry for entry in kept if entry.state != "pending"]
+        protected = [entry for entry in kept if entry.id in protected_ids]
+        available = max(0, max_rows - len(protected))
+        pending = [
+            entry for entry in kept if entry.id not in protected_ids and entry.state == "pending"
+        ]
+        terminal = [
+            entry for entry in kept if entry.id not in protected_ids and entry.state != "pending"
+        ]
         pending.sort(key=lambda entry: entry.createdAt, reverse=True)
         terminal.sort(key=lambda entry: entry.createdAt, reverse=True)
-        selected = pending[:max_rows]
-        if len(selected) < max_rows:
-            selected = selected + terminal[: max_rows - len(selected)]
-        kept = selected
+        selected = pending[:available]
+        if len(selected) < available:
+            selected = selected + terminal[: available - len(selected)]
+        kept = [*protected, *selected]
     return {entry.id for entry in kept}
 
 

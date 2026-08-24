@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from contextlib import ExitStack, nullcontext
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -151,6 +151,19 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                 mock.patch.object(series_closeout, "TaskDocumentTopology", return_value=topology),
                 mock.patch.object(series_closeout, "_require_atomic_master_complete"),
                 mock.patch.object(series_closeout, "_require_every_atomic_leaf_landed"),
+            ):
+                self.assertEqual(
+                    series_closeout.publish_closeout_under_authority(
+                        fixture.master_contract,
+                        lambda: "published",
+                    ),
+                    "published",
+                )
+
+            with (
+                mock.patch.object(series_closeout, "TaskDocumentTopology", return_value=topology),
+                mock.patch.object(series_closeout, "_require_atomic_master_complete"),
+                mock.patch.object(series_closeout, "_require_every_atomic_leaf_landed"),
                 mock.patch.object(
                     series_closeout,
                     "integration_authority_lock",
@@ -158,115 +171,37 @@ class AtomicSeriesAuthorityCoverageTests(unittest.TestCase):
                 ),
             ):
                 self.assertEqual(
-                    series_closeout._publish_atomic_series_edge(
+                    series_closeout.publish_series_integration_under_authority(
                         fixture.master_contract,
-                        lambda: "published",
-                        edge="closeout",
+                        lambda: "landed",
                     ),
-                    "published",
+                    "landed",
                 )
 
-    def test_queue_publication_refuses_graph_blocker_and_candidate_races(self) -> None:
+    def test_series_publication_is_queue_independent_and_revalidates_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp))
             master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
-            sprint_ref = TaskDocumentRef(repository="repo", path="sprint/task.json")
             topology = SimpleNamespace(
                 canonical_ref=lambda *_args: master_ref,
-                parent=lambda _ref: sprint_ref,
-                resolve=lambda _ref: SimpleNamespace(
-                    document=SimpleNamespace(executionGraph={"nodes": []})
+            )
+            changed = replace(fixture.master_contract, closeout_status="completed")
+            with (
+                mock.patch.object(series_closeout, "TaskDocumentTopology", return_value=topology),
+                mock.patch.object(series_closeout, "_require_atomic_master_complete"),
+                mock.patch.object(series_closeout, "_require_every_atomic_leaf_landed"),
+                mock.patch.object(
+                    series_closeout,
+                    "integration_authority_lock",
+                    return_value=nullcontext(),
                 ),
-            )
-
-            def publish(
-                state: SimpleNamespace,
-                *,
-                graph_side_effect: list[SimpleNamespace] | None = None,
-            ) -> None:
-                store = SimpleNamespace(inspect=lambda _initial, action: action(state))
-                graph = (
-                    mock.patch.object(
-                        series_closeout,
-                        "_graph_context",
-                        side_effect=graph_side_effect,
-                    )
-                    if graph_side_effect is not None
-                    else mock.patch.object(
-                        series_closeout,
-                        "_graph_context",
-                        return_value=SimpleNamespace(revision="1"),
-                    )
+                mock.patch.object(series_closeout, "load_contract", return_value=changed),
+                self.assertRaisesRegex(RuntimeError, "contract changed"),
+            ):
+                series_closeout.publish_series_integration_under_authority(
+                    fixture.master_contract,
+                    lambda: None,
                 )
-                with ExitStack() as stack:
-                    stack.enter_context(
-                        mock.patch.object(
-                            series_closeout,
-                            "TaskDocumentTopology",
-                            return_value=topology,
-                        )
-                    )
-                    stack.enter_context(
-                        mock.patch.object(series_closeout, "_require_atomic_master_complete")
-                    )
-                    stack.enter_context(
-                        mock.patch.object(series_closeout, "_require_every_atomic_leaf_landed")
-                    )
-                    stack.enter_context(
-                        mock.patch.object(
-                            series_closeout,
-                            "integration_authority_lock",
-                            return_value=nullcontext(),
-                        )
-                    )
-                    stack.enter_context(
-                        mock.patch.object(
-                            series_closeout,
-                            "initial_queue_state",
-                            return_value=object(),
-                        )
-                    )
-                    stack.enter_context(
-                        mock.patch.object(
-                            series_closeout,
-                            "CloseoutQueueStore",
-                            return_value=store,
-                        )
-                    )
-                    stack.enter_context(graph)
-                    series_closeout._publish_atomic_series_edge(
-                        fixture.master_contract,
-                        lambda: None,
-                        edge="closeout",
-                    )
-
-            state = SimpleNamespace(activeBlocker=None, candidates={})
-            with self.assertRaisesRegex(series_closeout.CloseoutQueueError, "graph changed"):
-                publish(
-                    state,
-                    graph_side_effect=[
-                        SimpleNamespace(revision="1"),
-                        SimpleNamespace(revision="2"),
-                    ],
-                )
-
-            with self.assertRaisesRegex(series_closeout.CloseoutQueueError, "blocker"):
-                publish(state)
-
-            state = SimpleNamespace(
-                activeBlocker=SimpleNamespace(master=master_ref),
-                candidates={
-                    "leaf": SimpleNamespace(
-                        owningMaster=master_ref,
-                        taskDocumentRef=TaskDocumentRef(
-                            repository="repo",
-                            path="master/leaf.json",
-                        ),
-                    )
-                },
-            )
-            with self.assertRaisesRegex(series_closeout.CloseoutQueueError, "every own leaf"):
-                publish(state)
 
     def test_chain_and_leaf_proofs_cover_invalid_edges(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

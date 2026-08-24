@@ -119,6 +119,12 @@ def run_agent_notifier_sweep(
     # tmux snapshot inside the callback is still fresh and fail-closed, and the agent-notifier is
     # level-triggered, so a kept row is simply re-judged on the next sweep.
     catalog_entries = ctx.catalog.list(include_terminated=True)
+    inbox_snapshot = tuple(ctx.inbox_store.current().values())
+    registered_execution_ids = (
+        ctx.register_execution_evidence(inbox_snapshot)
+        if ctx.register_execution_evidence is not None
+        else frozenset()
+    )
 
     def reconcile(current: dict[str, OperatorInboxEntry]) -> dict[str, str]:
         nonlocal reclamation
@@ -132,6 +138,7 @@ def run_agent_notifier_sweep(
     inbox_removed, current, resolved_entries = ctx.inbox_store.reconcile_and_compact(
         now=now,
         reconcile=reconcile,
+        registered_execution_ids=registered_execution_ids,
     )
     _log_inbox_compaction(ctx, inbox_removed, current, resolved_entries, reclamation)
     # N13 migration fold: pre-migration rows that satisfied the by-rule landing predicate

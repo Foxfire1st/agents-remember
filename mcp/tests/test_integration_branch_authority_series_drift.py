@@ -14,9 +14,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 )
 from agents_remember.worktrees.worktree_contract import write_contract
 from integration_branch_authority_test_support import (
-    _acquire_atomic_blocker,
     _authority_fixture,
     _complete_atomic_master,
+    _publish_completed_closeout_fixture,
 )
 from test_source_lineage import _commit_on, _git
 
@@ -26,7 +26,6 @@ class IntegrationBranchAuthoritySeriesDriftTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root)
-            _acquire_atomic_blocker(fixture)
             _commit_on(fixture.code_repo, "ar/master", "atomic-candidate.txt")
             candidate = _git(fixture.code_repo, "rev-parse", "refs/heads/ar/master")
             _complete_atomic_master(fixture)
@@ -38,6 +37,7 @@ class IntegrationBranchAuthoritySeriesDriftTests(unittest.TestCase):
                 code_commit=candidate,
             )
             write_contract(series.contract_path, series)
+            series = _publish_completed_closeout_fixture(fixture, series)
             _commit_on(fixture.code_repo, "super", "parallel-super.txt")
             record_path = operation_record_path(series.worktree_group, "integrate")
 

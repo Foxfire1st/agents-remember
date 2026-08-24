@@ -9,21 +9,28 @@ function queue(overrides: Partial<CloseoutQueueNode> = {}): CloseoutQueueNode {
   return {
     sprintRef: { repository: "repo-a", path: "sprint/task.json" },
     revision: 0,
-    graphRevision: "0".repeat(64),
-    candidates: [
+    serviceCondition: "valid-built",
+    sourceClassification: "active",
+    sourceFingerprint: "0".repeat(64),
+    sourceProblems: [],
+    members: [
       {
+        generationId: "1".repeat(64),
         taskDocumentRef: { repository: "repo-a", path: "master-a/leaf-a.json" },
         owningMaster: { repository: "repo-a", path: "master-a/task.json" },
-        candidateState: "declared",
-        gradePriority: "normal",
+        classification: "ready",
+        priority: "normal",
+        order: 0,
         reasons: [],
       },
       {
+        generationId: "2".repeat(64),
         taskDocumentRef: { repository: "repo-a", path: "master-b/leaf-b.json" },
         owningMaster: { repository: "repo-a", path: "master-b/task.json" },
-        candidateState: "declared",
-        gradePriority: undefined,
-        reasons: ["explicit-grade-required"],
+        classification: "blocked",
+        priority: "low",
+        order: 1,
+        reasons: ["door-scheduling-provenance-stale"],
       },
     ],
     ...overrides,
@@ -43,26 +50,32 @@ describe("CloseoutQueue", () => {
   it("renders candidates with state, grade, and reasons", () => {
     render(<CloseoutQueue />);
     expect(screen.getByText("master-a/leaf-a.json")).toBeTruthy();
-    expect(screen.getByText("declared · normal")).toBeTruthy();
+    expect(screen.getByText("ready · normal")).toBeTruthy();
     expect(screen.getByText("master-b/leaf-b.json")).toBeTruthy();
-    expect(screen.getByText("explicit-grade-required")).toBeTruthy();
+    expect(screen.getByText("door-scheduling-provenance-stale")).toBeTruthy();
   });
 
-  it("renders the active atomic blocker", () => {
+  it("renders typed non-admitting repair evidence", () => {
     dashboardStore.setState({
       closeoutQueues: [
         queue({
-          activeBlocker: {
-            master: { repository: "repo-a", path: "master-b/task.json" },
-            rationale: "atomic unit integration",
-            acquiredBy: "orchestrator",
-          },
+          serviceCondition: "invalid-empty",
+          sourceClassification: undefined,
+          sourceFingerprint: undefined,
+          members: [],
+          sourceProblems: [{
+            kind: "projection",
+            address: "/coord/tasks/repo-a/sprint/artifacts/closeout-candidates.json",
+            state: "unreadable",
+            errorType: "source-fingerprint-mismatch",
+            repairAction: "closeout_queue(action='rebuild')",
+          }],
         }),
       ],
     });
     render(<CloseoutQueue />);
-    expect(screen.getByText("blocker: master-b/task.json")).toBeTruthy();
-    expect(screen.getByText("atomic unit integration")).toBeTruthy();
+    expect(screen.getByText("source-fingerprint-mismatch")).toBeTruthy();
+    expect(screen.getByText("closeout_queue(action='rebuild')")).toBeTruthy();
   });
 
   it("renders nothing when no queue is projected", () => {

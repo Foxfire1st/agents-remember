@@ -739,7 +739,6 @@ class IntegrationBranchAuthorityCoverageTests(unittest.TestCase):
                         topology,
                         contract,
                         master,
-                        sprint_ref,
                         {},
                     )
 

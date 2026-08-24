@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any, Literal, Self
 
 from pydantic import (
@@ -173,6 +174,23 @@ class HeaderNote(_Doc):
 class TaskEnclosureRef(_Doc):
     leafId: str
     enclosurePath: str
+
+
+class TaskExecutionRegistration(_Doc):
+    """Bounded monotonic proof that one leaf acquired typed execution authority."""
+
+    sourceKind: Literal["terminal-catalog-seat", "operator-inbox-turn-report"]
+    role: Literal["worker", "reviewer", "curator"]
+    sourceId: str
+    observedAt: str
+
+    @field_validator("sourceId", "observedAt")
+    @classmethod
+    def _trim_registration_identity(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("task execution registration identity must not be blank")
+        return trimmed
 
 
 class SprintExecutionEndpoint(_Doc):
@@ -627,6 +645,71 @@ class SubTaskRef(_Doc):
     masterRef: TaskDocumentRef | None = None
 
 
+class DiscardSourceProof(_Doc):
+    """Exact accepted state of one child source side at discard admission."""
+
+    state: Literal["missing", "present"]
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    size: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _proof_matches_state(self) -> Self:
+        carries_any_bytes = self.sha256 is not None or self.size is not None
+        carries_complete_bytes = self.sha256 is not None and self.size is not None
+        if (self.state == "present" and not carries_complete_bytes) or (
+            self.state == "missing" and carries_any_bytes
+        ):
+            raise ValueError("discard source proof state must match complete digest and size")
+        return self
+
+
+class DiscardUnstartedProof(_Doc):
+    """Compact typed proof retained after a planning leaf source is removed."""
+
+    version: Literal["task-unstarted-evidence/v1"] = "task-unstarted-evidence/v1"
+    taskDocumentRef: TaskDocumentRef
+    taskState: Literal["planning-unstarted"] = "planning-unstarted"
+    enclosureState: Literal["absent"] = "absent"
+    locatorState: Literal["absent"] = "absent"
+    doorState: Literal["absent"] = "absent"
+    operationState: Literal["absent"] = "absent"
+    seatState: Literal["absent"] = "absent"
+    reviewState: Literal["absent"] = "absent"
+    commitState: Literal["absent"] = "absent"
+    childJson: DiscardSourceProof
+    childMarkdown: DiscardSourceProof
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class DiscardedSubTask(_Doc):
+    """Parent-owned audit for one leaf removed before execution began."""
+
+    number: str
+    name: str
+    file: str
+    scope: str = ""
+    disposition: Literal["discard-unstarted"] = "discard-unstarted"
+    reason: str
+    discardedAt: str
+    proof: DiscardUnstartedProof
+
+    @field_validator("number", "name", "file", "reason", "discardedAt")
+    @classmethod
+    def _trim_required_discard_value(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("discard-unstarted audit identity, reason, and time must not be blank")
+        return trimmed
+
+    @field_validator("file")
+    @classmethod
+    def _require_direct_markdown_source(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if path.is_absolute() or path.parent != PurePosixPath() or path.suffix != ".md":
+            raise ValueError("discard-unstarted audit file must be one direct Markdown child")
+        return value
+
+
 SprintSeatState = Literal["planned", "active", "retired"]
 
 
@@ -702,6 +785,10 @@ class TaskDocument(_Doc):
     executionNature: MasterExecutionNature | None = None
     executionGraph: SprintExecutionGraph | None = None
     enclosures: list[TaskEnclosureRef] = Field(default_factory=list)
+    # Typed seat/report stores are reclaimable. Before their last row is removed, one compact
+    # first-observation marker is registered here so historical execution can never become
+    # "never started". One marker per source kind and role keeps the task document bounded.
+    executionRegistrations: list[TaskExecutionRegistration] = Field(default_factory=list)
     lifecycleId: str | None = None
     objective: str = ""
     requirements: list[str] = Field(default_factory=list)
@@ -718,6 +805,10 @@ class TaskDocument(_Doc):
     # subTasks is the master series index (master-only). sections is the master's ordered
     # render plan AND, since R4, freeform extra sections on a leaf doc (appended after the template).
     subTasks: list[SubTaskRef] = Field(default_factory=list)
+    # Planning removal is not completion. The parent retains this compact typed audit after the
+    # live row and child JSON/Markdown disappear, which also makes a lost-response retry
+    # idempotently observable without a queue tombstone or filesystem scan.
+    discardedSubTasks: list[DiscardedSubTask] = Field(default_factory=list)
     sections: list[Section] = Field(default_factory=list)
     # The orchestration-command relation (260703-L14): a ``master`` doc that carries a non-empty
     # ``orchestrates`` list IS an orchestration task -- each entry names a master task it commands
@@ -731,39 +822,76 @@ class TaskDocument(_Doc):
     @model_validator(mode="after")
     def _check_kind_fields(self) -> Self:
         if self.kind == "master":
-            if (
-                self.steps
-                or self.codeExamples
-                or self.codeExamplesNote is not None
-                or self.lifecycleId is not None
-                or self.routeReview is not None
-            ):
-                raise ValueError(
-                    "a master document has no steps, codeExamples, codeExamplesNote, lifecycleId, "
-                    "or routeReview"
-                )
+            self._check_master_fields()
         else:
-            if self.subTasks:
-                raise ValueError(f"a {self.kind} document has no subTasks (master-only)")
-            if self.orchestrates:
-                raise ValueError(f"a {self.kind} document has no orchestrates (master-only)")
-            if self.seats:
-                raise ValueError(f"a {self.kind} document has no seats (sprint-only)")
-            if any(section.kind != "freeform" for section in self.sections):
-                raise ValueError(f"a {self.kind} document allows only freeform sections")
-            if self.codeExamplesNote is not None and self.codeExamples:
-                raise ValueError(
-                    "codeExamplesNote explains why code examples are absent; "
-                    "it cannot be set alongside codeExamples"
-                )
-            if self.executionNature is not None or self.executionGraph is not None:
-                raise ValueError(
-                    f"a {self.kind} document has no executionNature or executionGraph (master-only)"
-                )
+            self._check_nonmaster_fields()
         self._check_execution_fields()
         self._check_sprint_rows_and_seats()
+        self._check_discarded_subtasks()
         self._normalize_integration_branch()
         return self
+
+    def _check_master_fields(self) -> None:
+        if (
+            self.steps
+            or self.codeExamples
+            or self.codeExamplesNote is not None
+            or self.lifecycleId is not None
+            or self.routeReview is not None
+            or self.executionRegistrations
+        ):
+            raise ValueError(
+                "a master document has no steps, codeExamples, codeExamplesNote, lifecycleId, "
+                "routeReview, or executionRegistrations"
+            )
+
+    def _check_nonmaster_fields(self) -> None:
+        master_only = {
+            "subTasks": self.subTasks,
+            "discardedSubTasks": self.discardedSubTasks,
+            "orchestrates": self.orchestrates,
+            "seats": self.seats,
+        }
+        present = next((name for name, value in master_only.items() if value), None)
+        if present is not None:
+            raise ValueError(f"a {self.kind} document has no {present} (master-only)")
+        if any(section.kind != "freeform" for section in self.sections):
+            raise ValueError(f"a {self.kind} document allows only freeform sections")
+        if self.codeExamplesNote is not None and self.codeExamples:
+            raise ValueError(
+                "codeExamplesNote explains why code examples are absent; "
+                "it cannot be set alongside codeExamples"
+            )
+        if self.executionNature is not None or self.executionGraph is not None:
+            raise ValueError(
+                f"a {self.kind} document has no executionNature or executionGraph (master-only)"
+            )
+        if self.kind != "subTask" and self.executionRegistrations:
+            raise ValueError("only a subTask may carry leaf execution registrations")
+        registration_keys = [(item.sourceKind, item.role) for item in self.executionRegistrations]
+        if len(registration_keys) != len(set(registration_keys)):
+            raise ValueError("task execution registrations must be unique by source kind and role")
+
+    def _check_discarded_subtasks(self) -> None:
+        discarded = [item.number for item in self.discardedSubTasks]
+        if len(discarded) != len(set(discarded)):
+            raise ValueError("discardedSubTasks numbers must be unique")
+        live = {item.number for item in self.subTasks}
+        overlap = sorted(live.intersection(discarded))
+        if overlap:
+            raise ValueError(
+                "a discardedSubTasks identity cannot also remain live: " + ", ".join(overlap)
+            )
+        for item in self.discardedSubTasks:
+            proof_ref = item.proof.taskDocumentRef
+            expected_name = PurePosixPath(item.file).with_suffix(".json").name
+            if (
+                proof_ref.repository != self.repo
+                or PurePosixPath(proof_ref.path).name != expected_name
+            ):
+                raise ValueError(
+                    "discardedSubTasks proof identity must match the parent repository and file"
+                )
 
     def _check_execution_fields(self) -> None:
         if self.kind != "master":

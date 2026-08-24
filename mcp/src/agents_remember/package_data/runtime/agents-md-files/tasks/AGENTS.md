@@ -160,3 +160,38 @@ Before implementation, the agent should make visible, in chat or in a task artif
 The implementation plan should be derived from those earlier sections, not used as a substitute for them.
 
 ---
+
+## Task Authoring Is Authoritative
+
+Task planning, progress, topology, requirements, decisions, and route-review records belong to the
+JSON-primary task document. Closeout-door, queue, operation, lane, blocker, locator, worker, review,
+or Git state must not freeze that authoring plane.
+
+An intrinsically valid `task_doc` mutation is one that satisfies the task operation's own contract:
+valid typed arguments and schema, caller/task authority, exact current source-pair CAS, task-local
+status/step invariants, and structural or referential integrity. Scheduling convenience and
+operation phase are not intrinsic task validity conditions. Apply every such mutation during every
+closeout phase, including create/replace, progress/status/checkmarks, requirements/decisions/sections,
+route review, graph/linkage, attach/detach/reparent/removal, and sprint completion.
+
+After a governed task mutation publishes, read its machine-readable `projectionEffects`:
+
+1. the task write is already authoritative;
+2. every sprint in the before/after governing-scope union is made non-admitting
+   `invalid-empty`;
+3. each projection rebuilds independently from current task truth plus current `waiting`
+   closeout-door generations;
+4. an incomplete effect carries the exact sprint-addressed `nextAction` to execute.
+
+Never roll back the task write, patch/demote/retain an old queue row, or wait for a closeout
+operation to finish. The closeout queue is disposable scheduling output only. Accepted or partial
+work remains addressable in the operation journal independently of projection state.
+
+Planning discard is also not completion. `task_doc.remove_subtask` with
+`disposition:"discard-unstarted"` and a nonblank reason may remove a leaf only when the centralized
+evidence predicate proves that no execution authority or work ever existed. It publishes a typed
+parent audit and the normal projection effects without transiently completing or auto-skipping the
+leaf. Present, unreadable, or contradictory execution evidence refuses discard and names the real
+abandon/archive/recover/complete route.
+
+---

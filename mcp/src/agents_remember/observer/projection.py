@@ -35,6 +35,10 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
+from agents_remember.observer.projection_closeout import (
+    CloseoutProjectionProblemNode,
+    DiscardedSubTaskNode,
+)
 from agents_remember.observer.projection_graph import TaskExecutionGraphView
 
 AttentionSeverity: TypeAlias = Literal["alarm", "warn", "info"]
@@ -699,42 +703,34 @@ class TaskExecutionGraphNode(BaseModel):
 
 
 class CloseoutCandidateNode(BaseModel):
-    """One projected closeout candidate: its queue state, grade, and why it is not selectable.
-
-    Read from the durable queue artifact, never re-derived from titles, numbering, labels, or
-    open terminals (L8-R2/R5). ``reasons`` carries the queue's own waiting reasons; the dashboard
-    renders them verbatim rather than inferring readiness.
-    """
+    """One exact-current member of the disposable scheduling projection."""
 
     model_config = ConfigDict(extra="forbid")
 
+    generationId: str
     taskDocumentRef: TaskDocumentRef
     owningMaster: TaskDocumentRef
-    candidateState: str
-    gradePriority: str | None = None
-    reasons: list[str] = Field(default_factory=list)
-
-
-class AtomicBlockerNode(BaseModel):
-    """The active atomic-unit master blocker, with its recorded rationale."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    master: TaskDocumentRef
-    rationale: str = ""
-    acquiredBy: str = ""
+    classification: str
+    priority: str
+    order: int = 0
+    reasons: list[str] = Field(default_factory=list, max_length=256)
 
 
 class CloseoutQueueNode(BaseModel):
-    """The projected closeout queue for one sprint: candidates, blocker, and graph revision."""
+    """Exact effective state for one disposable sprint scheduling projection."""
 
     model_config = ConfigDict(extra="forbid")
 
     sprintRef: TaskDocumentRef
     revision: int = 0
-    graphRevision: str = ""
-    activeBlocker: AtomicBlockerNode | None = None
-    candidates: list[CloseoutCandidateNode] = Field(default_factory=list)
+    serviceCondition: str
+    sourceClassification: str | None = None
+    sourceFingerprint: str | None = None
+    sourceProblems: list[CloseoutProjectionProblemNode] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    members: list[CloseoutCandidateNode] = Field(default_factory=list, max_length=256)
 
 
 class TaskDocNode(BaseModel):
@@ -776,6 +772,13 @@ class TaskDocNode(BaseModel):
     # Master docs use these for the series index + ordered render plan; non-master task docs may
     # carry freeform sections. Empty when the document has no authored sections.
     subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
+    # Only master documents own discard-unstarted audit history. ``None`` distinguishes a
+    # non-master task from a master whose typed history is present and empty.
+    discardedCount: int | None = None
+    discardedSubTasks: list[DiscardedSubTaskNode] | None = Field(
+        default=None,
+        max_length=256,
+    )
     sections: list[TaskSectionNode] = Field(default_factory=list)
     # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
     # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
@@ -846,6 +849,8 @@ class SeriesNode(BaseModel):
     createdAt: str = ""
     objective: str = ""
     subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
+    discardedCount: int = 0
+    discardedSubTasks: list[DiscardedSubTaskNode] = Field(default_factory=list, max_length=256)
     doneCount: int = 0
     totalCount: int = 0
     seriesTokenTotal: int = 0

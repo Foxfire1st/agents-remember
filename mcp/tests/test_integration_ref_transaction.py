@@ -43,8 +43,8 @@ from agents_remember.worktrees.modules.integrate import (
 from agents_remember.worktrees.series_closeout import atomic_series_ledger_prefix
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from integration_branch_authority_test_support import (
-    _acquire_atomic_blocker,
     _land_two_external_atomic_leaves,
+    _publish_completed_closeout_fixture,
 )
 from test_integration_branch_authority import (
     _authority_fixture,
@@ -220,6 +220,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             fixture = _authority_fixture(root, external_memory=True)
             closed = _closed_external_leaf_worktrees(fixture, root)
             assert closed.memory_repo_path is not None
+            assert closed.memory_worktree is not None
             assert closed.ledger_path is not None
             content_tree = _git(
                 closed.memory_repo_path,
@@ -293,6 +294,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             fixture = _authority_fixture(root, external_memory=True)
             closed = _closed_external_leaf_worktrees(fixture, root)
             assert closed.memory_repo_path is not None
+            assert closed.memory_worktree is not None
             assert closed.ledger_path is not None
             write_ledger(
                 closed.ledger_path,
@@ -445,7 +447,6 @@ class IntegrationRefTransactionTests(unittest.TestCase):
     def test_atomic_series_publication_refuses_injected_prefix_before_super_movement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp), external_memory=True)
-            _acquire_atomic_blocker(fixture)
             _first, final = _land_two_external_atomic_leaves(fixture)
             series = fixture.master_contract
             memory_repo = series.memory_repo_path
@@ -534,6 +535,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             fixture = _authority_fixture(root, external_memory=True)
             closed = _closed_external_leaf_worktrees(fixture, root)
             assert closed.memory_repo_path is not None
+            assert closed.memory_worktree is not None
             assert closed.ledger_path is not None
             ledger = load_ledger(closed.ledger_path)
             write_ledger(closed.ledger_path, replace(ledger, rows=[ledger.rows[0]]))
@@ -557,7 +559,12 @@ class IntegrationRefTransactionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
-            closed = _closed_external_leaf_worktrees(fixture, root)
+            closed = _closed_external_leaf_worktrees(
+                fixture,
+                root,
+                publish_closeout_evidence=False,
+            )
+            assert closed.memory_worktree is not None
             assert closed.ledger_path is not None
             write_ledger(
                 closed.ledger_path,
@@ -574,6 +581,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 ledger_commit=_git(closed.memory_worktree, "rev-parse", "HEAD"),
             )
             write_contract(forged.contract_path, forged)
+            forged = _publish_completed_closeout_fixture(fixture, forged)
             running, recovery = self._land_external_recovery_pair(fixture, forged)
             contract_bytes = forged.contract_path.read_bytes()
 
@@ -595,8 +603,14 @@ class IntegrationRefTransactionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
-            closed = _closed_external_leaf_worktrees(fixture, root)
-            assert closed.memory_repo_path is not None and closed.ledger_path is not None
+            closed = _closed_external_leaf_worktrees(
+                fixture,
+                root,
+                publish_closeout_evidence=False,
+            )
+            assert closed.memory_repo_path is not None
+            assert closed.memory_worktree is not None
+            assert closed.ledger_path is not None
             content_tree = _git(
                 closed.memory_repo_path,
                 "rev-parse",
@@ -642,6 +656,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 ledger_commit=forged_ledger,
             )
             write_contract(forged.contract_path, forged)
+            forged = _publish_completed_closeout_fixture(fixture, forged)
             running, recovery = self._land_external_recovery_pair(fixture, forged)
             contract_bytes = forged.contract_path.read_bytes()
 

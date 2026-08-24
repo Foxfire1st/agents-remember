@@ -1,20 +1,16 @@
-"""Exact task-document publication under short integration authority."""
+"""Task-first publication and disposable projection refresh."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.closeout_projection import TaskDocProjectionEffect
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintGraphTitles,
-    SubTaskRef,
     TaskDocSourceReadError,
     TaskDocSourceSnapshot,
     TaskDocument,
@@ -24,18 +20,16 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.integration.integration_branch_authority import (
-    require_topology_publication_authority,
+from agents_remember.worktrees.queue.closeout_projection_publication import (
+    preview_closeout_projection_effect,
+)
+from agents_remember.worktrees.task_fact_publication import (
+    publish_task_fact_mutation,
+    validate_task_fact_mutation,
 )
 
-from .task_doc_queue_scope import (
-    QueuePublicationScope,
-    QueueScopeError,
-    QueueScopePreparation,
-    prepare_governing_queue_scope,
-)
+from .task_doc_queue_scope import TaskDocScopeChange, resolve_projection_scope_union
 from .task_doc_route_review import TaskDocError
-from .task_execution_topology import require_commanded_masters_completed
 
 
 class TaskDocPublicationConflict(TaskDocError):
@@ -66,70 +60,76 @@ class TaskDocPublication:
     documents: list[TaskDocument]
     source_snapshots: tuple[TaskDocSourceSnapshot, ...]
     publisher: Callable[[], list[tuple[Path, Path]]] | None = None
-    queue_scope: QueuePublicationScope | None = field(init=False)
-
-    def __post_init__(self) -> None:
-        try:
-            prepared = prepare_governing_queue_scope(
-                QueueScopePreparation(
-                    coordination_root=self.config.coordination_root,
-                    repo_id=self.target_repo_id,
-                    task_root=self.task_root,
-                    original=self.original,
-                    candidate=self.candidate,
-                    source_snapshots=self.source_snapshots,
-                )
-            )
-        except QueueScopeError as exc:
-            raise TaskDocError(str(exc)) from exc
-        object.__setattr__(self, "source_snapshots", prepared.source_snapshots)
-        object.__setattr__(self, "queue_scope", prepared.scope)
 
 
 @dataclass(frozen=True)
 class TaskDocPublicationTransaction:
-    """One exact source-pair CAS and publication under short integration authority."""
+    """One exact source-pair CAS and authoritative task publication."""
 
     coordination_root: Path
     target_repo_id: str
     source_snapshots: tuple[TaskDocSourceSnapshot, ...]
-    queue_scope: QueuePublicationScope | None
-    authority: Callable[[], None]
+    scope_changes: tuple[TaskDocScopeChange, ...]
     publisher: Callable[[], list[tuple[Path, Path]]]
 
 
-def publish_task_doc_set(context: TaskDocPublication) -> list[tuple[Path, Path]]:
-    """Publish one prepared set only if all accepted source bytes remain exact."""
+@dataclass(frozen=True)
+class TaskDocPublicationResult:
+    written: list[tuple[Path, Path]]
+    projection_effects: tuple[TaskDocProjectionEffect, ...]
+
+
+def publish_task_doc_set(context: TaskDocPublication) -> TaskDocPublicationResult:
+    """Publish task truth first, then independently refresh every affected scope."""
 
     transaction = task_doc_publication_transaction(context)
+    return publish_task_doc_transaction_and_refresh(transaction)
 
-    def publication() -> list[tuple[Path, Path]]:
-        return publish_task_doc_transaction(transaction)
 
-    scope = transaction.queue_scope
-    if scope is None:
-        return publication()
-    queue = CloseoutQueueStore(context.config.coordination_root, scope.sprint_ref)
-    if context.candidate.kind != "master" or not context.candidate.orchestrates:
-        if scope.owning_master is None:
-            raise TaskDocError("governed master/leaf edit has no owning master queue scope")
-        return queue.publish_task_facts_update(
-            publication,
-            owning_master=scope.owning_master,
-            topology_stable=_task_topology_stable(context.original, context.candidate),
-        )
-    return cast(
-        list[tuple[Path, Path]],
-        queue.publish_sprint_update(
-            publication,
-            completed=context.candidate.status == "Completed",
-            recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
-            validate_completion=lambda: require_commanded_masters_completed(
-                TaskDocumentTopology(context.config.coordination_root),
-                scope.sprint_ref,
-                {scope.sprint_ref: context.candidate},
-            ),
+def publish_task_doc_transaction_and_refresh(
+    transaction: TaskDocPublicationTransaction,
+) -> TaskDocPublicationResult:
+    """Commit task truth and invalidate every scope under CAS, then rebuild independently."""
+
+    published = publish_task_fact_mutation(
+        transaction.coordination_root,
+        transaction.target_repo_id,
+        validate=lambda: require_task_doc_sources_current(transaction.source_snapshots),
+        projection_scopes=lambda: resolve_projection_scope_union(
+            transaction.coordination_root,
+            transaction.target_repo_id,
+            transaction.scope_changes,
         ),
+        publication=transaction.publisher,
+    )
+    return TaskDocPublicationResult(published.result, published.projection_effects)
+
+
+def preview_task_doc_projection_effects(
+    context: TaskDocPublication,
+) -> tuple[TaskDocProjectionEffect, ...]:
+    """Predict the post-publication projections against exact candidate task bytes."""
+
+    return preview_task_doc_transaction_projection_effects(
+        task_doc_publication_transaction(context)
+    )
+
+
+def preview_task_doc_transaction_projection_effects(
+    transaction: TaskDocPublicationTransaction,
+) -> tuple[TaskDocProjectionEffect, ...]:
+    overrides = {change.ref: change.candidate for change in transaction.scope_changes}
+    return tuple(
+        preview_closeout_projection_effect(
+            transaction.coordination_root,
+            sprint_ref,
+            overrides=overrides,
+        )
+        for sprint_ref in resolve_projection_scope_union(
+            transaction.coordination_root,
+            transaction.target_repo_id,
+            transaction.scope_changes,
+        )
     )
 
 
@@ -138,13 +138,18 @@ def task_doc_publication_transaction(
 ) -> TaskDocPublicationTransaction:
     """Build the sole exact transaction for one ordinary/remove task-doc candidate."""
 
+    overrides = _task_doc_publication_overrides(context)
     return TaskDocPublicationTransaction(
-        context.config.coordination_root,
-        context.target_repo_id,
-        context.source_snapshots,
-        context.queue_scope,
-        lambda: validate_task_doc_publication_authority(context),
-        context.publisher
+        coordination_root=context.config.coordination_root,
+        target_repo_id=context.target_repo_id,
+        source_snapshots=context.source_snapshots,
+        scope_changes=task_doc_scope_changes(
+            context.config.coordination_root,
+            context.target_repo_id,
+            overrides,
+            context.source_snapshots,
+        ),
+        publisher=context.publisher
         or (
             lambda: write_task_docs(
                 context.task_root,
@@ -155,44 +160,54 @@ def task_doc_publication_transaction(
     )
 
 
-def publish_task_doc_transaction(
-    transaction: TaskDocPublicationTransaction,
-) -> list[tuple[Path, Path]]:
-    """CAS and publish one prepared task-document set through the sole transaction."""
+def task_doc_scope_changes(
+    coordination_root: Path,
+    repo_id: str,
+    overrides: dict[TaskDocumentRef, TaskDocument],
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...],
+) -> tuple[TaskDocScopeChange, ...]:
+    """Bind every changed candidate to its exact accepted original source bytes."""
 
-    with integration_authority_lock(
-        transaction.coordination_root,
-        transaction.target_repo_id,
-    ):
-        require_task_doc_sources_current(transaction.source_snapshots)
-        transaction.authority()
-        return transaction.publisher()
+    topology = TaskDocumentTopology(coordination_root)
+    sources = {snapshot.json_path.resolve(strict=False): snapshot for snapshot in source_snapshots}
+    changes: list[TaskDocScopeChange] = []
+    for ref, candidate in sorted(overrides.items(), key=lambda item: item[0].key):
+        path = topology.path_for_ref(ref).resolve(strict=False)
+        accepted = sources.get(path)
+        if accepted is None:
+            raise TaskDocError(f"changed task document has no accepted source snapshot: {ref.key}")
+        try:
+            original = (
+                None
+                if accepted.json_bytes is None
+                else TaskDocument.model_validate_json(accepted.json_bytes)
+            )
+        except ValueError as exc:
+            raise TaskDocError(
+                f"accepted task source cannot derive projection scope: {ref.key}: {exc}"
+            ) from exc
+        if candidate.repo != repo_id:
+            raise TaskDocError(
+                f"task document {ref.key} declares repo {candidate.repo!r}, "
+                f"expected {repo_id!r}"
+            )
+        if original is not None and original.repo != repo_id:
+            raise TaskDocError(
+                f"accepted task document {ref.key} declares repo {original.repo!r}, "
+                f"expected {repo_id!r}"
+            )
+        changes.append(TaskDocScopeChange(ref, original, candidate))
+    return tuple(changes)
 
 
 def validate_task_doc_transaction(transaction: TaskDocPublicationTransaction) -> None:
     """Read-only dry-run preflight through the same exact source-pair transaction."""
 
-    with integration_authority_lock(
+    validate_task_fact_mutation(
         transaction.coordination_root,
         transaction.target_repo_id,
-        create=False,
-    ):
-        require_task_doc_sources_current(transaction.source_snapshots)
-        transaction.authority()
-
-
-def validate_task_doc_publication_authority(context: TaskDocPublication) -> None:
-    repository = context.config.repositories[context.target_repo_id]
-    try:
-        require_topology_publication_authority(
-            context.config.coordination_root,
-            context.target_repo_id,
-            repository.path,
-            repository.memory_root,
-            _task_doc_publication_overrides(context),
-        )
-    except RuntimeError as exc:
-        raise TaskDocError(str(exc)) from exc
+        lambda: require_task_doc_sources_current(transaction.source_snapshots),
+    )
 
 
 def require_task_doc_sources_current(
@@ -232,26 +247,6 @@ def _task_doc_publication_overrides(
         )
         overrides[ref] = document
     return overrides
-
-
-def _task_topology_stable(
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> bool:
-    if original is None or original.kind != candidate.kind:
-        return False
-    stable_fields = ("id", "slug", "title", "repo", "orchestrates", "executionNature")
-    if any(getattr(original, field) != getattr(candidate, field) for field in stable_fields):
-        return False
-    if candidate.kind != "master":
-        return True
-
-    def identity(row: SubTaskRef) -> tuple[str, str, str | None]:
-        return row.number, row.name, row.file
-
-    return [identity(row) for row in original.subTasks] == [
-        identity(row) for row in candidate.subTasks
-    ]
 
 
 def _batch_graph_titles(

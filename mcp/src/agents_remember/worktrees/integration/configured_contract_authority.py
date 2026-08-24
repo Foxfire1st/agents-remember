@@ -97,6 +97,49 @@ def require_configured_contract_repositories(
 ) -> None:
     """Bind a task contract to repository identities selected by MCP authority."""
 
+    configured, code_identity = _require_configured_repository_authority(
+        contract,
+        config_path,
+    )
+    candidate_code_identity = repository_identity(contract.code_worktree)
+    if candidate_code_identity != code_identity:
+        raise ConfiguredContractAuthorityError(side="code", name="candidate")
+    if contract.memory_mode != "external":
+        return
+    memory_identity = _require_external_memory_repository_authority(
+        contract,
+        configured,
+        code_identity,
+    )
+    if contract.kind == "leaf" and (
+        contract.memory_worktree is None
+        or repository_identity(contract.memory_worktree) != memory_identity
+    ):
+        raise ConfiguredContractAuthorityError(side="memory", name="candidate")
+
+
+def require_configured_terminal_contract_repositories(
+    contract: WorktreeContract,
+    config_path: str,
+) -> None:
+    """Bind archived deletion authority without requiring already-deleted candidates."""
+
+    configured, code_identity = _require_configured_repository_authority(
+        contract,
+        config_path,
+    )
+    if contract.memory_mode == "external":
+        _require_external_memory_repository_authority(
+            contract,
+            configured,
+            code_identity,
+        )
+
+
+def _require_configured_repository_authority(
+    contract: WorktreeContract,
+    config_path: str,
+) -> tuple[RepositoryScope, Path]:
     config = load_config(config_path)
     try:
         configured = require_repo(config, contract.repo_name)
@@ -107,22 +150,17 @@ def require_configured_contract_repositories(
     contract_code_identity = repository_identity(contract.code_repo_path)
     if code_identity is None or contract_code_identity != code_identity:
         raise ConfiguredContractAuthorityError(side="code", name="repository")
-    candidate_code_identity = repository_identity(contract.code_worktree)
-    if candidate_code_identity != code_identity:
-        raise ConfiguredContractAuthorityError(side="code", name="candidate")
     expected_memory_mode = memory_mode_for_repository(configured.path, configured.memory_root)
     if contract.memory_mode != expected_memory_mode:
         raise ConfiguredContractAuthorityError(side="memory", name="mode")
-    if contract.memory_mode != "external":
-        return
-    _require_external_memory_authority(contract, configured, code_identity)
+    return configured, code_identity
 
 
-def _require_external_memory_authority(
+def _require_external_memory_repository_authority(
     contract: WorktreeContract,
     configured: RepositoryScope,
     code_identity: Path,
-) -> None:
+) -> Path:
     if configured.memory_root is None or contract.memory_repo_path is None:
         raise ConfiguredContractAuthorityError(side="memory", name="repository")
     memory_identity = repository_identity(configured.memory_root)
@@ -131,11 +169,7 @@ def _require_external_memory_authority(
         raise ConfiguredContractAuthorityError(side="memory", name="repository")
     if memory_identity == code_identity:
         raise ConfiguredContractAuthorityError(side="memory", name="repository-separation")
-    if contract.kind == "leaf":
-        if contract.memory_worktree is None:
-            raise ConfiguredContractAuthorityError(side="memory", name="candidate")
-        if repository_identity(contract.memory_worktree) != memory_identity:
-            raise ConfiguredContractAuthorityError(side="memory", name="candidate")
+    return memory_identity
 
 
 def _require_configured_task_identity(

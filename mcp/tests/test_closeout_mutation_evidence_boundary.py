@@ -27,7 +27,6 @@ from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.mutation_evidence import CloseoutMutationLeg
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
-    LifecycleOperationRecord,
 )
 from agents_remember.worktrees.closeout_input import capture_closeout_candidate
 from agents_remember.worktrees.integration import closeout_ledger_recovery
@@ -59,7 +58,7 @@ from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.queue.closeout_recovery import resume_external_commits
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import load_contract
 from closeout_fixture_test_support import selected_fixture
 from closeout_input_test_support import (
     MutationEvidenceRecorder,
@@ -109,35 +108,12 @@ def test_generic_lifecycle_start_cannot_bypass_raw_closeout_admission(tmp_path: 
     assert not operation_record_path(contract.worktree_group, "closeout").exists()
 
 
-def test_lease_bound_closeout_start_supplies_its_resolved_candidate(tmp_path: Path) -> None:
+def test_lease_bound_closeout_start_proves_the_exact_claimed_door(tmp_path: Path) -> None:
     fixture = selected_fixture(tmp_path, memory_mode="external")
     contract = fixture.contracts[MASTER_A]
     operation_input = closeout_operation_input(contract, config_path=fixture.config_path)
     expected_tree = capture_closeout_candidate(contract).candidate_tree
-    admitted_states: list[str] = []
-    publish_initial_intent = lifecycle_operations.ensure_initial_closeout_door_intent
-
-    def assert_initial_identity(
-        current_contract: WorktreeContract,
-        store: LifecycleOperationStore,
-        record: LifecycleOperationRecord,
-    ) -> LifecycleOperationRecord:
-        admitted_state = closeout_contract_sha256(current_contract)
-        classification = classify_initial_closeout_door_recovery(current_contract, record)
-        assert record.candidateState == admitted_state
-        assert classification.state == "synthesizable"
-        assert classification.expected is not None
-        assert classification.expected["candidateState"] == admitted_state
-        assert classification.observed == {}
-        admitted_states.append(admitted_state)
-        return publish_initial_intent(current_contract, store, record)
-
-    with mock.patch.object(
-        lifecycle_operations,
-        "ensure_initial_closeout_door_intent",
-        side_effect=assert_initial_identity,
-    ):
-        projection = start_closeout_operation(operation_input, launcher=lambda *_: None)
+    projection = start_closeout_operation(operation_input, launcher=lambda *_: None)
 
     record = LifecycleOperationStore(
         operation_record_path(contract.worktree_group, "closeout")
@@ -145,7 +121,14 @@ def test_lease_bound_closeout_start_supplies_its_resolved_candidate(tmp_path: Pa
     assert projection.status == "queued"
     assert record is not None
     assert record.candidateTree == expected_tree
-    assert admitted_states == [closeout_contract_sha256(contract)]
+    assert record.candidateState == closeout_contract_sha256(contract)
+    assert record.doorPublication is not None
+    assert record.doorPublication.state == "proven"
+    assert record.doorPublication.generation.disposition == "claimed"
+    assert record.doorPublication.generation.operationKind == "closeout"
+    assert record.doorPublication.generation.operationFingerprint == record.fingerprint
+    assert record.doorPublication.generation.claimedOperationKey == record.operationKey
+    assert classify_initial_closeout_door_recovery(contract, record).state == "not-applicable"
 
 
 def test_stale_unchanged_intent_observes_attempt_one_without_relaunch(tmp_path: Path) -> None:
@@ -247,7 +230,7 @@ def test_git_mutation_ref_log_failure_has_no_durable_progress(tmp_path: Path) ->
             use_current_candidate=True,
         )
 
-    assert str(raised.value) == "could not read Git ref-log evidence"
+    assert str(raised.value) == "Git ref-log mutation evidence is unreadable"
     assert store.path.read_bytes() == before
     current = store.read()
     assert current is not None
@@ -418,7 +401,11 @@ def test_reconciliation_preserves_bound_output_after_exact_restore(tmp_path: Pat
         config_path=fixture.config_path,
         approval_note="approved",
     )
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     running = runtime.start()
@@ -480,7 +467,11 @@ def test_public_recover_finishes_ordinary_external_ledger_precommit_intent(
         ledger="commit accepted ledger",
         approval_note="approved",
     )
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     current = runtime.start()
@@ -637,7 +628,11 @@ def _journal_before_ledger_write_cut(tmp_path: Path):
         config_path=fixture.config_path,
         approval_note="approved",
     )
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     accepted = runtime.start()
@@ -841,7 +836,11 @@ def _ordinary_ledger_conflict_fixture(tmp_path: Path, stage_intended: bool):
         ledger="commit accepted ledger",
         approval_note="approved",
     )
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     current = runtime.start()
@@ -1102,7 +1101,11 @@ def _running_code_operation(root: Path):
     contract = fixture.contracts[MASTER_A]
     (contract.code_worktree / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
     operation_input = closeout_operation_input(contract, config_path=fixture.config_path)
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     runtime.start()
@@ -1128,7 +1131,11 @@ def _intent_record(root: Path, *, leg: CloseoutMutationLeg, prepare_output: bool
         code="commit intent",
         approval_note="approved",
     )
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
     runtime = lifecycle_operation_worker.OperationRuntime(store)
     runtime.start()

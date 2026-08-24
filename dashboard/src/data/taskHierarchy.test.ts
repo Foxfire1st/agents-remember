@@ -19,6 +19,8 @@ function series(
     status: "open",
     createdAt: "2026-06-24T06:00:00+00:00",
     objective: "",
+    discardedCount: 0,
+    discardedSubTasks: [],
     doneCount: 0,
     totalCount: overrides.subTasks.length,
     seriesTokenTotal: 0,

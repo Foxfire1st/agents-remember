@@ -34,7 +34,7 @@ from agents_remember.providers.provider_setup import (
     _seed_catchup_results,
     _wait_for_cgc_watcher_ready,
 )
-from agents_remember.worktrees.modules.start import _sync_worktree_memory_mtimes
+from agents_remember.worktrees.modules.startup.start_memory import _sync_worktree_memory_mtimes
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 

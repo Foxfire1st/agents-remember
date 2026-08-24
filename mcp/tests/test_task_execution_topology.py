@@ -11,14 +11,9 @@ from unittest import mock
 import agents_remember.tasks.document_refs as task_document_refs
 import agents_remember.tasks.store as task_store
 from agents_remember.application.task_docs import task_doc_queue_scope
-from agents_remember.application.task_docs.task_doc_publication import (
-    TaskDocPublication,
-    publish_task_doc_set,
-)
 from agents_remember.application.task_docs.task_doc_queue_scope import (
-    PreparedQueuePublicationScope,
-    QueuePublicationScope,
-    QueueScopePreparation,
+    TaskDocScopeChange,
+    resolve_projection_scope_union,
 )
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
@@ -41,7 +36,6 @@ from agents_remember.tasks import (
     Section,
     SprintExecutionGraph,
     TaskDocument,
-    missing_task_doc_source,
     read_task_doc,
     write_task_doc,
 )
@@ -283,129 +277,155 @@ class ExecutionTopologyTests(unittest.TestCase):
             )
 
     def test_queue_scope_split_has_direct_topology_test_ownership(self) -> None:
-        self.assertTrue(callable(task_doc_queue_scope.prepare_governing_queue_scope))
+        self.assertTrue(callable(task_doc_queue_scope.resolve_projection_scope_union))
 
-    def test_queue_scope_refuses_multiple_sprints_and_wrong_leaf_owner(self) -> None:
-        affected = [
-            SimpleNamespace(ref=SPRINT),
-            SimpleNamespace(ref=MASTER_C),
-        ]
-        with self.assertRaisesRegex(task_doc_queue_scope.QueueScopeError, "multiple"):
-            task_doc_queue_scope._single_scope(cast(Any, affected), MASTER_A)
+    def test_new_sprint_scope_union_includes_its_own_projection(self) -> None:
+        new_sprint = TaskDocumentRef(repository=REPOSITORY, path="new-sprint/task.json")
+        candidate = _master(identity="NEW-SPRINT", orchestrates=["master-a"])
 
-        leaf_ref = TaskDocumentRef(repository=REPOSITORY, path="master-a/leaf/task.json")
-        leaf_path = self.tasks / leaf_ref.path
-        leaf_path.parent.mkdir(parents=True)
-        leaf_path.write_text("{}", encoding="utf-8")
-        (self.tasks / "master-a" / "task.json").write_text("{}", encoding="utf-8")
-        topology = mock.Mock()
-        topology.canonical_ref.side_effect = [leaf_ref, MASTER_A]
-        topology.resolve.return_value = SimpleNamespace(
-            document=SimpleNamespace(kind="subTask", orchestrates=[])
+        scopes = resolve_projection_scope_union(
+            self.coord,
+            REPOSITORY,
+            (TaskDocScopeChange(new_sprint, None, candidate),),
         )
-        topology.parent.return_value = MASTER_B
-        context = task_doc_queue_scope._ScopeContext(
-            topology=topology,
-            repo_id=REPOSITORY,
-            task_root=leaf_path.parent,
-            repository_root=self.tasks,
-            existing_path=leaf_path,
-            existing=True,
+
+        self.assertEqual(scopes, (new_sprint,))
+
+    def test_new_graphless_sprint_publication_isolated_from_unrelated_malformed_task(
+        self,
+    ) -> None:
+        write_task_doc(
+            self.tasks / "master-a",
+            _master(identity="MASTER-A", execution_nature="atomic"),
         )
-        with (
-            mock.patch.object(
-                task_doc_queue_scope,
-                "_unchanged_master_scope",
-                return_value=QueuePublicationScope(SPRINT, MASTER_A),
-            ),
-            self.assertRaisesRegex(task_doc_queue_scope.QueueScopeError, "exact owning master"),
-        ):
-            task_doc_queue_scope._existing_scope(
-                context,
-                None,
-                _master(identity="LEAF"),
-            )
+        malformed = self.tasks / "unrelated" / "task.json"
+        malformed.parent.mkdir()
+        malformed.write_text("{not-json", encoding="utf-8")
+        new_sprint = TaskDocumentRef(repository=REPOSITORY, path="new-sprint/task.json")
 
-        broken_root = self.tasks / "broken"
-        broken_root.mkdir()
-        (broken_root / "task.json").write_text("not json\n", encoding="utf-8")
-        with self.assertRaisesRegex(
-            task_doc_queue_scope.QueueScopeError,
-            "cannot resolve governing sprint queue",
-        ):
-            task_doc_queue_scope.prepare_governing_queue_scope(
-                QueueScopePreparation(
-                    coordination_root=self.coord,
-                    repo_id=REPOSITORY,
-                    task_root=broken_root,
-                    original=None,
-                    candidate=_master(identity="BROKEN"),
-                    source_snapshots=(
-                        task_store.capture_task_doc_source(broken_root / "task.json"),
-                    ),
-                )
-            )
-
-    def test_light_task_has_no_queue_scope_and_missing_owner_fails_closed(self) -> None:
-        light = _master(identity="LIGHT").model_copy(update={"kind": "light", "orchestrates": []})
-        self.assertIsNone(
-            task_doc_queue_scope.prepare_governing_queue_scope(
-                QueueScopePreparation(
-                    coordination_root=self.coord,
-                    repo_id=REPOSITORY,
-                    task_root=self.tasks / "light",
-                    original=None,
-                    candidate=light,
-                    source_snapshots=(),
-                )
-            ).scope
+        fields = (
+            _master(identity="NEW-SPRINT", orchestrates=["master-a"])
+            .model_copy(update={"integrationBranch": "super"})
+            .model_dump(by_alias=True)
         )
-        candidate = _master(identity="MASTER-A")
-        source = missing_task_doc_source(self.tasks / "master-a" / "task.json")
-        with (
-            mock.patch(
-                "agents_remember.application.task_docs.task_doc_publication."
-                "prepare_governing_queue_scope",
-                return_value=PreparedQueuePublicationScope(
-                    QueuePublicationScope(SPRINT, None),
-                    (source,),
-                ),
-            ),
-            self.assertRaisesRegex(TaskDocError, "no owning master"),
-        ):
-            publish_task_doc_set(
-                TaskDocPublication(
-                    config=self.cfg,
-                    target_repo_id=REPOSITORY,
-                    task_root=self.tasks / "master-a",
-                    original=None,
-                    candidate=candidate,
-                    documents=[candidate],
-                    source_snapshots=(source,),
-                    publisher=lambda: [],
-                )
-            )
+        preview = self._task_doc(
+            "new-sprint",
+            "create",
+            fields=fields,
+            dry_run=True,
+        )
+        self.assertFalse((self.tasks / "new-sprint" / "task.json").exists())
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in preview["projectionEffects"]
+            },
+            {new_sprint},
+        )
 
-        publisher = mock.Mock(return_value=[])
-        with (
-            mock.patch(
-                "agents_remember.application.task_docs.task_doc_publication."
-                "prepare_governing_queue_scope",
-                side_effect=task_doc_queue_scope.QueueScopeError("broken queue scope"),
+        created = self._task_doc("new-sprint", "create", fields=fields)
+
+        self.assertTrue((self.tasks / "new-sprint" / "task.json").is_file())
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in created["projectionEffects"]
+            },
+            {new_sprint},
+        )
+
+    def test_master_alias_change_includes_old_and_new_sprint_consumers(self) -> None:
+        old_sprint = _master(identity="SPRINT", orchestrates=["Old master title"])
+        new_sprint_ref = TaskDocumentRef(repository=REPOSITORY, path="new-sprint/task.json")
+        new_sprint = _master(identity="NEW-SPRINT", orchestrates=["New master title"])
+        original = _master(identity="MASTER-A", title="Old master title")
+        candidate = original.model_copy(update={"title": "New master title"})
+        write_task_doc(self.tasks / "sprint", old_sprint)
+        write_task_doc(self.tasks / "new-sprint", new_sprint)
+        write_task_doc(self.tasks / "master-a", original)
+
+        scopes = resolve_projection_scope_union(
+            self.coord,
+            REPOSITORY,
+            (TaskDocScopeChange(MASTER_A, original, candidate),),
+        )
+
+        self.assertEqual(scopes, tuple(sorted((SPRINT, new_sprint_ref), key=lambda ref: ref.key)))
+
+    def test_unrelated_malformed_task_isolated_and_duplicate_scopes_collapse(self) -> None:
+        sprint = _master(identity="SPRINT", orchestrates=["master-a"])
+        master = _master(identity="MASTER-A")
+        write_task_doc(self.tasks / "sprint", sprint)
+        write_task_doc(self.tasks / "master-a", master)
+        broken = self.tasks / "broken" / "task.json"
+        broken.parent.mkdir()
+        broken.write_text("{malformed", encoding="utf-8")
+
+        scopes = resolve_projection_scope_union(
+            self.coord,
+            REPOSITORY,
+            (
+                TaskDocScopeChange(MASTER_A, master, master),
+                TaskDocScopeChange(SPRINT, sprint, sprint),
             ),
-            self.assertRaisesRegex(TaskDocError, "broken queue scope"),
-        ):
-            TaskDocPublication(
-                config=self.cfg,
-                target_repo_id=REPOSITORY,
-                task_root=self.tasks / "master-a",
-                original=None,
-                candidate=candidate,
-                documents=[candidate],
-                source_snapshots=(source,),
-                publisher=publisher,
-            )
-        publisher.assert_not_called()
+        )
+
+        self.assertEqual(scopes, (SPRINT,))
+
+    def test_master_publication_refreshes_related_sprint_despite_unrelated_malformed_task(
+        self,
+    ) -> None:
+        sprint = _master(identity="SPRINT", orchestrates=["master-a"])
+        master = _master(identity="MASTER-A", execution_nature="atomic")
+        write_task_doc(self.tasks / "sprint", sprint)
+        write_task_doc(self.tasks / "master-a", master)
+        broken = self.tasks / "broken" / "task.json"
+        broken.parent.mkdir()
+        broken.write_text("{malformed", encoding="utf-8")
+
+        updated = self._task_doc(
+            "master-a",
+            "set_field",
+            fields={"status": "inProgress"},
+        )
+
+        self.assertEqual(
+            read_task_doc(self.tasks / "master-a" / "task.json").status,
+            "inProgress",
+        )
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in updated["projectionEffects"]
+            },
+            {SPRINT},
+        )
+        effect = updated["projectionEffects"][0]
+        self.assertEqual(effect["rebuild"]["outcome"], "published")
+        self.assertIsNotNone(effect["rebuild"]["sourceFingerprint"])
+        self.assertIsNone(effect["nextAction"])
+
+    def test_unparented_leaf_has_no_projection_scope(self) -> None:
+        leaf = TaskDocument.model_validate(
+            {
+                "id": "L1",
+                "slug": "leaf",
+                "title": "Leaf",
+                "kind": "subTask",
+                "type": "Code",
+                "repo": REPOSITORY,
+                "createdAt": "2026-08-24T00:00:00+00:00",
+            }
+        )
+        ref = TaskDocumentRef(repository=REPOSITORY, path="master/leaf.json")
+        self.assertEqual(
+            resolve_projection_scope_union(
+                self.coord,
+                REPOSITORY,
+                (TaskDocScopeChange(ref, None, leaf),),
+            ),
+            (),
+        )
 
     def test_completion_topology_errors_are_normalized_at_the_queue_boundary(self) -> None:
         topology = mock.Mock()
@@ -674,7 +694,7 @@ class ExecutionTopologyTests(unittest.TestCase):
                 "executionNature": None,
             }
         )
-        with self.assertRaisesRegex(TaskDocError, "migration-required"):
+        with self.assertRaisesRegex(TaskDocError, "membership-invalid"):
             self._task_doc("master-a", "replace", fields=downgraded_master)
 
         downgraded_sprint = read_task_doc(self.tasks / "sprint" / "task.json").model_dump(
@@ -767,6 +787,40 @@ class ExecutionTopologyTests(unittest.TestCase):
                     }
                 ],
             },
+        )
+
+    def test_graph_authoring_refreshes_every_sprint_consuming_changed_master_nature(
+        self,
+    ) -> None:
+        self._write_legacy()
+        other_sprint = TaskDocumentRef(
+            repository=REPOSITORY,
+            path="other-sprint/task.json",
+        )
+        write_task_doc(
+            self.tasks / "other-sprint",
+            _master(identity="OTHER-SPRINT", orchestrates=["master-a"]).model_copy(
+                update={"integrationBranch": "other-super"}
+            ),
+        )
+        expected = {SPRINT, other_sprint}
+
+        preview = self._bootstrap(dry_run=True)
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in preview["projectionEffects"]
+            },
+            expected,
+        )
+
+        applied = self._bootstrap()
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in applied["projectionEffects"]
+            },
+            expected,
         )
 
     def test_execution_waves_validates_and_returns_one_pinned_sprint_snapshot(self) -> None:

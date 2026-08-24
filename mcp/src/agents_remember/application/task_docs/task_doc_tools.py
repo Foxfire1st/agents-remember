@@ -9,7 +9,6 @@ schema before it is written.
 
 from __future__ import annotations
 
-import difflib
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,7 +20,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.tasks import (
-    SprintGraphTitles,
     TaskDocSourceSnapshot,
     TaskDocument,
     capture_task_doc_source,
@@ -29,15 +27,14 @@ from agents_remember.tasks import (
     json_path_for,
     markdown_path_for,
     missing_task_doc_source,
-    read_graph_titles,
     read_task_doc,
     read_task_doc_with_source,
-    render_markdown,
     step_done,
     step_total,
     write_task_docs,
+    write_task_docs_and_remove,
 )
-from agents_remember.tasks.master_sync import MasterSyncError, MasterSyncPlan, plan_master_sync
+from agents_remember.tasks.master_sync import MasterSyncError, plan_master_sync
 from agents_remember.tasks.readiness import (
     completed_master_rows_to_validate,
     missing_unresolved_master_rows,
@@ -61,12 +58,15 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 from . import task_sprint_linkage
+from .task_doc_discard import DiscardUnstartedRequest, discard_unstarted_subtask
 from .task_doc_publication import (
     TaskDocPublication,
+    preview_task_doc_projection_effects,
     publish_task_doc_set,
     task_doc_publication_transaction,
     validate_task_doc_transaction,
 )
+from .task_doc_response import graph_titles_for, task_doc_preview, task_doc_result
 from .task_doc_route_review import (
     DEFAULT_TASK_DOC_CALL,
     TaskDocCall,
@@ -334,20 +334,28 @@ def _publish_task_doc_candidate(
             tuple(source_snapshots),
         )
         validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
-        return _preview(operation, doc, task_root, master_sync=master_sync)
-    written = publish_task_doc_set(
-        TaskDocPublication(
-            config,
-            target.repo_id,
-            task_root,
-            original,
-            doc,
-            docs,
-            tuple(source_snapshots),
-        )
+        result = task_doc_preview(operation, doc, task_root, master_sync=master_sync)
+        result["projectionEffects"] = [
+            effect.model_dump(mode="json")
+            for effect in preview_task_doc_projection_effects(preview_context)
+        ]
+        return result
+    publication_context = TaskDocPublication(
+        config,
+        target.repo_id,
+        task_root,
+        original,
+        doc,
+        docs,
+        tuple(source_snapshots),
     )
-    json_path, markdown_path = written[0]
-    return _result(operation, doc, json_path, markdown_path, master_sync=master_sync)
+    publication = publish_task_doc_set(publication_context)
+    json_path, markdown_path = publication.written[0]
+    result = task_doc_result(operation, doc, json_path, markdown_path, master_sync=master_sync)
+    result["projectionEffects"] = [
+        effect.model_dump(mode="json") for effect in publication.projection_effects
+    ]
+    return result
 
 
 def _prepare_task_doc_edit(
@@ -414,7 +422,7 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
     if context.operation == "get":
         json_path = _existing_json(context.task_root, context.target.slug)
         doc = read_task_doc(json_path)
-        result = _result(
+        result = task_doc_result(
             context.operation,
             doc,
             json_path,
@@ -971,15 +979,20 @@ def _remove_subtask(
     context: _TaskDocSpecialContext,
     subtask: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Remove a sub-task row from a master and (by default) delete the leaf doc it points at.
+    """Remove a terminal row, or audit and discard one canonically proven-unstarted leaf.
 
     ``remove_subtask`` completes task-doc CRUD: it drops the ``SubTaskRef`` by ``number`` from the
     master ``subTasks`` index and deletes the referenced leaf document (``<slug>.json`` + ``.md``)
     -- "remove means remove" -- unless ``subtask.keep_file`` is set, in which case only the index
-    row is removed and the leaf doc is left on disk.
+    row is removed and the leaf doc is left on disk. ``disposition=discard-unstarted`` is the
+    distinct planning transition: it requires a nonblank reason, forbids ``keep_file``, proves
+    absence of execution authority under the task CAS, and leaves a typed parent audit.
     """
     if not subtask or not subtask.get("number"):
         raise TaskDocError("remove_subtask requires subtask.number")
+    disposition = subtask.get("disposition")
+    if disposition is not None or subtask.get("reason") is not None:
+        return _remove_subtask_with_disposition(context, subtask)
     number = str(subtask["number"])
     keep_file = bool(subtask.get("keep_file"))
     doc, selected_snapshot = read_task_doc_with_source(
@@ -1018,7 +1031,7 @@ def _remove_subtask(
             tuple(source_snapshots),
         )
         validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
-        result = _preview("remove_subtask", updated, context.task_root)
+        result = task_doc_preview("remove_subtask", updated, context.task_root)
         result["removedSubtask"] = number
         result["wouldDeleteFiles"] = (
             [] if keep_file else [path.as_posix() for path in leaf_files if path.exists()]
@@ -1027,19 +1040,22 @@ def _remove_subtask(
     deleted: list[str] = []
 
     def publication() -> list[tuple[Path, Path]]:
-        written = write_task_docs(
+        if keep_file:
+            return write_task_docs(
+                context.task_root,
+                [updated],
+                graph_titles=graph_titles_for(context.task_root, updated),
+            )
+        written, removed = write_task_docs_and_remove(
             context.task_root,
             [updated],
-            graph_titles=_graph_titles_for(context.task_root, updated),
+            leaf_files,
+            graph_titles=graph_titles_for(context.task_root, updated),
         )
-        if not keep_file:
-            for path in leaf_files:
-                if path.exists():
-                    path.unlink()
-                    deleted.append(path.as_posix())
+        deleted.extend(path.as_posix() for path in removed)
         return written
 
-    json_path, markdown_path = publish_task_doc_set(
+    published = publish_task_doc_set(
         TaskDocPublication(
             context.config,
             context.target.repo_id,
@@ -1050,11 +1066,38 @@ def _remove_subtask(
             tuple(source_snapshots),
             publisher=publication,
         )
-    )[0]
-    result = _result("remove_subtask", updated, json_path, markdown_path)
+    )
+    json_path, markdown_path = published.written[0]
+    result = task_doc_result("remove_subtask", updated, json_path, markdown_path)
     result["removedSubtask"] = number
     result["deletedFiles"] = deleted
+    result["projectionEffects"] = [
+        effect.model_dump(mode="json") for effect in published.projection_effects
+    ]
     return result
+
+
+def _remove_subtask_with_disposition(
+    context: _TaskDocSpecialContext,
+    subtask: dict[str, Any],
+) -> dict[str, Any]:
+    if subtask.get("disposition") != "discard-unstarted":
+        if subtask.get("disposition") is None:
+            raise TaskDocError(
+                "remove_subtask.reason is valid only with disposition='discard-unstarted'"
+            )
+        raise TaskDocError("remove_subtask disposition must be 'discard-unstarted' when supplied")
+    return discard_unstarted_subtask(
+        DiscardUnstartedRequest(
+            config=context.config,
+            repo_id=context.target.repo_id,
+            task_name=context.target.task_name,
+            task_root=context.task_root,
+            parent_path=_existing_json(context.task_root, context.target.slug),
+            subtask=subtask,
+            dry_run=context.dry_run,
+        )
+    )
 
 
 def _leaf_doc_files(task_root: Path, ref: dict[str, Any]) -> list[Path]:
@@ -1064,128 +1107,3 @@ def _leaf_doc_files(task_root: Path, ref: dict[str, Any]) -> list[Path]:
         return []
     markdown = task_root / file_name
     return [markdown.with_suffix(".json"), markdown]
-
-
-def _result(
-    operation: str,
-    doc: TaskDocument,
-    json_path: Path,
-    markdown_path: Path,
-    *,
-    master_sync: MasterSyncPlan | None = None,
-) -> dict[str, Any]:
-    result = {
-        "ok": True,
-        "operation": f"task_doc.{operation}",
-        "taskId": doc.id,
-        "slug": doc.slug,
-        "kind": doc.kind,
-        "status": doc.status,
-        "lifecycleId": doc.lifecycleId,
-        "docPath": json_path.as_posix(),
-        "renderedPath": markdown_path.as_posix(),
-        "stepsDone": step_done(doc),
-        "stepsTotal": step_total(doc),
-    }
-    sync_payload = _master_sync_payload(master_sync, preview=False)
-    if sync_payload is not None:
-        result["masterSync"] = sync_payload
-    return result
-
-
-def _preview(
-    operation: str,
-    doc: TaskDocument,
-    task_root: Path,
-    *,
-    master_sync: MasterSyncPlan | None = None,
-) -> dict[str, Any]:
-    """Render the would-be document without writing -- the dry-run safety preview.
-
-    Returns the same shape as a real op plus the rendered markdown, a unified diff against the
-    on-disk ``.md`` (if any), and ``wouldLose`` -- a non-blank on-disk line the render does not
-    reproduce (the signal that adopting this JSON would drop hand-authored content). ``renderedPath``
-    is where it *would* write; nothing is written.
-    """
-    preview = _render_preview(task_root, doc)
-    result = _result(
-        operation,
-        doc,
-        json_path_for(task_root, doc),
-        preview["markdownPath"],
-        master_sync=master_sync,
-    )
-    result["dryRun"] = True
-    result["rendered"] = preview["rendered"]
-    result["diff"] = preview["diff"]
-    result["wouldLose"] = preview["wouldLose"]
-    sync_payload = _master_sync_payload(master_sync, preview=True)
-    if sync_payload is not None:
-        result["masterSync"] = sync_payload
-    return result
-
-
-def _graph_titles_for(task_root: Path, doc: TaskDocument) -> SprintGraphTitles | None:
-    """Joined master/leaf titles for a sprint doc's execution-graph render.
-
-    Reads the commanded master documents under ``tasks/``; the sprint's own
-    ``task.md`` labels its mermaid boxes with real titles when they exist.
-    """
-
-    if doc.executionGraph is None:
-        return None
-    return read_graph_titles(task_root.parents[1], doc.executionGraph)
-
-
-def _render_preview(task_root: Path, doc: TaskDocument) -> dict[str, Any]:
-    rendered = render_markdown(doc, graph_titles=_graph_titles_for(task_root, doc))
-    markdown_path = markdown_path_for(task_root, doc)
-    existing = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
-    diff = "".join(
-        difflib.unified_diff(
-            existing.splitlines(keepends=True),
-            rendered.splitlines(keepends=True),
-            fromfile=f"{markdown_path.name} (on disk)",
-            tofile=f"{markdown_path.name} (rendered)",
-        )
-    )
-    rendered_lines = set(rendered.splitlines())
-    return {
-        "markdownPath": markdown_path,
-        "rendered": rendered,
-        "diff": diff,
-        "wouldLose": any(
-            line.strip() and line not in rendered_lines for line in existing.splitlines()
-        ),
-    }
-
-
-def _master_sync_payload(
-    master_sync: MasterSyncPlan | None, *, preview: bool
-) -> dict[str, Any] | None:
-    if (
-        master_sync is None
-        or master_sync.status == "none"
-        or master_sync.master is None
-        or master_sync.master_json_path is None
-    ):
-        return None
-    master_root = master_sync.master_json_path.parent
-    markdown_path = markdown_path_for(master_root, master_sync.master)
-    status = master_sync.status
-    if preview and status == "created":
-        status = "would-create"
-    elif preview and status == "updated":
-        status = "would-update"
-    payload: dict[str, Any] = {
-        "status": status,
-        "masterDocPath": master_sync.master_json_path.as_posix(),
-        "renderedPath": markdown_path.as_posix(),
-        "subtaskNumber": master_sync.subtask_number,
-    }
-    if preview:
-        rendered = _render_preview(master_root, master_sync.master)
-        payload["rendered"] = rendered["rendered"]
-        payload["diff"] = rendered["diff"]
-        payload["wouldLose"] = rendered["wouldLose"]
-    return payload

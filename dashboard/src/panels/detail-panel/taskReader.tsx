@@ -16,6 +16,7 @@ import {
   taskDocumentRefForDoc,
 } from "../../data/taskIdentity";
 import type {
+  DiscardedSubTaskNode,
   ProviderNode,
   SubTaskRow,
   TaskCodeExampleNode,
@@ -182,8 +183,14 @@ export function MasterOverview({
           />
         </Section>
       ) : null}
-      {/* The sprint execution graph + its closeout queue, reachable from the sprint page (L12-R5). */}
+      {doc.discardedSubTasks && doc.discardedSubTasks.length > 0 ? (
+        <Section title={`Discarded before start (${doc.discardedCount ?? doc.discardedSubTasks.length})`}>
+          <DiscardedSubTaskHistory items={doc.discardedSubTasks} />
+        </Section>
+      ) : null}
+      {/* Graph rendering is optional, but a legal sprint projection stays reachable without it. */}
       <SprintGraphSection doc={doc} />
+      <CloseoutQueue sprintRef={taskDocumentRefForDoc(doc)} />
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
@@ -214,18 +221,14 @@ export function MasterOverview({
   );
 }
 
-// The sprint execution graph section: the wave-grid view plus this sprint's closeout queue,
-// mounted together so the sprint page is the one reachable surface for both (L12-R5). Returns
-// nothing for a doc without a render-ready graph view (a non-sprint master).
+// The wave-grid is optional. CloseoutQueue is mounted by the master surface independently because
+// atomic-sequential orchestration sprints are supported without an authored execution graph.
 function SprintGraphSection({ doc }: { doc: MasterDocView }) {
   if (!doc.executionGraphView) return null;
   return (
-    <>
-      <Section title="Execution graph">
-        <SprintGraphView graphView={doc.executionGraphView} />
-      </Section>
-      <CloseoutQueue sprintRef={taskDocumentRefForDoc(doc)} />
-    </>
+    <Section title="Execution graph">
+      <SprintGraphView graphView={doc.executionGraphView} />
+    </Section>
   );
 }
 export function MasterTokenSummary({ total }: { total: number | undefined }) {
@@ -655,6 +658,19 @@ export function Bullets({ items }: { items: string[] }) {
       {items.map((item) => (
         <li key={item}>
           <Markdown inline>{item}</Markdown>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function DiscardedSubTaskHistory({ items }: { items: DiscardedSubTaskNode[] }) {
+  return (
+    <ul className={taskdocBullets}>
+      {items.map((item) => (
+        <li key={`${item.number}:${item.proof.fingerprint}`}>
+          <strong>{item.number}. {item.name}</strong>
+          {` — ${item.reason} · ${item.discardedAt} · proof ${item.proof.fingerprint}`}
         </li>
       ))}
     </ul>

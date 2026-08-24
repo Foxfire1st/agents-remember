@@ -11,7 +11,9 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     find_unique_mapping,
+    ledger_to_text,
     parse_ledger_text,
+    prepend_mapping,
 )
 from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
@@ -50,6 +52,8 @@ class DirectLandingRecoveryClassification:
     detail: str = ""
     expected: dict[str, object] | None = None
     observed: dict[str, object] | None = None
+    memory_commit: str = ""
+    ledger_commit: str = ""
 
     @property
     def mechanically_convergent(self) -> bool:
@@ -84,6 +88,14 @@ class _MutationIntentLive:
     accepted_text: str = ""
     intended_text: str = ""
     live_text: str = ""
+
+
+@dataclass(frozen=True)
+class _DirectRecoveryOutputs:
+    """Exact durable outputs proven by journal cells or accepted Git intent."""
+
+    memory_commit: str = ""
+    ledger_commit: str = ""
 
 
 def classify_direct_landing_recovery(
@@ -143,7 +155,14 @@ def _classify_direct_live_evidence(
     operation_input: DirectLandingOperationInput,
     live: _DirectLiveEvidence,
 ) -> DirectLandingRecoveryClassification:
-    if not _memory_state_converges(live.repository, record, operation_input, live.git):
+    outputs = _direct_recovery_outputs(record, operation_input, live)
+    if not _memory_state_converges(
+        live.repository,
+        record,
+        operation_input,
+        live.git,
+        outputs,
+    ):
         return _decision(
             "direct-landing-memory-evidence-conflict",
             "live memory Git evidence is outside the accepted or intended generation states",
@@ -154,28 +173,30 @@ def _classify_direct_live_evidence(
         record,
         operation_input,
         live.ledger_text,
+        outputs.memory_commit,
     )
     live.observed["ledgerMapping"] = mapping_observed
     if mapping_state == "conflict":
-        return _mapping_conflict(record, operation_input, live)
-    if not _ledger_state_converges(record, operation_input, live):
+        return _mapping_conflict(record, operation_input, live, outputs)
+    if not _ledger_state_converges(record, operation_input, live, outputs):
         return _decision(
             "direct-landing-ledger-evidence-conflict",
             "live ledger bytes/ref evidence is outside the accepted or intended states",
             expected=live.expected,
             observed=live.observed,
         )
-    recovery = record.recoveryCommits
     state: DirectRecoveryState = (
         "terminalizable"
         if mapping_state == "exact"
-        or (recovery is not None and recovery.memoryContentCommit and recovery.ledgerCommit)
+        or bool(outputs.memory_commit and outputs.ledger_commit)
         else "recoverable"
     )
     return DirectLandingRecoveryClassification(
         state,
         expected=live.expected,
         observed=live.observed,
+        memory_commit=outputs.memory_commit,
+        ledger_commit=outputs.ledger_commit,
     )
 
 
@@ -183,6 +204,7 @@ def _mapping_conflict(
     record: LifecycleOperationRecord,
     operation_input: DirectLandingOperationInput,
     live: _DirectLiveEvidence,
+    outputs: _DirectRecoveryOutputs,
 ) -> DirectLandingRecoveryClassification:
     return _decision(
         "direct-landing-ledger-mapping-conflict",
@@ -191,11 +213,7 @@ def _mapping_conflict(
             **live.expected,
             "ledgerMapping": {
                 "codeCommit": operation_input.codeCommit,
-                "memoryCommit": (
-                    record.recoveryCommits.memoryContentCommit
-                    if record.recoveryCommits is not None
-                    else ""
-                ),
+                "memoryCommit": outputs.memory_commit,
             },
         },
         observed=live.observed,
@@ -227,15 +245,11 @@ def _direct_ledger_mapping_state(
     record: LifecycleOperationRecord,
     operation_input: DirectLandingOperationInput,
     ledger_text: str,
+    memory_commit: str,
 ) -> tuple[DirectLedgerMappingState, dict[str, object]]:
     """Classify an existing immutable mapping only after memory proof and before intent."""
 
-    recovery = record.recoveryCommits
-    if (
-        record.directLandingLedgerIntent is not None
-        or recovery is None
-        or not recovery.memoryContentCommit
-    ):
+    if record.directLandingLedgerIntent is not None or not memory_commit:
         return "not-applicable", {"state": "not-applicable"}
     try:
         mapping = find_unique_mapping(parse_ledger_text(ledger_text), operation_input.codeCommit)
@@ -244,14 +258,185 @@ def _direct_ledger_mapping_state(
     if mapping is None:
         return "absent", {"state": "absent", "codeCommit": operation_input.codeCommit}
     observed: dict[str, object] = {
-        "state": "exact" if mapping.memory_commit == recovery.memoryContentCommit else "different",
+        "state": "exact" if mapping.memory_commit == memory_commit else "different",
         "codeCommit": mapping.code_commit,
         "memoryCommit": mapping.memory_commit,
     }
     return (
-        "exact" if mapping.memory_commit == recovery.memoryContentCommit else "conflict",
+        "exact" if mapping.memory_commit == memory_commit else "conflict",
         observed,
     )
+
+
+def _direct_recovery_outputs(
+    record: LifecycleOperationRecord,
+    operation_input: DirectLandingOperationInput,
+    live: _DirectLiveEvidence,
+) -> _DirectRecoveryOutputs:
+    """Resolve only outputs fixed by durable cells or the accepted mutation lineage."""
+
+    recovery = record.recoveryCommits
+    memory_commit = recovery.memoryContentCommit if recovery is not None else ""
+    ledger_commit = recovery.ledgerCommit if recovery is not None else ""
+    if not memory_commit and record.directLandingLedgerIntent is None:
+        memory_commit = _infer_unpublished_memory_commit(record, operation_input, live)
+    if (
+        memory_commit
+        and not ledger_commit
+        and record.directLandingLedgerIntent is None
+        and _exact_ledger_output_commit(
+            operation_input,
+            live,
+            memory_commit,
+            live.git.head,
+        )
+    ):
+        ledger_commit = live.git.head
+    return _DirectRecoveryOutputs(memory_commit, ledger_commit)
+
+
+def _infer_unpublished_memory_commit(
+    record: LifecycleOperationRecord,
+    operation_input: DirectLandingOperationInput,
+    live: _DirectLiveEvidence,
+) -> str:
+    evidence = record.mutationEvidence.get("memory")
+    if (
+        evidence is None
+        or evidence.state != "mutation-intent"
+        or evidence.observed is not None
+        or evidence.before is None
+        or live.git.headRef != evidence.before.headRef
+        or not _snapshot_is_clean(live.git)
+    ):
+        return ""
+    if _memory_commit_matches_intent(live.repository, evidence, live.git.head):
+        return live.git.head
+    try:
+        mapping = find_unique_mapping(
+            parse_ledger_text(live.ledger_text),
+            operation_input.codeCommit,
+        )
+    except LedgerError:
+        return ""
+    if mapping is None or not _memory_commit_matches_intent(
+        live.repository,
+        evidence,
+        mapping.memory_commit,
+    ):
+        return ""
+    if not _exact_ledger_output_commit(
+        operation_input,
+        live,
+        mapping.memory_commit,
+        live.git.head,
+    ):
+        return ""
+    return mapping.memory_commit
+
+
+def _memory_output_matches_evidence(
+    repository: Path,
+    operation_input: DirectLandingOperationInput,
+    evidence: GitMutationEvidence,
+    outputs: _DirectRecoveryOutputs,
+    live: GitMutationSnapshot,
+) -> bool:
+    memory_commit = outputs.memory_commit
+    expected_live_head = outputs.ledger_commit or memory_commit
+    if (
+        not memory_commit
+        or live.head != expected_live_head
+        or live.headRef != operation_input.memoryBefore.headRef
+        or (outputs.ledger_commit and not _snapshot_is_clean(live))
+    ):
+        return False
+    if evidence.state in {"pre-mutation", "reconciled-unchanged"}:
+        return bool(
+            memory_commit == operation_input.memoryBefore.head
+            and _snapshot_is_clean(operation_input.memoryBefore)
+        )
+    if evidence.state == "mutation-intent":
+        return _memory_commit_matches_intent(repository, evidence, memory_commit)
+    return bool(
+        evidence.state == "commit-proven"
+        and evidence.commit is not None
+        and evidence.commit == memory_commit
+    )
+
+
+def _memory_commit_matches_intent(
+    repository: Path,
+    evidence: GitMutationEvidence,
+    commit: str,
+) -> bool:
+    before = evidence.before
+    expected_tree = evidence.expectedOutputTree
+    if before is None or expected_tree is None or commit == before.head:
+        return False
+    try:
+        parent = require_git(repository, ["rev-parse", f"{commit}^"])
+        tree = require_git(repository, ["rev-parse", f"{commit}^{{tree}}"])
+    except RuntimeError:
+        return False
+    return parent == before.head and tree == expected_tree
+
+
+def _exact_ledger_output_commit(
+    operation_input: DirectLandingOperationInput,
+    live: _DirectLiveEvidence,
+    memory_commit: str,
+    ledger_commit: str,
+) -> bool:
+    if (
+        not memory_commit
+        or not ledger_commit
+        or ledger_commit == memory_commit
+        or live.git.head != ledger_commit
+        or live.git.headRef != operation_input.memoryBefore.headRef
+        or not _snapshot_is_clean(live.git)
+    ):
+        return False
+    intended_text = _deterministic_ledger_text(operation_input, memory_commit)
+    if intended_text is None or live.ledger_text != intended_text:
+        return False
+    try:
+        parent = require_git(live.repository, ["rev-parse", f"{ledger_commit}^"])
+        return bool(
+            parent == memory_commit
+            and _git_blob_text(live.repository, memory_commit, live.relative)
+            == operation_input.ledgerBeforeText
+            and _git_blob_text(live.repository, ledger_commit, live.relative) == intended_text
+            and _commit_changed_paths(live.repository, ledger_commit) == {live.relative}
+        )
+    except RuntimeError:
+        return False
+
+
+def _deterministic_ledger_text(
+    operation_input: DirectLandingOperationInput,
+    memory_commit: str,
+) -> str | None:
+    try:
+        return ledger_to_text(
+            prepend_mapping(
+                parse_ledger_text(operation_input.ledgerBeforeText),
+                operation_input.codeCommit,
+                memory_commit,
+            )
+        )
+    except LedgerError:
+        return None
+
+
+def _commit_changed_paths(repository: Path, commit: str) -> set[str]:
+    result = run_git(
+        repository,
+        ["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", commit],
+    )
+    if result.returncode != 0:
+        raise RuntimeError("could not inspect direct ledger commit paths")
+    return {item for item in result.stdout.split("\0") if item}
 
 
 def _memory_state_converges(
@@ -259,10 +444,19 @@ def _memory_state_converges(
     record: LifecycleOperationRecord,
     operation_input: DirectLandingOperationInput,
     live: GitMutationSnapshot,
+    outputs: _DirectRecoveryOutputs,
 ) -> bool:
     evidence = record.mutationEvidence.get("memory")
     if evidence is None:
         return False
+    if outputs.memory_commit and (outputs.ledger_commit or live.head == outputs.memory_commit):
+        return _memory_output_matches_evidence(
+            repository,
+            operation_input,
+            evidence,
+            outputs,
+            live,
+        )
     recovery = record.recoveryCommits
     if evidence.state in {"pre-mutation", "reconciled-unchanged"}:
         return _memory_prestate_converges(record, operation_input, recovery, live)
@@ -319,6 +513,7 @@ def _ledger_state_converges(
     record: LifecycleOperationRecord,
     operation_input: DirectLandingOperationInput,
     live: _DirectLiveEvidence,
+    outputs: _DirectRecoveryOutputs,
 ) -> bool:
     evidence = record.mutationEvidence.get("ledger")
     if evidence is None:
@@ -326,7 +521,7 @@ def _ledger_state_converges(
     intent = record.directLandingLedgerIntent
     recovery = record.recoveryCommits
     if intent is None:
-        return _ledger_without_intent_converges(operation_input, recovery, live)
+        return _ledger_without_intent_converges(operation_input, live, outputs)
     if recovery is None or not _ledger_intent_matches_recovery(record):
         return False
     return _journaled_ledger_state_converges(evidence, intent, recovery, live)
@@ -370,16 +565,25 @@ def _journaled_ledger_state_converges(
 
 def _ledger_without_intent_converges(
     operation_input: DirectLandingOperationInput,
-    recovery: LifecycleOperationRecoveryCommits | None,
     live: _DirectLiveEvidence,
+    outputs: _DirectRecoveryOutputs,
 ) -> bool:
+    if outputs.ledger_commit:
+        return bool(
+            outputs.memory_commit
+            and live.git.head == outputs.ledger_commit
+            and _exact_ledger_output_commit(
+                operation_input,
+                live,
+                outputs.memory_commit,
+                outputs.ledger_commit,
+            )
+        )
     if live.ledger_text != operation_input.ledgerBeforeText:
         return False
-    if recovery is not None and recovery.ledgerCommit:
-        return live.git.head == recovery.ledgerCommit and _snapshot_is_clean(live.git)
-    if recovery is not None and recovery.memoryContentCommit:
+    if outputs.memory_commit:
         return bool(
-            live.git.head == recovery.memoryContentCommit
+            live.git.head == outputs.memory_commit
             and _snapshot_is_clean(live.git)
             and _git_blob_text(live.repository, live.git.head, live.relative) == live.ledger_text
         )

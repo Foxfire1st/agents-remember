@@ -16,8 +16,7 @@ from agents_remember.application.worktree_tools import (
     worktree_status_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees.integration import closeout_door, initial_closeout_door_recovery
+from agents_remember.worktrees.integration import closeout_door
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operation_controls as controls_mod,
 )
@@ -195,73 +194,6 @@ def test_unreadable_pending_door_status_and_stale_handler_share_exact_decision(
     assert store.read() is not None
 
 
-def test_unreadable_initial_door_git_evidence_is_bounded_and_non_mutating(
-    tmp_path: Path,
-) -> None:
-    contract = _contract(tmp_path)
-    (contract.code_worktree / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
-    operation_input = closeout_operation_input(contract, code="publish claimed door first")
-    original_create = LifecycleOperationStore.create
-
-    def cut_after_record_create(
-        target: LifecycleOperationStore,
-        candidate: LifecycleOperationRecord,
-    ) -> tuple[LifecycleOperationRecord, bool]:
-        created = original_create(target, candidate)
-        if target.path == operation_record_path(contract.worktree_group, "closeout"):
-            raise SystemExit("cut before claimed-door intent")
-        return created
-
-    with (
-        mock.patch.object(LifecycleOperationStore, "create", new=cut_after_record_create),
-        pytest.raises(SystemExit, match="before claimed-door intent"),
-    ):
-        start_closeout_operation(operation_input, launcher=mock.Mock())
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    record = store.read()
-    assert record is not None and record.doorPublication is None
-    stale = legal_operation_controls(contract, record)[0]
-    config = load_config(Path(operation_input.configPath))
-    before = _byte_tree(tmp_path)
-
-    with (
-        mock.patch.object(
-            initial_closeout_door_recovery,
-            "ephemeral_git_mutation_snapshot",
-            side_effect=RuntimeError("private repository path and stderr"),
-        ),
-        mock.patch.object(controls_mod, "launch_detached_worker") as launch,
-        mock.patch.object(operations_mod, "launch_detached_worker") as apply_launch,
-    ):
-        projected = _projected_closeout(_public_status(config, contract))
-        refused = _public_control(config, stale)
-        repeated_apply = worktree_closeout_apply_tool(
-            config,
-            contract.contract_path.as_posix(),
-            CloseoutCommitMessages(code="publish claimed door first"),
-            CloseoutApproval(intent_note=operation_input.approvalNote),
-        )
-
-    assert projected["legalControls"] == []
-    decision = projected["result"]
-    assert decision["state"] == "closeout-initial-door-intent-missing"
-    live_git = decision["observed"]["liveGit"]
-    assert live_git["code"] == {
-        "status": "unreadable",
-        "side": "code",
-        "name": contract.code_worktree.name,
-        "errorType": "RuntimeError",
-    }
-    assert "private repository" not in repr(decision)
-    assert refused["ok"] is False
-    assert _refusal_semantics(refused) == _decision_semantics(decision)
-    assert repeated_apply["ok"] is False
-    assert _refusal_semantics(repeated_apply) == _decision_semantics(decision)
-    assert _byte_tree(tmp_path) == before
-    launch.assert_not_called()
-    apply_launch.assert_not_called()
-
-
 @pytest.mark.parametrize("mode", ["cancel", "successor", "retire", "supersede"])
 def test_all_pending_door_dispositions_refuse_live_third_state_without_mutation(
     tmp_path: Path,
@@ -277,7 +209,7 @@ def test_all_pending_door_dispositions_refuse_live_third_state_without_mutation(
         interrupted = _public_control(config, row)
     assert interrupted["ok"] is False
     assert interrupted["status"] == "closeout-door-publication-interrupted"
-    pending = store.effective_read()
+    pending = store.read()
     assert pending is not None and pending.doorPublication is not None
     assert pending.doorPublication.state == "intent"
     live = load_contract(contract.contract_path)

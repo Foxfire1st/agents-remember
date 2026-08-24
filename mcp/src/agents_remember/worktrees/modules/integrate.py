@@ -18,6 +18,10 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.worktrees.integration.atomic_series_landing import (
+    AtomicLandingBlocked,
+    require_atomic_landing_authority,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     integration_targets,
     require_ordinary_worktree,
@@ -85,6 +89,10 @@ from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
     next_guidance,
     status_payload,
+)
+from agents_remember.worktrees.modules.integration_preflight_results import (
+    atomic_landing_blocked_result,
+    prepared_integration_recovery,
 )
 from agents_remember.worktrees.modules.integration_publication import (
     IntegratePreview,
@@ -747,15 +755,15 @@ def integrate_result(
     operation = None
     if not args.dry_run:
         operation = require_plane_integration_operation(contract, args)
+    completed = _completed_integration_result(contract, args, operation)
+    if completed is not None:
+        return completed
     door_block = _integration_door_block(
         contract,
         operation.integrationPublication if operation is not None else None,
     )
     if door_block is not None:
         return door_block
-    completed = _completed_integration_result(contract, args, operation)
-    if completed is not None:
-        return completed
     validate_integrate_contract(contract)
     sources = _integration_replay_requirements(contract)
     operation = None
@@ -828,16 +836,21 @@ def _recover_integration_under_authority(
         decision = protected_integration_decision(current, args)
         if decision is not None:
             return decision
+        if current.integration_status != "completed":
+            require_atomic_landing_authority(current)
         result = _recover_integration_finalization(current, args, authority)
         return publish_journaled_organizational_completion(result, intent)
 
-    if contract.kind == "series":
-        if contract.integration_status != "completed":
-            return publish_series_integration_under_authority(contract, publication)
+    try:
+        if contract.kind == "series":
+            if contract.integration_status != "completed":
+                return publish_series_integration_under_authority(contract, publication)
+            with integration_authority_lock(contract.coordination_root, contract.repo_name):
+                return publication()
         with integration_authority_lock(contract.coordination_root, contract.repo_name):
             return publication()
-    with integration_authority_lock(contract.coordination_root, contract.repo_name):
-        return publication()
+    except AtomicLandingBlocked as error:
+        return atomic_landing_blocked_result(contract, error)
 
 
 def _continue_integration(
@@ -968,16 +981,19 @@ def _apply_integration(
         handover_warning=handover_warning,
     )
 
-    if contract.kind == "series":
-        result = publish_series_integration_under_authority(
-            contract,
-            lambda: _publish_integration_edge(publication),
-        )
-        completed = publish_journaled_organizational_completion(result, intent)
-    else:
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            result = _publish_integration_edge(publication)
+    try:
+        if contract.kind == "series":
+            result = publish_series_integration_under_authority(
+                contract,
+                lambda: _publish_integration_edge(publication),
+            )
             completed = publish_journaled_organizational_completion(result, intent)
+        else:
+            with integration_authority_lock(contract.coordination_root, contract.repo_name):
+                result = _publish_integration_edge(publication)
+                completed = publish_journaled_organizational_completion(result, intent)
+    except AtomicLandingBlocked as error:
+        return atomic_landing_blocked_result(contract, error)
     assert completed is not None
     return completed
 
@@ -991,6 +1007,7 @@ def _publish_integration_edge(
         return door_block
     if current != publication.contract:
         raise RuntimeError("integration contract changed before protected-ref movement")
+    require_atomic_landing_authority(current)
     if current.kind == "series":
         require_series_contract_authority(current, operation="worktree_integrate")
     else:
@@ -1054,27 +1071,8 @@ def _prepare_integration_commits(
     args: WorktreeArgs,
     sources: IntegrationSources,
 ):
-    recovered = _prepared_integration_recovery(args)
+    recovered = prepared_integration_recovery(args)
     return recovered or _prepare_fresh_integration_commits(contract, args, sources)
-
-
-def _prepared_integration_recovery(args: WorktreeArgs):
-    if args.integration_publication is None:
-        return None
-    recovery = args.recovery_commits
-    if recovery is None:
-        raise RuntimeError("integration publication recovery has no commit tuple")
-    certification = args.quality_certification
-    return (
-        IntegratedCommits(
-            code=recovery.codeCommit,
-            memory_content=recovery.memoryContentCommit,
-            ledger=recovery.ledgerCommit,
-        ),
-        certification.result if certification is not None else {},
-        certification,
-        IntegrationBoundaryFacts(None, None),
-    )
 
 
 def _prepare_fresh_integration_commits(
@@ -1089,7 +1087,7 @@ def _prepare_fresh_integration_commits(
         args, "integration-quality", current_command="run altitude-routed quality contract"
     )
     quality_certification = args.quality_certification
-    boundary_facts = IntegrationBoundaryFacts(None, None)
+    boundary_facts = IntegrationBoundaryFacts(None, None, None)
     if contract.kind == "series":
         quality_gate, blocked = _run_integration_quality_gate(contract)
         if blocked is not None:
@@ -1109,8 +1107,8 @@ def _prepare_fresh_integration_commits(
         memory_content=integrated_memory_content_commit,
         ledger=integrated_ledger_commit,
     )
+    boundary_facts = preview_integration_boundary(contract)
     if contract.kind == "leaf":
-        boundary_facts = preview_integration_boundary(contract)
         completion = boundary_facts.organizational_completion
         if completion is not None:
             quality_gate, blocked = _run_integration_quality_gate(

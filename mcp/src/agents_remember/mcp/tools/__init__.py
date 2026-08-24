@@ -10,6 +10,7 @@ from __future__ import annotations
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT
 from .base import _tool_payload as _tool_payload  # re-exported for tool-response tests
 from .benchmark import codex_benchmark_prepare_payload, codex_benchmark_run_payload
+from .closeout_door import closeout_door_payload
 from .closeout_queue import closeout_queue_payload
 from .core import (
     context_packet_payload,
@@ -122,6 +123,7 @@ __all__ = [
     "cgc_symbol_search_payload",
     "cgc_visualize_payload",
     "citation_fix_payload",
+    "closeout_door_payload",
     "closeout_queue_payload",
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",

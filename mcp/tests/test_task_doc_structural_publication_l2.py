@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event
 from unittest import mock
 
+import agents_remember.application.task_docs.task_doc_publication as task_publication
 import agents_remember.application.task_docs.task_doc_tools as task_doc_tools_module
 import agents_remember.application.task_docs.task_sprint_linkage as sprint_linkage
 import test_task_document_application_1 as master_sync_fixture
@@ -52,7 +53,7 @@ class TaskDocStructuralPublicationL2Tests(unittest.TestCase):
                 master_json if side == "markdown" else master_markdown
             ).read_bytes(),
         }
-        real_publish = sprint_linkage.publish_task_doc_transaction
+        real_publish = task_publication.publish_task_doc_transaction_and_refresh
 
         def drift_before_publication(transaction: TaskDocPublicationTransaction):
             source = next(
@@ -65,7 +66,7 @@ class TaskDocStructuralPublicationL2Tests(unittest.TestCase):
         with (
             mock.patch.object(
                 sprint_linkage,
-                "publish_task_doc_transaction",
+                "publish_task_doc_transaction_and_refresh",
                 side_effect=drift_before_publication,
             ),
             self.assertRaises(TaskDocPublicationConflict),
@@ -161,7 +162,7 @@ class TaskDocDetachAbsencePublicationL2Tests(unittest.TestCase):
         self.assertEqual(self.owner._sprint().orchestrates, ["master-a"])
 
     def _assert_missing_master_side_appearance_refuses(self, side: str) -> None:
-        real_publish = sprint_linkage.publish_task_doc_transaction
+        real_publish = task_publication.publish_task_doc_transaction_and_refresh
         selected_json = self.owner.tasks / "master-c" / "task.json"
         selected_markdown = selected_json.with_suffix(".md")
         before = self.owner._snapshot()
@@ -175,7 +176,7 @@ class TaskDocDetachAbsencePublicationL2Tests(unittest.TestCase):
         with (
             mock.patch.object(
                 sprint_linkage,
-                "publish_task_doc_transaction",
+                "publish_task_doc_transaction_and_refresh",
                 side_effect=create_one_side,
             ),
             self.assertRaises(TaskDocPublicationConflict),

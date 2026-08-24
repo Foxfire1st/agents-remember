@@ -12,7 +12,9 @@ from subprocess import CompletedProcess
 from typing import Any, cast
 from unittest import mock
 
-from agents_remember.application.lifecycle.direct_landing import direct_landing_tool
+from agents_remember.application.lifecycle.direct_landing import (
+    direct_landing_tool as _production_direct_landing_tool,
+)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tools import (
     OperationControlRequest,
@@ -29,7 +31,7 @@ from agents_remember.models.lifecycles.mutation_evidence import CloseoutMutation
 from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
-    direct_landing,
+    direct_landing as _production_direct_landing,
 )
 from agents_remember.worktrees.integration.direct_landing import (
     direct_landing_execution as execution,
@@ -44,15 +46,31 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_generation_resume
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_projection import (
     legal_operation_controls,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    successor_publication_path,
-)
 from agents_remember.worktrees.modules.git import head_commit, require_git
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from test_direct_landing import _series_fixture
+from agents_remember.worktrees.worktree_contract import load_contract
+from test_direct_landing import _series_fixture, _without_projection_effects
 from test_worktree_support import git
 
 _RETRY_LEGS: tuple[CloseoutMutationLeg, CloseoutMutationLeg] = ("memory", "ledger")
+
+
+def direct_landing(*args, **kwargs):
+    """Exercise recovery below the independently covered scheduling fence."""
+
+    with mock.patch(
+        "agents_remember.worktrees.direct_landing.require_first_ready_generation"
+    ):
+        return _production_direct_landing(*args, **kwargs)
+
+
+def direct_landing_tool(*args, **kwargs):
+    """Exercise the public recovery surface below the same scheduling fence."""
+
+    with mock.patch(
+        "agents_remember.worktrees.direct_landing.require_first_ready_generation"
+    ):
+        return _production_direct_landing_tool(*args, **kwargs)
 
 
 def _byte_tree(root: Path) -> dict[str, bytes]:
@@ -96,10 +114,23 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
     def _recover(fixture: dict[str, Any]) -> dict[str, Any]:
         record = direct_landing_store(fixture["contract"]).read()
         assert record is not None
-        recover = next(
-            row
-            for row in legal_operation_controls(fixture["contract"], record)
-            if row["action"] == "recover"
+        current = load_contract(fixture["contract"].contract_path)
+        controls = legal_operation_controls(current, record)
+        recover = next((row for row in controls if row["action"] == "recover"), None)
+        classification = execution.classify_direct_landing_recovery(current, record)
+        assert recover is not None, (
+            record.status,
+            record.phase,
+            {
+                leg: evidence.state
+                for leg, evidence in sorted(record.mutationEvidence.items())
+            },
+            classification.state,
+            classification.status,
+            classification.detail,
+            classification.expected,
+            classification.observed,
+            controls,
         )
         return worktree_operation_control_tool(
             fixture["config"],
@@ -120,10 +151,9 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
             "agents_remember.worktrees.direct_landing.execute_or_require_direct_landing_recovery",
             return_value={"ok": True, "state": "admitted"},
         ):
-            direct_landing_tool(fixture["config"], request)
-        observed = cast(dict[str, Any], direct_landing_tool(fixture["config"], request))
-        self.assertTrue(observed["ok"])
-        return observed["lifecycleOperation"]["legalControls"]
+            admitted = direct_landing_tool(fixture["config"], request)
+        self.assertTrue(admitted["ok"])
+        return cast(list[dict[str, Any]], self._status(fixture)["legalControls"])
 
     @staticmethod
     def _status(fixture: dict[str, Any]) -> dict[str, Any]:
@@ -749,10 +779,17 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
         fixture = self._fixture()
         request = self._request(fixture)
         first = direct_landing(fixture["config"], request, fixture["contract"])
-        second = direct_landing(fixture["config"], request, fixture["contract"])
+        second = direct_landing(
+            fixture["config"],
+            request,
+            load_contract(fixture["contract"].contract_path),
+        )
         record = direct_landing_store(fixture["contract"]).read()
         assert record is not None
-        self.assertEqual(first, second)
+        self.assertEqual(
+            _without_projection_effects(first),
+            _without_projection_effects(second),
+        )
         self.assertEqual((record.generation, record.attempt), (1, 1))
 
     def _assert_unreadable_journal(self, mode: str) -> None:
@@ -761,9 +798,9 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
         stale = next(row for row in controls if row["action"] == "recover")
         store = direct_landing_store(fixture["contract"])
         private = f"PRIVATE_DIRECT_{mode}_JOURNAL /tmp/direct-journal"
-        path = successor_publication_path(store.path) if mode == "successor" else store.path
+        path = store.path
         patcher = nullcontext()
-        if mode in {"malformed", "successor"}:
+        if mode == "malformed":
             path.write_text(
                 f'{{"schemaVersion":"3.0","private":"{private}"',
                 encoding="utf-8",
@@ -820,9 +857,6 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
 
     def test_os_error_current_journal_has_public_totality(self) -> None:
         self._assert_unreadable_journal("os-error")
-
-    def test_unreadable_successor_journal_has_public_totality(self) -> None:
-        self._assert_unreadable_journal("successor")
 
 
 if __name__ == "__main__":

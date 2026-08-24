@@ -5,7 +5,6 @@ from __future__ import annotations
 import difflib
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -17,7 +16,6 @@ from pydantic import (
     field_validator,
 )
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -52,16 +50,11 @@ from agents_remember.tasks.serving_preflight import (
     TopologyServingBuildError,
     require_serving_topology_schema,
 )
-from agents_remember.worktrees.integration.integration_branch_authority import (
-    require_topology_migration_authority,
-)
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_evidence import (
     JUDGMENT_REGISTER_SECTION,
     planning_authorities,
 )
-
-from .task_doc_queue_scope import QueuePublicationScope
 
 
 class ExecutionTopologyError(AgentsRememberError):
@@ -268,18 +261,24 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
     }
     if request.dry_run:
         from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
+            preview_task_doc_transaction_projection_effects,
             validate_task_doc_transaction,
         )
 
-        validate_task_doc_transaction(
-            _authoring_transaction(request, sprint_ref, prepared, lambda: [])
-        )
+        transaction = _authoring_transaction(request, prepared, lambda: [])
+        validate_task_doc_transaction(transaction)
+        result["projectionEffects"] = [
+            effect.model_dump(mode="json")
+            for effect in preview_task_doc_transaction_projection_effects(transaction)
+        ]
         result["dryRun"] = True
         result["documents"] = [
             _document_preview(ref, root, document) for ref, root, document in prepared.documents
         ]
         return result
-    result["documents"] = _publish_authoring(request, topology, sprint_ref, prepared)
+    documents, effects = _publish_authoring(request, prepared)
+    result["documents"] = documents
+    result["projectionEffects"] = effects
     return result
 
 
@@ -361,62 +360,53 @@ def _authoring_batch_titles(
 
 def _publish_authoring(
     request: ExecutionTopologyAuthoringRequest,
-    topology: TaskDocumentTopology,
-    sprint_ref: TaskDocumentRef,
     prepared: _AuthoringCandidate,
-) -> list[dict[str, Any]]:
-    def publication() -> list[tuple[Path, Path]]:
-        from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
-            publish_task_doc_transaction,
-        )
-
-        return publish_task_doc_transaction(
-            _authoring_transaction(
-                request,
-                sprint_ref,
-                prepared,
-                lambda: write_task_doc_batch(
-                    [(root, document) for _ref, root, document in prepared.documents],
-                    graph_titles=_authoring_batch_titles(prepared.documents),
-                ),
-            )
-        )
-
-    queue = CloseoutQueueStore(request.coordination_root, sprint_ref)
-    written = queue.publish_sprint_update(
-        publication,
-        completed=prepared.sprint.status == "Completed",
-        recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
-        validate_completion=lambda: require_commanded_masters_completed(
-            topology,
-            sprint_ref,
-            prepared.overrides,
-        ),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
+        publish_task_doc_transaction_and_refresh,
     )
-    return [
+
+    publication = publish_task_doc_transaction_and_refresh(
+        _authoring_transaction(
+            request,
+            prepared,
+            lambda: write_task_doc_batch(
+                [(root, document) for _ref, root, document in prepared.documents],
+                graph_titles=_authoring_batch_titles(prepared.documents),
+            ),
+        )
+    )
+    documents = [
         {
             "taskDocumentRef": ref.model_dump(mode="json"),
             "docPath": json_path.as_posix(),
             "renderedPath": markdown_path.as_posix(),
         }
         for (ref, _root, _document), (json_path, markdown_path) in zip(
-            prepared.documents, written, strict=True
+            prepared.documents, publication.written, strict=True
         )
     ]
+    effects = [effect.model_dump(mode="json") for effect in publication.projection_effects]
+    return documents, effects
 
 
-def _authoring_transaction(request, sprint_ref, prepared, publisher):
+def _authoring_transaction(request, prepared, publisher):
     from .task_doc_publication import (  # noqa: PLC0415 - avoids publication/topology cycle
         TaskDocPublicationTransaction,
+        task_doc_scope_changes,
     )
 
     return TaskDocPublicationTransaction(
-        request.coordination_root,
-        request.repo_id,
-        prepared.source_snapshots,
-        QueuePublicationScope(sprint_ref, None),
-        lambda: _require_authoring_publication_authority(request, prepared.overrides),
-        publisher,
+        coordination_root=request.coordination_root,
+        target_repo_id=request.repo_id,
+        source_snapshots=prepared.source_snapshots,
+        scope_changes=task_doc_scope_changes(
+            request.coordination_root,
+            request.repo_id,
+            prepared.overrides,
+            prepared.source_snapshots,
+        ),
+        publisher=publisher,
     )
 
 
@@ -774,22 +764,6 @@ def _authoring_placement_facts(
     ]
 
 
-def _require_authoring_publication_authority(
-    request: ExecutionTopologyAuthoringRequest,
-    overrides: dict[TaskDocumentRef, TaskDocument],
-) -> None:
-    try:
-        require_topology_migration_authority(
-            request.coordination_root,
-            request.repo_id,
-            request.code_repository,
-            request.memory_repository,
-            overrides,
-        )
-    except RuntimeError as exc:
-        raise ExecutionTopologyError(str(exc)) from exc
-
-
 def require_commanded_masters_completed(
     topology: TaskDocumentTopology,
     sprint_ref: TaskDocumentRef,
@@ -827,27 +801,44 @@ def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> No
     json_path = json_path_for(request.task_root, request.candidate)
     ref = _task_document_ref(request, json_path)
     overrides = {ref: request.candidate}
+    if request.candidate.orchestrates and request.candidate.integrationBranch is None:
+        raise ExecutionTopologyError(
+            f"orchestration sprint {ref.key} must declare integrationBranch"
+        )
     try:
-        sprint_refs: set[TaskDocumentRef] = set()
-        if request.candidate.orchestrates:
-            sprint_refs.add(ref)
-        elif request.original is not None and request.original.orchestrates:
-            raise ExecutionTopologyError(
-                "an orchestration sprint cannot remove its execution topology through "
-                f"task_doc.{request.operation}; use task_doc.author_execution_graph"
-            )
-        if (
-            request.original is not None
-            and request.original.executionGraph is not None
-            and request.candidate.executionGraph is None
-        ):
-            # The default mode may be chosen at creation, but an authored graph is
-            # only ever retired through the graph-authoring seam, never by dropping
-            # the field from a write.
-            raise ExecutionTopologyError(
-                "an orchestration sprint cannot remove its executionGraph through "
-                f"task_doc.{request.operation}; use task_doc.author_execution_graph"
-            )
+        sprint_refs = _affected_execution_sprints(request, topology, ref)
+        _validate_affected_execution_sprints(topology, sprint_refs, overrides)
+    except TaskDocumentRefError as exc:
+        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
+
+
+def _affected_execution_sprints(
+    request: ExecutionTopologyEditRequest,
+    topology: TaskDocumentTopology,
+    ref: TaskDocumentRef,
+) -> set[TaskDocumentRef]:
+    sprint_refs: set[TaskDocumentRef] = set()
+    if request.candidate.orchestrates:
+        sprint_refs.add(ref)
+    elif request.original is not None and request.original.orchestrates:
+        raise ExecutionTopologyError(
+            "an orchestration sprint cannot remove its execution topology through "
+            f"task_doc.{request.operation}; use task_doc.author_execution_graph"
+        )
+    if (
+        request.original is not None
+        and request.original.executionGraph is not None
+        and request.candidate.executionGraph is None
+    ):
+        raise ExecutionTopologyError(
+            "an orchestration sprint cannot remove its executionGraph through "
+            f"task_doc.{request.operation}; use task_doc.author_execution_graph"
+        )
+    # A sprint is its own topology owner. Only an ordinary master, including one
+    # transitioning to sprint altitude, needs its existing consumers enumerated.
+    if not request.candidate.orchestrates or (
+        request.original is not None and not request.original.orchestrates
+    ):
         sprint_refs.update(
             sprint.ref
             for sprint in topology.execution_sprints_affected_by_master(
@@ -856,19 +847,33 @@ def enforce_execution_topology_edit(request: ExecutionTopologyEditRequest) -> No
                 candidate=request.candidate,
             )
         )
-        for sprint_ref in sorted(sprint_refs, key=lambda item: item.key):
-            sprint = topology.resolve(sprint_ref, overrides)
-            if sprint.document.executionGraph is None:
-                # The atomic-sequential default (L13-R1): a graph-less sprint has no
-                # topology contract to validate; the series lane serializes masters.
-                continue
+    return sprint_refs
+
+
+def _validate_affected_execution_sprints(
+    topology: TaskDocumentTopology,
+    sprint_refs: set[TaskDocumentRef],
+    overrides: dict[TaskDocumentRef, TaskDocument],
+) -> None:
+    for sprint_ref in sorted(sprint_refs, key=lambda item: item.key):
+        sprint = topology.resolve(sprint_ref, overrides)
+        # The atomic-sequential default has no graph contract to validate; its
+        # series landing authority supplies ordering instead.
+        if sprint.document.executionGraph is not None:
             topology.validate_execution_topology(sprint_ref, overrides=overrides)
-    except TaskDocumentRefError as exc:
-        raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
+        else:
+            topology.commanded_masters(sprint, overrides=overrides)
+            topology.validate_sprint_linkage(sprint_ref, overrides=overrides)
 
 
 def _execution_topology_edit_required(request: ExecutionTopologyEditRequest) -> bool:
-    relevant = {"title", "orchestrates", "executionNature", "executionGraph"}
+    relevant = {
+        "title",
+        "orchestrates",
+        "integrationBranch",
+        "executionNature",
+        "executionGraph",
+    }
     if request.operation not in {"create", "replace", "set_field"}:
         return False
     original_is_master = request.original is not None and request.original.kind == "master"

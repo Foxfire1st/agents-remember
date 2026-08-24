@@ -6,10 +6,9 @@ import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 import type { CloseoutCandidateNode, CloseoutQueueNode, TaskDocumentRef } from "../types/projection";
 
-// Closeout queue — the projected, read-only scheduling surface (L8-R4/R5/R6). One ordered
-// list per sprint: the active atomic blocker first, then every declared candidate with its
-// queue state, grade, and the exact reasons it is not selectable. The dashboard never infers
-// readiness from titles, numbering, or labels; it renders the queue's recorded facts verbatim.
+// Closeout projection — an effective read of disposable exact-current scheduling state.
+// The dashboard renders member classification and typed repair evidence verbatim; it never
+// treats a stale or unreadable artifact as admitting lifecycle authority.
 const list = css({ listStyle: "none", margin: "0", padding: "0", display: "grid", gap: "0.35rem" });
 const row = css({
   display: "flex",
@@ -21,14 +20,14 @@ const row = css({
   borderLeftColor: "grid",
   background: "bg",
 });
-const blockerRow = css({ borderLeftColor: "alarm" });
+const problemRow = css({ borderLeftColor: "alarm" });
 const name = css({ fontWeight: "600", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
 const meta = css({ color: "muted", fontSize: "0.75rem" });
 const reasons = css({ color: "ink", opacity: "0.8", fontSize: "0.78rem" });
 const groupHead = css({ margin: "0.6rem 0 0.2rem", fontSize: "0.8rem", letterSpacing: "0.04em", color: "muted" });
 
 function CandidateRow({ candidate }: { candidate: CloseoutCandidateNode }) {
-  const title = `${candidate.candidateState}${candidate.gradePriority ? ` · ${candidate.gradePriority}` : ""}`;
+  const title = `${candidate.classification} · ${candidate.priority}`;
   return (
     <li className={row} data-testid="closeout-candidate">
       <span className={name}>{candidate.taskDocumentRef.path}</span>
@@ -48,18 +47,19 @@ function Queue({ queue }: { queue: CloseoutQueueNode }) {
       <h3 className={groupHead}>
         {queue.sprintRef.path}
         <span className={meta}>
-          rev {queue.revision} · graph {queue.graphRevision.slice(0, 8)}
+          rev {queue.revision} · {queue.serviceCondition}
+          {queue.sourceClassification ? ` · ${queue.sourceClassification}` : ""}
         </span>
       </h3>
-      {queue.activeBlocker && (
-        <div className={`${row} ${blockerRow}`} data-testid="closeout-blocker">
-          <span className={name}>blocker: {queue.activeBlocker.master.path}</span>
-          <span className={meta}>{queue.activeBlocker.rationale}</span>
+      {queue.sourceProblems.map((problem) => (
+        <div className={`${row} ${problemRow}`} data-testid="closeout-problem" key={`${problem.kind}/${problem.address}/${problem.errorType}`}>
+          <span className={name}>{problem.errorType}</span>
+          <span className={reasons}>{problem.repairAction}</span>
         </div>
-      )}
+      ))}
       <ul className={list}>
-        {queue.candidates.map((candidate) => (
-          <CandidateRow key={`${candidate.taskDocumentRef.repository}/${candidate.taskDocumentRef.path}`} candidate={candidate} />
+        {queue.members.map((candidate) => (
+          <CandidateRow key={candidate.generationId} candidate={candidate} />
         ))}
       </ul>
     </section>

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
@@ -14,24 +16,31 @@ from agents_remember.worktrees.scheduling_mode import stale_series_artifact_fact
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
+@dataclass(frozen=True)
+class StartedWorktreeState:
+    code: str
+    memory: dict[str, object]
+    providers: dict[str, object]
+
+
 def started_result(
     contract: WorktreeContract,
     args: WorktreeArgs,
-    code_state: str,
-    memory_state: dict[str, object],
-    provider_state: dict[str, object],
+    state: StartedWorktreeState,
+    *,
+    projection_effects: list[dict[str, object]] | None = None,
 ) -> WorktreeCommandResult:
     """Distinguish a non-mutating preview from a completed start on the wire."""
     if args.dry_run:
         return _start_preview_result(
             contract,
             args,
-            code_state,
-            memory_state,
-            provider_state,
+            state.code,
+            state.memory,
+            state.providers,
         )
     summary = "Worktree task started; continue the wrapped workflow before closeout."
-    if provider_state.get("state") == "starting":
+    if state.providers.get("state") == "starting":
         summary = (
             "Worktree task started; provider setup is running in the background — "
             "poll worktree_status until its providers block reaches a terminal state."
@@ -46,7 +55,8 @@ def started_result(
                 tool="worktree_status",
                 args=contract_next_args(contract),
             ),
-            **_start_result_facts(contract, code_state, memory_state, provider_state),
+            **_start_result_facts(contract, state.code, state.memory, state.providers),
+            "projectionEffects": projection_effects or [],
         },
     )
 

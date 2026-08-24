@@ -1,74 +1,249 @@
+"""L3 task-first multi-scope publication and actionable-effect forcing."""
+
 from __future__ import annotations
 
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar
+from unittest import mock
 
-from agents_remember.application.task_docs.task_doc_tools import (
-    TaskDocEdit,
-    TaskDocTarget,
-    task_doc_tool,
+from agents_remember.models.closeout_projection import (
+    CloseoutQueueState,
+    ProjectionInvalidationResult,
+    ProjectionRebuildResult,
+    TaskDocProjectionEffect,
 )
-from agents_remember.application.task_docs.task_execution_topology import ExecutionTopologyError
-from agents_remember.controlplane.closeout_queue_store import (
-    CloseoutQueueStoreError,
-    queue_store_paths,
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.worktrees import task_fact_publication as publication
+from agents_remember.worktrees.queue.closeout_projection_publication import (
+    ProjectionInvalidationReceipt,
 )
-from agents_remember.models.queue.closeout_queue import CloseoutQueueState
-from agents_remember.tasks import read_task_doc, write_task_doc
-from test_closeout_queue import LEAF_A, MASTER_A, REPO, SPRINT, QueueFixture
+
+NOW = "2026-08-24T00:00:00+00:00"
+SPRINT_A = TaskDocumentRef(repository="repo-a", path="a/task.json")
+SPRINT_B = TaskDocumentRef(repository="repo-a", path="b/task.json")
 
 
-class CloseoutQueueTaskDocStatusTests(unittest.TestCase):
+def _complete_effect(ref: TaskDocumentRef) -> TaskDocProjectionEffect:
+    return TaskDocProjectionEffect(
+        sprintTaskDocumentRef=ref,
+        queueExisted=True,
+        priorRevision=2,
+        priorSourceFingerprint="a" * 64,
+        invalidation=ProjectionInvalidationResult(outcome="persisted-empty", revision=3),
+        rebuild=ProjectionRebuildResult(
+            outcome="published",
+            revision=4,
+            sourceFingerprint="b" * 64,
+            sourceClassification="active",
+        ),
+        rebuiltRevision=4,
+    )
+
+
+class _FakeStore:
+    events: ClassVar[list[str]] = []
+
+    def __init__(self, _root: Path, sprint_ref: TaskDocumentRef) -> None:
+        self.sprint_ref = sprint_ref
+        self.state_path = Path("/projection") / sprint_ref.path
+
+    def exists(self) -> bool:
+        return True
+
+    def read_raw(self, *, timestamp: str) -> CloseoutQueueState:
+        del timestamp
+        return CloseoutQueueState(
+            sprintTaskDocumentRef=self.sprint_ref,
+            revision=2,
+            serviceCondition="valid-built",
+            sourceClassification="active",
+            sourceFingerprint="a" * 64,
+            updatedAt=NOW,
+        )
+
+    def invalidate(
+        self,
+        *,
+        timestamp: str,
+    ) -> tuple[CloseoutQueueState, ProjectionInvalidationResult]:
+        del timestamp
+        self.events.append(f"invalidate:{self.sprint_ref.key}")
+        if self.sprint_ref == SPRINT_A:
+            raise OSError("forced scope A failure")
+        state = CloseoutQueueState(
+            sprintTaskDocumentRef=self.sprint_ref,
+            revision=3,
+            serviceCondition="invalid-empty",
+            updatedAt=NOW,
+        )
+        return state, ProjectionInvalidationResult(outcome="persisted-empty", revision=3)
+
+
+class _PresenceFailureStore(_FakeStore):
+    def exists(self) -> bool:
+        if self.sprint_ref == SPRINT_A:
+            raise OSError("forced presence failure")
+        return super().exists()
+
+
+class TaskFactPublicationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory()
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        _FakeStore.events = []
 
     def tearDown(self) -> None:
-        self.temp.cleanup()
+        self.temporary.cleanup()
 
-    def test_task_doc_completion_uses_the_queue_quiescence_owner(self) -> None:
-        fixture = QueueFixture(Path(self.temp.name))
-        target = TaskDocTarget(repo_id=REPO, task_name="sprint")
-        edit = TaskDocEdit(fields={"status": "Completed"})
-        with self.assertRaisesRegex(ExecutionTopologyError, "commanded masters remain incomplete"):
-            task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        self.assertEqual(read_task_doc(fixture.tasks / "sprint" / "task.json").status, "inProgress")
-        for ref, master in fixture.master_docs.items():
-            write_task_doc(
-                fixture.tasks / Path(ref.path).parent,
-                master.model_copy(update={"status": "Completed"}),
+    def test_task_truth_commits_before_fixed_order_invalidation_and_failures_continue(self) -> None:
+        events: list[str] = []
+
+        def publish() -> str:
+            events.append("task-published")
+            return "durable-task-result"
+
+        def rebuild(
+            _root: Path,
+            receipt: ProjectionInvalidationReceipt,
+            **_kwargs: object,
+        ) -> TaskDocProjectionEffect:
+            ref = receipt.sprint_ref
+            events.append(f"rebuild:{ref.key}")
+            return _complete_effect(ref)
+
+        def scopes() -> tuple[TaskDocumentRef, ...]:
+            events.append("scopes-resolved")
+            return (SPRINT_B, SPRINT_A, SPRINT_B)
+
+        with (
+            mock.patch.object(publication, "CloseoutQueueStore", _FakeStore),
+            mock.patch.object(
+                publication,
+                "rebuild_invalidated_closeout_projection",
+                side_effect=rebuild,
+            ),
+        ):
+            result = publication.publish_task_fact_mutation(
+                self.root,
+                "repo-a",
+                validate=lambda: events.append("validated"),
+                projection_scopes=scopes,
+                publication=publish,
             )
-        with self.assertRaisesRegex(ExecutionTopologyError, "commanded masters remain incomplete"):
-            task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        fixture.declare(MASTER_A)
-        for ref, master in fixture.master_docs.items():
-            completed_rows = [
-                row.model_copy(update={"status": "Completed"}) for row in master.subTasks
-            ]
-            write_task_doc(
-                fixture.tasks / Path(ref.path).parent,
-                master.model_copy(update={"status": "Completed", "subTasks": completed_rows}),
+
+        self.assertEqual(result.result, "durable-task-result")
+        self.assertEqual(events[:3], ["validated", "task-published", "scopes-resolved"])
+        self.assertEqual(
+            _FakeStore.events,
+            [f"invalidate:{SPRINT_A.key}", f"invalidate:{SPRINT_B.key}"],
+        )
+        self.assertEqual(events[3:], [f"rebuild:{SPRINT_B.key}"])
+        self.assertEqual(len(result.projection_effects), 2)
+        failed, completed = result.projection_effects
+        self.assertEqual(failed.sprintTaskDocumentRef, SPRINT_A)
+        self.assertEqual(failed.invalidation.outcome, "failed")
+        self.assertEqual(failed.rebuild.outcome, "not-attempted")
+        self.assertIn("closeout_queue(action='rebuild'", failed.nextAction or "")
+        self.assertEqual(completed.sprintTaskDocumentRef, SPRINT_B)
+        self.assertIsNone(completed.nextAction)
+
+    def test_projection_failure_never_rolls_back_or_reinvokes_task_publication(self) -> None:
+        writes = 0
+
+        def publish() -> str:
+            nonlocal writes
+            writes += 1
+            return "committed"
+
+        with (
+            mock.patch.object(publication, "CloseoutQueueStore", _FakeStore),
+            mock.patch.object(
+                publication,
+                "rebuild_invalidated_closeout_projection",
+                side_effect=RuntimeError("forced rebuild cut"),
+            ),
+        ):
+            result = publication.publish_task_fact_mutation(
+                self.root,
+                "repo-a",
+                validate=lambda: None,
+                projection_scopes=lambda: (SPRINT_B,),
+                publication=publish,
             )
-        with self.assertRaisesRegex(CloseoutQueueStoreError, "cannot complete"):
-            task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        fixture.mutate("withdraw", candidate=LEAF_A)
-        completed = task_doc_tool(fixture.cfg, target, operation="set_status", edit=edit)
-        self.assertEqual(completed["status"], "Completed")
-        state_path, _pending_path = queue_store_paths(fixture.coord, SPRINT)
-        self.assertTrue(
-            CloseoutQueueState.model_validate_json(state_path.read_text(encoding="utf-8")).closed
+        self.assertEqual((writes, result.result), (1, "committed"))
+        effect = result.projection_effects[0]
+        self.assertEqual(effect.invalidation.outcome, "persisted-empty")
+        self.assertEqual(effect.rebuild.outcome, "source-unreadable")
+        self.assertIsNotNone(effect.nextAction)
+
+    def test_presence_failure_is_a_present_typed_effect_and_later_scopes_continue(self) -> None:
+        with (
+            mock.patch.object(publication, "CloseoutQueueStore", _PresenceFailureStore),
+            mock.patch.object(
+                publication,
+                "rebuild_invalidated_closeout_projection",
+                side_effect=lambda _root, receipt, **_kwargs: _complete_effect(
+                    receipt.sprint_ref
+                ),
+            ),
+        ):
+            result = publication.publish_task_fact_mutation(
+                self.root,
+                "repo-a",
+                validate=lambda: None,
+                projection_scopes=lambda: (SPRINT_A, SPRINT_B),
+                publication=lambda: "committed",
+            )
+
+        failed, completed = result.projection_effects
+        self.assertEqual(result.result, "committed")
+        self.assertTrue(failed.queueExisted)
+        self.assertEqual(failed.invalidation.outcome, "failed")
+        self.assertEqual(failed.rebuild.outcome, "not-attempted")
+        self.assertEqual(completed.sprintTaskDocumentRef, SPRINT_B)
+
+    def test_store_construction_failure_is_bounded_and_later_scopes_continue(self) -> None:
+        def store_factory(root: Path, sprint_ref: TaskDocumentRef) -> _FakeStore:
+            if sprint_ref == SPRINT_A:
+                raise OSError("forced store construction failure")
+            return _FakeStore(root, sprint_ref)
+
+        with (
+            mock.patch.object(publication, "CloseoutQueueStore", side_effect=store_factory),
+            mock.patch.object(
+                publication,
+                "rebuild_invalidated_closeout_projection",
+                side_effect=lambda _root, receipt, **_kwargs: _complete_effect(
+                    receipt.sprint_ref
+                ),
+            ),
+        ):
+            result = publication.publish_task_fact_mutation(
+                self.root,
+                "repo-a",
+                validate=lambda: None,
+                projection_scopes=lambda: (SPRINT_A, SPRINT_B),
+                publication=lambda: "committed",
+            )
+
+        self.assertEqual(result.result, "committed")
+        self.assertEqual(result.projection_effects[0].invalidation.outcome, "failed")
+        self.assertEqual(result.projection_effects[1].sprintTaskDocumentRef, SPRINT_B)
+
+    def test_effect_model_requires_recovery_only_when_incomplete(self) -> None:
+        complete = _complete_effect(SPRINT_A)
+        self.assertIsNone(complete.nextAction)
+        with self.assertRaises(ValueError):
+            TaskDocProjectionEffect.model_validate(
+                {**complete.model_dump(), "nextAction": "rebuild"}
+            )
+        incomplete = complete.model_copy(
+            update={
+                "rebuild": ProjectionRebuildResult(outcome="source-changed"),
+                "rebuiltRevision": None,
+                "nextAction": "closeout_queue(action='rebuild')",
+            }
         )
-        reopened = task_doc_tool(
-            fixture.cfg,
-            target,
-            operation="set_status",
-            edit=TaskDocEdit(fields={"status": "inProgress"}),
-        )
-        self.assertEqual(reopened["status"], "inProgress")
-        reopened_state = CloseoutQueueState.model_validate_json(
-            state_path.read_text(encoding="utf-8")
-        )
-        self.assertFalse(reopened_state.closed)
-        write_task_doc(fixture.tasks / "master-a", fixture.master_docs[MASTER_A])
-        declared = fixture.declare(MASTER_A)
-        self.assertEqual(declared["ready"][0]["taskDocumentRef"], LEAF_A.model_dump())
+        self.assertEqual(incomplete.rebuild.outcome, "source-changed")

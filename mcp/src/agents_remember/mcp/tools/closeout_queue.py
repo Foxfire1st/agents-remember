@@ -1,4 +1,4 @@
-"""Payload builder for the durable pre-closeout scheduler."""
+"""Payload builder for the disposable closeout projection."""
 
 from __future__ import annotations
 

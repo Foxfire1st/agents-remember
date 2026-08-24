@@ -11,8 +11,8 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest import mock
 
+import organizational_completion_test_support as fixture_mod
 import pytest
-import test_organizational_completion_integration as fixture_mod
 from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.application.task_docs.task_ref import TaskRef
@@ -26,6 +26,7 @@ from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationRecord,
 )
+from agents_remember.worktrees.integration import integration_quality as quality_mod
 from agents_remember.worktrees.integration import integration_ref_state
 from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationRefRace
 from agents_remember.worktrees.integration.lifecycle import (
@@ -208,9 +209,7 @@ def test_compare_and_swap_failure_requires_same_generation_recovery() -> None:
 
 class IntegrationRefCasClassificationL2Tests(unittest.TestCase):
     def setUp(self) -> None:
-        self.owner = fixture_mod.OrganizationalCompletionIntegrationTests(
-            "test_nonfinal_leaf_reuses_targeted_closeout_without_full_gate"
-        )
+        self.owner = fixture_mod.OrganizationalCompletionFixture()
         self.owner.setUp()
         self.fixture = self.owner.fixture
 
@@ -266,7 +265,7 @@ class IntegrationRefCasClassificationL2Tests(unittest.TestCase):
             "contract": contract.contract_path.read_bytes(),
             "queue": {
                 path.name: path.read_bytes() if path.exists() else None
-                for path in (queue.state_path, queue.pending_path)
+                for path in (queue.state_path,)
             },
             "refs": {
                 "code": ref_tip(
@@ -367,7 +366,7 @@ class IntegrationRefCasClassificationL2Tests(unittest.TestCase):
 
         with (
             mock.patch.object(
-                fixture_mod.quality_mod,
+                quality_mod,
                 "run_strict_code_quality_gate",
                 return_value=fixture_mod._full_gate(contract),
             ),

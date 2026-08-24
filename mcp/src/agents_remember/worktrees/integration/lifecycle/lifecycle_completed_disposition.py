@@ -55,12 +55,25 @@ def require_completed_disposition(
                 "dry_run": False,
             },
         )
-    exact_owner = (
+    closeout_owner = (
         record.operationKind == "closeout"
         and record.generationDisposition == "active"
         and closeout_generation_retained(record)
         and record.closeoutFinalizedContractSha256 == closeout_contract_sha256(contract)
     )
+    publication = record.doorPublication
+    direct_owner = bool(
+        record.operationKind == "direct-landing"
+        and record.generationDisposition == "active"
+        and publication is not None
+        and publication.state == "proven"
+        and publication.generation.disposition == "claimed"
+        and publication.generation.operationKind == "direct-landing"
+        and publication.generation.operationFingerprint == record.fingerprint
+        and publication.generation.claimedOperationKey == record.operationKey
+        and contract.closeout_door == publication.generation
+    )
+    exact_owner = closeout_owner or direct_owner
     if (
         record.status != "completed"
         or contract.integration_status == "completed"
@@ -68,7 +81,7 @@ def require_completed_disposition(
     ):
         raise LifecycleControlError(
             "lifecycle-disposition-not-allowed",
-            "retire/supersede requires closeout-complete but unintegrated work",
+            "retire/supersede requires an exact completed but unintegrated door owner",
             observed={
                 "operationStatus": record.status,
                 "integrationStatus": contract.integration_status,

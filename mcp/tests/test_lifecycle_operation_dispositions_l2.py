@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from unittest import mock
@@ -80,7 +81,12 @@ def _disposition_preserved_artifacts(contract, record) -> dict[str, object]:
     contract_payload = asdict(load_contract(contract.contract_path))
     contract_payload.pop("closeout_door")
     record_payload = record.model_dump(mode="json")
-    for mutable in ("generationDisposition", "doorPublication", "doorPublicationHistory"):
+    for mutable in (
+        "generationDisposition",
+        "supersedeDeclarationFingerprint",
+        "doorPublication",
+        "doorPublicationHistory",
+    ):
         record_payload.pop(mutable)
     refs = {
         "code-work": branch_commit(contract.code_repo_path, contract.code_work_branch),
@@ -375,5 +381,51 @@ def test_public_disposition_recovers_before_and_after_contract_publication(
     assert terminal.generationDisposition == ("retired" if action == "retire" else "superseded")
     assert terminal.doorPublication.state == "proven"
     assert terminal.doorPublication.generation.disposition == (
-        "retired" if action == "retire" else "waiting"
+        "claimed" if action == "retire" else "waiting"
     )
+
+
+def test_supersede_exact_replay_converges_and_competing_declaration_refuses(
+    tmp_path: Path,
+) -> None:
+    contract = _contract(tmp_path)
+    _operation_input, store, finalized = _publish_mutated_code_generation(contract)
+    record = store.read()
+    assert record is not None
+    owner = _standalone_owner(finalized)
+    config = load_config(Path(record.input.configPath))
+    row = next(
+        item
+        for item in legal_operation_controls(
+            finalized,
+            record,
+            context=LifecycleControlProjectionContext(
+                allow_completed_disposition=True,
+                caller=owner,
+            ),
+        )
+        if item["action"] == "supersede"
+    )
+
+    first = _public_control(config, row)
+    accepted = store.read()
+    accepted_door = load_contract(finalized.contract_path).closeout_door
+    assert first["ok"] is True
+    assert accepted is not None and accepted.supersedeDeclarationFingerprint is not None
+    assert accepted_door is not None and accepted_door.disposition == "waiting"
+
+    replay = _public_control(config, row)
+    assert replay["ok"] is True
+    assert store.read() == accepted
+    assert load_contract(finalized.contract_path).closeout_door == accepted_door
+
+    competing = deepcopy(row)
+    competing["arguments"]["grade"] = {
+        "priority": "critical",
+        "judgmentId": "competing-supersede-declaration",
+    }
+    refused = _public_control(config, competing)
+    assert refused["ok"] is False
+    assert refused["status"] == "lifecycle-supersede-declaration-conflict"
+    assert store.read() == accepted
+    assert load_contract(finalized.contract_path).closeout_door == accepted_door

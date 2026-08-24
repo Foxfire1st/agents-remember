@@ -16,6 +16,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     reload_provider_authority,
 )
 from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
@@ -56,6 +57,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_read_de
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_request import (
     LifecycleControlRequestError,
+    LifecycleControlRequestShape,
     validate_lifecycle_control_request,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
@@ -78,7 +80,9 @@ from agents_remember.worktrees.worktree_contract import (
 from .lifecycle.configured_contract_admission import (
     ConfiguredContractAccepted,
     ConfiguredContractRefused,
+    TerminalConfiguredContractAccepted,
     admit_configured_contract,
+    admit_configured_terminal_contract,
     execute_configured_contract_operation,
     project_configured_contract_refusal,
 )
@@ -169,6 +173,8 @@ class OperationControlRequest:
     code_commit_message: str | None = None
     memory_commit_message: str | None = None
     ledger_commit_message: str | None = None
+    grade: SchedulingGradeInput | None = None
+    admission: CandidateAdmissionFacts | None = None
     caller: DeclaredCaller | None = None
 
     def __post_init__(self) -> None:
@@ -178,6 +184,14 @@ class OperationControlRequest:
         # application callers reconstruct the same bounded model from JSON.
         if self.caller is not None and not isinstance(self.caller, DeclaredCaller):
             object.__setattr__(self, "caller", DeclaredCaller.model_validate(self.caller))
+        if self.grade is not None and not isinstance(self.grade, SchedulingGradeInput):
+            object.__setattr__(self, "grade", SchedulingGradeInput.model_validate(self.grade))
+        if self.admission is not None and not isinstance(self.admission, CandidateAdmissionFacts):
+            object.__setattr__(
+                self,
+                "admission",
+                CandidateAdmissionFacts.model_validate(self.admission),
+            )
 
 
 def worktree_start_tool(
@@ -364,6 +378,26 @@ def worktree_status_tool(
     result = _worktree_result("worktree_status", git_worktree_manager.status_result(args))
     contract_path = result.get("contract_path")
     if isinstance(contract_path, str) and contract_path:
+        terminal = admit_configured_terminal_contract(config, contract_path)
+        if isinstance(terminal, TerminalConfiguredContractAccepted):
+            _project_terminal_contract_status(result, terminal)
+            result.pop("contractReadFailure", None)
+            result.pop("lifecycleOperation", None)
+            result["lifecycleOperations"] = []
+            return result
+        if isinstance(terminal, ConfiguredContractRefused) and terminal.status.startswith(
+            "terminal-archive-"
+        ):
+            result.update(
+                project_configured_contract_refusal(
+                    terminal,
+                    operation="worktree_status",
+                )
+            )
+            result.pop("contractReadFailure", None)
+            result.pop("lifecycleOperation", None)
+            result["lifecycleOperations"] = []
+            return result
         try:
             resolved_caller = resolve_lifecycle_caller(config, caller)
         except LifecycleCallerError as exc:
@@ -429,6 +463,62 @@ def worktree_status_tool(
             operation.model_dump(mode="json", exclude_none=True) for operation in operations
         ]
     return result
+
+
+def _project_terminal_contract_status(
+    result: dict[str, Any],
+    accepted: TerminalConfiguredContractAccepted,
+) -> None:
+    authority = accepted.authority
+    archive = authority.archive
+    completed = authority.state == "cleanup-completed"
+    status = "terminal-cleanup-completed" if completed else "terminal-archive-ready"
+    result.update(
+        {
+            "ok": True,
+            "state": status,
+            "status": status,
+            "summary": (
+                "Terminal cleanup is complete and the external enclosure archive remains proven."
+                if completed
+                else "Terminal archive proof is durable; resume the accepted cleanup operation."
+            ),
+            "terminalArchive": {
+                "state": "terminal-archive-proven",
+                "cleanupOperation": archive.cleanupOperation,
+                "cleanupArguments": archive.cleanupArguments.model_dump(mode="json"),
+                "cleanupRequestId": archive.cleanupRequestId,
+                "archivePath": accepted.locator.terminalArchivePath,
+                "archiveSha256": accepted.locator.terminalArchiveSha256,
+                "receiptPath": accepted.locator.terminalReceiptPath,
+                "contractState": authority.state,
+            },
+        }
+    )
+    if completed:
+        result.pop("nextAction", None)
+        return
+    result.update(
+        {
+            "nextAction": archive.cleanupOperation,
+            "nextTool": archive.cleanupOperation,
+            "nextArgs": _terminal_cleanup_next_args(
+                accepted.contract_path,
+                archive.cleanupArguments.model_dump(mode="json"),
+            ),
+        }
+    )
+
+
+def _terminal_cleanup_next_args(
+    contract_path: Path,
+    accepted_arguments: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "contract_path": contract_path.as_posix(),
+        "dry_run": False,
+        **accepted_arguments,
+    }
 
 
 def _task_ref_namespace(
@@ -589,12 +679,11 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Start/observe only the exact already-selected task operation.
+    """Start or observe the exact contract-addressed integration operation.
 
-    Queue role projection assigns this leaf action to the owning manager. This
-    generic task-addressed boundary does not make scheduling decisions: it cannot
-    select or substitute a candidate, and the worker revalidates the selected
-    durable queue record immediately before moving source history.
+    This task-addressed boundary does not make scheduling decisions or claim a
+    closeout door. The operation worker revalidates its exact journal, contract,
+    and protected-ref authority immediately before moving source history.
     """
 
     configured = admit_configured_contract(config, contract_path)
@@ -694,14 +783,18 @@ def _operation_control_request_refusal(
 ) -> dict[str, Any] | None:
     try:
         validate_lifecycle_control_request(
-            action=request.action,
-            expected_generation=request.expected_generation,
-            intent_note=request.intent_note,
-            commit_messages={
-                "code_commit_message": request.code_commit_message,
-                "memory_commit_message": request.memory_commit_message,
-                "ledger_commit_message": request.ledger_commit_message,
-            },
+            LifecycleControlRequestShape(
+                action=request.action,
+                expected_generation=request.expected_generation,
+                intent_note=request.intent_note,
+                commit_messages={
+                    "code_commit_message": request.code_commit_message,
+                    "memory_commit_message": request.memory_commit_message,
+                    "ledger_commit_message": request.ledger_commit_message,
+                },
+                has_grade=request.grade is not None,
+                has_admission=request.admission is not None,
+            )
         )
     except LifecycleControlRequestError as error:
         return {
@@ -805,6 +898,8 @@ def _execute_operation_control(
                     revision_gate_policy=(
                         _gate_policy_snapshot(config) if request.action == "revise" else None
                     ),
+                    supersede_grade=request.grade,
+                    supersede_admission=request.admission,
                     allow_completed_disposition=disposition_authorized,
                     caller=caller,
                 )
@@ -923,7 +1018,7 @@ def worktree_cleanup_tool(
     dry_run: bool = False,
     teardown_providers: bool = True,
 ) -> dict[str, Any]:
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_terminal_contract(config, contract_path)
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_cleanup")
     args = git_worktree_manager.WorktreeArgs(
@@ -942,7 +1037,7 @@ def worktree_abandon_tool(
     dry_run: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_terminal_contract(config, contract_path)
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(configured, operation="worktree_abandon")
     args = git_worktree_manager.WorktreeArgs(

@@ -129,6 +129,7 @@ def _runtime(tmp: Path, *, host: object | None = None) -> _ServingRuntime:
         liveness_sweeper=TerminalCatalogLivenessSweeper(catalog, terminal_host),
         build=resolve_serving_build(),
         heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
+        register_inbox_execution_evidence=None,
         interval=100.0,
     )
 

@@ -183,7 +183,13 @@ class TerminalCatalogPort(Protocol):
         changed_at: str,
     ) -> TerminalCatalogEntry | None: ...
     def batch(self) -> AbstractContextManager[None]: ...
-    def compact(self, *, now: datetime, retain_seconds: float = 86400.0) -> int: ...
+    def compact(
+        self,
+        *,
+        now: datetime,
+        retain_seconds: float = 86400.0,
+        registered_execution_ids: frozenset[str] = frozenset(),
+    ) -> int: ...
 
 
 class ControlPlanePort(Protocol):

@@ -27,9 +27,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
-from closeout_input_test_support import with_commit_proven
+from closeout_input_test_support import with_commit_proven, with_mutation_intent
 from test_lifecycle_operation_controls_l2 import _dirty_closeout
-from test_lifecycle_operations import _contract, _integration_ready
+from test_lifecycle_operations import _completed_closeout_for_integration, _contract
 
 
 def _resume_with(
@@ -40,7 +40,7 @@ def _resume_with(
 
 
 def _integration_store(tmp_path: Path) -> LifecycleOperationStore:
-    contract = _integration_ready(_contract(tmp_path))
+    contract = _completed_closeout_for_integration(_contract(tmp_path))
     start_or_observe_operation(
         IntegrateOperationInput(
             configPath=(tmp_path / "settings.json").as_posix(),
@@ -92,6 +92,7 @@ def test_resume_preserves_approval_commits_worker_door_and_irreversible_boundary
 ) -> None:
     _contract_value, _operation_input, store, _record = _dirty_closeout(tmp_path)
     store.update(lambda record: record.model_copy(update={"approvalClaimed": True}))
+    store.update(with_mutation_intent)
     current = store.update(with_commit_proven)
     current = store.update(
         lambda record: record.model_copy(
@@ -157,7 +158,7 @@ def test_resume_preserves_quality_and_integration_publication(tmp_path: Path) ->
                 "integrationAuthority": alternate_authority,
                 "recoveryCommits": alternate_commits,
             },
-            "integration authority|recovery commits",
+            "integrationAuthority|recovery commits",
         ),
         ({"qualityCertification": None}, "quality certification"),
         ({"integrationPublication": None}, "publication intent"),
@@ -172,7 +173,11 @@ def test_resume_preserves_quality_and_integration_publication(tmp_path: Path) ->
 
 def test_resume_preserves_closeout_finalization_proof(tmp_path: Path) -> None:
     _contract_value, _operation_input, store, _record = _dirty_closeout(tmp_path)
+    store.update(
+        lambda record: record.model_copy(update={"status": "running", "phase": "preflight"})
+    )
     store.update(lambda record: record.model_copy(update={"approvalClaimed": True}))
+    store.update(with_mutation_intent)
     store.update(with_commit_proven)
     finalized = store.update(
         lambda record: record.model_copy(

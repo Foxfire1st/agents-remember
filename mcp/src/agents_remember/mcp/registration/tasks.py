@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.closeout_door import CloseoutDoorRequest
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
@@ -14,6 +15,7 @@ from agents_remember.application.worktree_tools import FinalizeTaskDocs
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 from ..tools import (
+    closeout_door_payload,
     closeout_queue_payload,
     lifecycle_finalize_task_payload,
     task_doc_payload,
@@ -24,32 +26,27 @@ from ..tools import (
 def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def closeout_queue(request: CloseoutQueueRequest) -> dict[str, Any]:
-        """Declare reviewed/curated leaf candidates before closeout, withdraw or update
-        their explicit scheduling inputs, select/release the ready candidate, transition atomic
-        blockers, or read the recomputed sprint frontier. Mutations require a caller-stable
-        request_id plus the revision returned by status; retries keep both values, while stale
-        mutations read status and use a new request id. Declaration requires the exact structured
-        curator attestation and binds its checklist and structured source-change disposition
-        evidence. Manager declaration cannot carry priority; the sprint orchestrator applies the
-        separate set-grade action as a small assertion resolved against exact canonical Priority
-        and Judgment Register rows; ordering
-        is critical/high/normal/low, graph-node order, then leaf identity. Atomic blocker release
-        requires canonical master completion; abort requires an exact strategist/orchestrator
-        judgment. The caller is the plane-injected hosted seat when one exists; an ambient caller
-        with no plane seat declares caller (role + task_document_ref) instead. The bounded canonical
-        sprint artifact validates Git, full route-review records and evidence,
-        memory mode/readiness, ledger, transitive lineage, graph, predecessor, blocker,
-        task-completion, and admission facts without inventing judgment. Public responses and
-        artifacts never expose lifecycle operation keys; task-addressed closeout/integration
-        cancellation and recovery own later transitions and the irreversible integration seam
-        revalidates the complete claim. The 'status' read never fails on a missing executionGraph
-        or missing/malformed registers: it reports the degraded projection (mode, registers,
-        laneOwner, legalNextOperations) instead. A closeout or integration whose recorded base
-        pair no longer matches the current source tips is refused with worktree_sync named as the
-        recovery; a completed landing reports stale-by-evidence siblings. An in-flight atomic
-        block owns the sprint landing lane for its entire lifetime, acquisition reports in-flight
-        organizational leafs as facts, and a certified candidate no longer occupies the lane."""
+        """Inspect or idempotently rebuild one sprint's disposable closeout projection.
+        The artifact is either exact-current valid-built or non-admitting invalid-empty. Rebuild
+        first persists invalid-empty, then derives membership and ordering only from current task
+        truth and current waiting contract-owned door generations. Old rows are never seeds,
+        history, or authority. A missing, malformed, or source-mismatched projection reports the
+        exact task-or-sprint-addressed rebuild action. This surface never declares, selects,
+        defers, withdraws, or otherwise mutates closeout intent."""
         return closeout_queue_payload(config, request)
+
+
+def _register_closeout_door_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    @server.tool()
+    def closeout_door(request: CloseoutDoorRequest) -> dict[str, Any]:
+        """Publish or inspect one exact contract-owned closeout-door generation.
+        declare and update-provenance require complete current task, source, review, memory,
+        ledger, admission, and scheduling evidence; defer, resume, and withdraw change only the
+        exact current generation's disposition. Successful source publication refreshes the
+        affected sprint projection after releasing the short task/door publication mutex. Same
+        intent retries converge on the already-published generation. Claiming is intentionally
+        absent here: worktree_closeout_apply validates first-ready and owns waiting-to-claimed."""
+        return closeout_door_payload(config, request)
 
 
 def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -124,8 +121,14 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         'skip_step' takes exact existing step={id, reason, parent?}, sets only that unit done, and
         records intentional-skip provenance without cascading. A nonblank reason is required.
         'set_subtask' (master) takes subtask={number, name,
-        file?, status?, scope?}; 'remove_subtask' (master) takes subtask={number, keep_file?} and drops that
-        sub-task row AND deletes its leaf doc (json+md) unless keep_file=true; 'set_section' (master) takes
+        file?, status?, scope?}; 'remove_subtask' (master) normally takes
+        subtask={number, keep_file?} for a terminal row and drops that row plus its leaf doc
+        (json+md) unless keep_file=true. To discard planning work that never started, pass
+        subtask={number, disposition:'discard-unstarted', reason}; this forbids keep_file, proves
+        absence of canonical enclosure/operation/seat/review/commit evidence under the same short
+        task-publication CAS used by worktree_start, removes the child sources, and retains a typed
+        parent audit. Started or ambiguous evidence refuses with the exact next lifecycle route;
+        retries converge from the parent audit. 'set_section' (master) takes
         section={heading, kind?, body?} — a section carrying a canonical register heading must keep
         the exact register table shape (write-time validation);
         'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
@@ -213,4 +216,5 @@ def register_task_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_task_reopen_tools(server, config)
     _register_task_finalizer_tools(server, config)
     _register_task_document_tools(server, config)
+    _register_closeout_door_tools(server, config)
     _register_closeout_queue_tools(server, config)

@@ -19,6 +19,7 @@ import re
 from .document import (
     CodeExample,
     Decision,
+    DiscardedSubTask,
     RouteReviewRecord,
     Section,
     SprintExecutionEndpoint,
@@ -30,6 +31,7 @@ from .document import (
     SubTaskRef,
     TaskDocument,
     TaskDocumentRef,
+    TaskExecutionRegistration,
 )
 from .execution_graph_titles import SprintGraphTitles
 
@@ -48,6 +50,11 @@ def render_markdown(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None
     parts += _section("Design", [doc.design or "No design reasoning needed."])
     parts += _section("Implementation Steps", _step_lines(doc.steps))
     parts += _section("Route Review", _route_review_lines(doc.routeReview))
+    if doc.executionRegistrations:
+        parts += _section(
+            "Execution Registrations",
+            _execution_registration_lines(doc.executionRegistrations),
+        )
     parts += _section(
         "Proposed Code Examples",
         _code_example_lines(doc.codeExamples, doc.codeExamplesNote),
@@ -58,6 +65,15 @@ def render_markdown(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None
     for section in doc.sections:  # R4: freeform extra sections appended after the standard template
         parts += _section(section.heading, section.body.split("\n"))
     return "\n".join(parts) + "\n"
+
+
+def _execution_registration_lines(
+    registrations: list[TaskExecutionRegistration],
+) -> list[str]:
+    return [
+        f"- `{item.sourceKind}` · `{item.role}` · `{item.sourceId}` · {item.observedAt}"
+        for item in registrations
+    ]
 
 
 _MARKER: dict[str, str] = {"Completed": "✅", "inProgress": "🔨", "planning": "⬜"}
@@ -92,6 +108,8 @@ def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None 
                 *_subtask_lines(doc.subTasks),
             ],
         )
+    if doc.discardedSubTasks:
+        parts += _section("Discarded Sub-Tasks", _discarded_subtask_lines(doc.discardedSubTasks))
     return "\n".join(parts) + "\n"
 
 
@@ -120,6 +138,21 @@ def _subtask_lines(subtasks: list[SubTaskRef]) -> list[str]:
         marker = _MARKER[ref.status]
         lines.append(f"{ref.number}. {marker} {name}{file_suffix}{scope_suffix}")
     return lines
+
+
+def _discarded_subtask_lines(discarded: list[DiscardedSubTask]) -> list[str]:
+    rows = [
+        (
+            f"| {_cell(item.discardedAt)} | {_cell(item.number)} | {_cell(item.name)} | "
+            f"{_cell(item.reason)} | `{item.proof.fingerprint}` |"
+        )
+        for item in discarded
+    ]
+    return [
+        "| Discarded At | Leaf | Name | Reason | Unstarted Proof |",
+        "| --- | --- | --- | --- | --- |",
+        *rows,
+    ]
 
 
 def _master_ref_link(ref: SubTaskRef) -> str:

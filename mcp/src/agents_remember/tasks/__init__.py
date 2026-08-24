@@ -12,6 +12,9 @@ from .document import (
     TASK_DOCUMENT_SCHEMA,
     CodeExample,
     Decision,
+    DiscardedSubTask,
+    DiscardSourceProof,
+    DiscardUnstartedProof,
     DocKind,
     DocStatus,
     HeaderNote,
@@ -34,6 +37,7 @@ from .document import (
     SubTaskRef,
     TaskDocument,
     TaskEnclosureRef,
+    TaskExecutionRegistration,
     current_step,
     derived_leaf_placement,
     leaf_placement_facts,
@@ -65,6 +69,7 @@ from .store import (
     write_task_doc,
     write_task_doc_batch,
     write_task_docs,
+    write_task_docs_and_remove,
 )
 
 __all__ = [
@@ -72,6 +77,9 @@ __all__ = [
     "CodeExample",
     "CompletionBlocker",
     "Decision",
+    "DiscardSourceProof",
+    "DiscardUnstartedProof",
+    "DiscardedSubTask",
     "DocKind",
     "DocStatus",
     "HeaderNote",
@@ -97,6 +105,7 @@ __all__ = [
     "TaskDocSourceSnapshot",
     "TaskDocument",
     "TaskEnclosureRef",
+    "TaskExecutionRegistration",
     "build_graph_titles",
     "capture_task_doc_source",
     "completion_blockers",
@@ -121,4 +130,5 @@ __all__ = [
     "write_task_doc",
     "write_task_doc_batch",
     "write_task_docs",
+    "write_task_docs_and_remove",
 ]

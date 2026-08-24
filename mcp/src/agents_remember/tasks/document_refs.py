@@ -465,6 +465,42 @@ class TaskDocumentTopology:
             and aliases.intersection(sprint.document.orchestrates)
         )
 
+    def projection_sprints_affected_by_master(
+        self,
+        master_ref: TaskDocumentRef,
+        *,
+        original: TaskDocument | None,
+        candidate: TaskDocument,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """Return readable projection consumers without promoting unrelated parse failures.
+
+        Projection refresh is derived after authoritative task publication.  One malformed
+        unrelated task document has no authority to veto that write; its own projection reader
+        remains fail-closed when addressed.  Strict execution-topology callers continue to use
+        :meth:`execution_sprints_affected_by_master`.
+        """
+
+        aliases = {Path(master_ref.path).parent.name, candidate.id, candidate.title}
+        if original is not None:
+            aliases.update({original.id, original.title})
+        candidates = overrides or {}
+        sprints: list[ResolvedTaskDocument] = []
+        for ref in self._master_document_refs(master_ref.repository, overrides=candidates):
+            if ref == master_ref:
+                continue
+            try:
+                sprint = self.resolve(ref, candidates)
+            except TaskDocumentRefError:
+                continue
+            if (
+                sprint.document.kind == "master"
+                and sprint.document.orchestrates
+                and aliases.intersection(sprint.document.orchestrates)
+            ):
+                sprints.append(sprint)
+        return tuple(sprints)
+
     def repository_masters(self, repository: str) -> tuple[ResolvedTaskDocument, ...]:
         """Return every canonical master document in one repository task tree.
 
@@ -501,20 +537,38 @@ class TaskDocumentTopology:
         return parent
 
     def _master_documents(self, repository: str) -> tuple[ResolvedTaskDocument, ...]:
-        root = self._repo_root(repository)
-        if not root.is_dir():
-            return ()
         documents: list[ResolvedTaskDocument] = []
-        for path in sorted(root.rglob("task.json")):
-            relative = path.relative_to(root)
-            if "0_archive" in relative.parts or "enclosures" in relative.parts:
-                continue
-            resolved = self.resolve(
-                TaskDocumentRef(repository=repository, path=relative.as_posix())
-            )
+        for ref in self._master_document_refs(repository):
+            resolved = self.resolve(ref)
             if resolved.document.kind == "master":
                 documents.append(resolved)
         return tuple(documents)
+
+    def _master_document_refs(
+        self,
+        repository: str,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[TaskDocumentRef, ...]:
+        root = self._repo_root(repository)
+        refs: set[TaskDocumentRef] = set()
+        if root.is_dir():
+            for path in sorted(root.rglob("task.json")):
+                relative = path.relative_to(root)
+                if "0_archive" in relative.parts or "enclosures" in relative.parts:
+                    continue
+                refs.add(TaskDocumentRef(repository=repository, path=relative.as_posix()))
+        for ref in overrides or {}:
+            parts = Path(ref.path).parts
+            if (
+                ref.repository == repository
+                and parts
+                and parts[-1] == "task.json"
+                and "0_archive" not in parts
+                and "enclosures" not in parts
+            ):
+                refs.add(ref)
+        return tuple(sorted(refs, key=lambda ref: ref.key))
 
     def _sprint_parents(self, master: ResolvedTaskDocument) -> tuple[ResolvedTaskDocument, ...]:
         names = {
@@ -546,18 +600,27 @@ class TaskDocumentTopology:
         sprint: ResolvedTaskDocument,
         overrides: Mapping[TaskDocumentRef, TaskDocument],
     ) -> tuple[ResolvedTaskDocument, ...]:
-        available = {
-            candidate.ref: self.resolve(candidate.ref, overrides)
-            for candidate in self._master_documents(sprint.ref.repository)
-            if candidate.ref != sprint.ref
-        }
-        for ref, document in overrides.items():
-            if (
-                ref.repository == sprint.ref.repository
-                and ref != sprint.ref
-                and document.kind == "master"
-            ):
-                available[ref] = self.resolve(ref, overrides)
+        commanded = set(sprint.document.orchestrates)
+        available: dict[TaskDocumentRef, ResolvedTaskDocument] = {}
+        for ref in self._master_document_refs(
+            sprint.ref.repository,
+            overrides=overrides,
+        ):
+            if ref == sprint.ref:
+                continue
+            try:
+                candidate = self.resolve(ref, overrides)
+            except TaskDocumentRefError:
+                # Exact sprint membership is addressed by the declared directory alias, id, or
+                # title.  An unreadable document at a different canonical directory address owns
+                # none of those readable facts and cannot veto this sprint.  A directly addressed
+                # directory remains fail-closed.  This is one scoped resolver policy, not a second
+                # reader or a compatibility fallback.
+                if Path(ref.path).parent.name in commanded:
+                    raise
+                continue
+            if candidate.document.kind == "master":
+                available[ref] = candidate
         resolved: list[ResolvedTaskDocument] = []
         for commanded_name in sprint.document.orchestrates:
             matches = [

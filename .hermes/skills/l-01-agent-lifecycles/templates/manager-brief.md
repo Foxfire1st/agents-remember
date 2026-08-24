@@ -46,10 +46,22 @@ master's leaf loop to the master-exit seam, then hand over.
   <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
-- Closeout-ready report: after that chain and a current-lineage proof, send the orchestrator the
-  canonical leaf/master refs, execution nature, routes/seams, blockers, and acceptance facts.
-  Report facts only; do not rank other masters or close out until the orchestrator releases the
-  candidate from the recomputed ready frontier.
+- Closeout-door publication: after that chain and a current-lineage proof, call
+  `closeout_door(request={action:"declare", contract_path:...})` against the configured leaf
+  contract with complete current
+  task/source/review/memory/ledger/admission evidence and the accepted priority grade. Send the
+  orchestrator the published waiting generation plus canonical leaf/master/sprint refs,
+  execution nature, routes/seams, blockers, and acceptance facts. The door is source truth; the
+  closeout queue is only a disposable projection of current waiting generations. Report facts
+  only; do not rank other masters, claim the generation, or close out until the orchestrator
+  releases the current first-ready generation from a valid-built projection.
+- Task edits never wait for closeout scheduling. Apply every intrinsically valid `task_doc`
+  mutation, inspect its machine-readable `projectionEffects`, and relay every incomplete effect's
+  exact `nextAction` to the orchestrator for sprint-addressed rebuild. Never whitelist task
+  operations, patch a stale queue row, or treat queue/door/operation state as a task lock. If the
+  change affects a waiting generation's evidence, re-prove it through
+  `closeout_door(request={action:"update-provenance", ...})` or change its door disposition before
+  it is schedulable again.
 - Every stable code-change session receives an independent route review before curator handoff.
   Partition the changed surface into material major routes from architectural ownership,
   governing route overviews, and the import/call graph. The reviewer chair fans out one
@@ -77,7 +89,10 @@ master's leaf loop to the master-exit seam, then hand over.
   current truth to the right onboarding home (specific sidecar or governing overview;
   L3 Operational-Notes last-resort only), and writes onboarding only.
 - Concurrency: <max parallel leaf build work or "sequential">. Build concurrency does not grant
-  landing order. An atomic block exposes no intermediate leaf to super.
+  landing order. An atomic block exposes no intermediate leaf to super. After a closeout claim,
+  lifecycle/worker/commit/recovery evidence belongs only to the enclosure-root operation journal;
+  observe it with `worktree_status` and execute only advertised
+  `worktree_operation_control` actions. Queue absence or invalidation never strands that journal.
 - Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
   no provider kill authority; provider stops and fixes route through the orchestrator and

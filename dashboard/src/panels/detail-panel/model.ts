@@ -183,6 +183,8 @@ export type MasterDocView = Pick<
   | "objective"
   | "sections"
   | "decisions"
+  | "discardedCount"
+  | "discardedSubTasks"
   | "masterLifecycleId"
   | "executionGraphView"
 
@@ -203,6 +205,8 @@ export const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   subTasks: orderedByCreation(seriesNode.subTasks),
   sections: seriesNode.sections,
   decisions: seriesNode.decisions,
+  discardedCount: seriesNode.discardedCount,
+  discardedSubTasks: seriesNode.discardedSubTasks,
   docPath: seriesNode.docPath,
   repository: seriesNode.repository,
   seriesTokenTotal: seriesNode.seriesTokenTotal,

@@ -23,7 +23,6 @@ from agents_remember.application.worktree_tools import (
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.closeout_input import CloseoutMessageInput
 from agents_remember.models.declared_caller import DeclaredCaller
-from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     GatePolicyRuleSnapshot,
@@ -32,7 +31,6 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
-from agents_remember.worktrees.integration import closeout_door
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operation_controls as controls_module,
 )
@@ -45,7 +43,6 @@ from agents_remember.worktrees.integration.lifecycle import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
     LifecycleControlAction,
     LifecycleControlCommand,
-    LifecycleControlError,
     control_operation,
     legal_operation_controls,
 )
@@ -214,7 +211,15 @@ def test_initial_claimed_door_crash_recovers_before_worker_launch(
     assert interrupted is not None and interrupted.doorPublication is not None
     assert interrupted.doorPublication.state == "intent"
     observed_contract = load_contract(contract.contract_path)
-    assert (observed_contract.closeout_door is not None) is after_contract_write
+    assert observed_contract.closeout_door is not None
+    if after_contract_write:
+        assert observed_contract.closeout_door == interrupted.doorPublication.generation
+    else:
+        assert observed_contract.closeout_door.disposition == "waiting"
+        assert (
+            observed_contract.closeout_door.generationId
+            == interrupted.doorPublication.generation.generationId
+        )
 
     config = load_config(Path(interrupted.input.configPath))
     with mock.patch(
@@ -243,7 +248,7 @@ def test_initial_claimed_door_crash_recovers_before_worker_launch(
     recovery_launch.assert_called_once()
 
 
-def test_initial_claimed_door_preintent_cut_recovers_before_first_launch(
+def test_initial_claimed_door_journal_create_cut_recovers_before_first_launch(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
@@ -257,7 +262,7 @@ def test_initial_claimed_door_preintent_cut_recovers_before_first_launch(
     ) -> tuple[LifecycleOperationRecord, bool]:
         created = original_create(target, candidate)
         if target.path == operation_record_path(contract.worktree_group, "closeout"):
-            raise SystemExit("cut after accepted record before claimed-door intent")
+            raise SystemExit("cut after accepted journal create")
         return created
 
     first_launch = mock.Mock()
@@ -267,7 +272,7 @@ def test_initial_claimed_door_preintent_cut_recovers_before_first_launch(
             "create",
             new=cut_after_record_create,
         ),
-        pytest.raises(SystemExit, match="before claimed-door intent"),
+        pytest.raises(SystemExit, match="accepted journal create"),
     ):
         start_closeout_operation(operation_input, launcher=first_launch)
     first_launch.assert_not_called()
@@ -276,8 +281,12 @@ def test_initial_claimed_door_preintent_cut_recovers_before_first_launch(
     assert interrupted is not None
     assert (interrupted.generation, interrupted.attempt, interrupted.status) == (1, 1, "queued")
     assert interrupted.workerPid is None
-    assert interrupted.doorPublication is None
-    assert load_contract(contract.contract_path).closeout_door is None
+    assert interrupted.doorPublication is not None
+    assert interrupted.doorPublication.state == "intent"
+    waiting = load_contract(contract.contract_path).closeout_door
+    assert waiting is not None
+    assert waiting.disposition == "waiting"
+    assert waiting.generationId == interrupted.doorPublication.generation.generationId
 
     config = load_config(Path(interrupted.input.configPath))
     with mock.patch(
@@ -314,30 +323,27 @@ def test_initial_door_without_journal_intent_is_exact_public_decision(
     contract = _contract(tmp_path)
     (contract.code_worktree / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
     operation_input = closeout_operation_input(contract, code="reject unjournaled live door")
-    original_create = LifecycleOperationStore.create
-
-    def cut_after_record_create(
-        target: LifecycleOperationStore,
-        candidate: LifecycleOperationRecord,
-    ) -> tuple[LifecycleOperationRecord, bool]:
-        created = original_create(target, candidate)
-        if target.path == operation_record_path(contract.worktree_group, "closeout"):
-            raise SystemExit("cut before initial door intent")
-        return created
-
-    with (
-        mock.patch.object(LifecycleOperationStore, "create", new=cut_after_record_create),
-        pytest.raises(SystemExit, match="before initial door intent"),
-    ):
-        start_closeout_operation(operation_input, launcher=mock.Mock())
+    start_closeout_operation(operation_input, launcher=mock.Mock())
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
+    accepted = store.read()
+    assert accepted is not None and accepted.doorPublication is not None
+    malformed = accepted.model_copy(update={"doorPublication": None})
+    store.path.write_text(malformed.model_dump_json(indent=2) + "\n", encoding="utf-8")
     interrupted = store.read()
     assert interrupted is not None and interrupted.doorPublication is None
-    stale_recover = legal_operation_controls(contract, interrupted)[0]
-    assert stale_recover["action"] == "recover"
     live = load_contract(contract.contract_path)
-    unjournaled = closeout_door.door_generation_for_operation(live, interrupted, "claimed")
-    write_contract(contract.contract_path, replace(live, closeout_door=unjournaled))
+    unjournaled = live.closeout_door
+    assert unjournaled is not None and unjournaled.disposition == "claimed"
+    stale_recover = {
+        "tool": "worktree_operation_control",
+        "arguments": {
+            "contract_path": live.contract_path.as_posix(),
+            "operation_kind": "closeout",
+            "action": "recover",
+            "expected_generation": interrupted.generation,
+            "intent_note": "probe malformed create-time door intent",
+        },
+    }
     journal_before = store.path.read_bytes()
     config = load_config(Path(interrupted.input.configPath))
     with mock.patch(
@@ -411,27 +417,28 @@ def test_advertised_integrate_control_starts_task_addressed_generation(
     launch.assert_called_once()
 
 
-def test_cancel_dry_run_and_revise_publish_one_linked_successor(tmp_path: Path) -> None:
+def test_cancel_dry_run_and_revise_only_advertise_the_waiting_successor(
+    tmp_path: Path,
+) -> None:
     contract, _operation_input, store, record = _dirty_closeout(tmp_path)
     cancelled_record = _cancelled_closeout_generation(tmp_path, contract, store, record)
     revise = _revision_command(contract, cancelled_record)
     before_preview = _byte_tree(tmp_path)
     dry = control_operation(replace(revise, dry_run=True))
     assert dry.generation == 1
+    assert dry.result is not None and dry.result["state"] == "would-revise"
     assert before_preview == _byte_tree(tmp_path)
     with mock.patch(
         "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls.launch_detached_worker"
     ) as launch:
-        successor = control_operation(revise)
+        ready = control_operation(revise)
     current = store.read()
     assert current is not None and current.doorPublication is not None
-    assert successor.generation == current.generation == 2
-    assert current.predecessorFingerprint == cancelled_record.fingerprint
-    assert current.input.gatePolicy == revise.revision_gate_policy
+    assert ready.generation == current.generation == 1
+    assert ready.result is not None and ready.result["state"] == "revision-ready"
+    assert ready.result["nextTool"] == "worktree_closeout_apply"
     assert current.doorPublication.generation.predecessorGenerationId
-    launch.assert_called_once()
-    with pytest.raises(LifecycleControlError, match="generation"):
-        control_operation(revise)
+    launch.assert_not_called()
 
 
 def _cancelled_closeout_generation(tmp_path, contract, store, record):
@@ -449,7 +456,7 @@ def _cancelled_closeout_generation(tmp_path, contract, store, record):
     assert cancelled_record is not None
     assert cancelled_record.doorPublication is not None
     assert cancelled_record.doorPublication.state == "proven"
-    assert cancelled_record.doorPublication.generation.disposition == "cancelled"
+    assert cancelled_record.doorPublication.generation.disposition == "waiting"
     assert cancelled_record.doorPublicationHistory[-1] == claimed_publication
     assert cancelled_record.cancellationEvidence is not None
     return cancelled_record
@@ -468,7 +475,7 @@ def _revision_command(contract, cancelled_record):
     )
 
 
-def test_public_active_revise_creates_successor_and_stale_n_routes_to_recover(
+def test_public_active_revise_returns_executable_apply_arguments_without_launching(
     tmp_path: Path,
 ) -> None:
     contract, _operation_input, store, record = _dirty_closeout(tmp_path)
@@ -478,26 +485,15 @@ def test_public_active_revise_creates_successor_and_stale_n_routes_to_recover(
     )
     revise["arguments"]["code_commit_message"] = "fresh direct revision"
     with mock.patch.object(controls_module, "launch_detached_worker") as launch:
-        advanced = _public_control(config, revise)
-    assert advanced["ok"] is True
-    successor = store.read()
-    assert successor is not None
-    assert successor.generation == 2
-    assert successor.predecessorFingerprint == record.fingerprint
-    launch.assert_called_once()
-
-    stale = _public_control(config, revise)
-    assert stale["ok"] is False
-    assert stale["status"] == "lifecycle-generation-changed"
-    assert stale["nextTool"] == "worktree_operation_control"
-    assert stale["nextArgs"]["expected_generation"] == 2
-    with mock.patch.object(controls_module, "launch_detached_worker") as recovery_launch:
-        recovered = worktree_operation_control_tool(
-            config,
-            OperationControlRequest(**stale["nextArgs"]),
-        )
-    assert recovered["ok"] is True
-    recovery_launch.assert_called_once()
+        ready = _public_control(config, revise)
+    assert ready["ok"] is True
+    current = store.read()
+    assert current is not None
+    assert current.generation == record.generation == 1
+    assert current.status == "cancelled"
+    assert ready["lifecycleOperation"]["result"]["state"] == "revision-ready"
+    assert ready["lifecycleOperation"]["result"]["nextTool"] == "worktree_closeout_apply"
+    launch.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -552,171 +548,15 @@ def test_refused_active_revise_leaves_safe_cancelled_and_executable_revise(
             intent_note="fresh approval after unchanged refusal",
         )
         with mock.patch.object(controls_module, "launch_detached_worker") as relaunch:
-            successor = worktree_operation_control_tool(
+            ready = worktree_operation_control_tool(
                 config,
                 OperationControlRequest(**next_args),
             )
-        assert successor["ok"] is True
-        assert successor["lifecycleOperation"]["generation"] == 2
-        relaunch.assert_called_once()
-
-
-def test_revision_predecessor_write_crash_recovers_from_public_status_only(
-    tmp_path: Path,
-) -> None:
-    contract, _operation_input, store, record = _dirty_closeout(tmp_path)
-    control_operation(_command(contract, record, "cancel"))
-    cancelled = store.read()
-    assert cancelled is not None
-    config = load_config(Path(cancelled.input.configPath))
-    revise = next(
-        row
-        for row in legal_operation_controls(load_contract(contract.contract_path), cancelled)
-        if row["action"] == "revise"
-    )
-    revise["arguments"]["code_commit_message"] = "accepted successor before crash"
-    original = closeout_door.write_contract
-
-    def crash_after_predecessor(path, updated):
-        original(path, updated)
-        if updated.closeout_door.disposition == "superseded":
-            raise SystemExit("lost process after predecessor publication")
-
-    with (
-        mock.patch.object(closeout_door, "write_contract", side_effect=crash_after_predecessor),
-        pytest.raises(SystemExit, match="lost process"),
-    ):
-        _public_control(config, revise)
-    accepted = store.read()
-    assert accepted is not None and accepted.generation == 2
-    with mock.patch(
-        "agents_remember.application.worktree_tools.git_worktree_manager.status_result",
-        return_value=WorktreeCommandResult(
-            0,
-            {
-                "contract_path": contract.contract_path.as_posix(),
-                "task_name": contract.task_name,
-            },
-        ),
-    ):
-        status = worktree_status_tool(
-            config,
-            TaskRef(repo_id=contract.repo_name, contract_path=contract.contract_path.as_posix()),
-        )
-    closeout = next(row for row in status["lifecycleOperations"] if row["kind"] == "closeout")
-    assert [row["action"] for row in closeout["legalControls"]] == ["recover"]
-    with mock.patch.object(controls_module, "launch_detached_worker") as launch:
-        recovered = _public_control(config, closeout["legalControls"][0])
-    assert recovered["ok"] is True
-    final = store.read()
-    assert final is not None and final.doorPublication is not None
-    assert final.doorPublication.generation.disposition == "claimed"
-    launch.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    ("operation_kind", "operation_fingerprint", "operation_key"),
-    (("closeout", "", ""), (None, "a" * 64, ""), (None, "", "b" * 64)),
-)
-def test_nonclaimed_closeout_door_rejects_partial_operation_identity(
-    operation_kind,
-    operation_fingerprint: str,
-    operation_key: str,
-) -> None:
-    with pytest.raises(ValueError, match="non-claimed generations"):
-        CloseoutDoorGeneration(
-            generationId="1" * 64,
-            disposition="superseded",
-            taskId="task",
-            taskName="task",
-            contractPath="/tmp/task/contract.json",
-            codeBaseCommit="2" * 40,
-            taskStateFingerprint="3" * 64,
-            operationKind=operation_kind,
-            operationFingerprint=operation_fingerprint,
-            claimedOperationKey=operation_key,
-        )
-
-
-@pytest.mark.parametrize(
-    ("publication", "after_write"),
-    ((1, False), (1, True), (2, False), (2, True)),
-)
-def test_public_revise_recovers_each_door_publication_cut(
-    tmp_path: Path,
-    publication: int,
-    after_write: bool,
-) -> None:
-    contract, _operation_input, store, record = _dirty_closeout(tmp_path)
-    control_operation(_command(contract, record, "cancel"))
-    cancelled = store.read()
-    assert cancelled is not None
-    config = load_config(Path(cancelled.input.configPath))
-    row = next(
-        item
-        for item in legal_operation_controls(load_contract(contract.contract_path), cancelled)
-        if item["action"] == "revise"
-    )
-    row["arguments"]["intent_note"] = "fresh approved successor after crash cut"
-    original = closeout_door.write_contract
-    calls = 0
-
-    def interrupted(path, updated):
-        nonlocal calls
-        calls += 1
-        if calls != publication:
-            return original(path, updated)
-        if after_write:
-            original(path, updated)
-        raise RuntimeError("forced closeout-door publication cut")
-
-    with mock.patch.object(controls_module, "launch_detached_worker") as launch:
-        with mock.patch.object(closeout_door, "write_contract", side_effect=interrupted):
-            cut = _public_control(config, row)
-        if after_write:
-            assert cut["ok"] is True
-            completed = cut
-        else:
-            assert cut["ok"] is False
-            assert cut["status"] == "closeout-door-publication-interrupted"
-            assert cut["nextTool"] == "worktree_operation_control"
-            completed = worktree_operation_control_tool(
-                config,
-                OperationControlRequest(**cut["nextArgs"]),
-            )
-    launch.assert_called_once()
-    assert completed["ok"] is True
-    successor = store.read()
-    assert successor is not None and successor.doorPublication is not None
-    assert successor.generation == 2
-    assert successor.predecessorFingerprint == cancelled.fingerprint
-    assert successor.doorPublication.state == "proven"
-    assert successor.doorPublication.generation.disposition == "claimed"
-
-
-def test_door_publication_third_state_requires_developer_decision(tmp_path: Path) -> None:
-    contract, _operation_input, store, record = _dirty_closeout(tmp_path)
-    control_operation(_command(contract, record, "cancel"))
-    cancelled = store.read()
-    assert cancelled is not None
-    row = next(
-        item
-        for item in legal_operation_controls(load_contract(contract.contract_path), cancelled)
-        if item["action"] == "revise"
-    )
-    config = load_config(Path(cancelled.input.configPath))
-    original = closeout_door.write_contract
-
-    def conflicting(path, updated):
-        original(path, replace(updated, commit_approval_note="conflicting contract bytes"))
-        raise RuntimeError("forced third contract state")
-
-    with mock.patch.object(closeout_door, "write_contract", side_effect=conflicting):
-        refused = _public_control(config, row)
-    assert refused["ok"] is False
-    assert refused["status"] == "closeout-door-publication-conflict"
-    assert refused["nextAction"] == "developer-decision"
-    assert refused["developerDecisionRequired"] is True
+        assert ready["ok"] is True
+        assert ready["lifecycleOperation"]["generation"] == 1
+        assert ready["lifecycleOperation"]["result"]["state"] == "revision-ready"
+        assert ready["lifecycleOperation"]["result"]["nextTool"] == "worktree_closeout_apply"
+        relaunch.assert_not_called()
 
 
 def test_signal_denial_retains_worker_authority_and_only_advertises_cancel(

@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents_remember.observer.projection import (
+    DiscardedSubTaskNode,
     EnclosureNode,
     SeriesNode,
     SeriesSubTaskNode,
@@ -31,6 +32,7 @@ from agents_remember.observer.projection import (
     TaskSubStepNode,
     TaskSubTaskRefNode,
 )
+from agents_remember.observer.projection_closeout import DiscardUnstartedProofNode
 from agents_remember.observer.projection_graph import (
     GraphNodeLike,
     GraphPredecessorFacts,
@@ -238,6 +240,8 @@ def read_series_documents(
                 createdAt=doc.createdAt,
                 objective="",
                 subTasks=_series_subtask_nodes(path, doc),
+                discardedCount=len(doc.discardedSubTasks),
+                discardedSubTasks=_discarded_subtask_nodes(doc),
                 doneCount=series_done(doc),
                 totalCount=series_total(doc),
                 sections=[],
@@ -266,6 +270,22 @@ def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNo
             createdAt=created_at,
         )
         for _, sub, created_at in indexed
+    ]
+
+
+def _discarded_subtask_nodes(doc: TaskDocument) -> list[DiscardedSubTaskNode]:
+    return [
+        DiscardedSubTaskNode(
+            number=item.number,
+            name=item.name,
+            file=item.file,
+            scope=item.scope,
+            disposition=item.disposition,
+            reason=item.reason,
+            discardedAt=item.discardedAt,
+            proof=DiscardUnstartedProofNode.model_validate(item.proof.model_dump(mode="json")),
+        )
+        for item in doc.discardedSubTasks
     ]
 
 
@@ -547,6 +567,8 @@ def _task_doc_node(
             )
             for ref in doc.subTasks
         ],
+        discardedCount=len(doc.discardedSubTasks) if doc.kind == "master" else None,
+        discardedSubTasks=_discarded_subtask_nodes(doc) if doc.kind == "master" else None,
         masterLifecycleId=parent_lifecycle,
         orchestrates=list(doc.orchestrates),
         seats=[
@@ -579,6 +601,7 @@ def _task_doc_body_revision(doc: TaskDocument) -> str:
         # first-class seats ride the always-on summary, but an OPEN reader renders the fetched body
         # — so both join the revision and a linkage/seat edit refetches an already-open sprint doc.
         "subTasks": [ref.model_dump(mode="json") for ref in doc.subTasks],
+        "discardedSubTasks": [item.model_dump(mode="json") for item in doc.discardedSubTasks],
         "seats": [seat.model_dump(mode="json") for seat in doc.seats],
         "executionNature": doc.executionNature,
         "executionGraph": (

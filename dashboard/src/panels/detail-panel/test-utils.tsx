@@ -51,6 +51,8 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
     status: "inProgress",
     objective: "",
     subTasks: [],
+    discardedCount: 0,
+    discardedSubTasks: [],
     doneCount: 0,
     totalCount: 0,
     seriesTokenTotal: 0,

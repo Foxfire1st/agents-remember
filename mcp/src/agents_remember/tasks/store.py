@@ -123,6 +123,55 @@ def write_task_docs(
     return write_task_doc_batch([(task_root, doc) for doc in docs], graph_titles=graph_titles)
 
 
+def write_task_docs_and_remove(
+    task_root: Path,
+    docs: list[TaskDocument],
+    removals: list[Path],
+    *,
+    graph_titles: SprintGraphTitles | None = None,
+) -> tuple[list[tuple[Path, Path]], list[Path]]:
+    """Publish task documents and remove exact sibling sources as one rollback-safe batch.
+
+    ``discard-unstarted`` must not expose a parent audit without converging the child-source
+    removal, or remove the child while losing the audit. Individual replacements and deletions
+    are not a filesystem transaction, so this boundary snapshots every touched path and restores
+    the exact prior bytes if any write or unlink fails. The surrounding task CAS supplies
+    serialization; this function supplies failure atomicity for its file set.
+    """
+
+    write_paths = {
+        path
+        for doc in docs
+        for path in (json_path_for(task_root, doc), markdown_path_for(task_root, doc))
+    }
+    ordered_removals = list(dict.fromkeys(path.resolve(strict=False) for path in removals))
+    overlap = write_paths.intersection(ordered_removals)
+    if overlap:
+        raise ValueError(
+            "task-document write and removal targets overlap: "
+            + ", ".join(sorted(path.as_posix() for path in overlap))
+        )
+    touched = [*sorted(write_paths), *ordered_removals]
+    originals = {path: path.read_bytes() if path.exists() else None for path in touched}
+    deleted: list[Path] = []
+    try:
+        written = write_task_docs(task_root, docs, graph_titles=graph_titles)
+        for path in ordered_removals:
+            if path.exists():
+                path.unlink()
+                deleted.append(path)
+        return written, deleted
+    except BaseException as publish_error:
+        try:
+            _restore_task_doc_batch(originals)
+        except BaseException as rollback_error:
+            raise RuntimeError(
+                "task-document write/removal publication and rollback both failed: "
+                f"{rollback_error}"
+            ) from publish_error
+        raise
+
+
 def write_task_doc_batch(
     documents: list[tuple[Path, TaskDocument]],
     *,

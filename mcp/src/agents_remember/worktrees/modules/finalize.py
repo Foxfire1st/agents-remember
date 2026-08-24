@@ -5,13 +5,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStoreError
 from agents_remember.tasks import (
     CompletionBlocker,
     SubTaskRef,
+    TaskDocSourceReadError,
+    TaskDocSourceSnapshot,
     TaskDocument,
     completion_blockers,
-    read_task_doc,
+    current_task_doc_source,
+    read_task_doc_with_source,
     write_task_docs,
 )
 from agents_remember.tasks.leaf_doc import (
@@ -24,8 +26,11 @@ from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import publish_queue_bound_task_facts
+from agents_remember.worktrees.task_fact_publication import (
+    preview_contract_task_facts,
+    publish_contract_task_facts,
+    validate_task_fact_mutation,
+)
 from agents_remember.worktrees.task_resolver import archive_completed_root_task
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -49,10 +54,12 @@ class FinalizeTaskTargets:
     leaf_path: Path | None = None
     leaf: TaskDocument | None = None
     completed_leaf: TaskDocument | None = None
+    leaf_source: TaskDocSourceSnapshot | None = None
     parent_path: Path | None = None
     parent: TaskDocument | None = None
     parent_row: SubTaskRef | None = None
     completed_parent: TaskDocument | None = None
+    parent_source: TaskDocSourceSnapshot | None = None
 
 
 def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
@@ -109,18 +116,18 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
 
     updated_contract = load_contract(contract.contract_path) if not args.dry_run else contract
     try:
-        updates = _reconcile_task_documents(
+        updates, projection_effects = _reconcile_task_documents(
             updated_contract,
             targets,
             dry_run=args.dry_run,
         )
-    except (CloseoutQueueError, CloseoutQueueStoreError) as exc:
+    except FinalizeTaskDocumentError as exc:
         return _task_refusal(
             updated_contract,
             args,
-            state="task-queue-blocked",
+            state="task-document-publication-blocked",
             blockers=[str(exc)],
-            summary=f"Task finalization is blocked by the sprint closeout queue: {exc}",
+            summary=f"Task finalization did not publish task truth: {exc}",
         )
     if updated_contract.kind == "series":
         archive = archive_completed_root_task(
@@ -147,6 +154,7 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
             "targetBranch": updated_contract.code_source_branch,
             "cleanup": cleanup.payload,
             "taskUpdates": updates,
+            "projectionEffects": projection_effects,
             "taskArchive": archive,
             "summary": (
                 "Task lifecycle finalized."
@@ -256,8 +264,18 @@ def _resolve_task_targets(
     )
     if resolved is None:
         return _resolve_parent_target(contract, args, None, None)
-    leaf_path, leaf = resolved
-    return _resolve_parent_target(contract, args, leaf_path, leaf)
+    leaf_path, resolved_leaf = resolved
+    try:
+        leaf, leaf_source = read_task_doc_with_source(leaf_path)
+    except (OSError, ValueError) as exc:
+        raise FinalizeTaskDocumentError(
+            f"cannot capture exact leaf task-document source {leaf_path}: {exc}"
+        ) from exc
+    if leaf != resolved_leaf:
+        raise FinalizeTaskDocumentError(
+            "contract-bound leaf task document changed during finalization preflight; retry"
+        )
+    return _resolve_parent_target(contract, args, leaf_path, leaf, leaf_source)
 
 
 def _resolve_parent_target(
@@ -265,6 +283,7 @@ def _resolve_parent_target(
     args: FinalizeArgs,
     leaf_path: Path | None,
     leaf: TaskDocument | None,
+    leaf_source: TaskDocSourceSnapshot | None = None,
 ) -> FinalizeTaskTargets:
     if leaf is None or leaf_path is None:
         if args.master_doc_path is None and not args.subtask_number:
@@ -281,10 +300,11 @@ def _resolve_parent_target(
             leaf_path=leaf_path,
             leaf=leaf,
             completed_leaf=_leaf_completion_candidate(leaf),
+            leaf_source=leaf_source,
         )
     expected_parent = _expected_parent_path(contract.task_root, leaf)
     _assert_parent_arguments(args, expected_parent, leaf.id)
-    parent = _read_parent(expected_parent)
+    parent, parent_source = _read_parent(expected_parent)
     row = _exact_parent_row(parent, leaf.id)
     _check_parent_row_path(expected_parent, row, leaf_path)
     completed_parent = _parent_completion_candidate(parent, row.number)
@@ -292,10 +312,12 @@ def _resolve_parent_target(
         leaf_path=leaf_path,
         leaf=leaf,
         completed_leaf=_leaf_completion_candidate(leaf),
+        leaf_source=leaf_source,
         parent_path=expected_parent,
         parent=parent,
         parent_row=row,
         completed_parent=completed_parent,
+        parent_source=parent_source,
     )
 
 
@@ -318,9 +340,9 @@ def _assert_parent_arguments(
         )
 
 
-def _read_parent(parent_path: Path) -> TaskDocument:
+def _read_parent(parent_path: Path) -> tuple[TaskDocument, TaskDocSourceSnapshot]:
     try:
-        parent = read_task_doc(parent_path)
+        parent, source = read_task_doc_with_source(parent_path)
     except (OSError, ValueError) as exc:
         raise FinalizeTaskDocumentError(
             f"cannot read immediate parent task document {parent_path}: {exc}"
@@ -329,7 +351,7 @@ def _read_parent(parent_path: Path) -> TaskDocument:
         raise FinalizeTaskDocumentError(
             f"immediate parent path is not a master task document: {parent_path}"
         )
-    return parent
+    return parent, source
 
 
 def _exact_parent_row(parent: TaskDocument, subtask_number: str) -> SubTaskRef:
@@ -367,7 +389,7 @@ def _reconcile_task_documents(
     targets: FinalizeTaskTargets,
     *,
     dry_run: bool,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, object]]]:
     updates: dict[str, Any] = {}
     documents: list[TaskDocument] = []
     if targets.leaf_path is None or targets.leaf is None:
@@ -397,16 +419,47 @@ def _reconcile_task_documents(
             dry_run=dry_run,
         )
         updates["parent"]["subtaskNumber"] = targets.parent_row.number
-    if not dry_run and documents:
+    projection_effects: list[dict[str, object]] = []
+    if dry_run and documents:
+        validate_task_fact_mutation(
+            contract.coordination_root,
+            contract.repo_name,
+            lambda: _require_finalize_sources_current(targets),
+        )
+        projection_effects = [
+            effect.model_dump(by_alias=True)
+            for effect in preview_contract_task_facts(contract, tuple(documents))
+        ]
+    elif documents:
         if targets.leaf_path is None:
             raise FinalizeTaskDocumentError("completion candidates have no task-document root")
         task_root = targets.leaf_path.parent
-        publish_queue_bound_task_facts(
+        published = publish_contract_task_facts(
             contract,
             lambda: write_task_docs(task_root, documents),
-            topology_stable=True,
+            documents=tuple(documents),
+            validate=lambda: _require_finalize_sources_current(targets),
         )
-    return updates
+        projection_effects = [
+            effect.model_dump(by_alias=True) for effect in published.projection_effects
+        ]
+    return updates, projection_effects
+
+
+def _require_finalize_sources_current(targets: FinalizeTaskTargets) -> None:
+    for source in (targets.leaf_source, targets.parent_source):
+        if source is None:
+            continue
+        try:
+            current = current_task_doc_source(source)
+        except TaskDocSourceReadError as exc:
+            raise FinalizeTaskDocumentError(
+                f"task document became unreadable before finalization: {exc.evidence()}"
+            ) from exc
+        if current != source:
+            raise FinalizeTaskDocumentError(
+                "task document source changed after finalization preflight; re-read and retry"
+            )
 
 
 def _leaf_completion_candidate(doc: TaskDocument) -> TaskDocument:

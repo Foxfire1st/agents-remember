@@ -401,30 +401,6 @@
       "title": "Analytics",
       "type": "object"
     },
-    "AtomicBlockerNode": {
-      "additionalProperties": false,
-      "description": "The active atomic-unit master blocker, with its recorded rationale.",
-      "properties": {
-        "acquiredBy": {
-          "default": "",
-          "title": "Acquiredby",
-          "type": "string"
-        },
-        "master": {
-          "$ref": "#/$defs/TaskDocumentRef"
-        },
-        "rationale": {
-          "default": "",
-          "title": "Rationale",
-          "type": "string"
-        }
-      },
-      "required": [
-        "master"
-      ],
-      "title": "AtomicBlockerNode",
-      "type": "object"
-    },
     "AttentionItem": {
       "additionalProperties": false,
       "description": "One thing that needs the human, decided by the reducer (note 06, slice 05).\n\nA ranked cross-section of the structural tree + analytics signals -- the\nhome-screen attention queue. Computed server-side so every client (dashboard,\nTUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never\na client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the\nstructural tree so the UI can couple a queue item to its operation-tree node.",
@@ -568,31 +544,33 @@
     },
     "CloseoutCandidateNode": {
       "additionalProperties": false,
-      "description": "One projected closeout candidate: its queue state, grade, and why it is not selectable.\n\nRead from the durable queue artifact, never re-derived from titles, numbering, labels, or\nopen terminals (L8-R2/R5). ``reasons`` carries the queue's own waiting reasons; the dashboard\nrenders them verbatim rather than inferring readiness.",
+      "description": "One exact-current member of the disposable scheduling projection.",
       "properties": {
-        "candidateState": {
-          "title": "Candidatestate",
+        "classification": {
+          "title": "Classification",
           "type": "string"
         },
-        "gradePriority": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Gradepriority"
+        "generationId": {
+          "title": "Generationid",
+          "type": "string"
         },
         "owningMaster": {
           "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "order": {
+          "default": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "priority": {
+          "title": "Priority",
+          "type": "string"
         },
         "reasons": {
           "items": {
             "type": "string"
           },
+          "maxItems": 256,
           "title": "Reasons",
           "type": "array"
         },
@@ -601,51 +579,73 @@
         }
       },
       "required": [
+        "generationId",
         "taskDocumentRef",
         "owningMaster",
-        "candidateState"
+        "classification",
+        "priority"
       ],
       "title": "CloseoutCandidateNode",
       "type": "object"
     },
+    "CloseoutProjectionProblemNode": {
+      "additionalProperties": false,
+      "description": "Bounded repair evidence for a non-admitting projection.",
+      "properties": {
+        "address": {"title": "Address", "type": "string"},
+        "errorType": {"title": "Errortype", "type": "string"},
+        "kind": {"title": "Kind", "type": "string"},
+        "repairAction": {"title": "Repairaction", "type": "string"},
+        "state": {"title": "State", "type": "string"}
+      },
+      "required": ["kind", "address", "state", "errorType", "repairAction"],
+      "title": "CloseoutProjectionProblemNode",
+      "type": "object"
+    },
     "CloseoutQueueNode": {
       "additionalProperties": false,
-      "description": "The projected closeout queue for one sprint: candidates, blocker, and graph revision.",
+      "description": "Exact effective state for one disposable sprint scheduling projection.",
       "properties": {
-        "activeBlocker": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/AtomicBlockerNode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "candidates": {
+        "members": {
           "items": {
             "$ref": "#/$defs/CloseoutCandidateNode"
           },
-          "title": "Candidates",
+          "maxItems": 256,
+          "title": "Members",
           "type": "array"
-        },
-        "graphRevision": {
-          "default": "",
-          "title": "Graphrevision",
-          "type": "string"
         },
         "revision": {
           "default": 0,
           "title": "Revision",
           "type": "integer"
         },
+        "serviceCondition": {
+          "title": "Servicecondition",
+          "type": "string"
+        },
+        "sourceClassification": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "title": "Sourceclassification"
+        },
+        "sourceFingerprint": {
+          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "default": null,
+          "title": "Sourcefingerprint"
+        },
+        "sourceProblems": {
+          "items": {"$ref": "#/$defs/CloseoutProjectionProblemNode"},
+          "maxItems": 256,
+          "title": "Sourceproblems",
+          "type": "array"
+        },
         "sprintRef": {
           "$ref": "#/$defs/TaskDocumentRef"
         }
       },
       "required": [
-        "sprintRef"
+        "sprintRef",
+        "serviceCondition"
       ],
       "title": "CloseoutQueueNode",
       "type": "object"
@@ -741,6 +741,119 @@
         }
       },
       "title": "CommitRefNode",
+      "type": "object"
+    },
+    "DiscardUnstartedProofNode": {
+      "additionalProperties": false,
+      "description": "Persisted proof facts retained after an unstarted leaf source is discarded.",
+      "properties": {
+        "commitState": {
+          "title": "Commitstate",
+          "type": "string"
+        },
+        "doorState": {
+          "title": "Doorstate",
+          "type": "string"
+        },
+        "enclosureState": {
+          "title": "Enclosurestate",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "locatorState": {
+          "title": "Locatorstate",
+          "type": "string"
+        },
+        "operationState": {
+          "title": "Operationstate",
+          "type": "string"
+        },
+        "reviewState": {
+          "title": "Reviewstate",
+          "type": "string"
+        },
+        "seatState": {
+          "title": "Seatstate",
+          "type": "string"
+        },
+        "taskDocumentRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "taskState": {
+          "title": "Taskstate",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "taskDocumentRef",
+        "taskState",
+        "enclosureState",
+        "locatorState",
+        "doorState",
+        "operationState",
+        "seatState",
+        "reviewState",
+        "commitState",
+        "fingerprint"
+      ],
+      "title": "DiscardUnstartedProofNode",
+      "type": "object"
+    },
+    "DiscardedSubTaskNode": {
+      "additionalProperties": false,
+      "description": "One master-owned, machine-readable discard-unstarted audit entry.",
+      "properties": {
+        "discardedAt": {
+          "title": "Discardedat",
+          "type": "string"
+        },
+        "disposition": {
+          "title": "Disposition",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "string"
+        },
+        "proof": {
+          "$ref": "#/$defs/DiscardUnstartedProofNode"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "scope": {
+          "default": "",
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "name",
+        "file",
+        "disposition",
+        "reason",
+        "discardedAt",
+        "proof"
+      ],
+      "title": "DiscardedSubTaskNode",
       "type": "object"
     },
     "DriftSnapshotNode": {
@@ -2262,6 +2375,19 @@
           "title": "Decisions",
           "type": "array"
         },
+        "discardedCount": {
+          "default": 0,
+          "title": "Discardedcount",
+          "type": "integer"
+        },
+        "discardedSubTasks": {
+          "items": {
+            "$ref": "#/$defs/DiscardedSubTaskNode"
+          },
+          "maxItems": 256,
+          "title": "Discardedsubtasks",
+          "type": "array"
+        },
         "docPath": {
           "title": "Docpath",
           "type": "string"
@@ -2866,6 +2992,34 @@
           ],
           "default": null,
           "title": "Design"
+        },
+        "discardedCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedcount"
+        },
+        "discardedSubTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DiscardedSubTaskNode"
+              },
+              "maxItems": 256,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedsubtasks"
         },
         "docPath": {
           "title": "Docpath",

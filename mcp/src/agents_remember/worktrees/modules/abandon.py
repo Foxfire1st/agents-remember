@@ -19,24 +19,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
+from agents_remember.models.lifecycles.enclosure import TerminalWorktreeAbandonArguments
+from agents_remember.worktrees.integration.atomic_series_terminal import (
+    AtomicSeriesTerminalPermit,
+    publish_atomic_series_terminal_under_authority,
+    require_atomic_series_terminal_release,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
     contract_lifecycle_lease,
-    require_lifecycle_operation_compatible,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
+    terminal_contract_authority_if_present,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     ENCLOSURE_REPORTS_DIRECTORY,
     _terminal_mutation_authority,
     _TerminalMutationAuthority,
+    _with_terminal_archive,
     delete_branch_force,
     delete_branch_if_merged,
     local_branch_presence,
@@ -50,11 +56,6 @@ from agents_remember.worktrees.modules.terminal_validation import (
     legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
-)
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    AtomicSeriesTerminalPermit,
-    publish_atomic_series_terminal_under_authority,
-    require_atomic_series_terminal_release,
 )
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
@@ -86,16 +87,21 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
-    archive_refusal = terminal_archive_required_result(
-        contract,
-        operation="worktree_abandon",
-        dry_run=args.dry_run,
-    )
-    if archive_refusal.returncode != 0:
-        return archive_refusal
-    if contract.kind == "series":
-        require_atomic_series_terminal_release(contract)
-    require_terminal_worktree(contract, operation="worktree_abandon")
+    terminal = terminal_contract_authority_if_present(contract)
+    if terminal is not None:
+        accepted_arguments = TerminalWorktreeAbandonArguments(force=args.force)
+        if (
+            terminal.archive.cleanupOperation != "worktree_abandon"
+            or terminal.archive.cleanupArguments != accepted_arguments
+        ):
+            return _terminal_archive_observation(contract, force=args.force)
+        if terminal.state == "cleanup-completed":
+            return _already_abandoned(contract, force=args.force)
+        contract = terminal.archived_contract
+    else:
+        if contract.kind == "series":
+            require_atomic_series_terminal_release(contract)
+        require_terminal_worktree(contract, operation="worktree_abandon")
     if (
         not args.dry_run
         and not args.force
@@ -173,34 +179,53 @@ def _abandon_with_guard(
 ) -> WorktreeCommandResult:
     try:
         with contract_lifecycle_lease(contract):
-            require_lifecycle_operation_compatible(
+            terminal_archive = terminal_archive_required_result(
                 contract,
-                operation_kind=None,
-                publish_worker_exits=not args.dry_run,
+                operation="worktree_abandon",
+                arguments=TerminalWorktreeAbandonArguments(force=args.force),
+                dry_run=args.dry_run,
+            )
+            if terminal_archive.returncode != 0:
+                return terminal_archive
+            terminal_authority = (
+                None
+                if args.dry_run
+                else terminal_contract_authority_if_present(
+                    load_contract(contract.contract_path)
+                )
             )
 
             def publish(
                 series_permit: AtomicSeriesTerminalPermit | None = None,
             ) -> WorktreeCommandResult:
                 current = load_contract(contract.contract_path)
-                if current != contract:
-                    raise RuntimeError("abandon contract changed before terminal mutation")
+                if args.dry_run:
+                    if current != contract:
+                        raise RuntimeError("abandon contract changed before preview")
+                else:
+                    terminal = terminal_contract_authority_if_present(current)
+                    if terminal is None:
+                        raise RuntimeError(
+                            "abandon lost terminal archive authority before mutation"
+                        )
+                    current = terminal.archived_contract
                 outputs = _abandon_terminal_outputs(
                     args,
                     current,
                     preflight,
                     series_permit=series_permit,
                 )
-                return _abandon_outputs_result(args, current, preflight, guard, outputs)
+                result = _abandon_outputs_result(args, current, preflight, guard, outputs)
+                return _with_terminal_archive(result, terminal_archive)
 
             if contract.kind == "series":
                 return publish_atomic_series_terminal_under_authority(
                     contract,
                     "worktree_abandon",
                     publish,
+                    terminal_authority=terminal_authority,
                 )
-            with integration_authority_lock(contract.coordination_root, contract.repo_name):
-                return publish()
+            return publish()
     except Exception as error:
         return WorktreeCommandResult(
             2,
@@ -214,6 +239,50 @@ def _abandon_with_guard(
                 "blockers": [{"terminal": "helper", "reason": str(error)}],
             },
         )
+
+
+def _terminal_archive_observation(
+    contract: WorktreeContract,
+    *,
+    force: bool,
+) -> WorktreeCommandResult:
+    with contract_lifecycle_lease(contract):
+        return terminal_archive_required_result(
+            contract,
+            operation="worktree_abandon",
+            arguments=TerminalWorktreeAbandonArguments(force=force),
+            dry_run=False,
+        )
+
+
+def _already_abandoned(
+    contract: WorktreeContract,
+    *,
+    force: bool,
+) -> WorktreeCommandResult:
+    terminal_archive = _terminal_archive_observation(
+        contract,
+        force=force,
+    )
+    if terminal_archive.returncode != 0:
+        return terminal_archive
+    return _with_terminal_archive(
+        WorktreeCommandResult(
+            0,
+            {
+                "state": "abandoned",
+                **status_payload(contract),
+                "summary": "Worktree was already abandoned; terminal archive proof remains valid.",
+                "providers": {"state": "already-terminal"},
+                "removed_worktrees": {},
+                "branches": {},
+                "directories": {},
+                "blockers": [],
+                "alreadyTerminal": True,
+            },
+        ),
+        terminal_archive,
+    )
 
 
 def _abandon_outputs_result(
@@ -535,6 +604,7 @@ def _abandon_directories(
     contract: WorktreeContract, *, dry_run: bool, force: bool
 ) -> dict[str, dict[str, object]]:
     group = contract.worktree_group
+    lifecycle = group / ".lifecycle"
     if contract.kind == "series":
         reports = group / ENCLOSURE_REPORTS_DIRECTORY
         return {
@@ -550,7 +620,11 @@ def _abandon_directories(
                     reports,
                     dry_run=dry_run,
                 )
-            )
+            ),
+            "lifecycle": worktree_services().provider_lifecycle.remove_tree(
+                lifecycle,
+                dry_run=dry_run,
+            ),
         }
     if force:
         directories = {
@@ -561,13 +635,18 @@ def _abandon_directories(
     else:
         reports_path = group / ENCLOSURE_REPORTS_DIRECTORY
         reports = worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
-        planned = (
-            {reports_path.resolve()}
-            if reports.get("removed") or reports.get("would_remove")
-            else set()
+        lifecycle_result = worktree_services().provider_lifecycle.remove_tree(
+            lifecycle,
+            dry_run=dry_run,
         )
+        planned: set[Path] = set()
+        if reports.get("removed") or reports.get("would_remove"):
+            planned.add(reports_path.resolve())
+        if lifecycle_result.get("removed") or lifecycle_result.get("would_remove"):
+            planned.add(lifecycle.resolve())
         directories = {
             "reports": reports,
+            "lifecycle": lifecycle_result,
             "worktree_group": remove_empty_dir(group, dry_run, planned),
         }
     if group.parent.exists():

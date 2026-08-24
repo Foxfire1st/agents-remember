@@ -254,6 +254,45 @@ class SprintLinkageTests(unittest.TestCase):
         self.assertEqual(result["executionNatureAsserted"], False)
         self.assertEqual(self._sprint().orchestrates.count("master-c"), 1)
 
+    def test_attach_nature_publication_refreshes_every_consuming_sprint(self) -> None:
+        self._graph_ful_sprint()
+        self._write_master(MASTER_C)
+        other_sprint = TaskDocumentRef(
+            repository=REPOSITORY,
+            path="other-sprint/task.json",
+        )
+        write_task_doc(
+            self.tasks / "other-sprint",
+            _master(identity="OTHER-SPRINT", orchestrates=["master-c"]).model_copy(
+                update={"integrationBranch": "other-super"}
+            ),
+        )
+        fields = {
+            "masterRef": MASTER_C.model_dump(),
+            "number": "M3",
+            "executionNature": "atomic",
+            "judgmentId": "J-1",
+        }
+        expected = {SPRINT, other_sprint}
+
+        preview = self._attach(fields, dry_run=True)
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in preview["projectionEffects"]
+            },
+            expected,
+        )
+
+        applied = self._attach(fields)
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in applied["projectionEffects"]
+            },
+            expected,
+        )
+
     def test_attach_target_and_uniqueness_refusals(self) -> None:
         self._graph_ful_sprint()
         self._write_master(MASTER_C, nature="atomic")
@@ -440,6 +479,13 @@ class SprintLinkageTests(unittest.TestCase):
         self.assertEqual([row.number for row in sprint.subTasks], ["M1"])
         self.assertIsNone(sprint.executionGraph)
         self.topology.validate_sprint_linkage(SPRINT)
+        self.assertEqual(
+            {
+                TaskDocumentRef.model_validate(effect["sprintTaskDocumentRef"])
+                for effect in result["projectionEffects"]
+            },
+            {SPRINT},
+        )
 
     # --- linkage report ---------------------------------------------------------
 
@@ -984,18 +1030,19 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             self._attach({"masterRef": MASTER_C.model_dump(), "number": "M3"})
         self.assertEqual(before, self._snapshot())
 
-    def test_attach_wraps_publication_authority_failures(self) -> None:
+    def test_attach_does_not_consult_landing_authority(self) -> None:
         self._graph_ful_sprint()
         self._write_master(MASTER_C, nature="atomic")
-        with (
-            mock.patch.object(
-                sprint_linkage,
-                "require_topology_migration_authority",
-                side_effect=RuntimeError("no authority"),
-            ),
-            self.assertRaisesRegex(TaskDocError, "no authority"),
-        ):
-            self._attach({"masterRef": MASTER_C.model_dump(), "number": "M3"}, dry_run=True)
+        with mock.patch(
+            "agents_remember.worktrees.integration.integration_branch_authority."
+            "require_topology_migration_authority",
+            side_effect=AssertionError("landing authority must not veto task authoring"),
+        ) as landing_authority:
+            result = self._attach(
+                {"masterRef": MASTER_C.model_dump(), "number": "M3"}, dry_run=True
+            )
+        self.assertTrue(result["dryRun"])
+        landing_authority.assert_not_called()
 
     def test_linkage_facts_unit_edges(self) -> None:
         self._graph_ful_sprint()

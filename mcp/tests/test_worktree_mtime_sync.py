@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from agents_remember.worktrees.modules.start import _sync_worktree_memory_mtimes
+from agents_remember.worktrees.modules.startup.start_memory import _sync_worktree_memory_mtimes
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _OLD = 1577836800.0  # 2020-01-01 UTC

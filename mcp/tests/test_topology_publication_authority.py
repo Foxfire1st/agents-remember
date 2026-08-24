@@ -1,4 +1,4 @@
-"""Production task-publication forcing for protected branch authority."""
+"""Task publication stays independent from landing and live-enclosure state."""
 
 from __future__ import annotations
 
@@ -34,63 +34,64 @@ def _config(fixture: QueueFixture) -> McpRuntimeConfig:
     )
 
 
-class TopologyPublicationAuthorityTests(unittest.TestCase):
+class TopologyPublicationIndependenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_preview_and_apply_refuse_promoting_a_live_leaf_work_branch(self) -> None:
+    def test_live_leaf_work_branch_does_not_veto_sprint_branch_authoring(self) -> None:
         fixture = QueueFixture(Path(self.temp.name))
         config = _config(fixture)
         contract = fixture.contracts[MASTER_A]
-        before = (fixture.tasks / "sprint" / "task.json").read_bytes()
+        sprint_path = fixture.tasks / "sprint" / "task.json"
+        before = sprint_path.read_bytes()
         work_tip = git(fixture.code, "rev-parse", contract.code_work_branch)
 
-        for dry_run in (True, False):
-            with (
-                self.subTest(dry_run=dry_run),
-                self.assertRaisesRegex(
-                    TaskDocError,
-                    "live leaf workbench",
-                ),
-            ):
-                task_doc_tool(
-                    config,
-                    TaskDocTarget(repo_id=REPO, task_name="sprint"),
-                    operation="set_field",
-                    edit=TaskDocEdit(fields={"integrationBranch": contract.code_work_branch}),
-                    call=TaskDocCall(dry_run=dry_run),
-                )
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="sprint"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"integrationBranch": contract.code_work_branch}),
+            call=TaskDocCall(dry_run=True),
+        )
+        self.assertEqual(sprint_path.read_bytes(), before)
 
-        self.assertEqual((fixture.tasks / "sprint" / "task.json").read_bytes(), before)
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="sprint"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"integrationBranch": contract.code_work_branch}),
+        )
+
+        self.assertEqual(read_task_doc(sprint_path).integrationBranch, contract.code_work_branch)
         self.assertEqual(git(fixture.code, "rev-parse", contract.code_work_branch), work_tip)
 
-    def test_atomic_nature_cannot_be_removed_while_its_series_is_live(self) -> None:
+    def test_live_atomic_series_does_not_veto_nature_authoring(self) -> None:
         fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
         config = _config(fixture)
-        before = (fixture.tasks / "master-b" / "task.json").read_bytes()
+        master_path = fixture.tasks / "master-b" / "task.json"
+        before = master_path.read_bytes()
 
-        for dry_run in (True, False):
-            with (
-                self.subTest(dry_run=dry_run),
-                self.assertRaisesRegex(
-                    TaskDocError,
-                    "retains a live series contract",
-                ),
-            ):
-                task_doc_tool(
-                    config,
-                    TaskDocTarget(repo_id=REPO, task_name="master-b"),
-                    operation="set_field",
-                    edit=TaskDocEdit(fields={"executionNature": "organizational"}),
-                    call=TaskDocCall(dry_run=dry_run),
-                )
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="master-b"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"executionNature": "organizational"}),
+            call=TaskDocCall(dry_run=True),
+        )
+        self.assertEqual(master_path.read_bytes(), before)
 
-        self.assertEqual((fixture.tasks / "master-b" / "task.json").read_bytes(), before)
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="master-b"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"executionNature": "organizational"}),
+        )
+        self.assertEqual(read_task_doc(master_path).executionNature, "organizational")
 
-    def test_atomic_master_cannot_be_detached_from_its_nondefault_sprint_source(self) -> None:
+    def test_live_atomic_series_does_not_veto_detach(self) -> None:
         fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
         config = _config(fixture)
         sprint_path = fixture.tasks / "sprint" / "task.json"
@@ -102,27 +103,24 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
             "edges": [],
         }
 
-        for dry_run in (True, False):
-            with (
-                self.subTest(dry_run=dry_run),
-                self.assertRaisesRegex(
-                    TaskDocError,
-                    "standalone atomic series code source is not the repository default",
-                ),
-            ):
-                task_doc_tool(
-                    config,
-                    TaskDocTarget(repo_id=REPO, task_name="sprint"),
-                    operation="replace",
-                    edit=TaskDocEdit(fields=data),
-                    call=TaskDocCall(dry_run=dry_run),
-                )
-
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="sprint"),
+            operation="replace",
+            edit=TaskDocEdit(fields=data),
+            call=TaskDocCall(dry_run=True),
+        )
         self.assertEqual(sprint_path.read_bytes(), before)
 
-    def test_organizational_master_with_live_leaf_cannot_be_detached_from_shared_super(
-        self,
-    ) -> None:
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="sprint"),
+            operation="replace",
+            edit=TaskDocEdit(fields=data),
+        )
+        self.assertEqual(read_task_doc(sprint_path).orchestrates, ["master-a"])
+
+    def test_live_organizational_leaf_does_not_veto_detach(self) -> None:
         fixture = QueueFixture(Path(self.temp.name))
         config = _config(fixture)
         sprint_path = fixture.tasks / "sprint" / "task.json"
@@ -134,25 +132,24 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
             "edges": [],
         }
 
-        for dry_run in (True, False):
-            with (
-                self.subTest(dry_run=dry_run),
-                self.assertRaisesRegex(
-                    TaskDocError,
-                    "live leaf would lose its exact owning master/sprint authority",
-                ),
-            ):
-                task_doc_tool(
-                    config,
-                    TaskDocTarget(repo_id=REPO, task_name="sprint"),
-                    operation="replace",
-                    edit=TaskDocEdit(fields=data),
-                    call=TaskDocCall(dry_run=dry_run),
-                )
-
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="sprint"),
+            operation="replace",
+            edit=TaskDocEdit(fields=data),
+            call=TaskDocCall(dry_run=True),
+        )
         self.assertEqual(sprint_path.read_bytes(), before)
 
-    def test_live_leaf_document_must_remain_in_its_exact_owning_master_root(self) -> None:
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="sprint"),
+            operation="replace",
+            edit=TaskDocEdit(fields=data),
+        )
+        self.assertEqual(read_task_doc(sprint_path).orchestrates, ["master-b"])
+
+    def test_live_enclosure_identity_drift_does_not_block_unrelated_task_field(self) -> None:
         for name, leaf_file, escape in (
             ("sibling-master", "../master-b/leaf-b.md", False),
             ("symlink-outside-repository", "escape/leaf-a.md", True),
@@ -181,22 +178,23 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                 sprint_before = sprint_path.read_bytes()
                 contract = fixture.contracts[MASTER_A]
                 contract_before = contract.contract_path.read_bytes()
-                reason = "owning master task root" if not escape else "escapes its repository"
 
-                for dry_run in (True, False):
-                    with (
-                        self.subTest(dry_run=dry_run),
-                        self.assertRaisesRegex(TaskDocError, reason),
-                    ):
-                        task_doc_tool(
-                            config,
-                            TaskDocTarget(repo_id=REPO, task_name="sprint"),
-                            operation="set_field",
-                            edit=TaskDocEdit(fields={"statusNote": "authority probe"}),
-                            call=TaskDocCall(dry_run=dry_run),
-                        )
-
+                task_doc_tool(
+                    config,
+                    TaskDocTarget(repo_id=REPO, task_name="sprint"),
+                    operation="set_field",
+                    edit=TaskDocEdit(fields={"statusNote": "authority probe"}),
+                    call=TaskDocCall(dry_run=True),
+                )
                 self.assertEqual(sprint_path.read_bytes(), sprint_before)
+
+                task_doc_tool(
+                    config,
+                    TaskDocTarget(repo_id=REPO, task_name="sprint"),
+                    operation="set_field",
+                    edit=TaskDocEdit(fields={"statusNote": "authority probe"}),
+                )
+                self.assertEqual(read_task_doc(sprint_path).statusNote, "authority probe")
                 self.assertEqual(contract.contract_path.read_bytes(), contract_before)
 
     def test_new_leaf_override_must_declare_the_target_repository(self) -> None:
@@ -232,7 +230,7 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
         self.assertEqual(master_path.read_bytes(), master_before)
         self.assertEqual(contract.contract_path.read_bytes(), contract_before)
 
-    def test_new_atomic_task_refuses_an_orphan_preexisting_target_ref(self) -> None:
+    def test_orphan_preexisting_atomic_ref_does_not_veto_task_creation(self) -> None:
         fixture = QueueFixture(Path(self.temp.name))
         config = _config(fixture)
         git(fixture.code, "branch", "ar/orphan", "main")
@@ -249,30 +247,30 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
                 "executionNature": "atomic",
             }
         )
+        task_path = fixture.tasks / "orphan" / "task.json"
 
-        for dry_run in (True, False):
-            with (
-                self.subTest(dry_run=dry_run),
-                self.assertRaisesRegex(
-                    TaskDocError,
-                    "already exists without its exact task-owned series contract",
-                ),
-            ):
-                task_doc_tool(
-                    config,
-                    TaskDocTarget(repo_id=REPO, task_name="orphan"),
-                    operation="create",
-                    edit=TaskDocEdit(fields=document.model_dump(by_alias=True)),
-                    call=TaskDocCall(dry_run=dry_run),
-                )
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="orphan"),
+            operation="create",
+            edit=TaskDocEdit(fields=document.model_dump(by_alias=True)),
+            call=TaskDocCall(dry_run=True),
+        )
+        self.assertFalse(task_path.exists())
 
-        self.assertFalse((fixture.tasks / "orphan" / "task.json").exists())
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="orphan"),
+            operation="create",
+            edit=TaskDocEdit(fields=document.model_dump(by_alias=True)),
+        )
+        self.assertTrue(task_path.is_file())
         self.assertEqual(
             git(fixture.code, "rev-parse", "ar/orphan"),
             git(fixture.code, "rev-parse", "main"),
         )
 
-    def test_cleaned_atomic_leaf_row_cannot_be_removed_before_series_closeout(self) -> None:
+    def test_terminal_enclosure_does_not_veto_completed_row_removal(self) -> None:
         fixture = QueueFixture(Path(self.temp.name), atomic_b=True)
         config = _config(fixture)
         contract = replace(fixture.contracts[MASTER_B], cleanup="completed")
@@ -292,20 +290,23 @@ class TopologyPublicationAuthorityTests(unittest.TestCase):
         write_task_doc(leaf_path.parent, leaf.model_copy(update={"status": "Completed"}))
         before = master_path.read_bytes()
 
-        for dry_run in (True, False):
-            with (
-                self.subTest(dry_run=dry_run),
-                self.assertRaisesRegex(
-                    TaskDocError,
-                    "live leaf is not declared by one exact owning-master row",
-                ),
-            ):
-                task_doc_tool(
-                    config,
-                    TaskDocTarget(repo_id=REPO, task_name="master-b"),
-                    operation="remove_subtask",
-                    edit=TaskDocEdit(subtask={"number": "LEAF-B", "keep_file": True}),
-                    call=TaskDocCall(dry_run=dry_run),
-                )
-
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="master-b"),
+            operation="remove_subtask",
+            edit=TaskDocEdit(subtask={"number": "LEAF-B", "keep_file": True}),
+            call=TaskDocCall(dry_run=True),
+        )
         self.assertEqual(master_path.read_bytes(), before)
+
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="master-b"),
+            operation="remove_subtask",
+            edit=TaskDocEdit(subtask={"number": "LEAF-B", "keep_file": True}),
+        )
+        self.assertEqual(read_task_doc(master_path).subTasks, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

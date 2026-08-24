@@ -46,7 +46,7 @@ from closeout_input_test_support import (
 from lifecycle_control_test_support import cancel_current_generation
 from pydantic import ValidationError
 from test_closeout_queue import MASTER_A
-from test_lifecycle_operations import _contract, _integration_ready
+from test_lifecycle_operations import _completed_closeout_for_integration, _contract
 
 
 def _closeout_store(root: Path) -> tuple[WorktreeContract, LifecycleOperationStore]:
@@ -60,7 +60,11 @@ def _external_store(root: Path) -> LifecycleOperationStore:
     fixture = selected_fixture(root, memory_mode="external")
     contract = fixture.contracts[MASTER_A]
     operation_input = closeout_operation_input(contract, config_path=fixture.config_path)
-    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    start_closeout_operation(
+        operation_input,
+        launcher=lambda *_: None,
+        fixture_bypass_scheduling=True,
+    )
     return LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
 
 
@@ -100,7 +104,7 @@ def test_proven_integration_claim_timestamp_is_nonempty_and_strictly_read(
             _proven_publication("5" * 64, transferred_at="")
         )
 
-    contract = _integration_ready(_contract(tmp_path))
+    contract = _completed_closeout_for_integration(_contract(tmp_path))
     operation_input = IntegrateOperationInput(
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
@@ -130,7 +134,7 @@ def test_store_reads_one_schema_and_revalidates_every_update(tmp_path: Path) -> 
     store.path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(LifecycleOperationReadError) as raised:
         store.read()
-    assert raised.value.side == "current"
+    assert raised.value.side == "current-record"
     assert raised.value.error_type == "ValidationError"
     assert store.path.as_posix() not in str(raised.value)
 
@@ -219,7 +223,7 @@ def test_store_refuses_clearing_or_cancelling_commit_boundary(tmp_path: Path) ->
 
 
 def test_integrate_boundary_cannot_be_cleared_or_cancelled(tmp_path: Path) -> None:
-    contract = _integration_ready(_contract(tmp_path))
+    contract = _completed_closeout_for_integration(_contract(tmp_path))
     operation_input = IntegrateOperationInput(
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),
@@ -506,7 +510,7 @@ def test_external_finalization_requires_complete_recovery_tuple(tmp_path: Path) 
 
 
 def test_completed_integration_retains_its_exact_parameters(tmp_path: Path) -> None:
-    contract = _integration_ready(_contract(tmp_path))
+    contract = _completed_closeout_for_integration(_contract(tmp_path))
     first = IntegrateOperationInput(
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),

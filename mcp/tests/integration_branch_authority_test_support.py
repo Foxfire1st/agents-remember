@@ -8,13 +8,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     load_ledger,
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
@@ -26,13 +26,12 @@ from agents_remember.tasks import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationStore,
+    operation_record_path,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.startup import start_contract
-from agents_remember.worktrees.queue.closeout_queue import (
-    CloseoutQueueRequest,
-    QueueActor,
-    closeout_queue_tool,
-)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -41,12 +40,24 @@ from agents_remember.worktrees.worktree_contract import (
     contract_publication_text,
     default_contract,
     default_series_contract,
+    load_contract,
     write_contract,
+)
+from closeout_input_test_support import (
+    closeout_operation_input,
+    publish_closeout_finalization,
+    start_closeout_operation,
 )
 from test_source_lineage import _commit_on, _fixture, _git
 
 
-def _closed_leaf_worktree(fixture, _root: Path, *, candidate_commit: bool):
+def _closed_leaf_worktree(
+    fixture,
+    _root: Path,
+    *,
+    candidate_commit: bool,
+    publish_closeout_evidence: bool = True,
+):
     worktree = fixture.leaf_contract.code_worktree
     worktree.parent.mkdir(parents=True, exist_ok=True)
     _git(fixture.code_repo, "worktree", "add", worktree.as_posix(), "leaf")
@@ -55,7 +66,7 @@ def _closed_leaf_worktree(fixture, _root: Path, *, candidate_commit: bool):
         _git(worktree, "add", "candidate.txt")
         _git(worktree, "commit", "-m", "closed leaf candidate")
     _git(fixture.code_repo, "switch", "ar/master")
-    return replace(
+    closed = replace(
         fixture.leaf_contract,
         code_worktree=worktree,
         code_source_branch="ar/master",
@@ -65,9 +76,19 @@ def _closed_leaf_worktree(fixture, _root: Path, *, candidate_commit: bool):
         human_review_status="approved",
         code_commit=_git(worktree, "rev-parse", "HEAD"),
     )
+    write_contract(closed.contract_path, closed)
+    if publish_closeout_evidence:
+        return _publish_completed_closeout_fixture(fixture, closed)
+    fixture.leaf_contract = closed
+    return closed
 
 
-def _closed_external_leaf_worktrees(fixture, _root: Path):
+def _closed_external_leaf_worktrees(
+    fixture,
+    _root: Path,
+    *,
+    publish_closeout_evidence: bool = True,
+):
     memory_repo = fixture.leaf_contract.memory_repo_path
     assert memory_repo is not None
     code_worktree = fixture.leaf_contract.code_worktree
@@ -109,7 +130,41 @@ def _closed_external_leaf_worktrees(fixture, _root: Path):
         ledger_commit=ledger_commit,
     )
     write_contract(closed.contract_path, closed)
+    if publish_closeout_evidence:
+        return _publish_completed_closeout_fixture(fixture, closed)
+    fixture.leaf_contract = closed
     return closed
+
+
+def _publish_completed_closeout_fixture(fixture, closed: WorktreeContract) -> WorktreeContract:
+    """Attach the exact claimed-door/root-journal evidence integration now consumes."""
+
+    operation_input = closeout_operation_input(
+        closed,
+        config_path=fixture.config_path,
+        approval_note="approved closed integration fixture",
+    )
+    start_closeout_operation(operation_input, launcher=lambda *_: None)
+    store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "closeout"))
+    runtime = lifecycle_operation_worker.OperationRuntime(store)
+    runtime.start()
+    finalized = replace(
+        load_contract(closed.contract_path),
+        closeout_status="completed",
+        approved_for_commit=True,
+        human_review_status="approved",
+        code_commit=closed.code_commit,
+        memory_content_commit=closed.memory_content_commit,
+        ledger_commit=closed.ledger_commit,
+    )
+    write_contract(finalized.contract_path, finalized)
+    publish_closeout_finalization(runtime, finalized)
+    runtime.finish({"state": "closed"}, ok=True)
+    if finalized.kind == "series":
+        fixture.master_contract = finalized
+    else:
+        fixture.leaf_contract = finalized
+    return load_contract(finalized.contract_path)
 
 
 def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
@@ -348,8 +403,6 @@ def _record_atomic_leaf_landing(
         integrated_code_commit=code_commit,
         integrated_memory_content_commit=memory_content_commit,
         integrated_ledger_commit=ledger_commit,
-        queue_sprint_task_document="repo/sprint/task.json",
-        queue_candidate_task_document=fixture.leaf_ref.key,
     )
     write_contract(landed.contract_path, landed)
     fixture.leaf_contract = landed
@@ -393,10 +446,6 @@ def _record_additional_atomic_leaf_landing(
             first.integrated_ledger_commit,
         ),
     )
-    leaf_ref = TaskDocumentRef(
-        repository=series.repo_name,
-        path=f"master/{leaf_id.lower()}.json",
-    )
     landed = replace(
         leaf,
         parent_task_name=series.task_name,
@@ -411,8 +460,6 @@ def _record_additional_atomic_leaf_landing(
         integrated_code_commit=code_commit,
         integrated_memory_content_commit=memory_content_commit,
         integrated_ledger_commit=ledger_commit,
-        queue_sprint_task_document="repo/sprint/task.json",
-        queue_candidate_task_document=leaf_ref.key,
     )
     first_doc_path = fixture.coordination / "tasks" / "repo" / fixture.leaf_ref.path
     first_doc = read_task_doc(first_doc_path)
@@ -495,24 +542,6 @@ def _land_two_external_atomic_leaves(
     )
     _complete_atomic_master(fixture)
     return first, second
-
-
-def _acquire_atomic_blocker(fixture) -> None:
-    sprint_ref = TaskDocumentRef(repository="repo", path="sprint/task.json")
-    master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
-    closeout_queue_tool(
-        load_config(fixture.config_path),
-        CloseoutQueueRequest(
-            action="acquire-blocker",
-            sprint_task_document_ref=sprint_ref,
-            request_id="series-closeout-blocker",
-            expected_revision=0,
-            blocker_master_ref=master_ref,
-            rationale="Finish the isolated atomic block before its one super landing.",
-        ),
-        actor=QueueActor(role="orchestrator", task_document_ref=sprint_ref),
-        now="2026-08-15T00:00:00+00:00",
-    )
 
 
 def _atomic_three_spec(fixture, task_root: Path) -> start_contract.MasterSeriesContractSpec:

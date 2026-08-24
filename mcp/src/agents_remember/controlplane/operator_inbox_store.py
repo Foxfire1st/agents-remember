@@ -51,6 +51,22 @@ from agents_remember.kernel.primitives.inbox_backoff import (
 )
 
 
+def _unregistered_execution_report_ids(
+    current: Mapping[str, OperatorInboxEntry],
+    registered_execution_ids: frozenset[str],
+) -> frozenset[str]:
+    """Protect task-bound leaf turn reports until task-owned proof is durable."""
+
+    return frozenset(
+        entry.id
+        for entry in current.values()
+        if entry.id not in registered_execution_ids
+        and entry.messageKind == "turn-report"
+        and entry.senderRole in {"worker", "reviewer", "curator"}
+        and (entry.subjectTaskDocumentRef is not None or entry.taskDocumentRef is not None)
+    )
+
+
 class OperatorInboxStore:
     """Store operator responses in one workspace inbox log and filter by mailbox key."""
 
@@ -254,13 +270,27 @@ class OperatorInboxStore:
             self._replace_unlocked(kept)
             return len(records) - len(kept)
 
-    def compact(self, *, now: datetime) -> int:
-        """Prune consumed or expired interaction entries from the inbox log."""
+    def compact(
+        self,
+        *,
+        now: datetime,
+        registered_execution_ids: frozenset[str] = frozenset(),
+    ) -> int:
+        """Prune interactions only after task-bound turn reports have durable task proof."""
         with self._exclusive_access():
             records = self._read_unlocked()
             if not records:
                 return 0
-            keep_ids = inbox_keep_ids(records, now=now)
+            current = fold_operator_inbox_entries(records)
+            keep_ids = inbox_keep_ids(
+                records,
+                now=now,
+                current=current,
+                protected_ids=_unregistered_execution_report_ids(
+                    current,
+                    registered_execution_ids,
+                ),
+            )
             kept = [record for record in records if record.id in keep_ids]
             if len(kept) == len(records):
                 return 0
@@ -272,6 +302,7 @@ class OperatorInboxStore:
         *,
         now: datetime,
         reconcile: Callable[[dict[str, OperatorInboxEntry]], Mapping[str, str]],
+        registered_execution_ids: frozenset[str] = frozenset(),
     ) -> tuple[int, dict[str, OperatorInboxEntry], tuple[OperatorInboxEntry, ...]]:
         """Fold once, terminally resolve a reviewed subset, then compact under one file lock.
 
@@ -300,7 +331,15 @@ class OperatorInboxStore:
                 records.append(terminal)
                 current[entry_id] = terminal
                 resolved.append(terminal)
-            keep_ids = inbox_keep_ids(records, now=now, current=current)
+            keep_ids = inbox_keep_ids(
+                records,
+                now=now,
+                current=current,
+                protected_ids=_unregistered_execution_report_ids(
+                    current,
+                    registered_execution_ids,
+                ),
+            )
             kept_records = [record for record in records if record.id in keep_ids]
             kept_current = {
                 entry_id: entry for entry_id, entry in current.items() if entry_id in keep_ids

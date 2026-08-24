@@ -10,9 +10,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from agents_remember.models.queue.closeout_queue import (
-    MAX_QUEUE_SHORT_TEXT,
-    MAX_QUEUE_TEXT,
+from agents_remember.models.closeout_source import (
+    MAX_CLOSEOUT_SOURCE_SHORT_TEXT,
+    MAX_CLOSEOUT_SOURCE_TEXT,
     EvidenceFact,
     SchedulingGrade,
     SchedulingGradeInput,
@@ -24,6 +24,8 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
 
+MAX_QUEUE_SHORT_TEXT = MAX_CLOSEOUT_SOURCE_SHORT_TEXT
+MAX_QUEUE_TEXT = MAX_CLOSEOUT_SOURCE_TEXT
 PRIORITY_RANK = {"critical": 0, "high": 1, "normal": 2, "low": 3}
 MAX_CURATOR_SOURCE_CANDIDATES = 2048
 JUDGMENT_REGISTER_SECTION = "judgment register (canonical judgment authority)"
@@ -315,7 +317,10 @@ def canonical_grade(
     """Resolve a small caller assertion against both canonical planning registers."""
 
     if raw is None:
-        raise CloseoutQueueError("closeout-grade-required", "set-grade requires grade")
+        raise CloseoutQueueError(
+            "closeout-grade-required",
+            "closeout-door declaration requires a scheduling grade",
+        )
     try:
         asserted = SchedulingGradeInput.model_validate(raw)
     except ValidationError as exc:
@@ -379,32 +384,6 @@ def canonical_grade(
     return grade, digest, evidence
 
 
-def canonical_blocker_abort(
-    judgment_id: str | None,
-    *,
-    authority: GradeAuthority,
-    master_ref: TaskDocumentRef,
-    graph_revision: str,
-) -> None:
-    """Require a durable strategist/orchestrator judgment before abandoning an atomic block."""
-
-    key = (judgment_id or "").strip()
-    judgment = authority.judgments.get(key)
-    if (
-        judgment is None
-        or judgment.kind != "atomic-blocker-abort"
-        or judgment.subject != master_ref.key
-        or judgment.author not in {"strategist", "orchestrator"}
-        or judgment.decision != {"blocker": "abort", "graphRevision": graph_revision}
-    ):
-        raise CloseoutQueueError(
-            "atomic-blocker-abort-judgment-invalid",
-            "blocker abort requires an exact canonical strategist/orchestrator judgment for this master and graph revision",
-        )
-    for ref in judgment.evidence_refs:
-        _task_relative_evidence(authority.sprint.path.parent, ref, "blocker abort evidence")
-
-
 def _require_matching_judgment(
     asserted: SchedulingGradeInput,
     priority: PriorityAuthority,
@@ -417,7 +396,7 @@ def _require_matching_judgment(
     if judgment.author not in {"strategist", "orchestrator"}:
         raise CloseoutQueueError(
             "closeout-grade-author-refused",
-            "only strategist/orchestrator Judgment Register rows may grade queue candidates",
+            "only strategist/orchestrator Judgment Register rows may grade closeout candidates",
         )
     if judgment.subject != priority.subject:
         raise CloseoutQueueError(

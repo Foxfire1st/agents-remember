@@ -17,11 +17,11 @@ from agents_remember.kernel.memory_ledger import (
     find_unique_mapping,
     parse_ledger_text,
 )
+from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     IntegrationQualityCertification,
     OrganizationalTaskPublicationIntent,
 )
-from agents_remember.models.queue.closeout_queue import CloseoutCandidateRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, completion_blockers, render_markdown
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
@@ -83,7 +83,7 @@ class OrganizationalCompletionPublicationState:
 
 _COMPLETION_DECISION = "Complete organizational master at its certified final-leaf landing."
 _COMPLETION_RATIONALE_PREFIX = (
-    "The sprint queue proved every sibling landed, the full master gate passed "
+    "Canonical sibling contracts proved every sibling landed, the full master gate passed "
     "against the exact proposed super candidate, and the paired refs moved under "
     "one integration authority. completionFingerprint="
 )
@@ -111,8 +111,7 @@ class OrganizationalCompletionContext:
     topology: TaskDocumentTopology
     sprint: ResolvedTaskDocument
     master: ResolvedTaskDocument
-    candidate: CloseoutCandidateRecord
-    candidates: Mapping[str, CloseoutCandidateRecord]
+    candidate: CloseoutDoorGeneration
 
 
 @dataclass(frozen=True)
@@ -205,7 +204,7 @@ def _completion_scope(
         raise OrganizationalCompletionError(
             "organizational completion master is not owned by the bound sprint"
         )
-    if context.candidate.owningMaster != context.master.ref:
+    if context.candidate.owningMasterTaskDocumentRef != context.master.ref:
         raise OrganizationalCompletionError(
             "organizational completion candidate names a different owning master"
         )
@@ -215,12 +214,6 @@ def _completion_scope(
             "organizational completion candidate is not a canonical child of its master"
         )
     if completion_blockers(context.master.document):
-        return None
-    if any(
-        queued.taskDocumentRef != context.candidate.taskDocumentRef
-        and queued.owningMaster == context.master.ref
-        for queued in context.candidates.values()
-    ):
         return None
     source_branch = context.sprint.document.integrationBranch
     if not source_branch:
@@ -438,7 +431,7 @@ def require_published_organizational_master_completion(
     *,
     fingerprint: str,
 ) -> None:
-    """Prove the final logical edge after its queue candidate was consumed."""
+    """Prove the final logical edge from its claimed door and root-journal authority."""
 
     if document.status != "Completed" or not _has_completion_marker(
         document,
@@ -459,7 +452,7 @@ def _bytes_sha256(value: bytes) -> str:
 
 def _require_candidate_identity(
     contract: WorktreeContract,
-    candidate: CloseoutCandidateRecord,
+    candidate: CloseoutDoorGeneration,
     sprint_ref: TaskDocumentRef,
 ) -> None:
     integration_is_exact = contract.integration_status == "not-started" or (
@@ -472,11 +465,13 @@ def _require_candidate_identity(
         contract.kind != "leaf"
         or not integration_is_exact
         or contract.closeout_status != "completed"
-        or contract.queue_candidate_task_document != candidate.taskDocumentRef.key
-        or contract.queue_sprint_task_document != sprint_ref.key
+        or candidate.disposition != "claimed"
+        or contract.closeout_door != candidate
+        or candidate.sprintTaskDocumentRef != sprint_ref
+        or candidate.contractPath != contract.contract_path.as_posix()
     ):
         raise OrganizationalCompletionError(
-            "organizational completion candidate contract is not the certified leaf edge"
+            "organizational completion candidate is not the exact claimed leaf edge"
         )
     integration_targets(contract)
 
@@ -527,6 +522,7 @@ def _require_sibling_contract_identity(
     completing_contract = expected.completing_contract
     child_ref = expected.child_ref
     source_branch = expected.source_branch
+    door = contract.closeout_door
     if (
         contract.kind != "leaf"
         or contract.task_id != completing_contract.task_id
@@ -539,8 +535,10 @@ def _require_sibling_contract_identity(
         or contract.parent_task_name != completing_contract.parent_task_name
         or contract.parent_contract_path is not None
         or contract.memory_mode != completing_contract.memory_mode
-        or contract.queue_sprint_task_document != expected.sprint_ref.key
-        or contract.queue_candidate_task_document != child_ref.key
+        or door is None
+        or door.disposition != "claimed"
+        or door.sprintTaskDocumentRef != expected.sprint_ref
+        or door.taskDocumentRef != child_ref
         or contract.code_source_branch != source_branch
         or not contract.integrated_code_commit
         or contract.integrated_code_commit != contract.code_commit

@@ -4,22 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from agents_remember.models.queue.closeout_queue import (
+from agents_remember.models.closeout_projection import (
     MAX_CLOSEOUT_CANDIDATES,
+    CloseoutProjectionMember,
+)
+from agents_remember.models.queue.closeout_queue import (
     MAX_CLOSEOUT_GRAPH_EDGES,
     MAX_CLOSEOUT_MASTERS,
-    CloseoutQueueCandidateView,
-    CloseoutQueueState,
-    SchedulingGrade,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
     SprintExecutionNode,
+    TaskDocument,
     derived_leaf_placement,
     leaf_placement_facts,
 )
@@ -31,31 +33,6 @@ from agents_remember.tasks.document_refs import (
 
 from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
 from .closeout_queue_evidence import PRIORITY_RANK, GradeAuthority, planning_authorities
-
-
-def acquisition_facts(graph: QueueGraphContext, state: CloseoutQueueState) -> dict[str, Any]:
-    """In-flight organizational leafs observed at blocker acquisition (L13-R3).
-
-    Facts only — they inform the strategist/orchestrator start-anyway judgment; the
-    mechanism never decides from them. In-flight means the candidate holds or held
-    the landing lane past plain declaration.
-    """
-
-    in_flight = sorted(
-        (
-            {
-                "candidate": candidate.taskDocumentRef.key,
-                "owningMaster": candidate.owningMaster.key,
-                "state": candidate.state,
-            }
-            for candidate in state.candidates.values()
-            if candidate.state != "declared"
-            and (master := graph.masters.get(candidate.owningMaster)) is not None
-            and master.document.executionNature == "organizational"
-        ),
-        key=lambda row: row["candidate"],
-    )
-    return {"inFlightOrganizationalLeafs": in_flight}
 
 
 @dataclass(frozen=True)
@@ -81,6 +58,7 @@ def graph_context(
     sprint_ref: TaskDocumentRef,
     *,
     strict_registers: bool = True,
+    overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
 ) -> QueueGraphContext:
     """Resolve, validate, cap, and index one sprint execution graph.
 
@@ -90,7 +68,7 @@ def graph_context(
     """
 
     try:
-        sprint = topology.resolve(sprint_ref)
+        sprint = topology.resolve(sprint_ref, overrides)
     except TaskDocumentRefError as exc:
         raise CloseoutQueueError(
             exc.status,
@@ -120,7 +98,7 @@ def graph_context(
             f"sprint has more than {MAX_CLOSEOUT_GRAPH_EDGES} dependency edges; split it before queue admission",
         )
     try:
-        masters = topology.validate_execution_topology(sprint_ref)
+        masters = topology.validate_execution_topology(sprint_ref, overrides=overrides)
     except TaskDocumentRefError as exc:
         raise CloseoutQueueError(
             exc.status,
@@ -264,9 +242,8 @@ def predecessor_waiting_reasons(
     ]
 
 
-def ready_sort_key(graph: QueueGraphContext, view: CloseoutQueueCandidateView) -> tuple[Any, ...]:
+def ready_sort_key(graph: QueueGraphContext, view: CloseoutProjectionMember) -> tuple[Any, ...]:
     """Priority rank, then the candidate node's declaration order, then leaf identity."""
-    grade = cast(SchedulingGrade, view.grade)
     node = candidate_node(graph, view.owningMaster, view.taskDocumentRef)
     order = (
         graph.node_order[node]
@@ -277,7 +254,7 @@ def ready_sort_key(graph: QueueGraphContext, view: CloseoutQueueCandidateView) -
         )
     )
     return (
-        PRIORITY_RANK[grade.priority],
+        PRIORITY_RANK[view.priority],
         order,
         view.taskDocumentRef.key,
     )

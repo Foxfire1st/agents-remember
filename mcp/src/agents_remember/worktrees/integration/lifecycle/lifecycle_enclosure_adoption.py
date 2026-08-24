@@ -25,7 +25,7 @@ from agents_remember.worktrees.worktree_contract import load_contract
 ADOPTION_RECEIPT = "enclosure-adoption-receipt.json"
 _LEGACY_ARTIFACT = re.compile(
     r"^(?:closeout|integrate|direct-landing)-operation"
-    r"(?:\.generation-[1-9][0-9]*|\.successor-intent)?\.(?:json|log)$"
+    r"(?:\.generation-[1-9][0-9]*)?\.(?:json|log)$"
 )
 
 

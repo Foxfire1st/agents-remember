@@ -21,7 +21,7 @@ from closeout_input_test_support import (
     with_commit_proven,
     with_mutation_intent,
 )
-from test_lifecycle_operations import _contract, _integration_ready
+from test_lifecycle_operations import _completed_closeout_for_integration, _contract
 
 
 def test_failed_closeout_with_commit_proof_keeps_queue_ownership(tmp_path: Path) -> None:
@@ -48,7 +48,7 @@ def test_failed_closeout_with_commit_proof_keeps_queue_ownership(tmp_path: Path)
 
 
 def test_failed_irreversible_integration_keeps_queue_ownership(tmp_path: Path) -> None:
-    contract = _integration_ready(_contract(tmp_path))
+    contract = _completed_closeout_for_integration(_contract(tmp_path))
     operation_input = IntegrateOperationInput(
         configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
         contractPath=contract.contract_path.as_posix(),

@@ -6,10 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeAlias
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
 from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
+from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
+from agents_remember.worktrees.integration.atomic_series_terminal import (
+    AtomicSeriesTerminalPermit,
+    publish_atomic_series_terminal_under_authority,
+    require_atomic_series_terminal_permit,
+    require_atomic_series_terminal_release,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     memory_repository_default_branch,
     repository_default_branch,
@@ -17,10 +23,10 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
     contract_lifecycle_lease,
-    require_lifecycle_operation_compatible,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
+    terminal_contract_authority_if_present,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity
@@ -31,12 +37,6 @@ from agents_remember.worktrees.modules.terminal_validation import (
     legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
-)
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    AtomicSeriesTerminalPermit,
-    publish_atomic_series_terminal_under_authority,
-    require_atomic_series_terminal_permit,
-    require_atomic_series_terminal_release,
 )
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
 from agents_remember.worktrees.worktree_contract import (
@@ -546,6 +546,7 @@ def _removed_directories(
     contract, dry_run: bool, planned_removed: set[Path] | None = None
 ) -> dict[str, dict[str, object]]:
     reports_path = contract.worktree_group / ENCLOSURE_REPORTS_DIRECTORY
+    lifecycle_path = contract.worktree_group / ".lifecycle"
     reports = (
         {
             "path": reports_path.as_posix(),
@@ -556,13 +557,20 @@ def _removed_directories(
         if contract.kind == "series" and legacy_series_reports_is_child_enclosure(contract)
         else worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
     )
+    lifecycle = worktree_services().provider_lifecycle.remove_tree(
+        lifecycle_path,
+        dry_run=dry_run,
+    )
     if contract.kind == "series":
-        return {"reports": reports}
+        return {"reports": reports, "lifecycle": lifecycle}
     planned = set(planned_removed or ())
     if reports.get("removed") or reports.get("would_remove"):
         planned.add(reports_path.resolve())
+    if lifecycle.get("removed") or lifecycle.get("would_remove"):
+        planned.add(lifecycle_path.resolve())
     directories = {
         "reports": reports,
+        "lifecycle": lifecycle,
         "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned),
     }
     if contract.worktree_group.parent.exists():
@@ -626,28 +634,41 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
         raise RuntimeError("cleanup requires --approved after successful integration")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
-    archive_refusal = terminal_archive_required_result(
-        contract,
-        operation="worktree_cleanup",
-        dry_run=args.dry_run,
-    )
-    if archive_refusal.returncode != 0:
-        return archive_refusal
-    if contract.kind == "series":
-        require_atomic_series_terminal_release(contract)
-    require_terminal_worktree(contract, operation="worktree_cleanup")
-    if contract.integration_status != "completed":
-        raise RuntimeError("cleanup requires integration.status completed")
-    # 05m: carryover must have run first -- it reads the parked memory branch this step deletes.
-    # The signal is the official ledger (carryover_done), not a contract stamp; internal/disabled
-    # memory has nothing to carry and passes vacuously.
-    carried, _carried_at = carryover_done(contract)
-    if not carried:
-        raise RuntimeError(
-            "cleanup requires the exact landed memory mapping; create an open carryover "
-            "recovery leaf, close and integrate it, then retry cleanup before discarding the "
-            "parked memory branch"
+    terminal = terminal_contract_authority_if_present(contract)
+    if terminal is not None:
+        accepted_arguments = TerminalWorktreeCleanupArguments(
+            teardown_providers=args.teardown_providers
         )
+        if (
+            terminal.archive.cleanupOperation != "worktree_cleanup"
+            or terminal.archive.cleanupArguments != accepted_arguments
+        ):
+            return _terminal_archive_observation(
+                contract,
+                teardown_providers=args.teardown_providers,
+            )
+        if terminal.state == "cleanup-completed":
+            return _already_completed_cleanup(
+                contract,
+                teardown_providers=args.teardown_providers,
+            )
+        contract = terminal.archived_contract
+    else:
+        if contract.kind == "series":
+            require_atomic_series_terminal_release(contract)
+        require_terminal_worktree(contract, operation="worktree_cleanup")
+        if contract.integration_status != "completed":
+            raise RuntimeError("cleanup requires integration.status completed")
+        # 05m: carryover must have run first -- it reads the parked memory branch this step deletes.
+        # The signal is the official ledger (carryover_done), not a contract stamp; internal/disabled
+        # memory has nothing to carry and passes vacuously.
+        carried, _carried_at = carryover_done(contract)
+        if not carried:
+            raise RuntimeError(
+                "cleanup requires the exact landed memory mapping; create an open carryover "
+                "recovery leaf, close and integrate it, then retry cleanup before discarding the "
+                "parked memory branch"
+            )
     if not args.dry_run and worktree_services().provider_lifecycle.setup_running(contract):
         # Teardown must not race the live background setup thread (GitHub #53);
         # a dead thread surfaces as a stale heartbeat and does not block.
@@ -721,34 +742,55 @@ def _cleanup_with_guard(
     # The exact leaf fence remains held through every terminal output and publication.
     try:
         with contract_lifecycle_lease(contract):
-            require_lifecycle_operation_compatible(
+            terminal_archive = terminal_archive_required_result(
                 contract,
-                operation_kind=None,
-                publish_worker_exits=not args.dry_run,
+                operation="worktree_cleanup",
+                arguments=TerminalWorktreeCleanupArguments(
+                    teardown_providers=args.teardown_providers
+                ),
+                dry_run=args.dry_run,
+            )
+            if terminal_archive.returncode != 0:
+                return terminal_archive
+            terminal_authority = (
+                None
+                if args.dry_run
+                else terminal_contract_authority_if_present(
+                    load_contract(contract.contract_path)
+                )
             )
 
             def publish(
                 series_permit: AtomicSeriesTerminalPermit | None = None,
             ) -> WorktreeCommandResult:
                 current = load_contract(contract.contract_path)
-                if current != contract:
-                    raise RuntimeError("cleanup contract changed before terminal mutation")
+                if args.dry_run:
+                    if current != contract:
+                        raise RuntimeError("cleanup contract changed before preview")
+                else:
+                    terminal = terminal_contract_authority_if_present(current)
+                    if terminal is None:
+                        raise RuntimeError(
+                            "cleanup lost terminal archive authority before mutation"
+                        )
+                    current = terminal.archived_contract
                 outputs = _cleanup_terminal_outputs(
                     args,
                     current,
                     preflight,
                     series_permit=series_permit,
                 )
-                return _cleanup_outputs_result(args, current, preflight, guard, outputs)
+                result = _cleanup_outputs_result(args, current, preflight, guard, outputs)
+                return _with_terminal_archive(result, terminal_archive)
 
             if contract.kind == "series":
                 return publish_atomic_series_terminal_under_authority(
                     contract,
                     "worktree_cleanup",
                     publish,
+                    terminal_authority=terminal_authority,
                 )
-            with integration_authority_lock(contract.coordination_root, contract.repo_name):
-                return publish()
+            return publish()
     except Exception as error:
         return WorktreeCommandResult(
             2,
@@ -762,6 +804,64 @@ def _cleanup_with_guard(
                 "blockers": [{"terminal": "helper", "reason": str(error)}],
             },
         )
+
+
+def _terminal_archive_observation(
+    contract: WorktreeContract,
+    *,
+    teardown_providers: bool,
+) -> WorktreeCommandResult:
+    with contract_lifecycle_lease(contract):
+        return terminal_archive_required_result(
+            contract,
+            operation="worktree_cleanup",
+            arguments=TerminalWorktreeCleanupArguments(
+                teardown_providers=teardown_providers
+            ),
+            dry_run=False,
+        )
+
+
+def _already_completed_cleanup(
+    contract: WorktreeContract,
+    *,
+    teardown_providers: bool,
+) -> WorktreeCommandResult:
+    terminal_archive = _terminal_archive_observation(
+        contract,
+        teardown_providers=teardown_providers,
+    )
+    if terminal_archive.returncode != 0:
+        return terminal_archive
+    return _with_terminal_archive(
+        WorktreeCommandResult(
+            0,
+            {
+                "state": "already-clean",
+                **status_payload(contract),
+                "summary": _cleanup_summary("already-clean"),
+                "providers": {"state": "already-terminal"},
+                "removed_worktrees": {},
+                "branches": {},
+                "drift_snapshots": {},
+                "directories": {},
+                "blockers": [],
+                "kept_branches": {},
+                "alreadyTerminal": True,
+            },
+        ),
+        terminal_archive,
+    )
+
+
+def _with_terminal_archive(
+    result: WorktreeCommandResult,
+    terminal_archive: WorktreeCommandResult,
+) -> WorktreeCommandResult:
+    return WorktreeCommandResult(
+        result.returncode,
+        {**result.payload, "terminalArchive": terminal_archive.payload},
+    )
 
 
 def _cleanup_outputs_result(

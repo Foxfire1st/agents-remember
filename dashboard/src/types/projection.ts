@@ -105,12 +105,6 @@ export interface Analytics {
   toolReports: ToolReportNode[];
 }
 
-export interface AtomicBlockerNode {
-  acquiredBy: string;
-  master: TaskDocumentRef;
-  rationale: string;
-}
-
 export interface AttentionItem {
   detail?: string;
   enclosure?: string;
@@ -128,18 +122,30 @@ export interface AttentionItem {
 }
 
 export interface CloseoutCandidateNode {
-  candidateState: string;
-  gradePriority?: string;
+  classification: string;
+  generationId: string;
   owningMaster: TaskDocumentRef;
+  order: number;
+  priority: string;
   reasons: string[];
   taskDocumentRef: TaskDocumentRef;
 }
 
+export interface CloseoutProjectionProblemNode {
+  address: string;
+  errorType: string;
+  kind: string;
+  repairAction: string;
+  state: string;
+}
+
 export interface CloseoutQueueNode {
-  activeBlocker?: AtomicBlockerNode;
-  candidates: CloseoutCandidateNode[];
-  graphRevision: string;
+  members: CloseoutCandidateNode[];
   revision: number;
+  serviceCondition: string;
+  sourceClassification?: string;
+  sourceFingerprint?: string;
+  sourceProblems: CloseoutProjectionProblemNode[];
   sprintRef: TaskDocumentRef;
 }
 
@@ -151,6 +157,31 @@ export interface CommitRefNode {
   exists?: boolean;
   factState: ProcessFactState;
   path?: string;
+}
+
+export interface DiscardUnstartedProofNode {
+  commitState: string;
+  doorState: string;
+  enclosureState: string;
+  fingerprint: string;
+  locatorState: string;
+  operationState: string;
+  reviewState: string;
+  seatState: string;
+  taskDocumentRef: TaskDocumentRef;
+  taskState: string;
+  version: string;
+}
+
+export interface DiscardedSubTaskNode {
+  discardedAt: string;
+  disposition: string;
+  file: string;
+  name: string;
+  number: string;
+  proof: DiscardUnstartedProofNode;
+  reason: string;
+  scope: string;
 }
 
 export interface DriftSnapshotNode {
@@ -402,6 +433,8 @@ export interface SeriesNode {
   ageSeconds?: number;
   createdAt: string;
   decisions: TaskDecisionNode[];
+  discardedCount: number;
+  discardedSubTasks: DiscardedSubTaskNode[];
   docPath: string;
   doneCount: number;
   objective: string;
@@ -513,6 +546,8 @@ export interface TaskDocNode {
   currentStep?: string;
   decisions: TaskDecisionNode[];
   design?: string;
+  discardedCount?: number;
+  discardedSubTasks?: DiscardedSubTaskNode[];
   docPath: string;
   executionGraph?: TaskExecutionGraphNode;
   executionGraphView?: TaskExecutionGraphView;

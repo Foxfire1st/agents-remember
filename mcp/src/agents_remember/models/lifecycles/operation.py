@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.base import StrictResponseModel
 from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout_projection import TaskDocProjectionEffect
 from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
     DirectLandingOperationInput,
@@ -108,7 +109,7 @@ class OrganizationalTaskPublicationIntent(BaseModel):
 
 
 class IntegrationPublicationIntent(BaseModel):
-    """Journal authority transferred from one certified queue projection."""
+    """Journal authority transferred from one claimed door and source operation."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -117,28 +118,32 @@ class IntegrationPublicationIntent(BaseModel):
     preparedAt: str = Field(min_length=1, max_length=128)
     claimState: Literal["not-applicable", "intent", "proven"]
     claimTransferredAt: str | None = Field(default=None, min_length=1, max_length=128)
-    queueSprintTaskDocument: str = Field(default="", max_length=4096)
-    queueCandidateTaskDocument: str = Field(default="", max_length=4096)
-    queueCandidateSha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
-    closeoutDoorGenerationId: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
-    closeoutOperationFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
-    closeoutOperationKey: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    sprintTaskDocument: str = Field(default="", max_length=4096)
+    candidateTaskDocument: str = Field(default="", max_length=4096)
+    doorGenerationId: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    sourceOperationKind: LifecycleOperationKind | None = None
+    sourceOperationGeneration: int | None = Field(default=None, ge=1)
+    sourceOperationFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    sourceOperationKey: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    sourceJournalSha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
     organizationalCompletion: OrganizationalTaskPublicationIntent | None = None
 
     @model_validator(mode="after")
-    def _queue_identity_is_complete(self) -> IntegrationPublicationIntent:
+    def _source_identity_is_complete(self) -> IntegrationPublicationIntent:
         cells = (
-            self.queueSprintTaskDocument,
-            self.queueCandidateTaskDocument,
-            self.queueCandidateSha256,
-            self.closeoutDoorGenerationId,
-            self.closeoutOperationFingerprint,
-            self.closeoutOperationKey,
+            self.sprintTaskDocument,
+            self.candidateTaskDocument,
+            self.doorGenerationId,
+            self.sourceOperationKind,
+            self.sourceOperationGeneration,
+            self.sourceOperationFingerprint,
+            self.sourceOperationKey,
+            self.sourceJournalSha256,
         )
         if any(cells) != all(cells):
-            raise ValueError("integration publication queue claim identity is partial")
-        if bool(self.queueCandidateSha256) != (self.claimState != "not-applicable"):
-            raise ValueError("integration publication claim state contradicts queue identity")
+            raise ValueError("integration publication source claim identity is partial")
+        if bool(self.doorGenerationId) != (self.claimState != "not-applicable"):
+            raise ValueError("integration publication claim state contradicts source identity")
         if (self.claimState == "proven") != (self.claimTransferredAt is not None):
             raise ValueError("proven integration claim transfer requires its timestamp")
         return self
@@ -339,6 +344,10 @@ class LifecycleOperationRecord(BaseModel):
     predecessorFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
     successorFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
     generationDisposition: Literal["active", "cancelled", "retired", "superseded"] = "active"
+    supersedeDeclarationFingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     integrationAuthority: IntegrationOperationAuthority | None = None
     input: LifecycleOperationInput
     status: LifecycleOperationStatus
@@ -368,7 +377,10 @@ class LifecycleOperationRecord(BaseModel):
     integrationPublication: IntegrationPublicationIntent | None = None
     organizationalRepair: OrganizationalCompletionRepairEvidence | None = None
     doorPublication: DoorPublicationEvidence | None = None
-    doorPublicationHistory: list[DoorPublicationEvidence] = Field(default_factory=list)
+    doorPublicationHistory: list[DoorPublicationEvidence] = Field(
+        default_factory=list,
+        max_length=256,
+    )
     directLandingLedgerIntent: DirectLandingLedgerIntent | None = None
     attempt: int = Field(default=1, ge=1)
     workerPid: int | None = Field(default=None, ge=1)
@@ -394,10 +406,10 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
         raise ValueError("lifecycle operation kind must equal its accepted input kind")
     if record.operationKind != "direct-landing" and record.directLandingLedgerIntent is not None:
         raise ValueError("direct landing ledger intent belongs only to direct landing")
-    if record.operationKind != "closeout" and (
+    if record.operationKind not in {"closeout", "direct-landing"} and (
         record.doorPublication is not None or record.doorPublicationHistory
     ):
-        raise ValueError("closeout door publication belongs only to closeout operations")
+        raise ValueError("door publication belongs only to schedulable commit operations")
     if record.operationKind == "integrate" and record.integrationAuthority is None:
         raise ValueError("integrate operation requires exact integrationAuthority")
     if record.operationKind != "integrate" and record.integrationAuthority is not None:
@@ -667,3 +679,4 @@ class LifecycleOperationProjection(StrictResponseModel):
     cancellable: bool = False
     generation: int | None = None
     legalControls: list[dict[str, Any]] = Field(default_factory=list)
+    projectionEffects: list[TaskDocProjectionEffect] = Field(default_factory=list, max_length=8)

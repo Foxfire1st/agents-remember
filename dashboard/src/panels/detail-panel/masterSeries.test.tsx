@@ -69,6 +69,64 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(queryByText("No task document bound to this task.")).toBeNull();
   });
 
+  it("renders discarded-before-start history separately from the live sub-task index", () => {
+    const master = taskDoc({
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Audited planning master",
+      docPath: "/tasks/repo-a/planning/task.json",
+      objective: "Keep planning removal visible without inventing completion.",
+      subTasks: [
+        {
+          number: "1",
+          name: "Live planning leaf",
+          file: "01_live.md",
+          status: "planning",
+          scope: "",
+        },
+      ],
+      discardedCount: 1,
+      discardedSubTasks: [
+        {
+          number: "2",
+          name: "Never started",
+          file: "02_never_started.md",
+          scope: "retired planning work",
+          disposition: "discard-unstarted",
+          reason: "No implementation was needed",
+          discardedAt: "2026-08-24T12:00:00+00:00",
+          proof: {
+            version: "task-unstarted-evidence/v1",
+            taskDocumentRef: {
+              repository: "repo-a",
+              path: "planning/02_never_started.json",
+            },
+            taskState: "planning-unstarted",
+            enclosureState: "absent",
+            locatorState: "absent",
+            doorState: "absent",
+            operationState: "absent",
+            seatState: "absent",
+            reviewState: "absent",
+            commitState: "absent",
+            fingerprint: "a".repeat(64),
+          },
+        },
+      ],
+    });
+    seedTaskDocuments([master]);
+
+    const { getByTestId, getByText } = render(
+      <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/task.json" />,
+    );
+
+    expect(getByText("Discarded before start (1)")).toBeTruthy();
+    const discarded = getByText("2. Never started").closest("li");
+    expect(discarded?.textContent).toContain("No implementation was needed");
+    expect(discarded?.textContent).toContain("proof " + "a".repeat(64));
+    expect(getByTestId("subtask-open-1").textContent).toContain("1. Live planning leaf");
+  });
+
   it("opens authored master leaves from the full projected pool when the master is lifecycle-bound", () => {
     const lc: LifecycleProjection = {
       id: "ROOT",

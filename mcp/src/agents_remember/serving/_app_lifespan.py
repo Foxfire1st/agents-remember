@@ -124,6 +124,14 @@ def _agent_notifier_context(
         event_store=EventStore(root),
         heartbeat_store=runtime.heartbeat_store,
         coordination_root=runtime.config.coordination_root,
+        register_execution_evidence=(
+            None
+            if runtime.register_inbox_execution_evidence is None
+            else partial(
+                runtime.register_inbox_execution_evidence,
+                runtime.config.coordination_root,
+            )
+        ),
         stale_seat_seconds=max(settings.agent_notifier.interval_seconds * 4, 60.0),
         redeliver_rate_limit_seconds=settings.agent_notifier.redeliver_rate_limit_seconds,
         signal_cooldown_seconds=settings.agent_notifier.signal_cooldown_seconds,

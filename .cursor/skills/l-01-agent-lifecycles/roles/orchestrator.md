@@ -154,7 +154,7 @@ architect/developer hand-off; the developer review concentrates at the super PR/
 through the architect. The table's integration row governs when a hand-off DOES happen (solo runs;
 a raised durable gate):
 
-| Junction | Parked durable gate `kind` | Hands off via |
+| Junction | Durable gate `kind` | Hands off via |
 | --- | --- | --- |
 | design acceptance / plan gate | `plan-approval` | architect decision item |
 | worktree intent | `worktree-intent` | `c-09-git-worktree-manager` |
@@ -164,9 +164,10 @@ a raised durable gate):
 | cleanup / finalization | `cleanup-approval` | `c-09` / `c-12` |
 | any other developer-worthy wait | `agent-question` | architect decision item |
 
-`closeout-approval` **is** the commit hand-off. The block-and-wait `lifecycle_gate` +
-`lifecycle_resume` pair remains the parked fallback for a durable, mutation-blocking approval
-record; when developer attention is needed, the architect is the relay that presents it.
+`closeout-approval` **is** the commit hand-off when that human-pinned gate is explicitly present.
+It gates only the addressed closeout admission and never freezes task authoring or becomes an
+operation-recovery mechanism. When developer attention is needed, the architect is the relay that
+presents it.
 
 ## Design Boundary — Ask The Architect
 
@@ -269,16 +270,25 @@ If the plane cannot create or resolve this edge, stop and surface the missing pr
 hand-roll the branch as a hidden fallback.
 
 **Execution loop — recompute after every material event.** The control plane supplies mechanical
-facts: graph validity, derived waves, completed predecessors, candidate readiness, lineage, gates,
-and changed routes/seams. This seat supplies judgment: accepted priority grade, urgency changes,
-and whether new evidence requires a graph/classification reshape. Build the legal ready frontier
-from the graph; never rank a blocked node. Choose among ready candidates by the recorded
-**critical / high / normal / low** grade, then use the graph's stable node order as a deterministic
-tie-break only. Recompute after every candidate declaration, invalidation, landing, blocker change,
-or accepted reprioritization. Before an ordinary priority or queue judgment changes selection,
-record its rationale, evidence, author, confidence, and supersession in the sprint decision log and
-the orchestration task's Judgment Register. The record makes judgment visible; it does not turn the
-mechanism into the judge.
+facts: graph validity, derived waves, completed predecessors, current closeout-door generations,
+closeout-projection validity, lineage, gates, and changed routes/seams. This seat supplies judgment:
+accepted priority grade, urgency changes, and whether new evidence requires a graph/classification
+reshape. Build the legal graph frontier first; never rank a blocked node. For each sprint, call
+`closeout_queue(request={action:"status", sprint_task_document_ref:...})`. A missing, malformed,
+source-mismatched, or `invalid-empty`
+projection is non-admitting: execute its exact sprint-addressed `rebuild` action and read status
+again. A `valid-built` projection contains only current `waiting` door generations. Select only its
+`firstReadyGenerationId`, ordered by the accepted **critical / high / normal / low** grade and the
+stable graph tie-break.
+
+Recompute after every task mutation's `projectionEffects`, door declaration/disposition/provenance
+change, landing, atomic-blocker change, or accepted reprioritization. The task mutation is already
+authoritative; projection rebuilding is follow-up work, never a reason to refuse, roll back, or
+freeze it. Before an ordinary priority judgment changes selection, record its rationale, evidence,
+author, confidence, and supersession in the sprint decision log and the orchestration task's
+Judgment Register, then publish the changed grade through the door owner and rebuild. The record
+makes judgment visible; it does not turn the projection into the judge. Never patch, demote,
+tombstone, replan, or drain an old projection row.
 
 Dispatch independent ready organizational masters and their build work in parallel up to
 `orchestration.concurrency.maxParallelMasters`. An atomic master is an exclusive block: acquire it
@@ -299,6 +309,12 @@ round that failed to shrink the finding set — the convergence rule, `../SKILL.
 Loop): this seat either re-runs the loop at ITS level (the orchestrator-level agent set — the
 strongest models) or, when the blocker is a quo-vadis truth, emits a decision item to the
 architect. This spawned backend seat does not run flat hat-collapse (see The Hat-Collapse Rule).
+
+The atomic blocker and landing lane serialize only conflicting protected-ref movement. They cannot
+veto task creation, replacement, progress/checkmarks, requirements/decisions/sections, route review,
+graph/linkage, attach/detach/reparent/removal, or sprint completion. Process those writes normally,
+then consume their per-scope projection effects. A present-unreadable landing owner fails closed
+for that exact conflicting landing, not for planning elsewhere.
 
 **Delegated series authority:** after the developer accepts the orchestration plan, this seat owns
 subordinate execution without repeated developer formality. Managers may close out and integrate
@@ -344,10 +360,13 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 **Landing duty — one super line, two execution natures.** Per ready candidate:
 
 1. Consume the manager's readiness or handover packet: execution nature, canonical refs,
-   change-set summary, targeted acceptance, verdict, route/seam facts, lineage, ledger state,
-   blockers, risks, and dependent nodes.
-2. Recompute the ready frontier and release only a legal candidate. A manager reports facts; it
-   never selects against another master.
+   waiting door generation, change-set summary, targeted acceptance, verdict, route/seam facts,
+   lineage, ledger state, blockers, risks, and dependent nodes.
+2. Recompute the graph frontier and current valid-built closeout projection, then release only its
+   exact first-ready generation. A manager publishes door facts; it never selects against another
+   master. Claim is a short task/door CAS inside `worktree_closeout_apply`; after claim, all
+   attempt/worker/commit/recovery evidence belongs to the operation journal even if the projection
+   is later invalidated or absent.
 3. **Organizational:** release one reviewed leaf closeout against the current super source. Ordinary
    leaves land their targeted-certified commits directly. For the final leaf, build the exact
    proposed super candidate, run the repository's full acceptance once **before** moving super,
@@ -359,7 +378,9 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 5. Map the external-memory edge with the code edge. Prefer ancestry-preserving fast-forward/replay;
    carry-over is an explicit recovery for unavoidable divergence, not a routine consequence of
    parallel organizational work.
-6. Record the new super tips and queue event durably, release or retain the blocker, and recompute.
+6. Record the new super tips in their owning Git/ledger/operation evidence, publish any resulting
+   task or door disposition change, rebuild affected projections, release or retain the exact
+   landing blocker, and recompute. Do not retain a terminal or certified queue row for audit.
 7. **Close completed subordinate seats; retain the manager owner** —
    `lifecycle_finalize_task` retries the default-on completion cleanup for report-bearing
    worker/reviewer/curator seats of its exact leaf: normal retirement kills tmux while preserving
@@ -414,13 +435,16 @@ approval**.
 overlap found during planning becomes a cited predecessor edge or an atomic foundation master
 implemented first. *Late:* return the repair to the leaf that owns the change, or create a scoped
 fix leaf when it is genuinely new work; refresh it from current super, review it, and re-enter the
-queue. Direct feature/fix commits on main, super, or an atomic integration branch are forbidden;
+door/projection path with new proven provenance. Direct feature/fix commits on main, super, or an
+atomic integration branch are forbidden;
 only plane-owned ref movement and narrowly scoped conflict-resolution commits belong there.
 
-**Mechanization boundary:** the typed graph and execution-nature schema are current authority.
-Queue persistence and nature-specific branch enforcement land through the dedicated execution
-leaves of this design. Until a required primitive exists, fail closed and report the gap; never
-approximate it with direct Git edits on an integration branch.
+**Mechanization boundary:** the typed graph and execution-nature schema own task ordering; door
+generations own closeout intent; the closeout queue is a disposable waiting-only projection; the
+enclosure-root journal owns accepted-operation lifecycle; and the landing lane owns protected-ref
+movement and atomic exclusion only. If any owner is unreadable, fail closed only at its own
+boundary and report the task-addressed repair. Never approximate a missing primitive with direct
+Git, task freezes, queue lifecycle rows, scanned journals, or compatibility readers.
 
 **Super exit & landing tail — the architect-mediated SINGLE review point (ruled 2026-07-06, resolves
 L8-Q9):** all organizational leaf→super and atomic master→super landings are

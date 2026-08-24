@@ -63,6 +63,7 @@ PUBLIC_TOOLS = (
     "lifecycle_finalize_task",
     "task_doc",
     "task_reopen",
+    "closeout_door",
     "closeout_queue",
     "lifecycle_gate",
     "gate_decide",

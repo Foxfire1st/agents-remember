@@ -29,13 +29,11 @@ import difflib
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature
@@ -72,19 +70,16 @@ from agents_remember.tasks.serving_preflight import (
     TopologyServingBuildError,
     require_serving_topology_schema,
 )
-from agents_remember.worktrees.integration.integration_branch_authority import (
-    require_topology_migration_authority,
-)
 
 from .task_doc_publication import (
     TaskDocPublicationTransaction,
-    publish_task_doc_transaction,
+    preview_task_doc_transaction_projection_effects,
+    publish_task_doc_transaction_and_refresh,
+    task_doc_scope_changes,
     validate_task_doc_transaction,
 )
-from .task_doc_queue_scope import QueuePublicationScope
 from .task_execution_topology import (
     ExecutionTopologyError,
-    require_commanded_masters_completed,
     verify_sprint_judgment_ids,
 )
 
@@ -248,21 +243,23 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "executionNatureAsserted": candidate_master is not None,
     }
     if request.dry_run:
-        validate_task_doc_transaction(
-            _publication_transaction(
-                request,
-                sprint_ref,
-                overrides,
-                (sprint_source, master_source),
-                lambda: [],
-            )
+        transaction = _publication_transaction(
+            request,
+            overrides,
+            (sprint_source, master_source),
+            lambda: [],
         )
+        validate_task_doc_transaction(transaction)
+        result["projectionEffects"] = [
+            effect.model_dump(mode="json")
+            for effect in preview_task_doc_transaction_projection_effects(transaction)
+        ]
         result["dryRun"] = True
         result["documents"] = [
             _document_preview(ref, root, document) for ref, root, document in documents
         ]
         return result
-    result["documents"] = _publish(
+    published_documents, effects = _publish(
         request,
         _LinkagePublication(
             topology=topology,
@@ -272,6 +269,8 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
             source_snapshots=(sprint_source, master_source),
         ),
     )
+    result["documents"] = published_documents
+    result["projectionEffects"] = effects
     return result
 
 
@@ -316,21 +315,23 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "masterResolved": master is not None,
     }
     if request.dry_run:
-        validate_task_doc_transaction(
-            _publication_transaction(
-                request,
-                sprint_ref,
-                overrides,
-                (sprint_source, master_source),
-                lambda: [],
-            )
+        transaction = _publication_transaction(
+            request,
+            overrides,
+            (sprint_source, master_source),
+            lambda: [],
         )
+        validate_task_doc_transaction(transaction)
+        result["projectionEffects"] = [
+            effect.model_dump(mode="json")
+            for effect in preview_task_doc_transaction_projection_effects(transaction)
+        ]
         result["dryRun"] = True
         result["documents"] = [
             _document_preview(ref, root, document) for ref, root, document in documents
         ]
         return result
-    result["documents"] = _publish(
+    published_documents, effects = _publish(
         request,
         _LinkagePublication(
             topology=topology,
@@ -340,6 +341,8 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
             source_snapshots=(sprint_source, master_source),
         ),
     )
+    result["documents"] = published_documents
+    result["projectionEffects"] = effects
     return result
 
 
@@ -691,24 +694,10 @@ def _validate_candidate(
         else:
             # The L13 atomic-sequential default governs a graph-less sprint; only the
             # typed linkage cross-check applies (L14-R5).
+            topology.commanded_masters(sprint, overrides=overrides)
             topology.validate_sprint_linkage(sprint_ref, overrides=overrides)
     except TaskDocumentRefError as exc:
         raise SprintLinkageError(f"{exc.status}: {exc}") from exc
-
-
-def _require_publication_authority(
-    request: SprintLinkageRequest, overrides: dict[TaskDocumentRef, TaskDocument]
-) -> None:
-    try:
-        require_topology_migration_authority(
-            request.coordination_root,
-            request.repo_id,
-            request.code_repository,
-            request.memory_repository,
-            overrides,
-        )
-    except RuntimeError as exc:
-        raise SprintLinkageError(str(exc)) from exc
 
 
 def _batch_graph_titles(
@@ -726,56 +715,49 @@ def _batch_graph_titles(
 def _publish(
     request: SprintLinkageRequest,
     batch: _LinkagePublication,
-) -> list[dict[str, Any]]:
-    def publication() -> list[tuple[Path, Path]]:
-        return publish_task_doc_transaction(
-            _publication_transaction(
-                request,
-                batch.sprint_ref,
-                batch.overrides,
-                batch.source_snapshots,
-                lambda: write_task_doc_batch(
-                    [(root, document) for _ref, root, document in batch.documents],
-                    graph_titles=_batch_graph_titles(batch.documents),
-                ),
-            )
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    publication = publish_task_doc_transaction_and_refresh(
+        _publication_transaction(
+            request,
+            batch.overrides,
+            batch.source_snapshots,
+            lambda: write_task_doc_batch(
+                [(root, document) for _ref, root, document in batch.documents],
+                graph_titles=_batch_graph_titles(batch.documents),
+            ),
         )
-
-    queue = CloseoutQueueStore(request.coordination_root, batch.sprint_ref)
-    written = queue.publish_sprint_update(
-        publication,
-        completed=batch.overrides[batch.sprint_ref].status == "Completed",
-        recorded_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
-        validate_completion=lambda: require_commanded_masters_completed(
-            batch.topology, batch.sprint_ref, batch.overrides
-        ),
     )
-    return [
+    documents = [
         {
             "taskDocumentRef": ref.model_dump(mode="json"),
             "docPath": json_path.as_posix(),
             "renderedPath": markdown_path.as_posix(),
         }
         for (ref, _root, _document), (json_path, markdown_path) in zip(
-            batch.documents, written, strict=True
+            batch.documents, publication.written, strict=True
         )
     ]
+    effects = [effect.model_dump(mode="json") for effect in publication.projection_effects]
+    return documents, effects
 
 
 def _publication_transaction(
     request: SprintLinkageRequest,
-    sprint_ref: TaskDocumentRef,
     overrides: dict[TaskDocumentRef, TaskDocument],
     source_snapshots: tuple[TaskDocSourceSnapshot, ...],
     publisher: Callable[[], list[tuple[Path, Path]]],
 ) -> TaskDocPublicationTransaction:
     return TaskDocPublicationTransaction(
-        request.coordination_root,
-        request.repo_id,
-        source_snapshots,
-        QueuePublicationScope(sprint_ref, None),
-        lambda: _require_publication_authority(request, overrides),
-        publisher,
+        coordination_root=request.coordination_root,
+        target_repo_id=request.repo_id,
+        source_snapshots=source_snapshots,
+        scope_changes=task_doc_scope_changes(
+            request.coordination_root,
+            request.repo_id,
+            overrides,
+            source_snapshots,
+        ),
+        publisher=publisher,
     )
 
 

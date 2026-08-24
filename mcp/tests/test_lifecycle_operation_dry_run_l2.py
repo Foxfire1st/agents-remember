@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
-import pytest
 from agents_remember.application.worktree_tools import (
     OperationControlRequest,
     worktree_operation_control_tool,
@@ -115,58 +114,6 @@ def test_control_dry_run_projects_dead_sibling_without_publishing_exit(
     assert _byte_tree(tmp_path) == before
     durable_closeout = closeout_store.read()
     assert durable_closeout is not None and durable_closeout.workerPid == 4242
-
-
-def test_dry_run_compatibility_uses_pending_successor_as_current_authority(
-    tmp_path: Path,
-) -> None:
-    contract, _operation_input, store, _record = _dirty_closeout(tmp_path)
-    terminal = store.update(
-        lambda current: current.model_copy(
-            update={
-                "status": "failed",
-                "phase": "failed",
-                "finishedAt": "2026-08-23T01:00:00+00:00",
-            }
-        )
-    )
-    candidate = terminal.model_copy(
-        update={
-            "fingerprint": "e" * 64,
-            "operationKey": "f" * 64,
-            "status": "queued",
-            "phase": "queued",
-            "finishedAt": None,
-            "failure": None,
-        }
-    )
-    with (
-        mock.patch.object(
-            LifecycleOperationStore,
-            "_archive_generation",
-            side_effect=OSError("retain accepted successor WAL"),
-        ),
-        pytest.raises(OSError, match="retain accepted successor WAL"),
-    ):
-        store.replace_terminal(candidate)
-    pending = store.read_successor_intent()
-    assert pending is not None and pending.successor.status == "queued"
-    before = _byte_tree(tmp_path)
-
-    with pytest.raises(RuntimeError, match="closeout"):
-        require_lifecycle_operation_compatible(
-            contract,
-            operation_kind="integrate",
-            publish_worker_exits=False,
-        )
-    assert _byte_tree(tmp_path) == before
-    with pytest.raises(RuntimeError, match="closeout"):
-        require_lifecycle_operation_compatible(
-            contract,
-            operation_kind="integrate",
-            publish_worker_exits=True,
-        )
-    assert store.read_successor_intent() == pending
 
 
 def test_only_mutating_compatibility_publishes_proven_terminal_worker_exit(

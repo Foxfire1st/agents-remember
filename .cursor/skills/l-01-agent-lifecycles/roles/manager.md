@@ -2,7 +2,8 @@
 
 > One master, one seat, self-contained. The manager lifecycle drives exactly one organizational or
 > atomic master: dispatch a fresh worker per leaf, review turn reports, decide delegated leaf
-> gates, report closeout-ready candidates, and execute only the landings the orchestrator releases.
+> gates, publish contract-owned closeout-door generations, and execute only the landings the
+> orchestrator releases.
 > Your **brief is your session start**.
 >
 > Drawn as the **MANAGER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
@@ -65,9 +66,10 @@ The **default agent behavior stands**: **fulfill the task, fill small blanks.** 
 creative-liberty prompting in either direction** — it is neither pushed to reshape nor forced to the
 letter. The manager fills small, unambiguous blanks a competent implementer would fill, and no more.
 When a clarification arrives mid-master, run `../SKILL.md`'s Developer Clarification Triage against
-the current leaf queue before recording it as a note. Same-leaf or same-master refinements that are
-small and fit the current change are implementation work; later-release, separate-subsystem, or
-dependency-blocked items are future queue; unclear fit escalates one rung instead of guessing.
+the current master plan and leaf backlog before recording it as a note. Same-leaf or same-master
+refinements that are small and fit the current change are implementation work; later-release,
+separate-subsystem, or dependency-blocked items are future backlog; unclear fit escalates one rung
+instead of guessing. This planning vocabulary is distinct from the disposable closeout projection.
 
 > **The spirit test does NOT apply to this seat.** It is orchestrator-only. A manager's changes can
 > collide with what it cannot see, so a **plan delta beyond blank-filling escalates to the
@@ -173,14 +175,27 @@ stops belong to the orchestrator via the system-specialist protocol.
   verdict + current source-lineage proof + curator coherence pass**. Closeout and integration still
   re-prove lineage after their long quality work; the pre-curator proof prevents wasted or stale
   onboarding, while the exit proof closes the later time-of-check/time-of-use window.
-- **Declare closeout readiness; do not rank the portfolio.** Once the leaf has builder completion,
-  a current candidate-bound route verdict, curator reconciliation, and current lineage, publish one
-  durable readiness row to the orchestrator. Include the canonical leaf/master refs,
-  `executionNature`, routes and seams touched, local blockers, acceptance state, and any
-  plan-recorded urgency evidence. These are facts. Do not assign or change cross-master priority,
-  release another manager, or close out before the orchestrator grants this candidate from the
-  recomputed ready frontier. A later source move invalidates readiness and returns the same leaf to
-  sync/review; it does not justify carry-over by default.
+- **Publish closeout-door truth; do not rank the portfolio.** Once the leaf has builder completion,
+  a current candidate-bound route verdict, curator reconciliation, current task/source/memory/ledger
+  provenance, and current lineage, call the `closeout_door` MCP tool with a
+  `request={action:"declare", contract_path:...}` for the configured leaf contract. Publish the
+  canonical leaf/master/sprint refs, `executionNature`,
+  accepted priority grade, exact candidate tree, routes/seams, and complete admission evidence as
+  the door generation—not as a queue row or chat-only readiness claim. Declaration retries with the
+  same intent converge. The resulting `waiting` generation is source truth; the closeout queue is
+  only its current schedulable projection. Do not assign or change cross-master priority, release
+  another manager, claim the generation, or close out before the orchestrator grants the current
+  first-ready generation from a `valid-built` projection. A later source move requires
+  `worktree_sync`, any necessary delta review/curation, and
+  `closeout_door(request={action:"update-provenance", ...})`; it does not mutate an old queue row
+  or justify carry-over by default.
+- **Task authoring remains authoritative.** Continue every intrinsically valid `task_doc` mutation
+  during every door, projection, and operation phase. Read the returned `projectionEffects` for the
+  before/after governing-sprint union. If an effect carries `nextAction`, send that exact
+  sprint-addressed rebuild fact to the orchestrator; never reject, roll back, whitelist, or delay the
+  task write because a closeout generation exists. Task edits do not change scheduling intent
+  secretly: any affected waiting generation is re-proven, deferred, resumed, withdrawn, or replaced
+  through its door owner before it can reappear in a fresh projection.
 - **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
   (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
   **owning agent never self-approves; a distinct configured role may** — that configured role is the
@@ -203,7 +218,10 @@ stops belong to the orchestrator via the system-specialist protocol.
   escalate to the orchestrator). Absent a durable gate, the **series' standing approval** governs:
   the developer's portfolio-gate approval of this series, recorded in the planner master's
   decision log, covers orchestrator-released leaf integrations. Loop until the master's leaves are
-  done; an atomic master exposes nothing to super between leaves.
+  done; an atomic master exposes nothing to super between leaves. Once claim transfers the
+  generation into the enclosure-root operation journal, observe and recover it only through
+  `worktree_status` and advertised `worktree_operation_control` actions. Queue absence,
+  invalid-empty state, or later task edits never erase or strand that operation.
 - **Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
   acceptance exactly once, and leaf integration lands that exact certified commit without
   rerunning it. The repository-prescribed full check runs exactly once per master at its completion

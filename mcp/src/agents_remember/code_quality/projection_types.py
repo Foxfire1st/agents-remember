@@ -34,7 +34,7 @@ DEFINITION_RENAMES = {
     "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
 }
 NULL_PRESERVING_MODELS = frozenset({"AgentNotifierHeartbeatPayload"})
-SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
+SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "maxItems", "title"})
 SCHEMA_KEYWORDS = SCHEMA_ANNOTATION_KEYWORDS | {
     "$defs",
     "$ref",

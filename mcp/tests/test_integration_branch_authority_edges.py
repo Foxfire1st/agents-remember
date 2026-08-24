@@ -47,7 +47,6 @@ from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.git import branch_exists, ensure_worktree
 from agents_remember.worktrees.modules.integrate import integrate_result
 from agents_remember.worktrees.modules.startup import start_contract
-from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -62,7 +61,6 @@ from closeout_input_test_support import (
     closeout_worktree_args,
 )
 from integration_branch_authority_test_support import (
-    _acquire_atomic_blocker,
     _add_atomic_master_to_sprint,
     _assert_exact_series_preview,
     _authority_fixture,
@@ -214,27 +212,6 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                         WorktreeArgs(contract_path=malicious.contract_path, dry_run=True)
                     )
                 self.assertTrue(branch_exists(repository, "ar/master"))
-
-    def test_terminal_series_cleanup_refuses_while_its_atomic_blocker_is_active(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = _authority_fixture(Path(tmp))
-            _acquire_atomic_blocker(fixture)
-            _complete_atomic_master(fixture)
-            integrated = _git(fixture.code_repo, "rev-parse", "ar/master")
-            series = replace(
-                fixture.master_contract,
-                integration_status="completed",
-                integrated_code_commit=integrated,
-            )
-            write_contract(series.contract_path, series)
-
-            with self.assertRaisesRegex(
-                CloseoutQueueError,
-                "landing blocker to be released",
-            ):
-                cleanup_result(WorktreeArgs(contract_path=series.contract_path, dry_run=True))
-
-            self.assertTrue(branch_exists(fixture.code_repo, "ar/master"))
 
     def test_direct_ref_writer_requires_a_plane_prepared_capability(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -828,7 +805,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 mock.patch.object(
                     integrate_module,
                     "preview_integration_boundary",
-                    return_value=integrate_module.IntegrationBoundaryFacts(None, None),
+                    return_value=integrate_module.IntegrationBoundaryFacts(None, None, None),
                 ),
             ):
                 result = integrate_result(
@@ -848,7 +825,6 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
-            _acquire_atomic_blocker(fixture)
             memory = fixture.master_contract.memory_repo_path
             assert memory is not None
             _commit_on(fixture.code_repo, "ar/master", "atomic-code.txt")
@@ -898,7 +874,6 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root)
-            _acquire_atomic_blocker(fixture)
             _commit_on(fixture.code_repo, "ar/master", "atomic-block.txt")
             candidate = _git(fixture.code_repo, "rev-parse", "ar/master")
             _record_atomic_leaf_landing(fixture, candidate)
@@ -945,58 +920,10 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), candidate)
             self.assertEqual(_git(fixture.code_repo, "rev-parse", "main"), main_before)
 
-    def test_series_integration_refuses_without_its_active_atomic_blocker(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = _authority_fixture(Path(tmp))
-            _commit_on(fixture.code_repo, "ar/master", "atomic-block.txt")
-            candidate = _git(fixture.code_repo, "rev-parse", "ar/master")
-            _complete_atomic_master(fixture)
-            series = replace(
-                fixture.master_contract,
-                closeout_status="completed",
-                approved_for_commit=True,
-                human_review_status="approved",
-                code_commit=candidate,
-            )
-            write_contract(series.contract_path, series)
-            lifecycle_operations.start_or_observe_operation(
-                IntegrateOperationInput(
-                    configPath=fixture.config_path.as_posix(),
-                    contractPath=series.contract_path.as_posix(),
-                ),
-                series,
-                launcher=lambda *_: None,
-            )
-            store = LifecycleOperationStore(
-                operation_record_path(series.worktree_group, "integrate")
-            )
-            running = OperationRuntime(store).start()
-            super_before = _git(fixture.code_repo, "rev-parse", "super")
-
-            with (
-                mock.patch.object(
-                    integrate_module,
-                    "_run_integration_quality_gate",
-                    return_value=({"passed": True}, None),
-                ),
-                self.assertRaisesRegex(CloseoutQueueError, "active sprint landing blocker"),
-            ):
-                integrate_result(
-                    WorktreeArgs(
-                        contract_path=series.contract_path,
-                        approved=True,
-                        operation_key=running.operationKey,
-                        operation_generation=running.generation,
-                    ),
-                    series,
-                )
-            self.assertEqual(_git(fixture.code_repo, "rev-parse", "super"), super_before)
-
     def test_external_series_integration_recovers_exact_pair_without_ambient_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
-            _acquire_atomic_blocker(fixture)
             memory_repo = fixture.master_contract.memory_repo_path
             assert memory_repo is not None
             _first, final = _land_two_external_atomic_leaves(fixture)

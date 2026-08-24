@@ -74,7 +74,7 @@ def execute_direct_landing(
     """Recover and finish one accepted direct generation without repeating proof."""
     record = runtime.store.read() or runtime.record
     _require_mechanically_convergent_direct_state(contract, runtime, record)
-    record = reconcile_direct_landing(runtime.store)
+    record = reconcile_direct_landing(contract, runtime.store)
     runtime.record = record
     operation_input = direct_landing_input(record)
     memory_repo = Path(operation_input.memoryRepository)

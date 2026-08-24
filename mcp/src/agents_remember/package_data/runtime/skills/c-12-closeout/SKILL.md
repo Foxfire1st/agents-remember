@@ -43,6 +43,10 @@ Use the worktree closeout tools against the task contract:
 ```text
 worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_status(repo_id="<repo-id>", contract_path="<enclosure series-contract.md>")
+worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="retry|recover|cancel|revise|retire|supersede", expected_generation=<generation>, intent_note="<audit intent>")
+worktree_legacy_operation(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="inspect|migrate|archive", ...)
+direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", memory_commit_message="<message>", ledger_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>")
 ```
 
 Worktree closeout records closeout state in the contract the
@@ -73,6 +77,12 @@ cannot be repaired inside the leaf, or when a quo-vadis decision is required.
 Real closeout uses the matching apply tool with an `intent_note`. The note records the applicable
 authority: either explicit developer commit approval or delegated accepted-series authority. Agents
 must not treat a vague "looks good" or their own preference as authority.
+
+Every contract-enabled code, memory, and ledger leg also requires its own explicit nonblank commit
+message. Preview and apply normalize the same effective input before any claim, worker, journal, or
+Git authority is acquired; a blank required cell is a typed no-effect refusal, not an immutable
+half-operation. A typed not-applicable leg omits its message instead of receiving a synthesized
+default.
 
 Approval remains outside and before apply: preview, relay, and the applicable explicit or delegated
 authority must be complete before `worktree_closeout_apply`. Once apply begins, it reruns its
@@ -139,70 +149,27 @@ clears the attention item, and runs `worktree_closeout_apply` — you send no ex
 Never invoke `worktree_closeout_apply` in the same turn as the relay; the preview report is what the
 developer sees.
 
-## Server-Side Gate Enforcement (parked fallback)
+Apply returns promptly after starting or observing the task-bound closeout generation. Use
+`worktree_status` against the configured contract to read the current journal projection. Do not
+wait on a queue row or retain an operation id. If the journal advertises a legal next action, feed
+that exact generation and action to `worktree_operation_control`: same-generation `retry` or
+`recover` preserves immutable accepted input; `cancel` proves worker termination and unchanged Git
+state; `revise`, `retire`, and `supersede` use their explicit evidence-aware boundaries. Proven or
+ambiguous Git output always reconciles the same generation. Never recover by running Git directly,
+repeating from scratch, changing journal bytes, or using a stale queue row.
 
-This block-and-wait gate is the **parked fallback**, not the active path: the active closeout hand-off is
-the notify-and-continue `lifecycle_turn_end_notification` above. `lifecycle_gate`, the operator inbox,
-and the dashboard GateResponder still exist and still enforce when you **deliberately** raise the durable
-gate, but nothing routes toward them automatically (`next_step.py` repoints every gate moment to the
-notification). Use the path below only when you need a durable, developer-attributed, mutation-blocking
-approval record.
+## Explicit Durable Closeout Gates
 
-The chat approval hand-off above is the floor. When the lifecycle is connected to
-the dashboard and a `closeout-approval` gate is explicitly raised, closeout is **also** enforced
-server-side through that durable gate, so a developer can approve from the cockpit and the
-mutating tool — not a UI button — is the security boundary.
+`closeout-approval` is the sole human commit gate for code, memory, and ledger when one is
+explicitly raised. It gates only admission of the addressed closeout generation; it never freezes
+the task document, another sprint, or an already accepted operation. Apply accepts only a current
+developer-attributed approval and consumes it once. Open, rejected, revision-requested, applied,
+or model-approved gates refuse closeout admission. A model never self-approves a human-pinned gate.
 
-`closeout-approval` **is** the human commit gate when it is deliberately raised — closeout is the
-single commit-of-record for code, memory, and ledger, so there is no separate `commit-approval`
-kind. Subordinate orchestrated-series closeouts normally do not raise this gate; they use the
-accepted-series authority recorded in the `intent_note`. The dashboard junction uses the
-preview/dry-run -> chat report -> `lifecycle_gate` order above.
-
-How it binds:
-
-1. To route approval through the dashboard, raise the closeout junction with the
-   durable gate kind, developer-facing ask, and preview packet in one operation:
-
-   ```text
-   lifecycle_gate(
-     kind="closeout-approval",
-     ask={"kind": "decision", "prompt": "<the commit ask>", "options": ["approve", "revise"]},
-     packet={ ...preview facts... },
-   )
-   ```
-
-2. The developer approves (or rejects / requests revision) from the dashboard.
-   Only the dashboard writes a **developer-attributed** decision
-   (`decidedBy="developer"`); the agent's own `gate_decide` is recorded
-   `decidedBy="model"` and never counts as approval.
-
-3. On the developer's resolution reaching the agent, **clear** the ambient block
-   with `lifecycle_resume()`, then run `worktree_closeout_apply`. A chat "approved"
-   does not propagate itself; the agent always sends the clear. The apply step
-   reads the lifecycle's gate and **refuses** unless it is `approved` by the
-   developer — an `open`, `rejected`, `revision-requested`, already-`applied`, or
-   **model-approved** gate blocks the closeout; on success the tool appends an
-   `applied` snapshot so one approval cannot be replayed.
-
-Rules:
-
-1. **Never self-approve a human-pinned gate.** A model-attributed approval is rejected by
-   enforcement. Wait for the developer's dashboard decision or chat response when a
-   `closeout-approval` gate exists, and never pass your own judgment off as developer approval.
-   Delegated-series closeout without a raised gate is different: it records the accepted series
-   authority and the owning seat's review in `intent_note`.
-2. **Opening a gate is opt-in and deliberate.** Open a `closeout-approval` gate
-   **only** when a developer is driving approval from the dashboard. Do **not**
-   open one in a pure-chat session with no cockpit watching — an `open` gate blocks
-   your own closeout until it is decided.
-3. **Gateless lifecycles use the applicable authority.** With no `closeout-approval` gate,
-   standalone/final work still needs explicit developer commit approval, while accepted
-   orchestrated-series subordinate work may proceed under delegated series authority. Enforcement is
-   additive, never a requirement to raise a gate on every closeout.
-4. The closeout preview/apply payload carries a `closeout_gate` block
-   (`enforced` / `permitted` / `gateId` / `reason`); relay it at the commit-approval
-   gate so the developer sees whether a dashboard gate is open, approved, or absent.
+Do not create a durable gate as an incident workaround or compatibility route. Ordinary
+subordinate closeouts use recorded accepted-series authority; standalone/final work uses the
+developer hand-off above. The closeout preview/apply payload's `closeout_gate` block is evidence of
+an explicitly existing gate, not a second lifecycle or recovery mechanism.
 
 ## Preconditions
 
@@ -254,7 +221,7 @@ the reviewer seat's evidence, not something to patch silently at closeout time.
 
 The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
-contract's recorded closeout commit, falling back to the task base) and the
+contract's recorded closeout commit when present, otherwise the exact task base) and the
 work branch HEAD, scoped by the recorded base so synced-in parallel work and
 previously closed-out slices never re-gate. Already-onboarded artifacts —
 sidecars, route overviews, entity fingerprints — gate on every transported
@@ -337,14 +304,41 @@ it never pushes. Pushing the integration branch is part of the landing tail the
 `c-09-git-worktree-manager` skill owns: call
 `lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the push intent as
 your final prose, and **STOP**; push only after the developer approves and
-your next turn auto-resumes. (Parked fallback: the durable
-`lifecycle_gate(kind="push-approval", ...)` + `lifecycle_resume` still works if deliberately raised.)
+your next turn auto-resumes. A separately raised human-pinned `push-approval` gate, when present,
+must be decided by the developer; it is not a closeout recovery route.
 
 Closeout does not mark the task `Completed`. After closeout, integration, any
 PR-gated merge/pull, and memory carryover are done, use
 `lifecycle_finalize_task` from the `c-09-git-worktree-manager` skill to prove the
 landed parent-child branch edge, run or verify cleanup, and update the current
 task plus immediate parent row.
+
+## Sanctioned Branch-Direct Landing
+
+`direct_landing` is not a direct-checkout closeout path. It is the policy-gated,
+branch-addressed counterpart for a code commit that already exists at the exact series branch HEAD.
+The tool verifies that code commit and gated candidate tree, requires explicit nonblank memory and
+ledger messages for enabled legs, and validates the complete effective input before acquiring
+landing authority.
+
+Apply persists a task/contract-addressed `direct-landing` operation generation before either Git
+leg. Intent and proof for memory commit, ledger conflict detection, ledger staging, ledger commit,
+and terminal publication are journaled independently. After interruption, read the same generation
+through `worktree_status` and execute only its advertised action through
+`worktree_operation_control(operation_kind="direct-landing", ...)`. Recovery reconciles exact
+code/tree/memory/ledger evidence and reuses each already produced commit once; the queue is not an
+input. A transient landing lock, synthesized subject, repeat-from-scratch, or raw Git is not
+recovery.
+
+## Explicit Legacy Operation Repair
+
+Normal lifecycle readers accept only the current schema. For an exact historical schema-1 record,
+use `worktree_legacy_operation(action="inspect")`, bind the returned digest, and then choose the
+single supported audited transition: `migrate` fills only proven-missing unfinished memory/ledger
+message cells for the known blank-input incident and preserves live code-output evidence in one
+canonical generation; `archive` accepts only proven terminal/no-live-authority evidence. Canonical
+`worktree_operation_control` then recovers the migrated generation. The legacy tool is explicit and
+bounded; it is never called by status, normal journal reads, cleanup, or closeout apply.
 
 ## Failure Conditions
 
@@ -402,6 +396,12 @@ preview and apply payloads for the commit-approval relay.
 Worktree closeout also fails when the recorded code or external-memory source
 branch moved since task start.
 
+Every enabled blank/whitespace commit-message cell fails before operation authority and leaves no
+claim, journal generation, worker, commit, or queue-lifecycle residue. A moved source or stale door
+provenance refuses only the landing edge and returns the exact sync/republish route; it never locks
+task authoring. Once a generation has been accepted, failures are classified from its journal and
+live Git evidence and expose only evidence-safe task-addressed controls.
+
 Missing onboarding is the expected hard failure when the required onboarding file was not produced —
 in the manager -> builder -> reviewer -> curator chain that means the curator's memory pass did not
 cover it. The next step is to run (or rerun) the curator's `c-05-create-or-update-onboarding-files`
@@ -426,3 +426,7 @@ curator seat runs that skill itself.
 9. The `c-12-closeout` skill must not push automatically.
 10. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
 11. The `c-12-closeout` skill must not close out a change set that contradicts the memory layer's `system/coding-guidelines.md` without the contradiction being repaired in scope or named at the commit-approval relay; green acceptance evidence is not evidence of guideline adherence.
+12. The `c-12-closeout` skill must not acquire closeout authority until every enabled immutable
+    input cell and the exact current door generation have validated.
+13. The `c-12-closeout` skill must not recover from a queue row, direct Git, a reports file, a
+    permanent compatibility reader, or synthesized commit-message input.

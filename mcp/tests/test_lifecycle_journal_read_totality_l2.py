@@ -39,7 +39,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
-    successor_publication_path,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
@@ -47,10 +46,10 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from closeout_input_test_support import closeout_operation_input, start_closeout_operation
 from test_direct_landing import _series_fixture
-from test_lifecycle_operations import _contract, _integration_ready
+from test_lifecycle_operations import _completed_closeout_for_integration, _contract
 
-JournalMode = Literal["malformed", "invalid-schema-3", "os-error", "successor"]
-UnreadableContractJournalMode = Literal["valid", "malformed", "successor"]
+JournalMode = Literal["malformed", "invalid-schema-3", "os-error"]
+UnreadableContractJournalMode = Literal["valid", "malformed"]
 ContextOperationKind = Literal["closeout", "integrate", "direct-landing"]
 LocationFailureMode = Literal["missing-locator", "manifest-mismatch", "unreadable-manifest"]
 ContractLossMode = Literal["missing", "unreadable"]
@@ -90,7 +89,7 @@ def _admit(tmp_path: Path, kind: Literal["closeout", "integrate"]):
         operation_input = closeout_operation_input(contract)
         start_closeout_operation(operation_input, launcher=lambda *_: None)
     else:
-        contract = _integration_ready(contract)
+        contract = _completed_closeout_for_integration(contract)
         operation_input = IntegrateOperationInput(
             configPath=(contract.code_repo_path.parent / "settings.json").as_posix(),
             contractPath=contract.contract_path.as_posix(),
@@ -125,9 +124,14 @@ def _admit_direct(tmp_path: Path):
         candidate_tree=fixture["candidate_tree"],
         intent_note="approve retained direct landing",
     )
-    with mock.patch(
-        "agents_remember.worktrees.direct_landing.execute_or_require_direct_landing_recovery",
-        return_value={"ok": True, "state": "admitted"},
+    with (
+        mock.patch(
+            "agents_remember.worktrees.direct_landing.require_first_ready_generation"
+        ),
+        mock.patch(
+            "agents_remember.worktrees.direct_landing.execute_or_require_direct_landing_recovery",
+            return_value={"ok": True, "state": "admitted"},
+        ),
     ):
         admitted = direct_landing_tool(fixture["config"], request)
     assert admitted["ok"] is True
@@ -161,8 +165,8 @@ def _install_journal_failure(
     mode: JournalMode,
     private: str,
 ) -> tuple[Path, AbstractContextManager[object]]:
-    path = successor_publication_path(store.path) if mode == "successor" else store.path
-    if mode in {"malformed", "successor"}:
+    path = store.path
+    if mode == "malformed":
         path.write_text(f'{{"private":"{private}"', encoding="utf-8")
         return path, nullcontext()
     if mode == "invalid-schema-3":
@@ -242,7 +246,7 @@ def test_registered_public_reader_refuses_empty_proven_claim_timestamp(
 
 
 @pytest.mark.parametrize("kind", ["closeout", "integrate"])
-@pytest.mark.parametrize("mode", ["malformed", "invalid-schema-3", "os-error", "successor"])
+@pytest.mark.parametrize("mode", ["malformed", "invalid-schema-3", "os-error"])
 def test_strict_journal_failure_status_stale_control_and_context_are_total(
     tmp_path: Path,
     kind: Literal["closeout", "integrate"],
@@ -300,7 +304,7 @@ def test_strict_journal_failure_status_stale_control_and_context_are_total(
 
 
 @pytest.mark.parametrize("kind", ["closeout", "integrate"])
-@pytest.mark.parametrize("mode", ["valid", "malformed", "successor"])
+@pytest.mark.parametrize("mode", ["valid", "malformed"])
 def test_unreadable_contract_public_start_status_and_real_context_use_locator_journal(
     tmp_path: Path,
     kind: Literal["closeout", "integrate"],

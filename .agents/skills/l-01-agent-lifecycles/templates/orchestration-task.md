@@ -135,10 +135,22 @@ index position), then one `task_doc.author_execution_graph` batch for the edges:
 - <duplicate work, vocabulary drift, or cross-master conflict — cited>
 
 ## Runtime Re-Evaluation Contract
-- Orchestrator recomputes after candidate declaration/invalidation, landing, blocker change, or accepted priority change.
+- Task documents remain authoritative during every scheduling and operation phase. An intrinsically
+  valid mutation publishes first; its `projectionEffects` names every before/after-union sprint and
+  the exact rebuild action for any projection left invalid-empty.
+- Closeout intent changes only through task truth or a contract-owned door generation's
+  waiting/deferred/withdrawn disposition. The queue has only `status` and `rebuild`; it never owns
+  declaration, claim, lifecycle, commit, recovery, certification, replan, or drain.
+- Orchestrator recomputes after every task projection effect, door declaration/disposition or
+  provenance change, landing, landing-blocker change, or accepted priority change. Rebuild derives
+  solely from current task + current waiting-door facts; no old row is input.
 - Ordinary readiness and bounded reprioritization: orchestrator judgment; no strategist required.
-- Before a queue judgment affects selection, append its rationale, evidence, author, confidence,
-  and superseded row to the sprint decision log and Judgment Register.
+- Before a priority judgment affects door order, append its rationale, evidence, author,
+  confidence, and superseded row to the sprint decision log and Judgment Register; then publish the
+  new grade through the door owner and rebuild the projection.
+- Claim transfers the exact generation to the enclosure-root operation journal. The operation
+  stays task-addressable through locator -> manifest -> journal with the queue absent or
+  invalid-empty; execute only its advertised `worktree_operation_control` action.
 - New dependency, changed atomic boundary, invalid priority model, or multi-master reshape:
   architect proposes a fresh strategist pass.
 - Out-of-sprint addition: next sprint unless scope is explicitly changed.

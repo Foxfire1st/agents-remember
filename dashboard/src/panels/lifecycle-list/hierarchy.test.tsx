@@ -17,6 +17,41 @@ import {
 installLifecycleListCleanup();
 
 describe("LifecycleList task labels — hierarchy and phase grouping", () => {
+  it("reports discarded planning work without adding it to completed progress", () => {
+    seed(
+      projection({
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          taskDocuments: [
+            taskDoc({
+              id: "MASTER",
+              kind: "master",
+              title: "Audited planning master",
+              docPath: "/tasks/master/task.json",
+              subTasks: [
+                {
+                  number: "1",
+                  name: "Live planning leaf",
+                  file: "01_live.md",
+                  status: "planning",
+                  scope: "",
+                },
+              ],
+              discardedCount: 1,
+            }),
+          ],
+        },
+      }),
+    );
+
+    const { getByText } = render(
+      <LifecycleList selectedId={null} onSelect={vi.fn()} />,
+    );
+    const row = getByText("Audited planning master").closest("[role='option']");
+    expect(row?.textContent).toContain("0/1 · 1 discarded");
+    expect(row?.textContent).not.toContain("1/1");
+  });
+
   it("renders the orchestration tier above its commanded masters with the V4 treatment (L14)", () => {
     // An orchestration task is a master doc carrying `orchestrates`.
     // It renders gold-tier at depth 0; a master it names nests one step with the purple tier; that
@@ -318,4 +353,3 @@ describe("LifecycleList task labels — hierarchy and phase grouping", () => {
     );
   });
 });
-

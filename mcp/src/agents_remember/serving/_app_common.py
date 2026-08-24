@@ -14,6 +14,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel, Field
 
+from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.models.application_requests import AgentRole, InboxMessageKind
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
@@ -429,6 +430,12 @@ class ServingCollaborators:
     terminal_catalog: TerminalCatalogPort | None = None
     terminal_paster: TerminalPaster | None = None
     harness_capability_catalog: HarnessCapabilityCatalog | None = None
+    register_terminal_execution_evidence: (
+        Callable[[Path, tuple[TerminalCatalogEntry, ...]], frozenset[str]] | None
+    ) = None
+    register_inbox_execution_evidence: (
+        Callable[[Path, tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
+    ) = None
 
 
 INFERRED_LIVE_INPUTS = LiveProjectionInputs()
@@ -453,6 +460,9 @@ class _ServingRuntime:
     liveness_sweeper: TerminalCatalogLivenessSweeper
     build: ServingBuild
     heartbeat_store: AgentNotifierHeartbeatStore
+    register_inbox_execution_evidence: (
+        Callable[[Path, tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
+    )
     interval: float
 
     @property

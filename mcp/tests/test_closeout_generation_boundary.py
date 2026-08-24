@@ -14,7 +14,6 @@ from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
-from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     closeout_generation_retained,
 )
@@ -40,11 +39,13 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit, head_commit
 from agents_remember.worktrees.worktree_contract import (
-    contract_to_text,
     load_contract,
     write_contract,
 )
-from closeout_input_test_support import closeout_operation_input, start_closeout_operation
+from closeout_input_test_support import (
+    closeout_operation_input,
+    start_closeout_operation,
+)
 from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
@@ -87,6 +88,7 @@ def test_invalid_closeout_precedes_active_integrate_decision_without_authority(
     messages[field] = value
     before_contract = contract.contract_path.read_bytes()
     before_integrate = integrate_path.read_bytes()
+    before_closeout = closeout_path.read_bytes()
     before_coordination = _bytes_under(fixture.coordination)
     before_code = _git_facts(contract.code_worktree)
     assert contract.memory_worktree is not None
@@ -114,7 +116,7 @@ def test_invalid_closeout_precedes_active_integrate_decision_without_authority(
         f"<nonblank {field} commit message>"
     )
     launch.assert_not_called()
-    assert not closeout_path.exists()
+    assert closeout_path.read_bytes() == before_closeout
     assert integrate_path.read_bytes() == before_integrate
     assert contract.contract_path.read_bytes() == before_contract
     assert _bytes_under(fixture.coordination) == before_coordination
@@ -136,24 +138,25 @@ def test_valid_closeout_conflicts_with_active_integrate_only_after_validation(
         launcher=lambda *_: None,
     )
     closeout_path = operation_record_path(contract.worktree_group, "closeout")
+    before_closeout = closeout_path.read_bytes()
 
     with pytest.raises(RuntimeError, match=r"closeout cannot proceed.*integrate"):
         worktree_tools.worktree_closeout_apply_tool(
             load_config(fixture.config_path),
             contract.contract_path.as_posix(),
             worktree_tools.CloseoutCommitMessages(
-                memory="record external memory",
-                ledger="record ledger mapping",
+                memory="close external memory",
+                ledger="record code-to-memory mapping",
             ),
-            worktree_tools.CloseoutApproval(intent_note="approve exact closeout"),
+            worktree_tools.CloseoutApproval(intent_note="approved closed integration fixture"),
         )
 
-    assert not closeout_path.exists()
+    assert closeout_path.read_bytes() == before_closeout
 
 
 @pytest.mark.parametrize(
     "case",
-    ["ordinary-internal", "series", "external-mapped", "external-mapped-legacy"],
+    ["ordinary-internal", "series", "external-mapped"],
 )
 @pytest.mark.parametrize("terminal", [False, True], ids=["running-cut", "completed-cut"])
 def test_noop_finalization_retry_observes_the_same_generation(
@@ -189,15 +192,12 @@ def test_noop_finalization_retry_observes_the_same_generation(
     assert hashlib.sha256(contract.contract_path.read_bytes()).hexdigest() == (
         current.closeoutFinalizedContractSha256
     )
-    if case == "external-mapped-legacy":
-        assert contract.leaf_id == "leaf-1"
-        assert load_contract(contract.contract_path).leaf_id == "LEAF-1"
     assert store.path.read_bytes() == before
     launcher.assert_not_called()
     assert runtime.store.path == store.path
 
 
-@pytest.mark.parametrize("case", ["external-mapped", "external-mapped-legacy"])
+@pytest.mark.parametrize("case", ["external-mapped"])
 def test_invalid_duplicate_cannot_observe_noop_finalized_external_generation(
     tmp_path: Path,
     case: str,
@@ -319,7 +319,7 @@ def test_recovery_cells_without_exact_finalization_state_do_not_retain_generatio
     assert operation_projection(recorded).cancellable is True
 
 
-def test_unrelated_contract_advancement_after_completed_noop_allows_a_new_generation(
+def test_unrelated_contract_advancement_cannot_replace_completed_unintegrated_generation(
     tmp_path: Path,
 ) -> None:
     contract, config_path, commits = _generation_case(tmp_path, "ordinary-internal")
@@ -349,23 +349,20 @@ def test_unrelated_contract_advancement_after_completed_noop_allows_a_new_genera
     assert operation_state_fingerprint(advanced) == operation_state_fingerprint(finalized)
     assert closeout_contract_sha256(advanced) != closeout_contract_sha256(finalized)
     write_contract(advanced.contract_path, advanced)
-    launches: list[int] = []
+    before = store.path.read_bytes()
+    launcher = mock.Mock()
 
-    observed = start_closeout_operation(
-        closeout_operation_input(advanced, config_path=config_path),
-        launcher=lambda _, record: launches.append(record.attempt),
-    )
+    with pytest.raises(RuntimeError, match="closeout-door-claim-owner-conflict"):
+        start_closeout_operation(
+            closeout_operation_input(advanced, config_path=config_path),
+            launcher=launcher,
+        )
 
-    second = store.read()
-    assert second is not None
-    assert observed.status == "queued"
-    assert second.attempt == 2
-    assert second.operationKey != first.operationKey
-    assert second.closeoutFinalizedContractSha256 is None
-    assert launches == [2]
+    assert store.path.read_bytes() == before
+    launcher.assert_not_called()
 
 
-def test_candidate_advancement_after_completed_noop_allows_a_new_generation(
+def test_candidate_advancement_cannot_replace_completed_unintegrated_generation(
     tmp_path: Path,
 ) -> None:
     contract, config_path, commits = _generation_case(tmp_path, "ordinary-internal")
@@ -382,27 +379,25 @@ def test_candidate_advancement_after_completed_noop_allows_a_new_generation(
         "VALUE = 'new candidate'\n",
         encoding="utf-8",
     )
-    launches: list[int] = []
+    advanced = load_contract(finalized.contract_path)
+    before = store.path.read_bytes()
+    launcher = mock.Mock()
 
-    observed = start_closeout_operation(
-        closeout_operation_input(
-            load_contract(finalized.contract_path),
-            config_path=config_path,
-            code="close the next generation",
-        ),
-        launcher=lambda _, record: launches.append(record.attempt),
-    )
+    with pytest.raises(RuntimeError, match="closeout-door-claim-owner-conflict"):
+        start_closeout_operation(
+            closeout_operation_input(
+                advanced,
+                config_path=config_path,
+                code="close the next generation",
+            ),
+            launcher=launcher,
+        )
 
-    second = store.read()
-    assert second is not None
-    assert observed.status == "queued"
-    assert second.attempt == 2
-    assert second.operationKey != first.operationKey
-    assert second.closeoutFinalizedContractSha256 is None
-    assert launches == [2]
+    assert store.path.read_bytes() == before
+    launcher.assert_not_called()
 
 
-def test_completed_mutated_generation_retains_intent_then_allows_advancement(
+def test_completed_mutated_generation_retains_intent_and_requires_explicit_disposition(
     tmp_path: Path,
 ) -> None:
     contract = _contract(tmp_path)
@@ -428,18 +423,17 @@ def test_completed_mutated_generation_retains_intent_then_allows_advancement(
         sync_log=(_sync_log_entry(finalized),),
     )
     write_contract(advanced.contract_path, advanced)
-    launches: list[int] = []
+    before = store.path.read_bytes()
+    launcher = mock.Mock()
 
-    projection = start_closeout_operation(
-        closeout_operation_input(advanced),
-        launcher=lambda _, record: launches.append(record.attempt),
-    )
+    with pytest.raises(RuntimeError, match="closeout-door-claim-owner-conflict"):
+        start_closeout_operation(
+            closeout_operation_input(advanced),
+            launcher=launcher,
+        )
 
-    current = store.read()
-    assert current is not None
-    assert projection.status == "queued"
-    assert current.attempt == 2
-    assert launches == [2]
+    assert store.path.read_bytes() == before
+    launcher.assert_not_called()
 
 
 def _publish_mutated_code_generation(contract):
@@ -538,8 +532,12 @@ def _generation_case(root: Path, case: str):
                 ),
             },
         )
-    if case in {"external-mapped", "external-mapped-legacy"}:
-        closed = _closed_external_leaf_worktrees(fixture, root)
+    if case == "external-mapped":
+        closed = _closed_external_leaf_worktrees(
+            fixture,
+            root,
+            publish_closeout_evidence=False,
+        )
         contract = replace(
             closed,
             closeout_status="not-started",
@@ -551,25 +549,6 @@ def _generation_case(root: Path, case: str):
             commit_approval_note="",
         )
         write_contract(contract.contract_path, contract)
-        if case == "external-mapped-legacy":
-            task_root = contract.task_root
-            master = read_task_doc(task_root / "task.json")
-            leaf = read_task_doc(task_root / "leaf-1.json")
-            write_task_doc(
-                task_root,
-                master.model_copy(
-                    update={
-                        "subTasks": [
-                            row.model_copy(update={"number": "LEAF-1"}) for row in master.subTasks
-                        ]
-                    }
-                ),
-            )
-            write_task_doc(task_root, leaf.model_copy(update={"id": "LEAF-1"}))
-            contract = replace(contract, leaf_id="leaf-1")
-            contract.contract_path.write_text(contract_to_text(contract), encoding="utf-8")
-            contract = load_contract(contract.contract_path)
-            assert contract.leaf_id == "leaf-1"
         return (
             contract,
             fixture.config_path,

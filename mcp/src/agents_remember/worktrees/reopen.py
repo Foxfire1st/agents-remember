@@ -30,11 +30,10 @@ the leaf id never changed.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStoreError
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
 from agents_remember.tasks.document import TaskDocument
@@ -52,6 +51,10 @@ from .integration.integration_ref_transaction import (
     IntegratedCommits,
     require_integrated_ledger_mapping,
 )
+from .integration.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocationError,
+    require_terminal_lifecycle_predecessor,
+)
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -59,9 +62,12 @@ from .modules.guidance import (
     status_payload,
 )
 from .modules.models import WorktreeCommandResult
-from .queue.closeout_queue_errors import CloseoutQueueError
-from .queue.closeout_queue_lifecycle import publish_queue_bound_task_facts
 from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
+from .task_fact_publication import (
+    contract_projection_scopes,
+    preview_contract_task_facts,
+    publish_task_fact_mutation,
+)
 from .worktree_contract import (
     ContractCells,
     WorktreeContract,
@@ -214,6 +220,24 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
     refusal = _reopen_preflight_refusal(contract)
     if refusal is not None:
         return refusal
+    try:
+        require_terminal_lifecycle_predecessor(contract)
+    except LifecycleOperationLocationError as error:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": error.status,
+                "status": error.status,
+                **_contract_reopen_facts(contract),
+                "summary": error.detail,
+                "detail": error.detail,
+                "expected": error.expected,
+                "observed": error.observed,
+                "nextAction": "developer-decision",
+                "developerDecisionRequired": True,
+                "decisionSurface": error.detail,
+            },
+        )
     updated = _reopened_contract(contract)
     try:
         _, doc_reset = _plan_leaf_doc_reset(contract, dry_run=dry_run)
@@ -228,15 +252,13 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             },
         )
     try:
-        frozen_cleared, published_doc_reset = _publish_reopen_transition(
+        frozen_cleared, published_doc_reset, projection_effects = _publish_reopen_transition(
             contract,
             updated,
             dry_run=dry_run,
         )
     except (
         OSError,
-        CloseoutQueueError,
-        CloseoutQueueStoreError,
         _ReopenTransitionRefusal,
     ) as exc:
         return WorktreeCommandResult(
@@ -278,6 +300,7 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             "state": "would-reopen" if dry_run else "reopened",
             "doc": doc_reset,
             "frozenLanding": frozen_cleared,
+            "projectionEffects": projection_effects,
             "summary": summary,
             **_response_guidance(
                 operation,
@@ -439,8 +462,6 @@ def _plan_leaf_doc_reset(
         if dry_run and master_state == "reset"
         else master_state,
     }
-    if dry_run:
-        return ([], report)
     docs = [updated]
     if master is not None:
         docs.append(master)
@@ -452,14 +473,55 @@ def _publish_reopen_transition(
     updated: WorktreeContract,
     *,
     dry_run: bool,
-) -> tuple[str, dict | None]:
-    """Publish contract, task docs, and landing deletion as one rollback-capable unit."""
+) -> tuple[str, dict | None, list[dict[str, object]]]:
+    """Publish the reopen batch under task CAS, then report projection refresh independently."""
     if dry_run:
-        return _clear_frozen_landing(contract, dry_run=True), None
+        return _preview_reopen_transition(contract)
+    publication = _ReopenPublication(contract, updated)
+    published = publish_task_fact_mutation(
+        contract.coordination_root,
+        contract.repo_name,
+        validate=publication.validate,
+        projection_scopes=publication.projection_scopes,
+        publication=publication.publish,
+    )
+    frozen_cleared, doc_reset = published.result
+    return (
+        frozen_cleared,
+        doc_reset,
+        [effect.model_dump(by_alias=True) for effect in published.projection_effects],
+    )
 
-    def publication() -> tuple[str, dict | None]:
-        current = load_contract(contract.contract_path)
-        if current != contract:
+
+def _preview_reopen_transition(
+    contract: WorktreeContract,
+) -> tuple[str, dict | None, list[dict[str, object]]]:
+    documents, _report = _plan_leaf_doc_reset(contract, dry_run=True)
+    return (
+        _clear_frozen_landing(contract, dry_run=True),
+        None,
+        [
+            effect.model_dump(by_alias=True)
+            for effect in preview_contract_task_facts(contract, tuple(documents))
+        ],
+    )
+
+
+@dataclass
+class _ReopenPublication:
+    contract: WorktreeContract
+    updated: WorktreeContract
+    documents: tuple[TaskDocument, ...] | None = None
+    doc_reset: dict | None = None
+
+    def prepared_documents(self) -> tuple[TaskDocument, ...]:
+        if self.documents is None:
+            raise _ReopenTransitionRefusal("reopen task batch was not prepared under task CAS")
+        return self.documents
+
+    def validate(self) -> None:
+        current = load_contract(self.contract.contract_path)
+        if current != self.contract:
             raise _ReopenTransitionRefusal(
                 "the completed leaf contract changed after reopen preflight"
             )
@@ -470,16 +532,21 @@ def _publish_reopen_transition(
             docs, doc_reset = _plan_leaf_doc_reset(current, dry_run=False)
         except ReopenTaskDocumentError as exc:
             raise _ReopenTransitionRefusal(f"task-document-reset: {exc}") from exc
-        final_path = contract.contract_path.parent / LANDING_FINAL_BASENAME
-        paths = {contract.contract_path, final_path}
-        for doc in docs:
-            paths.add(json_path_for(contract.task_root, doc))
-            paths.add(markdown_path_for(contract.task_root, doc))
-        originals = {path: path.read_bytes() if path.exists() else None for path in paths}
+        self.documents = tuple(docs)
+        self.doc_reset = doc_reset
+
+    def projection_scopes(self) -> tuple:
+        return contract_projection_scopes(self.contract, self.prepared_documents())
+
+    def publish(self) -> tuple[str, dict | None]:
+        docs = self.prepared_documents()
+        if self.doc_reset is None:
+            raise _ReopenTransitionRefusal("reopen task batch was not prepared under task CAS")
+        originals = self._original_artifacts(docs)
         try:
-            frozen_cleared = _clear_frozen_landing(contract, dry_run=False)
-            write_task_docs(contract.task_root, docs)
-            write_contract(contract.contract_path, updated)
+            frozen_cleared = _clear_frozen_landing(self.contract, dry_run=False)
+            write_task_docs(self.contract.task_root, list(docs))
+            write_contract(self.contract.contract_path, self.updated)
         except BaseException as publish_error:
             try:
                 _restore_reopen_artifacts(originals)
@@ -488,13 +555,18 @@ def _publish_reopen_transition(
                     f"reopen publication and rollback both failed: {rollback_error}"
                 ) from publish_error
             raise
-        return frozen_cleared, doc_reset
+        return frozen_cleared, self.doc_reset
 
-    return publish_queue_bound_task_facts(
-        contract,
-        publication,
-        topology_stable=True,
-    )
+    def _original_artifacts(
+        self,
+        docs: tuple[TaskDocument, ...],
+    ) -> dict[Path, bytes | None]:
+        final_path = self.contract.contract_path.parent / LANDING_FINAL_BASENAME
+        paths = {self.contract.contract_path, final_path}
+        for doc in docs:
+            paths.add(json_path_for(self.contract.task_root, doc))
+            paths.add(markdown_path_for(self.contract.task_root, doc))
+        return {path: path.read_bytes() if path.exists() else None for path in paths}
 
 
 def _restore_reopen_artifacts(originals: dict[Path, bytes | None]) -> None:

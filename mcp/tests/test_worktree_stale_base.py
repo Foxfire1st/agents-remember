@@ -17,8 +17,10 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.start import (
-    _ensure_memory_source_branch,
     _stale_base_preflight,
+)
+from agents_remember.worktrees.modules.startup.start_memory import (
+    _ensure_memory_source_branch,
     prepare_memory_for_start,
 )
 from agents_remember.worktrees.worktree_contract import (

@@ -31,6 +31,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     named_gate_policy,
 )
 from agents_remember.kernel.primitives.runtime_config import RepositoryScope
+from agents_remember.models.lifecycles.operation import IntegrationPublicationIntent
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.projections.paths import observer_logs_root
 from agents_remember.tasks import (
@@ -460,6 +461,7 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
         with (
             mock.patch.object(integrate_mod, "load_contract", return_value=self.contract),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(integrate_mod, "_integration_door_block", return_value=None),
             mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(
                 integrate_mod,
@@ -511,7 +513,12 @@ class IntegrateDryRunGuardTests(unittest.TestCase):
                 return_value=SimpleNamespace(
                     integrationAuthority=None,
                     recoveryCommits=None,
-                    integrationPublication=None,
+                    integrationPublication=IntegrationPublicationIntent(
+                        operationKey="a" * 64,
+                        generation=1,
+                        preparedAt="2026-08-15T00:00:00+00:00",
+                        claimState="not-applicable",
+                    ),
                 ),
             ),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),

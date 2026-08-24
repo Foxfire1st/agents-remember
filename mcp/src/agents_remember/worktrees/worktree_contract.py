@@ -269,10 +269,6 @@ class WorktreeContract:
     leaf_id: str = ""
     parent_task_name: str = ""
     parent_contract_path: Path | None = None
-    # An admitted graph-managed leaf keeps these immutable canonical refs in its enclosure.
-    # Empty means this contract has never crossed the explicit L3 queue boundary.
-    queue_sprint_task_document: str = ""
-    queue_candidate_task_document: str = ""
     # Durable declaration/disposition authority. Queue membership is derived elsewhere.
     closeout_door: CloseoutDoorGeneration | None = None
     # The lifecycle this enclosure anchors (design §1.1): written by worktree_start
@@ -462,9 +458,7 @@ def load_contract(path: Path) -> WorktreeContract:
     """
     if not path.exists():
         raise ContractError(f"worktree contract does not exist: {path}")
-    front_matter = _extract_front_matter(path.read_text(encoding="utf-8"), path)
-    data = _parse_limited_yaml(front_matter)
-    contract = _contract_from_data(data, path)
+    contract = parse_contract_text(path.read_text(encoding="utf-8"), path=path)
     if contract.unknown_cells:
         logger.warning(
             "worktree contract %s carries %d cell(s) outside their vocabulary: %s",
@@ -472,6 +466,15 @@ def load_contract(path: Path) -> WorktreeContract:
             len(contract.unknown_cells),
             "; ".join(contract.unknown_cells),
         )
+    return contract
+
+
+def parse_contract_text(text: str, *, path: Path) -> WorktreeContract:
+    """Parse exact retained contract bytes without inventing a temporary-file authority."""
+
+    front_matter = _extract_front_matter(text, path)
+    data = _parse_limited_yaml(front_matter)
+    contract = _contract_from_data(data, path)
     validate_contract(contract, path=path)
     return contract
 
@@ -735,10 +738,6 @@ def contract_to_text(contract: WorktreeContract) -> str:
         lines.append(f"  parent_task_name: {contract.parent_task_name}")
     if contract.parent_contract_path is not None:
         lines.append(f"  parent_contract_path: {contract.parent_contract_path.as_posix()}")
-    if contract.queue_sprint_task_document:
-        lines.append(f"  queue_sprint_task_document: {contract.queue_sprint_task_document}")
-    if contract.queue_candidate_task_document:
-        lines.append(f"  queue_candidate_task_document: {contract.queue_candidate_task_document}")
     if contract.closeout_door is not None:
         encoded_door = json.dumps(
             contract.closeout_door.model_dump(mode="json"),
@@ -1074,8 +1073,6 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),
-        queue_sprint_task_document=coordination.get("queue_sprint_task_document", ""),
-        queue_candidate_task_document=coordination.get("queue_candidate_task_document", ""),
         closeout_door=_parse_closeout_door(coordination.get("closeout_door", ""), contract_path),
         lifecycle_id=lifecycle.get("id", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),

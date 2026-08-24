@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 55 public tools. Tools **apply by default** — pass
+The Agents Remember MCP server exposes 63 public tools. Tools **apply by default** — pass
 `dry_run=true` to preview first (for the read-only `cgc_*`/`grepai_*` query tools,
 `dry_run=true` returns the planned provider command without running it). The two
 `codex_benchmark_*` tools are the exception: they default to `dry_run=true`
@@ -80,6 +80,15 @@ and `worktree_cleanup`/`worktree_abandon` remove its reserved `reports/` directo
 enclosure. Dirty-source and real-commit residuals remain listed separately so the pre-commit loop
 does not fabricate closeout metadata.
 
+The `reports/` directory is disposable evidence, not the live operation journal. Lifecycle reads
+have two strict routes. A live locator reaches the exact root-local
+`.lifecycle/enclosure-manifest.json` and canonical journal/history. A terminal locator reaches only
+the exact external archive/receipt plus surviving configured-contract truth; it never falls through
+to the old root. Terminal cleanup archives and reads back the canonical evidence, publishes the
+external receipt, and only then may remove the enclosure root and its reports. A task document,
+task/worktree scan, naming inference, caller-supplied root, or reports path is never
+operation-location authority.
+
 The strict quality wrapper has the same enclosure-owned lifetime for its test evidence. Every
 completed leaf-closeout or leaf/master-integration gate atomically replaces
 `<worktree enclosure>/reports/test-results.md` with the run status, command, timestamps, scope,
@@ -113,19 +122,55 @@ application operation, not an agent-facing route around MCP.
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `worktree_start` | Create/load a task contract and code (+ external-memory) worktrees. | `repo_id`, `task_name`, `worktree_name`, `workflow_kind="light-task"`, `dry_run=false`, `memory_choice` |
+| `worktree_enclosure_adopt` | Explicitly adopt one exact readable pre-locator enclosure. Validates the configured contract/root pair and writes an audited locator receipt; normal readers never invoke it. Dry-run by default. | `contract_path`, `expected_worktree_group`, nonblank `rationale`, `dry_run=true`, `approved=false`, optional `expected_publication_request_id` |
 | `worktree_attach` | Re-attach to an existing task contract without mutating Git. | `repo_id`, `task_name` / `contract_path` |
-| `worktree_status` | Report worktree lifecycle phase, dirty flags, and next-step hints. | `repo_id`, `task_name` / `contract_path` |
+| `worktree_status` | Report strict task-addressed lifecycle status without queue input. A live locator resolves to the root manifest/journal and its executable controls; a terminal locator resolves to the exact external archive/receipt plus surviving contract truth, distinguishes archive-ready from cleanup-completed, and returns the archived `cleanupArguments` with exact retry `nextArgs`. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory/ledger commit messages |
-| `worktree_closeout_apply` | Start or observe an approved, durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, commit messages |
+| `worktree_closeout_apply` | Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
 | `worktree_integrate` | Start or observe durable task-bound landing (`ff-only` or `replay`) and return promptly. Poll `worktree_status`; retries with conflicting input refuse. | `contract_path`, `strategy`, `dry_run=false` |
-| `worktree_cleanup` | Remove worktrees and merged task branches after integration. This is non-terminal for task documents: it never checks off steps or changes task status. | `contract_path`, `dry_run=false` |
+| `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact closeout/integrate/direct-landing generation. Retry/recover preserve accepted input; cancellation proves worker exit and Git safety; revise/retire/supersede are evidence-aware. | `contract_path`, `operation_kind`, `action`, `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
+| `worktree_legacy_operation` | Explicitly inspect, migrate, or archive one exact schema-1 operation. Migration is limited to the proven blank-message incident; normal readers remain current-schema-only. | `contract_path`, `operation_kind`, `action`, inspect-bound `expected_digest`, action-specific messages/reason, `dry_run=false` |
+| `direct_landing` | Policy-gated branch-addressed memory/ledger landing for an already verified series code commit. Persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path`, `code_commit`, explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `dry_run=false` |
+| `worktree_cleanup` | After integration, archive/read back canonical lifecycle evidence, publish an external terminal receipt, then remove worktrees, merged task branches, reports, and the enclosure root. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` |
+| `worktree_abandon` | Abandon an unintegrated generation through exact contract/journal/Git authority and preserve terminal archive proof before deletion. Archive-ready but incomplete abandon retries this exact public call with its archived `force` value until surviving contract truth records abandonment. | `contract_path`, `dry_run=false`, `force=false` |
 | `lifecycle_finalize_task` | Prove the landed edge, resolve the exact contract-bound leaf, refuse before cleanup unless every parent/nested step is done, then complete that leaf and, when it declares an existing immediate parent, automatically derive and reconcile that exact row. Standalone/no-parent tasks remain supported; the parent document's own task status and higher ancestors are not completed. | `contract_path`; optional `task_doc_path`, `master_doc_path`, and `subtask_number` are independent identity assertions; `dry_run=false` |
+
+Receipt-file existence alone does not select the terminal route. While the locator is still live,
+an identical accepted `worktree_cleanup` or `worktree_abandon` retry reuses the exact published
+archive/receipt bytes and completes terminal-locator publication. Only after the locator becomes
+`terminal-archived` does `worktree_status` use the terminal route to distinguish archive-ready from
+surviving contract completion; the same accepted disposition with its original public arguments
+finishes an incomplete destructive tail. This is not a `worktree_operation_control` action. A
+conflicting terminal request must expose the archive-accepted verb as its public retry action; it
+never invents a fallback reader or second cleanup route. The archive request identity includes
+typed `cleanupArguments`: `{teardown_providers: <bool>}` for `worktree_cleanup` or
+`{force: <bool>}` for `worktree_abandon`. Status and conflict payloads return that object and the
+exact `nextArgs`. A retry with a different value refuses; omitted/default arguments are not
+reconstructed as recovery intent.
+
+For a same-address reopened or abandoned successor, reservation first proves the exact terminal
+archive and restartable predecessor contract. Under that reservation, the stable contract file is
+atomically changed only when its bytes equal the accepted predecessor tombstone; already accepted
+successor bytes are idempotent, and every other byte state refuses. This is a strict successor
+publication transaction, not a generic overwrite or compatibility reader.
+
+## Closeout scheduling projection
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `closeout_door` | Publish or inspect one contract-owned closeout generation. Declare/update-provenance bind complete current evidence; defer/resume/withdraw change only the exact generation's scheduling disposition. Claim is intentionally absent. | request with `action`, `contract_path`, action-specific `candidate_task_document_ref`, `expected_generation_id`, `grade`, `admission`, optional declared `caller` |
+| `closeout_queue` | Inspect or rebuild one sprint's disposable waiting-only projection. It is either exact-current `valid-built` or non-admitting `invalid-empty`; rebuild derives solely from current task plus waiting-door facts. | request with `action:"status"|"rebuild"`, `sprint_task_document_ref`, optional declared `caller` |
+
+The queue has no declare, select, claim, defer, withdraw, lifecycle, commit, certification,
+recovery, replan, drain, or stale-row transition. Claim transfers the current generation from its
+door into the enclosure-root operation journal. Queue invalidation or absence cannot destroy or
+strand accepted operation evidence.
 
 ## Task documents
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `task_doc` | Author JSON-primary task documents and deterministic markdown. `skip_step` records an exact intentional skip with a nonblank reason; `Completed` transitions refuse unresolved parent/nested steps or master rows. | `repo_id`, task/contract target, `operation`, edit payload, `dry_run=false` |
+| `task_doc` | Author JSON-primary task documents and deterministic markdown. Every intrinsically valid mutation publishes during every queue/operation phase and returns per-sprint `projectionEffects`; an incomplete effect carries its exact rebuild `nextAction`. `skip_step` requires a nonblank reason; `discard-unstarted` removes only centrally proven never-started planning work without completion fiction; `Completed` refuses unresolved units. | `repo_id`, task/contract target, `operation`, edit payload, `dry_run=false` |
 | `task_reopen` | Reopen a fully landed leaf under the same leaf id so new work can be declared explicitly. | `contract_path`, `dry_run=false` |
 
 See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.

@@ -18,6 +18,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.models.lifecycles.operation import (
+    IntegrationPublicationIntent,
     IntegrationOperationAuthority,
     LifecycleOperationRecoveryCommits,
 )
@@ -60,6 +61,15 @@ def git(root: Path, *args: str) -> str:
     if result.returncode != 0:
         raise AssertionError(result.stderr)
     return result.stdout.strip()
+
+
+def _not_applicable_integration_publication() -> IntegrationPublicationIntent:
+    return IntegrationPublicationIntent(
+        operationKey="a" * 64,
+        generation=1,
+        preparedAt="2026-08-15T00:00:00+00:00",
+        claimState="not-applicable",
+    )
 
 
 def integration_contract(root: Path, *, kind: str = "leaf") -> WorktreeContract:
@@ -392,7 +402,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
                 mock.patch.object(
                     integrate_mod,
                     "preview_integration_boundary",
-                    return_value=integrate_mod.IntegrationBoundaryFacts(None, None),
+                    return_value=integrate_mod.IntegrationBoundaryFacts(None, None, None),
                 ),
                 mock.patch.object(
                     integrate_mod,
@@ -709,7 +719,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
             mock.patch.object(
                 integrate_mod,
                 "preview_integration_boundary",
-                return_value=integrate_mod.IntegrationBoundaryFacts(None, None),
+                return_value=integrate_mod.IntegrationBoundaryFacts(None, None, None),
             ),
             mock.patch.object(
                 integrate_mod, "_integration_source_state_block", side_effect=[None, moved]
@@ -723,7 +733,12 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         ):
             result = integrate_mod._apply_integration(
                 contract,
-                WorktreeArgs(strategy="ff-only", operation_key="a" * 64),
+                WorktreeArgs(
+                    strategy="ff-only",
+                    operation_key="a" * 64,
+                    operation_generation=1,
+                    integration_publication=_not_applicable_integration_publication(),
+                ),
                 IntegrationSources(
                     current_code_source="c0",
                     current_memory_source="",
@@ -785,6 +800,7 @@ class IntegrationDryRunTests(unittest.TestCase):
                 return_value=(SimpleNamespace(side="code", branch="ar/master"),),
             ),
             mock.patch.object(integrate_mod, "validate_integrate_contract"),
+            mock.patch.object(integrate_mod, "_integration_door_block", return_value=None),
             mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
             mock.patch.object(
                 integrate_mod,

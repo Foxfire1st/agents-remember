@@ -70,7 +70,7 @@ from agents_remember.worktrees.modules.integrate import (
     integrate_result,
 )
 from agents_remember.worktrees.modules.start import attach_result
-from agents_remember.worktrees.modules.startup import start_contract
+from agents_remember.worktrees.modules.startup import start_contract, start_memory
 from agents_remember.worktrees.modules.sync import sync_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from closeout_input_test_support import closeout_worktree_args
@@ -79,6 +79,7 @@ from integration_branch_authority_test_support import (
     _closed_external_leaf_worktrees,
     _closed_leaf_worktree,
     _doc,
+    _publish_completed_closeout_fixture,
 )
 from test_cleanup_carryover import _allow_terminal_archive_for_downstream_unit
 from test_source_lineage import _commit_on, _git
@@ -441,24 +442,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
-            memory_repo = fixture.leaf_contract.memory_repo_path
-            assert memory_repo is not None
-            code_worktree = fixture.leaf_contract.worktree_group / "closed-code"
-            memory_worktree = fixture.leaf_contract.worktree_group / "closed-memory"
-            code_worktree.parent.mkdir(parents=True, exist_ok=True)
-            _git(fixture.code_repo, "worktree", "add", code_worktree.as_posix(), "leaf")
-            _git(memory_repo, "worktree", "add", memory_worktree.as_posix(), "leaf")
-            closed = replace(
-                fixture.leaf_contract,
-                code_worktree=code_worktree,
-                memory_worktree=memory_worktree,
-                ledger_path=memory_worktree / "memory.md",
-                closeout_status="completed",
-                code_commit=_git(fixture.code_repo, "rev-parse", "leaf"),
-                memory_content_commit=_git(memory_repo, "rev-parse", "leaf"),
-                ledger_commit=_git(memory_repo, "rev-parse", "leaf"),
-            )
-            write_contract(closed.contract_path, closed)
+            closed = _closed_external_leaf_worktrees(fixture, root)
             operation_input = IntegrateOperationInput(
                 configPath=fixture.config_path.as_posix(),
                 contractPath=closed.contract_path.as_posix(),
@@ -566,7 +550,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 "agents_remember.worktrees.integration.integration_branch_repository.run_git",
                 return_value=failed,
             ),
-            self.assertRaisesRegex(RuntimeError, "cannot resolve local branch authority"),
+            self.assertRaisesRegex(RuntimeError, "local branch authority is unreadable"),
         ):
             canonical_local_branch(Path("/repo"), "leaf")
 
@@ -642,19 +626,25 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             assert memory_repo is not None
             _git(memory_repo, "branch", "-D", "ar/master")
             with self.assertRaisesRegex(RuntimeError, "task-derived memory source branch"):
-                start_module._ensure_memory_source_branch(fixture.leaf_contract)
+                start_memory._ensure_memory_source_branch(fixture.leaf_contract)
 
     def test_direct_main_target_is_rejected_before_operation_creation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp))
             closed = replace(
-                _closed_leaf_worktree(fixture, Path(tmp), candidate_commit=False),
+                _closed_leaf_worktree(
+                    fixture,
+                    Path(tmp),
+                    candidate_commit=False,
+                    publish_closeout_evidence=False,
+                ),
                 code_source_branch="main",
                 closeout_status="completed",
                 approved_for_commit=True,
                 code_commit=_git(fixture.code_repo, "rev-parse", "leaf"),
             )
             write_contract(closed.contract_path, closed)
+            closed = _publish_completed_closeout_fixture(fixture, closed)
             operation_input = IntegrateOperationInput(
                 configPath=fixture.config_path.as_posix(),
                 contractPath=closed.contract_path.as_posix(),
@@ -696,7 +686,12 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root)
-            closed = _closed_leaf_worktree(fixture, root, candidate_commit=True)
+            closed = _closed_leaf_worktree(
+                fixture,
+                root,
+                candidate_commit=True,
+                publish_closeout_evidence=False,
+            )
             _git(
                 fixture.code_repo,
                 "symbolic-ref",
@@ -705,6 +700,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             )
             closed = replace(closed, code_source_branch="integration-alias")
             write_contract(closed.contract_path, closed)
+            closed = _publish_completed_closeout_fixture(fixture, closed)
             operation_input = IntegrateOperationInput(
                 configPath=fixture.config_path.as_posix(),
                 contractPath=closed.contract_path.as_posix(),
@@ -910,10 +906,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 expected["intended"],
                 {"codeRef": closed.code_commit, "memoryRef": closed.ledger_commit},
             )
-            self.assertEqual(
-                raised.exception.observed,
-                {"codeRef": closed.code_commit, "memoryRef": raced_memory},
-            )
+            self.assertEqual(raised.exception.observed, {})
             self.assertEqual(
                 _git(fixture.code_repo, "rev-parse", "ar/master"),
                 closed.code_commit,
@@ -1076,15 +1069,13 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 operation_record_path(closed.worktree_group, "integrate")
             )
             OperationRuntime(store).start()
-            with (
-                mock.patch.object(
-                    lifecycle_operation_worker.os,
-                    "getpid",
-                    return_value=999_999,
-                ),
-                self.assertRaisesRegex(RuntimeError, "another running worker"),
+            with mock.patch.object(
+                lifecycle_operation_worker.os,
+                "getpid",
+                return_value=999_999,
             ):
-                OperationRuntime(store).start()
+                duplicate = OperationRuntime(store).start()
+            self.assertEqual(duplicate, store.read())
 
             payload = json.loads(store.path.read_text(encoding="utf-8"))
             payload["schemaVersion"] = "1.0"

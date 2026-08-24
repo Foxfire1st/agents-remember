@@ -78,10 +78,6 @@ from agents_remember.worktrees.queue.closeout_preview import (
     closeout_summary,
     proposed_closeout_commits,
 )
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    certify_queue_candidate_closeout,
-    claim_queue_candidate_for_closeout,
-)
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
     accepted_code_commit,
@@ -1033,7 +1029,6 @@ def closeout_result(
     accepted_candidate_tree = cast(str, args.candidate_tree)
     refuse_series_workbench_commit(contract)
     _revalidate_reviewed_candidate(contract, route_review, accepted_candidate_tree)
-    claim_queue_candidate_for_closeout(contract, args.operation_key)
 
     def publication() -> tuple[_CloseoutCommitPhase, Any]:
         current = load_contract(contract.contract_path)
@@ -1074,7 +1069,6 @@ def closeout_result(
         return committed, updated
 
     committed, updated = publish_closeout_under_authority(contract, publication)
-    certify_queue_candidate_closeout(updated, args.operation_key)
     return WorktreeCommandResult(
         0,
         _closed_result_payload(
@@ -1097,13 +1091,12 @@ def _closeout_entry(
 ) -> tuple[WorktreeContract, EffectiveCloseoutInput, WorktreeCommandResult | None]:
     if not args.dry_run:
         require_closeout_mutation_authority(args)
-    contract_path, contract = _closeout_contract(args, current_contract)
+    _contract_path, contract = _closeout_contract(args, current_contract)
     effective_input = _effective_closeout_input(args)
     if args.recovery_commits is None:
         require_effective_closeout_plan(contract, effective_input, route="worktree")
     recovered = _recover_closeout_finalization(contract, args)
     if recovered is not None:
-        certify_queue_candidate_closeout(load_contract(contract_path), args.operation_key)
         return contract, effective_input, recovered
     _validate_closeout_source_state(contract)
     refuse_series_workbench_commit(contract)

@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.models.lifecycles.door import (
+    CloseoutDoorGeneration,
+    DoorAdmissionProvenance,
+    DoorProvenance,
+    DoorSchedulingProvenance,
+)
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationEvidence,
     GitMutationSnapshot,
 )
 from agents_remember.models.lifecycles.operation import CloseoutOperationInput
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.closeout_input import (
+    capture_closeout_candidate,
     normalize_closeout_input,
     raw_closeout_messages,
 )
@@ -21,6 +34,9 @@ from agents_remember.worktrees.integration.closeout_operation_admission import (
 from agents_remember.worktrees.integration.closeout_recovery_projection import (
     derive_closeout_recovery_commits,
 )
+from agents_remember.worktrees.integration.lifecycle import (
+    lifecycle_operations as lifecycle_operations_module,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
@@ -28,7 +44,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import
     start_or_observe_closeout_operation,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 
 
 class MutationEvidenceRecorder:
@@ -68,30 +84,129 @@ def start_closeout_operation(
     operation_input: CloseoutOperationInput,
     **options,
 ):
-    """Route a durable-input fixture through canonical raw, lease-bound admission."""
+    """Route a durable-input fixture through canonical raw, lease-bound admission.
+
+    Older lifecycle suites exercise behavior below the L3 scheduling boundary. They receive an
+    explicit synthetic waiting door and bypass only the first-ready projection assertion for that
+    synthetic generation. Fixtures that already own a real door still exercise the production
+    scheduling fence unchanged.
+    """
+    fixture_bypass_scheduling = bool(options.pop("fixture_bypass_scheduling", False))
     effective = operation_input.effectiveInput
-    return start_or_observe_closeout_operation(
-        CloseoutOperationAdmission(
-            config_path=operation_input.configPath,
-            contract_path=Path(operation_input.contractPath),
-            messages=raw_closeout_messages(
-                code=_enabled_message(effective, "code"),
-                memory=_enabled_message(effective, "memory"),
-                ledger=_enabled_message(effective, "ledger"),
-            ),
-            approval_note=operation_input.approvalNote,
-            gate_policy=operation_input.gatePolicy,
-            corrected_call=CloseoutCorrectedCall(
-                tool="worktree_closeout_apply",
-                arguments={
-                    "contract_path": operation_input.contractPath,
-                    "intent_note": "<developer intent>",
-                },
-            ),
-        ),
+    contract, bypass_scheduling_fence = _ensure_fixture_waiting_door(
         load_contract(Path(operation_input.contractPath)),
-        **options,
+        force_synthetic=fixture_bypass_scheduling,
     )
+    scheduling_fence = (
+        mock.patch.object(lifecycle_operations_module, "require_first_ready_generation")
+        if bypass_scheduling_fence or fixture_bypass_scheduling
+        else nullcontext()
+    )
+    with scheduling_fence:
+        return start_or_observe_closeout_operation(
+            CloseoutOperationAdmission(
+                config_path=operation_input.configPath,
+                contract_path=Path(operation_input.contractPath),
+                messages=raw_closeout_messages(
+                    code=_enabled_message(effective, "code"),
+                    memory=_enabled_message(effective, "memory"),
+                    ledger=_enabled_message(effective, "ledger"),
+                ),
+                approval_note=operation_input.approvalNote,
+                gate_policy=operation_input.gatePolicy,
+                corrected_call=CloseoutCorrectedCall(
+                    tool="worktree_closeout_apply",
+                    arguments={
+                        "contract_path": operation_input.contractPath,
+                        "intent_note": "<developer intent>",
+                    },
+                ),
+            ),
+            contract,
+            **options,
+        )
+
+
+def _ensure_fixture_waiting_door(contract, *, force_synthetic: bool = False):
+    """Publish a typed test-only scheduling input for below-queue lifecycle suites."""
+
+    if contract.closeout_door is not None and not (
+        force_synthetic and contract.closeout_door.disposition == "waiting"
+    ):
+        door = contract.closeout_door
+        bypass = door.disposition == "waiting" and door.declaredBy.startswith("test-fixture:")
+        return contract, bypass
+    door = _fixture_waiting_door(contract)
+    write_contract(contract.contract_path, replace(contract, closeout_door=door))
+    return load_contract(contract.contract_path), True
+
+
+def _fixture_waiting_door(
+    contract,
+) -> CloseoutDoorGeneration:
+    """Build one typed synthetic source generation for legacy lifecycle fixtures."""
+
+    candidate = capture_closeout_candidate(contract)
+    task_ref = TaskDocumentRef(
+        repository=contract.repo_name,
+        path=(
+            f"{contract.task_name}/{contract.leaf_id.lower()}.json"
+            if contract.leaf_id
+            else f"{contract.task_name}/task.json"
+        ),
+    )
+    master_ref = TaskDocumentRef(
+        repository=contract.repo_name,
+        path=f"{contract.task_name}/task.json",
+    )
+    sprint_ref = TaskDocumentRef(
+        repository=contract.repo_name,
+        path="lifecycle-fixture-sprint/task.json",
+    )
+    identity = {
+        "schema": "test-fixture-closeout-door/v1",
+        "contractPath": contract.contract_path.as_posix(),
+        "candidateTree": candidate.candidate_tree,
+        "codeBaseCommit": contract.code_base_commit,
+        "taskDocumentRef": task_ref.model_dump(mode="json"),
+    }
+    generation_id = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    not_applicable = DoorProvenance(
+        state="not-applicable",
+        fingerprint=hashlib.sha256(b"test-fixture-not-applicable").hexdigest(),
+    )
+    door = CloseoutDoorGeneration(
+        generationId=generation_id,
+        disposition="waiting",
+        taskId=contract.task_id,
+        taskName=contract.task_name,
+        taskDocumentRef=task_ref,
+        owningMasterTaskDocumentRef=master_ref,
+        sprintTaskDocumentRef=sprint_ref,
+        contractPath=contract.contract_path.as_posix(),
+        candidateTree=candidate.candidate_tree,
+        memoryCandidateTree=contract.memory_base_commit,
+        codeBaseCommit=contract.code_base_commit,
+        memoryBaseCommit=contract.memory_base_commit,
+        ledgerMemoryCommit=contract.memory_base_commit,
+        taskTopologyFingerprint=hashlib.sha256(b"test-fixture-topology").hexdigest(),
+        reviewProvenance=not_applicable,
+        memoryProvenance=not_applicable,
+        ledgerProvenance=not_applicable,
+        admissionProvenance=DoorAdmissionProvenance(
+            fingerprint=hashlib.sha256(b"test-fixture-admission").hexdigest()
+        ),
+        schedulingProvenance=DoorSchedulingProvenance(
+            priority="normal",
+            judgmentId="TEST-FIXTURE-BELOW-SCHEDULING",
+            fingerprint=hashlib.sha256(b"test-fixture-scheduling").hexdigest(),
+        ),
+        declaredBy="test-fixture:lifecycle-below-scheduling",
+        declaredAt="2026-08-15T00:00:00+00:00",
+    )
+    return door
 
 
 def publish_closeout_finalization(runtime, contract) -> None:

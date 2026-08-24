@@ -48,6 +48,16 @@ def terminal_catalog_path(coordination_root: Path) -> Path:
     return coordination_root / "logs" / "dashboard" / "terminal-sessions.json"
 
 
+def _leaf_execution_entry(entry: TerminalCatalogEntry) -> bool:
+    return entry.binding_role in {"worker", "reviewer", "curator"} and any(
+        ref is not None
+        for ref in (
+            entry.task_document_ref,
+            entry.replacement_for_task_document_ref,
+        )
+    )
+
+
 class TerminalCatalog:
     """JSON-backed catalog for dashboard-owned terminal sessions."""
 
@@ -298,7 +308,11 @@ class TerminalCatalog:
                     self._write_disk(entries)
 
     def compact(
-        self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS
+        self,
+        *,
+        now: datetime,
+        retain_seconds: float = TERMINATED_RETENTION_SECONDS,
+        registered_execution_ids: frozenset[str] = frozenset(),
     ) -> int:
         """Reclaim ``terminated`` tombstones older than ``retain_seconds`` so the file stays bounded.
 
@@ -306,7 +320,10 @@ class TerminalCatalog:
         the catalog is re-read on every sweep, so unbounded tombstone growth is the reclamation gap. Only
         ``terminated`` rows past the window are dropped -- ``running``/``exited`` rows are live, and
         ``landed`` rows are inspectable archives reclaimed by the L11 manual group-cleanup, never here.
-        Provenance survives in the observer lifecycle event stream, so no separate archive file is kept.
+        A task-bound worker/reviewer/curator row is retained until its id is explicitly authorized
+        by the task-owned execution registrar. That registrar publishes one bounded first-evidence
+        marker before reclamation, so routine retention cannot turn historical execution into
+        "never started". Other row provenance remains in the observer lifecycle event stream.
         Returns the number of rows reclaimed. Composes inside ``batch()`` (drops from the buffer, folded
         into the one commit write).
         """
@@ -318,6 +335,7 @@ class TerminalCatalog:
                 if not (
                     entry.status == "terminated"
                     and _terminated_beyond(entry, now=now, retain_seconds=retain_seconds)
+                    and (not _leaf_execution_entry(entry) or entry.id in registered_execution_ids)
                 )
             ]
             if len(kept) == len(entries):

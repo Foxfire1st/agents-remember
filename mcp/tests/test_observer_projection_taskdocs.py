@@ -411,6 +411,50 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         # through the task-document body endpoint.
         self.assertEqual(series.sections, [])
 
+    def test_discarded_planning_history_is_distinct_in_task_and_series_metrics(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "series"
+        data = self._master().model_dump(by_alias=True)
+        data["discardedSubTasks"] = [
+            {
+                "number": "2",
+                "name": "Never started",
+                "file": "02_never_started.md",
+                "scope": "retired planning work",
+                "disposition": "discard-unstarted",
+                "reason": "No implementation was needed",
+                "discardedAt": "2026-08-24T12:00:00+00:00",
+                "proof": {
+                    "version": "task-unstarted-evidence/v1",
+                    "taskDocumentRef": {
+                        "repository": "repo-a",
+                        "path": "series/02_never_started.json",
+                    },
+                    "taskState": "planning-unstarted",
+                    "enclosureState": "absent",
+                    "locatorState": "absent",
+                    "doorState": "absent",
+                    "operationState": "absent",
+                    "seatState": "absent",
+                    "reviewState": "absent",
+                    "commitState": "absent",
+                    "fingerprint": "a" * 64,
+                },
+            }
+        ]
+        write_task_doc(root, TaskDocument.model_validate(data))
+
+        [task_node] = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        [series] = read_series_documents(self.coord, now=FRESH)
+
+        self.assertEqual(task_node.discardedCount, 1)
+        self.assertIsNotNone(task_node.discardedSubTasks)
+        assert task_node.discardedSubTasks is not None
+        self.assertEqual(task_node.discardedSubTasks[0].number, "2")
+        self.assertEqual(series.discardedCount, 1)
+        self.assertEqual(series.discardedSubTasks[0].reason, "No implementation was needed")
+        self.assertEqual((series.doneCount, series.totalCount), (0, 1))
+        self.assertEqual([row.number for row in series.subTasks], ["1"])
+
     def test_nested_masters_stay_on_series_surface(self) -> None:
         parent_dir = self.coord / "tasks" / "repo-a" / "parent"
         child_dir = self.coord / "tasks" / "repo-a" / "child"

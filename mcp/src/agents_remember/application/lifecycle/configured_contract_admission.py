@@ -12,14 +12,22 @@ from agents_remember.errors import (
     ConfiguredContractAuthorityError,
     ConfiguredContractRereadError,
 )
+from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.lifecycles.enclosure import LifecycleEnclosureLocator
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.worktrees.integration.configured_contract_authority import (
     require_configured_contract_repositories,
+    require_configured_terminal_contract_repositories,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
+    TerminalCleanupContractAuthority,
+    terminal_cleanup_contract_authority,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocation,
     LifecycleOperationLocationError,
+    inspect_lifecycle_operation_locator,
     require_contract_matches_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
@@ -57,6 +65,16 @@ class ConfiguredContractAccepted:
 
 
 @dataclass(frozen=True)
+class TerminalConfiguredContractAccepted:
+    """One terminal locator bound to archived and surviving configured contract truth."""
+
+    contract_path: Path
+    contract: WorktreeContract
+    locator: LifecycleEnclosureLocator
+    authority: TerminalCleanupContractAuthority
+
+
+@dataclass(frozen=True)
 class ConfiguredContractRefused:
     """One finite admission refusal containing only bounded public evidence."""
 
@@ -70,6 +88,11 @@ class ConfiguredContractRefused:
 
 
 ConfiguredContractAdmission = ConfiguredContractAccepted | ConfiguredContractRefused
+TerminalConfiguredContractAdmission = (
+    ConfiguredContractAccepted
+    | TerminalConfiguredContractAccepted
+    | ConfiguredContractRefused
+)
 ConfiguredContractOperationResult = TypeVar("ConfiguredContractOperationResult")
 
 
@@ -147,6 +170,104 @@ def admit_configured_contract(
             location=location,
         )
     return ConfiguredContractAccepted(confined, contract, location)
+
+
+def admit_configured_terminal_contract(
+    config: McpRuntimeConfig,
+    contract_path: str | Path,
+) -> TerminalConfiguredContractAdmission:
+    """Admit live authority normally or one exact terminal archive for final retry/status."""
+
+    try:
+        confined = require_within_coordination(config, str(contract_path), "contract_path")
+    except AuthorityError as error:
+        detail = "the configured contract address is outside coordination authority"
+        return ConfiguredContractRefused(
+            reason="address-invalid",
+            status="configured-contract-address-invalid",
+            detail=detail,
+            expected={"contractAddress": "confined under coordinationRoot"},
+            observed=public_failure_evidence(
+                stage="contract-address",
+                side="contract",
+                name="contract_path",
+                error_type=type(error).__name__,
+                observed={"state": "invalid"},
+            ),
+        )
+    observation = inspect_lifecycle_operation_locator(
+        config.coordination_root,
+        confined,
+    )
+    if observation.state != "terminal-archived":
+        return admit_configured_contract(config, confined)
+    assert observation.locator is not None
+    try:
+        contract = load_contract(confined)
+    except (ContractError, OSError, UnicodeError, ValueError) as error:
+        detail = "terminal retry requires readable surviving contract truth"
+        return ConfiguredContractRefused(
+            reason="location-invalid",
+            status="terminal-archive-contract-unreadable",
+            detail=detail,
+            expected={
+                "contractPath": confined.as_posix(),
+                "route": "terminal locator -> exact archive/receipt -> surviving contract",
+            },
+            observed=public_failure_evidence(
+                stage="terminal-contract-read",
+                side="contract",
+                name=confined.name,
+                error_type=type(error).__name__,
+                observed={"state": "missing" if not confined.exists() else "unreadable"},
+            ),
+            contract_path=confined,
+        )
+    try:
+        authority = terminal_cleanup_contract_authority(
+            config.coordination_root,
+            contract,
+            observation.locator,
+        )
+    except LifecycleOperationLocationError as error:
+        return ConfiguredContractRefused(
+            reason="location-invalid",
+            status=error.status,
+            detail=error.detail,
+            expected=error.expected,
+            observed=error.observed,
+            contract_path=confined,
+        )
+    try:
+        require_configured_terminal_contract_repositories(
+            authority.archived_contract,
+            config.config_path.as_posix(),
+        )
+    except ConfiguredContractAuthorityError as error:
+        detail = "the archived terminal contract does not match configured repository authority"
+        return ConfiguredContractRefused(
+            reason="authority-invalid",
+            status="terminal-archive-configured-authority-invalid",
+            detail=detail,
+            expected={
+                "contractPath": confined.as_posix(),
+                "repositoryAuthority": "configured",
+            },
+            observed=public_failure_evidence(
+                stage="terminal-contract-authority",
+                side=error.side,
+                name=error.name,
+                error_type=type(error).__name__,
+                observed={"state": "mismatch"},
+            ),
+            contract_path=confined,
+        )
+    return TerminalConfiguredContractAccepted(
+        contract_path=confined,
+        contract=contract,
+        locator=observation.locator,
+        authority=authority,
+    )
 
 
 def configured_authority_refusal(

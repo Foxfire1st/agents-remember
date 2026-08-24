@@ -1,191 +1,108 @@
-"""Resolve the sprint queue that governs one task-document publication."""
+"""Post-publication projection-scope union for authoritative task changes."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocSourceSnapshot, TaskDocument, json_path_for
-from agents_remember.tasks.document_refs import (
-    ResolvedTaskDocument,
-    TaskDocumentRefError,
-    TaskDocumentTopology,
-)
+from agents_remember.tasks import TaskDocument
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 
-class QueueScopeError(ValueError):
-    """A task document cannot resolve one unambiguous governing sprint queue."""
+class TaskDocScopeError(ValueError):
+    """A prepared changed-document set cannot identify its canonical task addresses."""
 
 
 @dataclass(frozen=True)
-class QueuePublicationScope:
-    sprint_ref: TaskDocumentRef
-    owning_master: TaskDocumentRef | None
+class TaskDocScopeChange:
+    """One accepted before/candidate pair used only to derive projection blast radius."""
 
-
-@dataclass(frozen=True)
-class PreparedQueuePublicationScope:
-    """Prepared queue identity without promoting projection reads into task CAS."""
-
-    scope: QueuePublicationScope | None
-    source_snapshots: tuple[TaskDocSourceSnapshot, ...]
-
-
-@dataclass(frozen=True)
-class QueueScopePreparation:
-    """Accepted task candidate and source generation used to derive queue scope."""
-
-    coordination_root: Path
-    repo_id: str
-    task_root: Path
+    ref: TaskDocumentRef
     original: TaskDocument | None
     candidate: TaskDocument
-    source_snapshots: tuple[TaskDocSourceSnapshot, ...]
 
 
-@dataclass(frozen=True)
-class _ScopeContext:
-    topology: TaskDocumentTopology
-    repo_id: str
-    task_root: Path
-    repository_root: Path
-    existing_path: Path
-    existing: bool
-
-
-def _single_scope(
-    affected: Sequence[ResolvedTaskDocument], owning_master: TaskDocumentRef
-) -> QueuePublicationScope | None:
-    if len(affected) > 1:
-        raise QueueScopeError(
-            "task document edit affects multiple sprint queues; resolve its parent topology first"
-        )
-    return QueuePublicationScope(affected[0].ref, owning_master) if affected else None
-
-
-def _master_edit_scope(
-    topology: TaskDocumentTopology,
-    master_ref: TaskDocumentRef,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> QueuePublicationScope | None:
-    affected = topology.execution_sprints_affected_by_master(
-        master_ref,
-        original=original,
-        candidate=candidate,
-    )
-    return _single_scope(affected, master_ref)
-
-
-def _unchanged_master_scope(
-    topology: TaskDocumentTopology, master_ref: TaskDocumentRef
-) -> QueuePublicationScope | None:
-    master = topology.resolve(master_ref).document
-    return _master_edit_scope(topology, master_ref, master, master)
-
-
-def _existing_scope(
-    context: _ScopeContext,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> QueuePublicationScope | None:
-    ref = context.topology.canonical_ref(context.repo_id, context.existing_path)
-    existing = context.topology.resolve(ref)
-    if existing.document.kind == "master":
-        if existing.document.orchestrates or candidate.orchestrates:
-            return QueuePublicationScope(ref, None)
-        return _master_edit_scope(context.topology, ref, original, candidate)
-    master_ref = _existing_ref(
-        context.topology,
-        context.repo_id,
-        context.task_root / "task.json",
-    )
-    if master_ref is None:
-        return None
-    scope = _unchanged_master_scope(context.topology, master_ref)
-    if scope is not None and context.topology.parent(ref) != master_ref:
-        raise QueueScopeError("governed leaf does not resolve to its exact owning master")
-    return scope
-
-
-def _new_scope(
-    context: _ScopeContext,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> QueuePublicationScope | None:
-    if candidate.kind == "master":
-        candidate_ref = TaskDocumentRef(
-            repository=context.repo_id,
-            path=context.existing_path.relative_to(context.repository_root).as_posix(),
-        )
-        return _master_edit_scope(context.topology, candidate_ref, original, candidate)
-    master_ref = _existing_ref(
-        context.topology,
-        context.repo_id,
-        context.task_root / "task.json",
-    )
-    if master_ref is None:
-        return None
-    return _unchanged_master_scope(context.topology, master_ref)
-
-
-def _existing_ref(
-    topology: TaskDocumentTopology,
+def resolve_projection_scope_union(
+    coordination_root: Path,
     repo_id: str,
-    path: Path,
-) -> TaskDocumentRef | None:
-    """Resolve one source through the topology's accepted snapshot set, including absence."""
+    changes: tuple[TaskDocScopeChange, ...],
+) -> tuple[TaskDocumentRef, ...]:
+    """Return the complete canonical old/new sprint union for one published task batch."""
 
-    try:
-        return topology.canonical_ref(repo_id, path.resolve(strict=False))
-    except TaskDocumentRefError as exc:
-        if exc.status == "task-document-not-found":
-            return None
-        raise
+    topology = TaskDocumentTopology(coordination_root)
+    by_ref: dict[TaskDocumentRef, TaskDocScopeChange] = {}
+    for change in changes:
+        if change.ref.repository != repo_id:
+            raise TaskDocScopeError(
+                f"scope change {change.ref.key} does not belong to repository {repo_id!r}"
+            )
+        previous = by_ref.get(change.ref)
+        if previous is not None and previous != change:
+            raise TaskDocScopeError(f"conflicting scope changes for {change.ref.key}")
+        by_ref[change.ref] = change
 
-
-def prepare_governing_queue_scope(
-    request: QueueScopePreparation,
-) -> PreparedQueuePublicationScope:
-    """Prepare queue scope entirely from one captured topology generation."""
-
-    topology = TaskDocumentTopology(
-        request.coordination_root,
-        accepted_sources=request.source_snapshots,
-    )
-    repository_root = (request.coordination_root / "tasks" / request.repo_id).resolve(strict=False)
-    existing_path = json_path_for(
-        request.task_root,
-        request.original or request.candidate,
-    ).resolve(strict=False)
-    context = _ScopeContext(
-        topology,
-        request.repo_id,
-        request.task_root,
-        repository_root,
-        existing_path,
-        request.original is not None,
-    )
-    try:
-        scope = _resolve_governing_queue_scope(
-            context,
-            request.original,
-            request.candidate,
+    overrides = {ref: change.candidate for ref, change in by_ref.items()}
+    scopes: set[TaskDocumentRef] = set()
+    for change in by_ref.values():
+        versions = tuple(
+            document for document in (change.original, change.candidate) if document is not None
         )
-    except (TaskDocumentRefError, ValueError) as exc:
-        raise QueueScopeError(f"cannot resolve governing sprint queue: {exc}") from exc
-    return PreparedQueuePublicationScope(scope, request.source_snapshots)
+        if any(_is_sprint(document) for document in versions):
+            scopes.add(change.ref)
+        if any(document.kind == "master" and not document.orchestrates for document in versions):
+            scopes.update(
+                sprint.ref
+                for sprint in topology.projection_sprints_affected_by_master(
+                    change.ref,
+                    original=change.original,
+                    candidate=change.candidate,
+                    overrides=overrides,
+                )
+            )
+        if any(document.kind == "subTask" for document in versions):
+            scopes.update(
+                _leaf_projection_scopes(
+                    topology,
+                    change,
+                    by_ref,
+                    overrides,
+                )
+            )
+    return tuple(sorted(scopes, key=lambda ref: ref.key))
 
 
-def _resolve_governing_queue_scope(
-    context: _ScopeContext,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> QueuePublicationScope | None:
-    if candidate.kind == "light":
-        return None
-    if context.existing:
-        return _existing_scope(context, original, candidate)
-    return _new_scope(context, original, candidate)
+def _is_sprint(document: TaskDocument) -> bool:
+    return document.kind == "master" and bool(document.orchestrates)
+
+
+def _leaf_projection_scopes(
+    topology: TaskDocumentTopology,
+    leaf: TaskDocScopeChange,
+    changes: dict[TaskDocumentRef, TaskDocScopeChange],
+    overrides: dict[TaskDocumentRef, TaskDocument],
+) -> set[TaskDocumentRef]:
+    parent_ref = TaskDocumentRef(
+        repository=leaf.ref.repository,
+        path=(Path(leaf.ref.path).parent / "task.json").as_posix(),
+    )
+    parent_change = changes.get(parent_ref)
+    if parent_change is None:
+        try:
+            current = topology.resolve(parent_ref, overrides).document
+        except TaskDocumentRefError:
+            return set()
+        original = current
+        candidate = current
+    else:
+        original = parent_change.original
+        candidate = parent_change.candidate
+    return {
+        sprint.ref
+        for sprint in topology.projection_sprints_affected_by_master(
+            parent_ref,
+            original=original,
+            candidate=candidate,
+            overrides=overrides,
+        )
+    }

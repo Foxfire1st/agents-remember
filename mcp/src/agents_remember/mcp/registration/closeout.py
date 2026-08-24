@@ -16,6 +16,7 @@ from agents_remember.application.worktree_tools import (
     OperationControlRequest,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import IntegrateStrategy
 from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
@@ -52,7 +53,7 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         candidate_tree: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Verify one series code commit and lock-serialize its memory + ledger writes.
+        """Verify one series code commit and durably serialize its memory + ledger writes.
 
         The direct landing is the branch-addressed counterpart of the worktree closeout
         commit phase for sanctioned direct execution: it binds the task-root series
@@ -62,7 +63,8 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         Message intent is normalized before lane authority. Apply persists one synchronous
         direct-landing lifecycle generation before memory or ledger mutation, records Git
         intent/proof per leg, and resumes the exact generation through the task-addressed
-        recover control after interruption. Policy-gated:
+        recover control after interruption. A transient landing lock and the closeout queue are
+        never recovery evidence. Policy-gated:
         directExecutionEnabled must be set in the MCP
         authority settings. The code commit is verified, never created. Pass
         candidate_tree (the staged candidate the owner gated through the Dagger
@@ -137,7 +139,8 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         MUTATING and commit-gated: preview and approval precede apply. Requires intent_note.
         Every contract-enabled commit leg requires its explicit, nonblank message; typed
         not-applicable legs may be omitted.
-        Repeat the same task input to observe/recover it; conflicting input refuses."""
+        Repeat the same task input to observe/recover it; conflicting input refuses. Queue
+        invalidation or absence does not affect the accepted journal generation."""
         return worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -166,7 +169,8 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         the full wrapper once through the pinned Dagger executor inside this step.
         An explicit orchestration.qualityGate.memoryCapBytes remains available. MUTATING:
         moves branch refs; preview with dry_run=true. Repeat the same task input to
-        observe/recover it; conflicting input refuses."""
+        observe/recover it; conflicting input refuses. Protected-ref serialization applies only to
+        the addressed landing and never blocks task-document authoring."""
         return worktree_integrate_payload(
             config,
             contract_path,
@@ -186,6 +190,8 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
         ledger_commit_message: str | None = None,
+        grade: SchedulingGradeInput | None = None,
+        admission: CandidateAdmissionFacts | None = None,
         dry_run: bool = False,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
@@ -207,6 +213,8 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
                 code_commit_message=code_commit_message,
                 memory_commit_message=memory_commit_message,
                 ledger_commit_message=ledger_commit_message,
+                grade=grade,
+                admission=admission,
                 dry_run=dry_run,
                 caller=caller,
             ),
@@ -252,10 +260,12 @@ def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfi
     def worktree_cleanup(
         *, contract_path: str, dry_run: bool = False, teardown_providers: bool = True
     ) -> dict[str, Any]:
-        """Remove a task's worktrees and merged task branches after integration. MUTATING and
-        destructive (deletes worktrees/branches) — run only after worktree_integrate. Preview with
-        dry_run=true. teardown_providers=true (default) also reclaims the worktree's isolated
-        provider stack (containers, networks, provider-runtime tree)."""
+        """Archive and read back one terminal generation's canonical enclosure manifest/journal/
+        history, publish its external terminal receipt, then remove the task's worktrees, merged
+        task branches, reports, and enclosure root after integration. Active or ambiguous evidence
+        and missing/unreadable/mismatched archive proof refuse deletion. MUTATING and destructive —
+        run only after worktree_integrate. Preview with dry_run=true. teardown_providers=true
+        (default) also reclaims the worktree's isolated provider stack."""
         return worktree_cleanup_payload(
             config, contract_path, dry_run=dry_run, teardown_providers=teardown_providers
         )
@@ -264,10 +274,12 @@ def _register_reclamation_command_tools(server: FastMCP, config: McpRuntimeConfi
     def worktree_abandon(
         *, contract_path: str, dry_run: bool = False, force: bool = False
     ) -> dict[str, Any]:
-        """Discard a worktree-backed task WITHOUT integrating it: reclaim its isolated provider
-        stack (containers, networks, provider-runtime tree), remove the code and memory worktrees,
-        delete the task branches, and remove the worktree group dir. MUTATING and destructive.
-        Unlike worktree_cleanup it needs no completed integration. Without force it refuses dirty
-        worktrees and unmerged branches (reporting the commits); force=true discards them
-        (git worktree remove --force, git branch -D). Preview with dry_run=true."""
+        """Abandon a worktree-backed task WITHOUT integrating it. First prove that the enclosure
+        has no live or ambiguous operation, archive and read back canonical enclosure evidence,
+        and publish the external terminal receipt; only then reclaim providers, worktrees, task
+        branches, reports, and the enclosure root. Active or ambiguous evidence is never
+        collectable. MUTATING and
+        destructive. Without force it refuses dirty worktrees and unmerged branches (reporting the
+        commits); force=true discards them only under the same contract-derived terminal authority.
+        Preview with dry_run=true."""
         return worktree_abandon_payload(config, contract_path, dry_run=dry_run, force=force)

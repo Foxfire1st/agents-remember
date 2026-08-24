@@ -1,4 +1,4 @@
-"""Transfer a certified queue projection into journal-owned integration authority."""
+"""Transfer claimed door and source-journal proof into integration authority."""
 
 from __future__ import annotations
 
@@ -7,16 +7,19 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from agents_remember.controlplane.closeout_queue_store import (
-    CloseoutQueueStore,
-    QueueTransaction,
-)
+from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     IntegrationPublicationIntent,
     IntegrationQualityCertification,
+    LifecycleOperationRecord,
 )
-from agents_remember.models.queue.closeout_queue import CloseoutCandidateRecord, CloseoutQueueState
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.integration.closeout_recovery_projection import (
+    closeout_generation_retained,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
+    closeout_contract_sha256,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     located_lifecycle_operation_store,
 )
@@ -26,86 +29,58 @@ from agents_remember.worktrees.integration.organizational_completion import (
     organizational_completion_plan,
     prepare_organizational_master_completion,
 )
-from agents_remember.worktrees.queue.closeout_queue import (
-    CloseoutQueueError,
-    _candidate_blockers,
-    _candidate_or_error,
-    _graph_context,
-    now_iso,
-)
-from agents_remember.worktrees.queue.closeout_queue_lifecycle import (
-    _integration_commit_blockers,
-    contract_queue_binding,
-)
-from agents_remember.worktrees.queue.closeout_queue_state import initial_queue_state
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True)
 class IntegrationBoundaryFacts:
-    """The exact certified projection and optional organizational completion plan."""
+    """Exact claimed source authority and optional organizational completion plan."""
 
-    candidate: CloseoutCandidateRecord | None
+    door: CloseoutDoorGeneration | None
+    source_operation: LifecycleOperationRecord | None
     organizational_completion: OrganizationalCompletionPlan | None
 
 
 def preview_integration_boundary(contract: WorktreeContract) -> IntegrationBoundaryFacts:
-    """Read the exact certified projection before journal claim transfer."""
+    """Re-prove the claimed door, source journal, and current task topology."""
 
-    binding = contract_queue_binding(contract)
-    if binding is None:
-        return IntegrationBoundaryFacts(None, None)
-    topology = TaskDocumentTopology(contract.coordination_root)
-    graph = _graph_context(topology, binding.sprint_ref)
-    initial = initial_queue_state(binding.sprint_ref, graph.revision, now_iso())
+    door = contract.closeout_door
+    if door is None:
+        return IntegrationBoundaryFacts(None, None, None)
+    if door.disposition != "claimed" or door.operationKind not in {"closeout", "direct-landing"}:
+        raise RuntimeError("integration requires one exact claimed closeout source door")
+    source = located_lifecycle_operation_store(contract, door.operationKind).read()
+    if source is None:
+        raise RuntimeError("claimed closeout door has no addressable source journal")
+    if not source_operation_matches(contract, door, source):
+        raise RuntimeError("claimed closeout door contradicts its source journal")
 
-    def inspect(state: CloseoutQueueState) -> IntegrationBoundaryFacts:
-        live_graph = _graph_context(topology, binding.sprint_ref)
-        candidate = _candidate_or_error(state, binding.candidate_ref)
-        if candidate.state != "certified":
-            raise CloseoutQueueError(
-                "closeout-candidate-certification-required",
-                "integration publication requires the exact certified waiting projection",
-            )
-        blockers = _candidate_blockers(topology, live_graph, candidate)
-        blockers.extend(
-            _integration_commit_blockers(
-                candidate,
-                contract,
-                contract.code_commit,
-                contract.memory_content_commit,
-                contract.ledger_commit,
-            )
-        )
-        if blockers:
-            raise CloseoutQueueError(
-                "closeout-candidate-integration-blocked",
-                f"certified candidate changed before journal transfer: {blockers!r}",
-            )
-        master = live_graph.masters[candidate.owningMaster]
+    completion = None
+    if contract.kind == "leaf":
+        topology = TaskDocumentTopology(contract.coordination_root)
+        sprint = topology.resolve(door.sprintTaskDocumentRef)
+        master = topology.resolve(door.owningMasterTaskDocumentRef)
+        candidate = topology.resolve(door.taskDocumentRef)
+        if (
+            topology.parent(candidate.ref) != master.ref
+            or topology.parent(master.ref) != sprint.ref
+        ):
+            raise RuntimeError("claimed door task topology changed before integration")
         completion = organizational_completion_plan(
             OrganizationalCompletionContext(
                 topology=topology,
-                sprint=live_graph.sprint,
+                sprint=sprint,
                 master=master,
-                candidate=candidate,
-                candidates=state.candidates,
+                candidate=door,
             ),
             contract=contract,
         )
-        return IntegrationBoundaryFacts(candidate, completion)
-
-    return CloseoutQueueStore(contract.coordination_root, binding.sprint_ref).inspect(
-        initial,
-        inspect,
-    )
+    return IntegrationBoundaryFacts(door, source, completion)
 
 
 def preview_organizational_completion(
     contract: WorktreeContract,
 ) -> OrganizationalCompletionPlan | None:
-    """Read the final-leaf completion plan without acquiring lifecycle authority."""
-
     return preview_integration_boundary(contract).organizational_completion
 
 
@@ -117,9 +92,8 @@ def prepare_integration_publication_intent(
     facts: IntegrationBoundaryFacts,
     certification: IntegrationQualityCertification | None,
 ) -> IntegrationPublicationIntent:
-    """Choose the full postclaim publication identity before protected ref movement."""
+    """Bind the source authority before protected refs or task truth move."""
 
-    candidate = facts.candidate
     completion = facts.organizational_completion
     if (completion is None) != (certification is None):
         raise RuntimeError(
@@ -135,10 +109,11 @@ def prepare_integration_publication_intent(
         if completion is not None and certification is not None
         else None
     )
-    binding = contract_queue_binding(contract)
-    if candidate is None:
-        if binding is not None:
-            raise RuntimeError("queue-bound integration publication has no certified candidate")
+    door = facts.door
+    source = facts.source_operation
+    if door is None or source is None:
+        if door is not None or source is not None:
+            raise RuntimeError("integration source authority is partial")
         return IntegrationPublicationIntent(
             operationKey=operation_key,
             generation=generation,
@@ -146,22 +121,21 @@ def prepare_integration_publication_intent(
             claimState="not-applicable",
             organizationalCompletion=organizational,
         )
-    if binding is None or candidate.taskDocumentRef != binding.candidate_ref:
-        raise RuntimeError("integration publication candidate contradicts contract binding")
-    door = contract.closeout_door
-    if door is None or door.disposition != "claimed":
-        raise RuntimeError("integration publication candidate has no claimed closeout door")
+    if not source_operation_matches(contract, door, source):
+        raise RuntimeError("integration source authority changed before journal intent")
     return IntegrationPublicationIntent(
         operationKey=operation_key,
         generation=generation,
         preparedAt=prepared_at,
         claimState="intent",
-        queueSprintTaskDocument=binding.sprint_ref.key,
-        queueCandidateTaskDocument=binding.candidate_ref.key,
-        queueCandidateSha256=_candidate_sha256(candidate),
-        closeoutDoorGenerationId=door.generationId,
-        closeoutOperationFingerprint=door.operationFingerprint,
-        closeoutOperationKey=door.claimedOperationKey,
+        sprintTaskDocument=door.sprintTaskDocumentRef.key,
+        candidateTaskDocument=door.taskDocumentRef.key,
+        doorGenerationId=door.generationId,
+        sourceOperationKind=source.operationKind,
+        sourceOperationGeneration=source.generation,
+        sourceOperationFingerprint=source.fingerprint,
+        sourceOperationKey=source.operationKey,
+        sourceJournalSha256=source_journal_sha256(source),
         organizationalCompletion=organizational,
     )
 
@@ -172,53 +146,45 @@ def transfer_integration_claim(
     *,
     commits: tuple[str, str, str],
 ) -> IntegrationPublicationIntent:
-    """Consume/prove the exact certified projection, then return journal proof."""
+    """Prove the journaled source authority without consuming disposable projection state."""
 
-    if intent.claimState in {"not-applicable", "proven"}:
+    if intent.claimState == "not-applicable":
         return intent
-    binding = contract_queue_binding(contract)
-    if binding is None or (
-        binding.sprint_ref.key != intent.queueSprintTaskDocument
-        or binding.candidate_ref.key != intent.queueCandidateTaskDocument
-    ):
-        raise CloseoutQueueError(
-            "closeout-candidate-claim-binding-mismatch",
-            "journaled integration claim contradicts the contract queue binding",
-        )
-    topology = TaskDocumentTopology(contract.coordination_root)
-    graph = _graph_context(topology, binding.sprint_ref)
-    initial = initial_queue_state(binding.sprint_ref, graph.revision, now_iso())
-    store = CloseoutQueueStore(contract.coordination_root, binding.sprint_ref)
-    candidate = (
-        store.inspect(initial, lambda state: state.candidates.get(binding.candidate_ref.key))
-        if store.exists()
-        else None
+    facts = preview_integration_boundary(contract)
+    door = facts.door
+    source = facts.source_operation
+    if door is None or source is None:
+        raise RuntimeError("journaled integration source authority disappeared")
+    expected = (
+        door.sprintTaskDocumentRef.key,
+        door.taskDocumentRef.key,
+        door.generationId,
+        source.operationKind,
+        source.generation,
+        source.fingerprint,
+        source.operationKey,
+        source_journal_sha256(source),
     )
-    if candidate is not None:
-        event = _claim_transfer_event(intent)
-
-        def consume(state: CloseoutQueueState) -> CloseoutQueueState:
-            current = _candidate_or_error(state, binding.candidate_ref)
-            if current.state != "certified" or _candidate_sha256(current) != (
-                intent.queueCandidateSha256
-            ):
-                raise CloseoutQueueError(
-                    "closeout-candidate-claim-conflict",
-                    "certified projection changed after journal claim intent",
-                )
-            live_graph = _graph_context(topology, binding.sprint_ref)
-            blockers = _candidate_blockers(topology, live_graph, current)
-            blockers.extend(_integration_commit_blockers(current, contract, *commits))
-            if blockers:
-                raise CloseoutQueueError(
-                    "closeout-candidate-integration-blocked",
-                    f"candidate is not legal at journal claim transfer: {blockers!r}",
-                )
-            candidates = dict(state.candidates)
-            candidates.pop(binding.candidate_ref.key)
-            return state.model_copy(update={"candidates": candidates})
-
-        store.transact(initial=initial, event=event, transform=consume)
+    observed = (
+        intent.sprintTaskDocument,
+        intent.candidateTaskDocument,
+        intent.doorGenerationId,
+        intent.sourceOperationKind,
+        intent.sourceOperationGeneration,
+        intent.sourceOperationFingerprint,
+        intent.sourceOperationKey,
+        intent.sourceJournalSha256,
+    )
+    if observed != expected:
+        raise RuntimeError("journaled integration claim contradicts current door/journal authority")
+    if commits != (
+        contract.code_commit,
+        contract.memory_content_commit,
+        contract.ledger_commit,
+    ):
+        raise RuntimeError("integration commits changed after source authority admission")
+    if intent.claimState == "proven":
+        return intent
     return intent.model_copy(
         update={
             "claimState": "proven",
@@ -232,8 +198,6 @@ def recorded_organizational_quality_certification(
     *,
     operation_key: str,
 ) -> IntegrationQualityCertification:
-    """Load the exact proof just persisted by the running integration owner."""
-
     record = located_lifecycle_operation_store(contract, "integrate").read()
     if (
         record is None
@@ -247,30 +211,33 @@ def recorded_organizational_quality_certification(
     return record.qualityCertification
 
 
-def _candidate_sha256(candidate: CloseoutCandidateRecord) -> str:
-    payload = json.dumps(candidate.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _claim_transfer_event(
-    intent: IntegrationPublicationIntent,
-) -> QueueTransaction:
-    """Identify only the disposable waiting projection consumed by this transaction."""
-
-    payload = {
-        "action": "complete-integration",
-        "sprint": intent.queueSprintTaskDocument,
-        "candidate": intent.queueCandidateTaskDocument,
-        "closeoutDoorGenerationId": intent.closeoutDoorGenerationId,
-    }
-    fingerprint = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return QueueTransaction(
-        action="complete-integration",
-        request_id=f"integration-projection-transfer:{fingerprint}",
-        fingerprint=fingerprint,
-        recorded_at=now_iso(),
-        actor="integration-projection",
-        rationale="transfer certified waiting projection into journal-owned integration authority",
+def source_operation_matches(
+    contract: WorktreeContract,
+    door: CloseoutDoorGeneration,
+    source: LifecycleOperationRecord,
+) -> bool:
+    publication = source.doorPublication
+    return bool(
+        source.operationKind == door.operationKind
+        and source.fingerprint == door.operationFingerprint
+        and source.operationKey == door.claimedOperationKey
+        and source.status == "completed"
+        and source.generationDisposition == "active"
+        and closeout_generation_retained(source)
+        and publication is not None
+        and publication.state == "proven"
+        and publication.generation == door
+        and (
+            source.operationKind != "closeout"
+            or source.closeoutFinalizedContractSha256 == closeout_contract_sha256(contract)
+        )
     )
+
+
+def source_journal_sha256(source: LifecycleOperationRecord) -> str:
+    payload = json.dumps(
+        source.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

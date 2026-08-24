@@ -696,7 +696,6 @@ def _require_no_live_leaf_collisions(
             topology,
             contract,
             master,
-            sprint_ref,
             overrides,
         )
         if current and (current_owner is None or current_owner[1] != sprint_ref):
@@ -764,7 +763,6 @@ def _require_live_leaf_task_identity(
     topology: TaskDocumentTopology,
     contract: WorktreeContract,
     master: ResolvedTaskDocument,
-    sprint_ref: TaskDocumentRef | None,
     overrides: Mapping[TaskDocumentRef, TaskDocument],
 ) -> None:
     rows = [row for row in master.document.subTasks if row.number == contract.leaf_id]
@@ -803,17 +801,6 @@ def _require_live_leaf_task_identity(
             "task topology publication refused: live leaf task identity changed for "
             f"{contract.contract_path}"
         )
-    if (
-        contract.queue_candidate_task_document
-        and contract.queue_candidate_task_document != leaf_ref.key
-    ):
-        raise RuntimeError("task topology publication refused: live leaf queue identity changed")
-    if bool(contract.queue_candidate_task_document) != bool(contract.queue_sprint_task_document):
-        raise RuntimeError("task topology publication refused: live leaf queue binding is partial")
-    if contract.queue_sprint_task_document and contract.queue_sprint_task_document != (
-        sprint_ref.key if sprint_ref is not None else ""
-    ):
-        raise RuntimeError("task topology publication refused: live leaf queue owner changed")
 
 
 def _require_live_leaf_source_authority(

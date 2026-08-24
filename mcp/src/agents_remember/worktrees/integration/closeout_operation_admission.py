@@ -29,6 +29,7 @@ from agents_remember.worktrees.integration.closeout_recovery_projection import (
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
     LifecycleOperationCandidate,
+    LifecycleOperationCandidateBinding,
     lifecycle_operation_candidate,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
@@ -92,10 +93,12 @@ def prevalidate_closeout_operation_admission(
         operation_input=operation_input,
         snapshot=snapshot,
         candidate=lifecycle_operation_candidate(
-            operation_input,
-            candidate_state=snapshot.state,
-            closeout_candidate=snapshot.candidate,
-            integration_authority=None,
+            LifecycleOperationCandidateBinding(
+                operation_input=operation_input,
+                candidate_state=snapshot.state,
+                closeout_candidate=snapshot.candidate,
+                closeout_door_generation_id=_current_door_generation_id(contract),
+            )
         ),
     )
 
@@ -164,10 +167,12 @@ def _validate_existing_closeout_request(
             current.fingerprint,
         )
     return operation_input, lifecycle_operation_candidate(
-        operation_input,
-        candidate_state=validated.snapshot.state,
-        closeout_candidate=validated.snapshot.candidate,
-        integration_authority=None,
+        LifecycleOperationCandidateBinding(
+            operation_input=operation_input,
+            candidate_state=validated.snapshot.state,
+            closeout_candidate=validated.snapshot.candidate,
+            closeout_door_generation_id=_current_door_generation_id(contract),
+        )
     )
 
 
@@ -244,10 +249,16 @@ def _candidate_is_generation_output(
     accepted = current.input
     assert isinstance(accepted, CloseoutOperationInput)
     unchanged = lifecycle_operation_candidate(
-        accepted,
-        candidate_state=current.candidateState,
-        closeout_candidate=candidate,
-        integration_authority=None,
+        LifecycleOperationCandidateBinding(
+            operation_input=accepted,
+            candidate_state=current.candidateState,
+            closeout_candidate=candidate,
+            closeout_door_generation_id=(
+                current.doorPublication.generation.generationId
+                if current.doorPublication is not None
+                else None
+            ),
+        )
     )
     if unchanged.fingerprint == current.fingerprint:
         return True
@@ -258,3 +269,10 @@ def _candidate_is_generation_output(
         and code.commit == candidate.head_commit
         and code.expectedOutputTree == candidate.head_tree
     )
+
+
+def _current_door_generation_id(contract: WorktreeContract) -> str:
+    door = contract.closeout_door
+    if door is None:
+        raise RuntimeError("closeout admission requires one exact door generation")
+    return door.generationId

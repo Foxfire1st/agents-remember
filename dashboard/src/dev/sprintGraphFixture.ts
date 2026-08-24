@@ -71,19 +71,19 @@ export const SPRINT_GRAPH_TASK_DOC = taskDoc({
 export const SPRINT_GRAPH_QUEUE: CloseoutQueueNode = {
   sprintRef: { repository: "agents-remember", path: "sprint-graph/task.json" },
   revision: 2,
-  graphRevision: "ab".repeat(32),
-  activeBlocker: {
-    master: ATOMIC_F,
-    rationale: "atomic unit integration",
-    acquiredBy: "orchestrator",
-  },
-  candidates: [
+  serviceCondition: "valid-built",
+  sourceClassification: "active",
+  sourceFingerprint: "ab".repeat(32),
+  sourceProblems: [],
+  members: [
     {
+      generationId: "cd".repeat(32),
       taskDocumentRef: { repository: "agents-remember", path: "atomic-f/task.json" },
       owningMaster: ATOMIC_F,
-      candidateState: "declared",
-      gradePriority: "high",
-      reasons: ["explicit-grade-required"],
+      classification: "waiting",
+      priority: "high",
+      order: 0,
+      reasons: ["atomic-series-lane-owned-by: agents-remember/sprint-graph/atomic-f/task.json"],
     },
   ],
 };

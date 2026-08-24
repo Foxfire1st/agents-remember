@@ -82,67 +82,73 @@ def door_generation_for_operation(
     disposition: CloseoutDoorDisposition,
     *,
     predecessor_generation_id: str = "",
-    successor_generation_id: str = "",
 ) -> CloseoutDoorGeneration:
-    """Derive one stable door identity from an accepted operation generation."""
+    """Claim the exact already-published waiting generation for one journal intent."""
 
-    generation_id = fingerprint_payload(
-        {
-            "taskId": record.taskId,
-            "contractPath": record.contractPath,
+    if disposition != "claimed":
+        raise RuntimeError(
+            "cancel, retire, and supersede are journal outcomes, not door dispositions"
+        )
+    waiting = contract.closeout_door
+    if waiting is None or waiting.disposition != "waiting":
+        raise RuntimeError("closeout operation requires one exact waiting door generation")
+    if predecessor_generation_id and waiting.predecessorGenerationId != predecessor_generation_id:
+        raise RuntimeError(
+            "claimed door predecessor assertion does not match its source generation"
+        )
+    if waiting.contractPath != record.contractPath or waiting.taskId != record.taskId:
+        raise RuntimeError("waiting door does not identify the accepted closeout operation task")
+    return waiting.model_copy(
+        update={
+            "disposition": "claimed",
             "operationKind": record.operationKind,
             "operationFingerprint": record.fingerprint,
-            "generation": record.generation,
-            "predecessorGenerationId": predecessor_generation_id,
-            "codeBaseCommit": contract.code_base_commit,
-            "memoryBaseCommit": contract.memory_base_commit,
+            "claimedOperationKey": record.operationKey,
         }
-    )
-    claimed = disposition == "claimed"
-    return CloseoutDoorGeneration(
-        generationId=generation_id,
-        predecessorGenerationId=predecessor_generation_id,
-        successorGenerationId=successor_generation_id,
-        disposition=disposition,
-        taskId=record.taskId,
-        taskName=record.taskName,
-        contractPath=record.contractPath,
-        codeBaseCommit=contract.code_base_commit,
-        memoryBaseCommit=contract.memory_base_commit,
-        taskStateFingerprint=record.candidateState,
-        operationKind=record.operationKind if claimed else None,
-        operationFingerprint=record.fingerprint if claimed else "",
-        claimedOperationKey=record.operationKey if claimed else "",
     )
 
 
 def successor_waiting_door(
-    contract: WorktreeContract,
-    predecessor: CloseoutDoorGeneration,
+    claimed: CloseoutDoorGeneration,
+    *,
+    declared_by: str,
+    declared_at: str,
 ) -> CloseoutDoorGeneration:
-    """Create a distinct, unclaimed future generation after supersession."""
+    """Derive one deterministic schedulable source successor from a claimed generation."""
 
-    generation_id = fingerprint_payload(
-        {
-            "predecessorGenerationId": predecessor.generationId,
-            "taskId": contract.task_id,
-            "contractPath": contract.contract_path.resolve().as_posix(),
-            "codeBaseCommit": contract.code_base_commit,
-            "memoryBaseCommit": contract.memory_base_commit,
-            "taskStateFingerprint": predecessor.taskStateFingerprint,
+    if claimed.disposition != "claimed":
+        raise RuntimeError("a waiting successor requires one exact claimed predecessor")
+    identity = {
+        "schema": "ar-closeout-door-successor/v1",
+        "predecessorGenerationId": claimed.generationId,
+        "taskId": claimed.taskId,
+        "taskDocumentRef": claimed.taskDocumentRef.model_dump(mode="json"),
+        "owningMasterTaskDocumentRef": claimed.owningMasterTaskDocumentRef.model_dump(mode="json"),
+        "sprintTaskDocumentRef": claimed.sprintTaskDocumentRef.model_dump(mode="json"),
+        "contractPath": claimed.contractPath,
+        "candidateTree": claimed.candidateTree,
+        "memoryCandidateTree": claimed.memoryCandidateTree,
+        "codeBaseCommit": claimed.codeBaseCommit,
+        "memoryBaseCommit": claimed.memoryBaseCommit,
+        "ledgerMemoryCommit": claimed.ledgerMemoryCommit,
+        "taskTopologyFingerprint": claimed.taskTopologyFingerprint,
+        "reviewProvenance": claimed.reviewProvenance.model_dump(mode="json"),
+        "memoryProvenance": claimed.memoryProvenance.model_dump(mode="json"),
+        "ledgerProvenance": claimed.ledgerProvenance.model_dump(mode="json"),
+        "admissionProvenance": claimed.admissionProvenance.model_dump(mode="json"),
+        "schedulingProvenance": claimed.schedulingProvenance.model_dump(mode="json"),
+    }
+    return claimed.model_copy(
+        update={
+            "generationId": fingerprint_payload(identity),
+            "predecessorGenerationId": claimed.generationId,
             "disposition": "waiting",
+            "declaredBy": declared_by,
+            "declaredAt": declared_at,
+            "operationKind": None,
+            "operationFingerprint": "",
+            "claimedOperationKey": "",
         }
-    )
-    return CloseoutDoorGeneration(
-        generationId=generation_id,
-        predecessorGenerationId=predecessor.generationId,
-        disposition="waiting",
-        taskId=contract.task_id,
-        taskName=contract.task_name,
-        contractPath=contract.contract_path.as_posix(),
-        codeBaseCommit=contract.code_base_commit,
-        memoryBaseCommit=contract.memory_base_commit,
-        taskStateFingerprint=predecessor.taskStateFingerprint,
     )
 
 
@@ -320,27 +326,48 @@ def _require_door_transition(
             "contractPath",
             "codeBaseCommit",
             "memoryBaseCommit",
-            "taskStateFingerprint",
+            "taskDocumentRef",
+            "owningMasterTaskDocumentRef",
+            "sprintTaskDocumentRef",
+            "candidateTree",
+            "memoryCandidateTree",
+            "taskTopologyFingerprint",
+            "reviewProvenance",
+            "memoryProvenance",
+            "ledgerProvenance",
+            "admissionProvenance",
+            "schedulingProvenance",
+            "declaredBy",
+            "declaredAt",
         )
         if any(getattr(current, field) != getattr(updated, field) for field in immutable):
             raise RuntimeError("closeout-door generation identity is immutable")
         allowed = {
-            "waiting": {"waiting", "claimed", "withdrawn", "superseded"},
-            "claimed": {"claimed", "cancelled", "retired", "superseded"},
-            "cancelled": {"cancelled", "superseded"},
-            "withdrawn": {"withdrawn", "superseded"},
-            "retired": {"retired"},
-            "superseded": {"superseded"},
+            "waiting": {"waiting", "deferred", "withdrawn", "claimed"},
+            "deferred": {"waiting", "deferred", "withdrawn"},
+            "withdrawn": {"withdrawn"},
+            "claimed": {"claimed"},
         }
         if updated.disposition not in allowed[current.disposition]:
             raise RuntimeError("invalid closeout-door disposition transition")
-        if current.successorGenerationId and (
-            updated.successorGenerationId != current.successorGenerationId
+        if current.disposition == "claimed" and (
+            current.operationKind != updated.operationKind
+            or current.operationFingerprint != updated.operationFingerprint
+            or current.claimedOperationKey != updated.claimedOperationKey
         ):
-            raise RuntimeError("closeout-door successor link is immutable once published")
+            raise RuntimeError("claimed closeout-door operation identity is immutable")
         return
-    if (
-        current.successorGenerationId != updated.generationId
-        or updated.predecessorGenerationId != current.generationId
-    ):
+    successor_edge = (current.disposition, updated.disposition)
+    if updated.predecessorGenerationId != current.generationId or successor_edge not in {
+        ("claimed", "waiting"),
+        ("withdrawn", "waiting"),
+        ("waiting", "waiting"),
+        ("deferred", "deferred"),
+    }:
         raise RuntimeError("new closeout-door generation requires the exact predecessor link")
+    if current.disposition == "claimed" and (
+        updated.operationKind is not None
+        or updated.operationFingerprint
+        or updated.claimedOperationKey
+    ):
+        raise RuntimeError("a claimed cancellation successor must clear operation identity")

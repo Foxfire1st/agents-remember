@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import test_organizational_completion_integration as fixture_mod
+import organizational_completion_test_support as fixture_mod
 from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tools import (
@@ -17,6 +17,7 @@ from agents_remember.application.worktree_tools import (
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.tasks import read_task_doc, write_task_doc
+from agents_remember.worktrees.integration import integration_quality as quality_mod
 from agents_remember.worktrees.integration import organizational_completion as completion_mod
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operation_controls as controls_mod,
@@ -31,9 +32,7 @@ from test_worktree_support import git
 
 class IntegrationOrganizationalDecisionL2Tests(unittest.TestCase):
     def setUp(self) -> None:
-        self.owner = fixture_mod.OrganizationalCompletionIntegrationTests(
-            "test_nonfinal_leaf_reuses_targeted_closeout_without_full_gate"
-        )
+        self.owner = fixture_mod.OrganizationalCompletionFixture()
         self.owner.setUp()
         self.fixture = self.owner.fixture
 
@@ -48,7 +47,7 @@ class IntegrationOrganizationalDecisionL2Tests(unittest.TestCase):
         store, runtime, record = self.owner._integration_runtime(contract)
         with (
             mock.patch.object(
-                fixture_mod.quality_mod,
+                quality_mod,
                 "run_strict_code_quality_gate",
                 return_value=fixture_mod._full_gate(contract),
             ),
@@ -114,7 +113,7 @@ class IntegrationOrganizationalDecisionL2Tests(unittest.TestCase):
             "contract": contract.contract_path.read_bytes(),
             "queue": {
                 path.name: path.read_bytes() if path.exists() else None
-                for path in (queue.state_path, queue.pending_path)
+                for path in (queue.state_path,)
             },
             "refs": {
                 "code": git(

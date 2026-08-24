@@ -95,13 +95,6 @@ class StartAuthorityCoverageTests(unittest.TestCase):
                 stack.enter_context(
                     mock.patch.object(
                         start_module,
-                        "integration_authority_lock",
-                        return_value=nullcontext(),
-                    )
-                )
-                stack.enter_context(
-                    mock.patch.object(
-                        start_module,
                         "prepare_memory_for_start",
                         side_effect=[
                             {"state": "ready"},
@@ -115,6 +108,26 @@ class StartAuthorityCoverageTests(unittest.TestCase):
                 )
                 stack.enter_context(
                     mock.patch.object(start_module, "ensure_worktree", return_value="created")
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        start_module,
+                        "plan_providers_for_start",
+                        return_value={"state": "skipped"},
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        start_module,
+                        "task_publication_lock",
+                        return_value=nullcontext(),
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(start_module, "require_current_start_task_binding")
+                )
+                stack.enter_context(
+                    mock.patch.object(start_module, "reserve_new_lifecycle_operation_location")
                 )
                 stack.enter_context(
                     mock.patch.object(

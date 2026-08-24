@@ -1,4 +1,4 @@
-"""Lease-serialized transfer from scheduling projection to integration journal."""
+"""Lease-serialized transfer from claimed source authority to integration journal."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def transfer_and_publish_integration_claim(
     *,
     commits: tuple[str, str, str],
 ) -> IntegrationPublicationIntent:
-    """Persist journal intent and consume its exact row under disposition serialization."""
+    """Persist journal intent and prove its exact door/journal source authority."""
 
     with contract_lifecycle_lease(contract):
         current = load_contract(contract.contract_path)
@@ -48,7 +48,7 @@ def transfer_and_publish_integration_claim(
             report_operation_progress(
                 args,
                 "source-merge",
-                current_command="prove certified queue projection consumed by journal claim",
+                current_command="prove claimed source journal transferred to integration",
                 irreversible_boundary=True,
                 integration_publication=proven.model_dump(mode="json"),
             )
