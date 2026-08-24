@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.kernel.atomic_write import atomic_write_text
@@ -26,6 +24,20 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_termina
     require_successor_generation,
     terminal_predecessor,
     validate_terminal_proof,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_binding import (
+    EnclosureBindingIdentity,
+    byte_conflict,
+    enclosure_binding_payload,
+    location_conflict,
+    locator_binding,
+    locator_id,
+    manifest_identity,
+    manifest_identity_payload,
+    model_text,
+    sha256_bytes,
+    sha256_payload,
+    sha256_text,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location_errors import (
     LifecycleOperationLocationError,
@@ -146,33 +158,6 @@ class TerminalLifecyclePublication:
     receipt_path: Path
 
 
-@dataclass(frozen=True)
-class _EnclosureBindingIdentity:
-    locator_id: str
-    repository: str
-    contract_path: str
-    worktree_group: str
-    lifecycle_directory: str
-    task_id: str
-    task_name: str
-    leaf_id: str
-    lifecycle_id: str
-
-    @classmethod
-    def from_manifest(cls, manifest: LifecycleEnclosureManifest) -> _EnclosureBindingIdentity:
-        return cls(
-            locator_id=manifest.locatorId,
-            repository=manifest.repository,
-            contract_path=manifest.contractPath,
-            worktree_group=manifest.worktreeGroup,
-            lifecycle_directory=manifest.lifecycleDirectory,
-            task_id=manifest.taskId,
-            task_name=manifest.taskName,
-            leaf_id=manifest.leafId,
-            lifecycle_id=manifest.lifecycleId,
-        )
-
-
 def lifecycle_operation_locator_path(
     coordination_root: Path,
     contract_path: Path,
@@ -184,7 +169,7 @@ def lifecycle_operation_locator_path(
         coordination_root.resolve(strict=False)
         / "controlplane"
         / "lifecycle-enclosures"
-        / (f"{_locator_id(confined)}.json")
+        / (f"{locator_id(confined)}.json")
     )
 
 
@@ -212,11 +197,11 @@ def prepare_enclosure_publication(
     manifest_path = lifecycle_enclosure_manifest_path(worktree_group)
     lifecycle_directory = manifest_path.parent
     locator_path = lifecycle_operation_locator_path(root, contract_path)
-    locator_id = _locator_id(contract_path)
-    contract_sha256 = _sha256_text(contract_text)
-    binding = _enclosure_binding_payload(
-        _EnclosureBindingIdentity(
-            locator_id=locator_id,
+    publication_locator_id = locator_id(contract_path)
+    contract_sha256 = sha256_text(contract_text)
+    binding = enclosure_binding_payload(
+        EnclosureBindingIdentity(
+            locator_id=publication_locator_id,
             repository=contract.repo_name,
             contract_path=contract_path.as_posix(),
             worktree_group=worktree_group.as_posix(),
@@ -228,8 +213,8 @@ def prepare_enclosure_publication(
         ),
         predecessor_terminal=predecessor_terminal,
     )
-    binding_fingerprint = _sha256_payload(binding)
-    request_id = _sha256_payload(
+    binding_fingerprint = sha256_payload(binding)
+    request_id = sha256_payload(
         {
             "publicationKind": publication_kind,
             "auditIntent": intent,
@@ -238,7 +223,7 @@ def prepare_enclosure_publication(
         }
     )
     manifest = LifecycleEnclosureManifest(
-        locatorId=locator_id,
+        locatorId=publication_locator_id,
         publicationRequestId=request_id,
         publicationKind=publication_kind,
         auditIntent=intent,
@@ -254,9 +239,9 @@ def prepare_enclosure_publication(
         bindingFingerprint=binding_fingerprint,
         predecessorTerminal=predecessor_terminal,
     )
-    manifest_text = _model_text(manifest)
+    manifest_text = model_text(manifest)
     locator = LifecycleEnclosureLocator(
-        locatorId=locator_id,
+        locatorId=publication_locator_id,
         publicationRequestId=request_id,
         publicationKind=publication_kind,
         stableAddress=contract_path.as_posix(),
@@ -265,7 +250,7 @@ def prepare_enclosure_publication(
         manifestPath=manifest_path.as_posix(),
         lifecycleDirectory=lifecycle_directory.as_posix(),
         bindingFingerprint=binding_fingerprint,
-        expectedManifestSha256=_sha256_text(manifest_text),
+        expectedManifestSha256=sha256_text(manifest_text),
         expectedInitialContractSha256=contract_sha256,
         predecessorTerminal=predecessor_terminal,
     )
@@ -398,7 +383,7 @@ def reserve_new_lifecycle_operation_location(
         else:
             locator = _reserve_locator(artifacts)
         if locator.state not in {"reserved", "manifest-proven"}:
-            raise _location_conflict(
+            raise location_conflict(
                 "enclosure reservation state",
                 artifacts.reserved_locator,
                 locator,
@@ -436,7 +421,7 @@ def resume_new_lifecycle_operation_location(
         current,
     )
     if current.state == "terminal-archived":
-        raise _location_conflict(
+        raise location_conflict(
             "terminal locator",
             _prepare_start_generation(contract, contract_text=contract_text).reserved_locator,
             current,
@@ -464,7 +449,7 @@ def publish_enclosure_location(
     with exclusive_access(artifacts.locator_path, _LOCATION_OWNERSHIP):
         locator = _reserve_locator(artifacts)
         if locator.state == "terminal-archived":
-            raise _location_conflict("terminal locator", artifacts.reserved_locator, locator)
+            raise location_conflict("terminal locator", artifacts.reserved_locator, locator)
         _publish_or_prove_manifest(artifacts)
         locator = _prove_manifest(artifacts, locator)
         if before_contract_proof is not None and locator.state != "addressable":
@@ -620,7 +605,7 @@ def publish_terminal_lifecycle_operation_location(
             )
             return current
         if current != expected_location.locator or current.state != "addressable":
-            raise _location_conflict(
+            raise location_conflict(
                 "terminal archive source locator",
                 expected_location.locator,
                 current,
@@ -739,8 +724,11 @@ def require_contract_matches_lifecycle_operation_location(
 ) -> None:
     """Cross-check one already-resolved location without a second live read."""
 
-    expected = _manifest_identity(contract)
-    observed = _manifest_identity_payload(location.manifest)
+    expected = manifest_identity(
+        contract,
+        lifecycle_directory=lifecycle_enclosure_manifest_path(contract.worktree_group).parent,
+    )
+    observed = manifest_identity_payload(location.manifest)
     if observed != expected:
         raise LifecycleOperationLocationError(
             "operation-location-mismatch",
@@ -762,8 +750,8 @@ def _reserve_locator(
         == "file"
     ):
         current = _read_locator(artifacts.locator_path, artifacts.contract_path)
-        if _locator_binding(current) != _locator_binding(artifacts.reserved_locator):
-            raise _location_conflict("locator binding", artifacts.reserved_locator, current)
+        if locator_binding(current) != locator_binding(artifacts.reserved_locator):
+            raise location_conflict("locator binding", artifacts.reserved_locator, current)
         return current
     _write_locator(artifacts.locator_path, artifacts.reserved_locator)
     return artifacts.reserved_locator
@@ -786,10 +774,10 @@ def _publish_or_prove_manifest(artifacts: EnclosurePublicationArtifacts) -> None
         )
     observed = _read_bytes(artifacts.manifest_path, "manifest", artifacts.contract_path)
     if observed != artifacts.manifest_text.encode("utf-8"):
-        raise _byte_conflict("manifest", artifacts.manifest_text.encode(), observed)
+        raise byte_conflict("manifest", artifacts.manifest_text.encode(), observed)
     parsed = _read_manifest(artifacts.manifest_path, artifacts.contract_path)
     if parsed != artifacts.manifest:
-        raise _location_conflict("manifest binding", artifacts.manifest, parsed)
+        raise location_conflict("manifest binding", artifacts.manifest, parsed)
 
 
 def _publish_successor_contract(
@@ -816,8 +804,8 @@ def _publish_successor_contract(
         raise LifecycleOperationLocationError(
             "operation-location-successor-contract-mismatch",
             "the stable contract address no longer contains the exact accepted predecessor",
-            expected={"predecessorContractSha256": _sha256_bytes(predecessor)},
-            observed={"contractSha256": _sha256_bytes(observed)},
+            expected={"predecessorContractSha256": sha256_bytes(predecessor)},
+            observed={"contractSha256": sha256_bytes(observed)},
         )
     atomic_write_text(artifacts.contract_path, artifacts.contract_text)
     published = _read_bytes(
@@ -826,7 +814,7 @@ def _publish_successor_contract(
         artifacts.contract_path,
     )
     if published != successor:
-        raise _byte_conflict("successor contract", successor, published)
+        raise byte_conflict("successor contract", successor, published)
 
 
 def _prove_manifest(
@@ -874,7 +862,7 @@ def _publish_or_prove_contract(
     observed = _read_bytes(artifacts.contract_path, "contract", artifacts.contract_path)
     expected = artifacts.contract_text.encode("utf-8")
     if observed != expected:
-        raise _byte_conflict("initial contract", expected, observed)
+        raise byte_conflict("initial contract", expected, observed)
 
 
 def _prove_contract(
@@ -884,7 +872,7 @@ def _prove_contract(
     if locator.state == "addressable":
         return locator
     if locator.state != "manifest-proven":
-        raise _location_conflict("publication state", artifacts.reserved_locator, locator)
+        raise location_conflict("publication state", artifacts.reserved_locator, locator)
     proven = locator.model_copy(
         update={
             "state": "addressable",
@@ -896,7 +884,7 @@ def _prove_contract(
 
 
 def _write_locator(path: Path, locator: LifecycleEnclosureLocator) -> None:
-    text = _model_text(locator)
+    text = model_text(locator)
     _publish_exact_text(
         path,
         text,
@@ -905,7 +893,7 @@ def _write_locator(path: Path, locator: LifecycleEnclosureLocator) -> None:
     )
     observed = _read_bytes(path, "locator", Path(locator.stableAddress))
     if observed != text.encode("utf-8"):
-        raise _byte_conflict("locator publication", text.encode(), observed)
+        raise byte_conflict("locator publication", text.encode(), observed)
 
 
 def _publish_exact_text(
@@ -934,7 +922,7 @@ def _publish_exact_text(
             detail,
             expected={
                 "path": path.as_posix(),
-                "sha256": hashlib.sha256(expected).hexdigest(),
+                "sha256": sha256_bytes(expected),
                 "size": len(expected),
             },
             observed={
@@ -944,7 +932,7 @@ def _publish_exact_text(
         ) from write_error
     observed = _read_bytes(path, owner, contract_path)
     if observed != expected:
-        raise _byte_conflict(owner, expected, observed)
+        raise byte_conflict(owner, expected, observed)
 
 
 def _read_locator(path: Path, contract_path: Path) -> LifecycleEnclosureLocator:
@@ -984,7 +972,7 @@ def _validate_locator(
 ) -> None:
     expected_path = lifecycle_operation_locator_path(coordination_root, contract_path)
     if (
-        locator.locatorId != _locator_id(contract_path)
+        locator.locatorId != locator_id(contract_path)
         or Path(locator.stableAddress) != contract_path
         or locator_path != expected_path
     ):
@@ -1011,16 +999,14 @@ def _validate_manifest(
     worktree_group = Path(manifest.worktreeGroup).resolve(strict=False)
     expected_manifest_path = lifecycle_enclosure_manifest_path(worktree_group)
     _require_confined_worktree_group(coordination_root, manifest.repository, worktree_group)
-    observed_manifest_sha = hashlib.sha256(
-        _read_bytes(manifest_path, "manifest", contract_path)
-    ).hexdigest()
-    derived_binding_fingerprint = _sha256_payload(
-        _enclosure_binding_payload(
-            _EnclosureBindingIdentity.from_manifest(manifest),
+    observed_manifest_sha = sha256_bytes(_read_bytes(manifest_path, "manifest", contract_path))
+    derived_binding_fingerprint = sha256_payload(
+        enclosure_binding_payload(
+            EnclosureBindingIdentity.from_manifest(manifest),
             predecessor_terminal=manifest.predecessorTerminal,
         )
     )
-    derived_publication_request_id = _sha256_payload(
+    derived_publication_request_id = sha256_payload(
         {
             "publicationKind": manifest.publicationKind,
             "auditIntent": manifest.auditIntent,
@@ -1082,74 +1068,6 @@ def _validate_manifest(
         )
 
 
-def _manifest_identity(contract: WorktreeContract) -> dict[str, str]:
-    return {
-        "repository": contract.repo_name,
-        "contractPath": contract.contract_path.resolve(strict=False).as_posix(),
-        "worktreeGroup": contract.worktree_group.resolve(strict=False).as_posix(),
-        "lifecycleDirectory": lifecycle_enclosure_manifest_path(
-            contract.worktree_group
-        ).parent.as_posix(),
-        "taskId": contract.task_id,
-        "taskName": contract.task_name,
-        "leafId": contract.leaf_id,
-        "lifecycleId": contract.lifecycle_id,
-    }
-
-
-def _manifest_identity_payload(manifest: LifecycleEnclosureManifest) -> dict[str, str]:
-    return {
-        "repository": manifest.repository,
-        "contractPath": manifest.contractPath,
-        "worktreeGroup": manifest.worktreeGroup,
-        "lifecycleDirectory": manifest.lifecycleDirectory,
-        "taskId": manifest.taskId,
-        "taskName": manifest.taskName,
-        "leafId": manifest.leafId,
-        "lifecycleId": manifest.lifecycleId,
-    }
-
-
-def _locator_binding(locator: LifecycleEnclosureLocator) -> dict[str, object]:
-    excluded = {
-        "state",
-        "provenManifestSha256",
-        "provenInitialContractSha256",
-        "terminalArchivePath",
-        "terminalArchiveSha256",
-        "terminalReceiptPath",
-    }
-    if locator.predecessorTerminal is None:
-        excluded.add("predecessorTerminal")
-    return locator.model_dump(
-        mode="json",
-        exclude=excluded,
-    )
-
-
-def _enclosure_binding_payload(
-    identity: _EnclosureBindingIdentity,
-    *,
-    predecessor_terminal: TerminalEnclosurePredecessor | None,
-) -> dict[str, object]:
-    """Build the sole canonical payload protected by the enclosure binding digest."""
-
-    binding: dict[str, object] = {
-        "locatorId": identity.locator_id,
-        "repository": identity.repository,
-        "contractPath": identity.contract_path,
-        "worktreeGroup": identity.worktree_group,
-        "lifecycleDirectory": identity.lifecycle_directory,
-        "taskId": identity.task_id,
-        "taskName": identity.task_name,
-        "leafId": identity.leaf_id,
-        "lifecycleId": identity.lifecycle_id,
-    }
-    if predecessor_terminal is not None:
-        binding["predecessorTerminal"] = predecessor_terminal.model_dump(mode="json")
-    return binding
-
-
 def _confined_contract_path(coordination_root: Path, contract_path: Path) -> Path:
     root = coordination_root.resolve(strict=False)
     confined = contract_path.resolve(strict=False)
@@ -1177,53 +1095,3 @@ def _require_confined_worktree_group(
             expected={"worktreesRoot": expected_root.as_posix()},
             observed={"worktreeGroup": worktree_group.as_posix()},
         )
-
-
-def _locator_id(contract_path: Path) -> str:
-    return hashlib.sha256(contract_path.as_posix().encode("utf-8")).hexdigest()
-
-
-def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _sha256_bytes(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _sha256_payload(payload: Mapping[str, object]) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _model_text(model: BaseModel) -> str:
-    exclude = (
-        {"predecessorTerminal"} if getattr(model, "predecessorTerminal", None) is None else None
-    )
-    return model.model_dump_json(indent=2, exclude=exclude) + "\n"
-
-
-def _location_conflict(
-    owner: str,
-    expected: BaseModel,
-    observed: BaseModel,
-) -> LifecycleOperationLocationError:
-    return LifecycleOperationLocationError(
-        "operation-location-conflict",
-        f"the immutable enclosure {owner} already contains different binding facts",
-        expected=expected.model_dump(mode="json"),
-        observed=observed.model_dump(mode="json"),
-    )
-
-
-def _byte_conflict(
-    owner: str,
-    expected: bytes,
-    observed: bytes,
-) -> LifecycleOperationLocationError:
-    return LifecycleOperationLocationError(
-        "operation-location-conflict",
-        f"the canonical {owner} bytes differ from the accepted publication",
-        expected={"sha256": hashlib.sha256(expected).hexdigest(), "size": len(expected)},
-        observed={"sha256": hashlib.sha256(observed).hexdigest(), "size": len(observed)},
-    )

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
 from agents_remember.application.task_docs.task_ref import TaskRef
@@ -16,7 +15,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     reload_provider_authority,
 )
 from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
-from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
@@ -98,100 +96,19 @@ from .lifecycle.lifecycle_operation_location import (
     unreadable_operation_refusal,
     unreadable_status_operations,
 )
-
-LifecycleControlAction = Literal[
-    "retry",
-    "recover",
-    "cancel",
-    "revise",
-    "retire",
-    "supersede",
-]
-
-
-@dataclass(frozen=True)
-class TaskIdentity:
-    """The identity a task is created under.
-
-    ``worktree_name`` is the on-disk directory the code worktree gets;
-    ``leaf_id``/``parent_task`` place the task in the task tree; ``workflow_kind``
-    is the document format its contract follows ('light-task' or 'chat-task').
-    """
-
-    repo_id: str
-    task_name: str
-    worktree_name: str
-    leaf_id: str | None = None
-    parent_task: str | None = None
-    workflow_kind: str = "light-task"
-
-
-@dataclass(frozen=True)
-class TaskBases:
-    """What a started task is based on, and the answers that clear a refused base.
-
-    A start cuts a code work branch from a source branch and opens memory alongside
-    it under ``memory_mode``. When a preflight refuses -- a source branch behind or
-    diverged from its remote, or an undecided memory setup -- the caller may explicitly
-    choose ``proceed-stale`` or ``disabled-memory``. Protected source repair belongs to a
-    separate landing/recovery operation.
-    """
-
-    source_branch: str | None = None
-    work_branch: str | None = None
-    memory_mode: str | None = None
-    memory_choice: str | None = None
-    stale_base_choice: str | None = None
-
-
-@dataclass(frozen=True)
-class StartExecution:
-    """How the start itself runs: as a preview or for real, and what happens to the
-    background provider setup -- skipped outright, or relaunched for a contract whose
-    earlier setup failed or went stale."""
-
-    dry_run: bool = False
-    skip_provider_setup: bool = False
-    retry_provider_setup: bool = False
-
-
-DEFAULT_TASK_BASES = TaskBases()
-"""Repo-default branches, repo-default memory topology, no recovery choice made."""
-
-DEFAULT_START_EXECUTION = StartExecution()
-"""A real start with background provider setup launched normally."""
-
-
-@dataclass(frozen=True)
-class OperationControlRequest:
-    contract_path: str
-    operation_kind: LifecycleOperationKind
-    action: LifecycleControlAction
-    expected_generation: int
-    intent_note: str
-    dry_run: bool = False
-    code_commit_message: str | None = None
-    memory_commit_message: str | None = None
-    ledger_commit_message: str | None = None
-    grade: SchedulingGradeInput | None = None
-    admission: CandidateAdmissionFacts | None = None
-    caller: DeclaredCaller | None = None
-
-    def __post_init__(self) -> None:
-        # Legal-control arguments are public JSON and must be directly
-        # executable when fed back through this application request boundary.
-        # Transport registration already supplies the typed model; direct
-        # application callers reconstruct the same bounded model from JSON.
-        if self.caller is not None and not isinstance(self.caller, DeclaredCaller):
-            object.__setattr__(self, "caller", DeclaredCaller.model_validate(self.caller))
-        if self.grade is not None and not isinstance(self.grade, SchedulingGradeInput):
-            object.__setattr__(self, "grade", SchedulingGradeInput.model_validate(self.grade))
-        if self.admission is not None and not isinstance(self.admission, CandidateAdmissionFacts):
-            object.__setattr__(
-                self,
-                "admission",
-                CandidateAdmissionFacts.model_validate(self.admission),
-            )
+from .worktree_tool_requests import (
+    DEFAULT_START_EXECUTION,
+    DEFAULT_TASK_BASES,
+    NO_TASK_DOCS,
+    PREVIEW_ONLY,
+    CloseoutApproval,
+    CloseoutCommitMessages,
+    FinalizeTaskDocs,
+    OperationControlRequest,
+    StartExecution,
+    TaskBases,
+    TaskIdentity,
+)
 
 
 def worktree_start_tool(
@@ -553,31 +470,6 @@ def worktree_sync_tool(
         dry_run=dry_run,
     )
     return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
-
-
-@dataclass(frozen=True)
-class CloseoutCommitMessages:
-    """Raw public observations; contract resolution decides which legs are enabled."""
-
-    code: str | None = None
-    memory: str | None = None
-    ledger: str | None = None
-
-
-@dataclass(frozen=True)
-class CloseoutApproval:
-    """Whether a closeout actually commits, and the note recording why it may.
-
-    A preview is the unapproved form -- ``dry_run`` with no note. An apply carries the
-    developer's intent note, which the seam guard records as the approval.
-    """
-
-    intent_note: str = ""
-    dry_run: bool = False
-
-
-PREVIEW_ONLY = CloseoutApproval(dry_run=True)
-"""The preview form: nothing is committed and no approval is claimed."""
 
 
 def worktree_closeout_preview_tool(
@@ -1066,20 +958,6 @@ def end_ambient_lifecycle_if_anchored(lifecycle_id: str, *, outcome: TerminalSta
     current = amb.current
     if current is not None and current.id == lifecycle_id:
         amb.end(outcome)
-
-
-@dataclass(frozen=True)
-class FinalizeTaskDocs:
-    """The documents a finalize ticks off: the leaf's own task document, the master
-    document that tracks it, and the master subtask row number this leaf occupies."""
-
-    task_doc_path: str | None = None
-    master_doc_path: str | None = None
-    subtask_number: str = ""
-
-
-NO_TASK_DOCS = FinalizeTaskDocs()
-"""Finalize a contract that carries no task documents to tick."""
 
 
 def lifecycle_finalize_task_tool(
