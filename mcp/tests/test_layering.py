@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import layering
 
 
@@ -338,6 +339,7 @@ def test_wrapper_step_is_registered() -> None:
     config = check.CheckConfig(
         project_root=Path("."),
         scope=scope,
+        admission=QUALITY_TEST_ADMISSION,
         coverage_json=None,
         threshold=20.0,
         top=10,

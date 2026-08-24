@@ -44,13 +44,15 @@ from agents_remember.code_quality import (
     targeted,
 )
 from agents_remember.code_quality import scope as quality_scope
-from agents_remember.code_quality.dagger_environment import (
-    DaggerAdmissionError,
-    require_dagger_admission,
-)
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.platform_subprocess import native_subprocess_environment
 from agents_remember.kernel.primitives import memory_cap
+from agents_remember.testing.dagger_admission import (
+    DaggerAdmission,
+    DaggerAdmissionError,
+    require_dagger_admission,
+    require_dagger_admission_capability,
+)
 
 crap_failure_line = post_coverage.crap_failure_line
 run_crap_calculator = post_coverage.run_crap_calculator
@@ -91,6 +93,7 @@ QUALITY_TEMP_ROOT = Path("/tmp/arq")
 class CheckConfig:
     project_root: Path
     scope: GateScope
+    admission: DaggerAdmission
     coverage_json: Path | None
     threshold: float
     top: int
@@ -269,6 +272,7 @@ def _pytest_step(
     retry_plan: retry_proof.RetryPlan | None,
 ) -> Step | None:
     """The pytest rail, or None when a targeted run derived no test subset."""
+    require_dagger_admission_capability(config.admission)
     if getattr(config, "targeted", False) and not config.scope.test_paths:
         return None
     pytest_args = [sys.executable, "-m", "pytest", *test_args]
@@ -426,6 +430,7 @@ def run_quality_check(
     runner: CommandRunner = run_subprocess,
     printer: Printer = print_line,
 ) -> int:
+    require_dagger_admission_capability(config.admission)
     project_root = config.project_root.resolve()
     progress = QualityProgress.start(config.progress_report)
     targeted = getattr(config, "targeted", False)
@@ -788,6 +793,7 @@ def prepare_retry_plan(
                 test_roots=tuple(pytest_testpaths(project_root)),
                 untracked_paths=tuple(config.scope.untracked_paths),
             ),
+            admission=config.admission,
             printer=printer,
         )
     except (OSError, RuntimeError, ScopeError) as error:
@@ -937,7 +943,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def config_from_args(args: argparse.Namespace) -> CheckConfig:
+def config_from_args(
+    args: argparse.Namespace,
+    *,
+    admission: DaggerAdmission,
+) -> CheckConfig:
+    require_dagger_admission_capability(admission)
     project_root = args.project_root.resolve()
     configured_progress = getattr(args, "progress_report", None)
     if configured_progress is None and (
@@ -958,6 +969,7 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
         full_scope = derive_scope(project_root)
         return CheckConfig(
             project_root=project_root,
+            admission=admission,
             scope=derived.to_gate_scope(full_scope),
             coverage_json=args.coverage_json,
             threshold=args.threshold,
@@ -974,6 +986,7 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
         )
     return CheckConfig(
         project_root=project_root,
+        admission=admission,
         scope=derive_scope(project_root),
         coverage_json=args.coverage_json,
         threshold=args.threshold,
@@ -989,7 +1002,7 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        require_dagger_admission(subject="Agents Remember quality wrapper")
+        admission = require_dagger_admission(subject="Agents Remember quality wrapper")
     except DaggerAdmissionError as error:
         print_line(str(error))
         print_line("result: quality-wrapper FAIL")
@@ -1026,7 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
             f"mechanism={memory_cap.RLIMIT_MECHANISM}; cap={args.memory_cap_bytes} bytes"
         )
     try:
-        config = config_from_args(args)
+        config = config_from_args(args, admission=admission)
         return run_quality_check(config)
     except ScopeError as error:
         print_line(f"gate scope could not be derived: {error}")

@@ -14,13 +14,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MCP_SRC = REPOSITORY_ROOT / "mcp" / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality.dagger_environment import DaggerAdmissionError
 from agents_remember.testing.certifying_bootstrap import (
     CertifyingPytestBootstrap,
 )
 from agents_remember.testing.certifying_bootstrap import (
     prepare_certifying_pytest_bootstrap as _prepare_certifying_pytest_bootstrap,
 )
+from agents_remember.testing.dagger_admission import DaggerAdmissionError
 from agents_remember.testing.global_state import begin_pytest_process
 from agents_remember.testing.hermetic_bootstrap import (
     BootstrapConfigurationError,

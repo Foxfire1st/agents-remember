@@ -1,4 +1,4 @@
-"""Mint the capability for a nonce-attested Dagger quality process."""
+"""Mint the testing-layer capability for a nonce-attested Dagger quality process."""
 
 from __future__ import annotations
 

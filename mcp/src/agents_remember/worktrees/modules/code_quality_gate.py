@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shlex
-import subprocess
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,11 +13,20 @@ from typing import NoReturn
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.models.quality import QualityGateResult
+from agents_remember.models.test_evidence import (
+    CertifyingTestEvidence,
+    EvidenceConsumer,
+    require_certifying_evidence,
+    test_evidence_payload,
+)
 from agents_remember.worktrees.modules.clean_quality_executor import (
+    CleanQualityOutcome,
     CleanQualityRequest,
+    certifying_evidence_from_published_manifest,
     published_report_path_from_manifest,
     run_clean_quality,
 )
+from agents_remember.worktrees.modules.git import require_git
 from agents_remember.worktrees.modules.published_quality_manifest import (
     load_published_quality_manifest,
 )
@@ -57,7 +65,7 @@ class QualityGateTarget:
 @dataclass(frozen=True)
 class _QualityGateReport:
     path: Path
-    result: subprocess.CompletedProcess[str]
+    result: CleanQualityOutcome
     command: list[str]
     invocation: str
     mode: str
@@ -230,6 +238,7 @@ def run_strict_code_quality_gate(
             f"self-owned wrapper is missing at {wrapper}"
         )
     plan = _validated_quality_gate_plan(plan)
+    candidate_tree = require_git(code_worktree, ["write-tree"])
     command, invocation = _gate_command_parts(plan, diff_base, invocation)
     started_at = datetime.now(UTC)
     started = time.monotonic()
@@ -268,10 +277,20 @@ def run_strict_code_quality_gate(
                 requested_memory_cap_bytes=plan.memory_cap_bytes,
             )
         )
+    evidence = require_certifying_evidence(
+        result.evidence,
+        consumer=EvidenceConsumer.LIFECYCLE,
+    )
+    current_tree = require_git(code_worktree, ["write-tree"])
+    if evidence.candidate_tree != candidate_tree or current_tree != candidate_tree:
+        raise RuntimeError(
+            "quality candidate changed while Dagger certification was being published"
+        )
     return _strict_quality_success_payload(
         target,
         diff_base=diff_base,
         plan=plan,
+        evidence=evidence,
     )
 
 
@@ -306,10 +325,18 @@ def recover_strict_code_quality_gate(
     result = raw_result
     if result.get("status") != "passed" or result.get("exitCode") != 0:
         return None
+    candidate_tree = require_git(target.code_worktree, ["write-tree"])
+    evidence = certifying_evidence_from_published_manifest(
+        reports,
+        manifest,
+        candidate_tree=candidate_tree,
+    )
+    require_certifying_evidence(evidence, consumer=EvidenceConsumer.LIFECYCLE)
     return _strict_quality_success_payload(
         target,
         diff_base=diff_base,
         plan=plan,
+        evidence=evidence,
         published_result_path=published_result_path,
     )
 
@@ -319,6 +346,7 @@ def _strict_quality_success_payload(
     *,
     diff_base: str,
     plan: QualityGatePlan,
+    evidence: CertifyingTestEvidence,
     published_result_path: Path | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -334,6 +362,7 @@ def _strict_quality_success_payload(
         "diffBase": diff_base,
         "mode": plan.mode,
         "executor": plan.executor,
+        "certifyingTestEvidence": test_evidence_payload(evidence),
         "reportPath": test_results_report_path(target.worktree_group).as_posix(),
         **(
             {"publishedResultPath": published_result_path.as_posix()}
@@ -475,13 +504,13 @@ def _memory_policy_payload(
 
 
 def _gate_failure_message(
-    result: subprocess.CompletedProcess[str],
+    result: CleanQualityOutcome,
     report_path: Path,
     *,
     requested_memory_cap_bytes: int | None = None,
 ) -> str:
     """One refusal message: nothing committed, plus Dagger cap policy when requested."""
-    details = _failure_output(result.stdout)
+    details = _failure_output(result.stdout or "")
     if requested_memory_cap_bytes is not None:
         killed = (
             " The Dagger container scope was killed by the memory cap."

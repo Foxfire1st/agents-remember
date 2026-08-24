@@ -16,6 +16,8 @@ from agents_remember.worktrees.modules.clean_quality_executor import (
     run_clean_quality,
 )
 
+CANDIDATE_TREE = "c" * 40
+
 
 def git(root: Path, *args: str) -> str:
     result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=False)
@@ -77,6 +79,7 @@ class CleanQualityExecutorTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0)
+            self.assertIsNotNone(result.evidence)
             sandbox = group / "reports/test-sandbox"
             source = sandbox / "source"
             self.assertEqual((source / "tracked.txt").read_text(encoding="utf-8"), "candidate\n")
@@ -140,6 +143,7 @@ class CleanQualityExecutorTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 8)
+            self.assertIsNone(result.evidence)
             self.assertEqual(len(calls), 1)
             progress = json.loads(
                 (root / "group/reports/quality-progress.json").read_text(encoding="utf-8")
@@ -262,7 +266,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
             )
             (export / "closeout-operation.json").write_text("forged", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "unexpected report files"):
-                clean_quality_executor._publish_reports(export, reports)
+                clean_quality_executor._publish_reports(
+                    export,
+                    reports,
+                    candidate_tree=CANDIDATE_TREE,
+                )
             self.assertEqual(
                 durable.read_text(encoding="utf-8"), '{"status":"passed","exitCode":0}\n'
             )
@@ -276,7 +284,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
             (old / "clean-quality-results.json").write_text(
                 '{"status":"passed","exitCode":0,"attempt":"old"}\n', encoding="utf-8"
             )
-            clean_quality_executor._publish_reports(old, reports)
+            clean_quality_executor._publish_reports(
+                old,
+                reports,
+                candidate_tree=CANDIDATE_TREE,
+            )
             manifest_before = (reports / clean_quality_executor.REPORT_SET_MANIFEST).read_bytes()
 
             new = root / "new"
@@ -308,7 +320,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
                     ),
                     self.assertRaisesRegex(OSError, "injected publication failure"),
                 ):
-                    clean_quality_executor._publish_reports(new, reports)
+                    clean_quality_executor._publish_reports(
+                        new,
+                        reports,
+                        candidate_tree=CANDIDATE_TREE,
+                    )
                 self.assertEqual(
                     (reports / clean_quality_executor.REPORT_SET_MANIFEST).read_bytes(),
                     manifest_before,
@@ -326,7 +342,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(OSError, "crash after pointer"),
             ):
-                clean_quality_executor._publish_reports(new, reports)
+                clean_quality_executor._publish_reports(
+                    new,
+                    reports,
+                    candidate_tree=CANDIDATE_TREE,
+                )
             selected = clean_quality_executor.published_report_path(
                 reports, "clean-quality-results.json"
             )
@@ -346,7 +366,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 raise FileExistsError(target)
 
             with mock.patch.object(Path, "rename", autospec=True, side_effect=competing_rename):
-                manifest = clean_quality_executor._publish_reports(source, root / "reports")
+                manifest = clean_quality_executor._publish_reports(
+                    source,
+                    root / "reports",
+                    candidate_tree=CANDIDATE_TREE,
+                )
 
             selected = clean_quality_executor.published_report_path(
                 root / "reports", "clean-quality-results.json"
@@ -366,8 +390,9 @@ class CleanQualityExecutorTests(unittest.TestCase):
             manifest_path.write_text(
                 json.dumps(
                     {
-                        "schemaVersion": "1.0",
+                        "schemaVersion": "2.0",
                         "generation": "invalid",
+                        "candidateTree": CANDIDATE_TREE,
                         "files": {"result.json": {"sha256": "", "size": 0}},
                     }
                 ),
@@ -378,8 +403,9 @@ class CleanQualityExecutorTests(unittest.TestCase):
 
             generation = "a" * 64
             manifest = {
-                "schemaVersion": "1.0",
+                "schemaVersion": "2.0",
                 "generation": generation,
+                "candidateTree": CANDIDATE_TREE,
                 "files": {"result.json": {"sha256": "0" * 64, "size": 1}},
             }
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -417,7 +443,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             root = Path(tmp)
             with self.assertRaisesRegex(RuntimeError, "did not export"):
-                clean_quality_executor._publish_reports(root / "missing", root / "reports")
+                clean_quality_executor._publish_reports(
+                    root / "missing",
+                    root / "reports",
+                    candidate_tree=CANDIDATE_TREE,
+                )
             empty = root / "empty"
             empty.mkdir()
             reports = root / "reports"
@@ -426,9 +456,14 @@ class CleanQualityExecutorTests(unittest.TestCase):
             (reports / "pytest-events.jsonl").write_text("stale", encoding="utf-8")
             (reports / "dagger-progress.log").write_text("owned elsewhere", encoding="utf-8")
             (empty / "nested").mkdir()
-            clean_quality_executor._publish_reports(empty, reports)
-            self.assertFalse((reports / "coverage.json").exists())
-            self.assertFalse((reports / "pytest-events.jsonl").exists())
+            with self.assertRaisesRegex(RuntimeError, "no valid authoritative result"):
+                clean_quality_executor._publish_reports(
+                    empty,
+                    reports,
+                    candidate_tree=CANDIDATE_TREE,
+                )
+            self.assertTrue((reports / "coverage.json").exists())
+            self.assertTrue((reports / "pytest-events.jsonl").exists())
             self.assertTrue((reports / "dagger-progress.log").exists())
             failed = subprocess.CompletedProcess(["git"], 2, stdout="", stderr="bad ref\n")
             with self.assertRaisesRegex(RuntimeError, "could not resolve base: bad ref"):

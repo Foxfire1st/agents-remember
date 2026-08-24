@@ -17,6 +17,7 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import application_boundary, check, scope, single_owner
 from agents_remember.code_quality.application_boundary import BoundaryContractError
 from agents_remember.code_quality.scope import ScopeError
@@ -342,7 +343,7 @@ class TestCheckRails:
             ),
             pytest.raises(ScopeError, match="bad env"),
         ):
-            check.config_from_args(args)
+            check.config_from_args(args, admission=QUALITY_TEST_ADMISSION)
 
 
 class TestScopeModuleBranches:

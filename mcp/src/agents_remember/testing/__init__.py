@@ -1,7 +1,6 @@
 """Bounded direct-test diagnostics with no acceptance authority."""
 
-from agents_remember.testing.eligibility import classify_direct_selection
-from agents_remember.testing.evidence import (
+from agents_remember.models.test_evidence import (
     DiagnosticTestEvidence,
     EvidenceAltitude,
     EvidenceConsumer,
@@ -11,6 +10,7 @@ from agents_remember.testing.evidence import (
     require_certifying_evidence,
     test_evidence_payload,
 )
+from agents_remember.testing.eligibility import classify_direct_selection
 from agents_remember.testing.selection_contract import (
     DirectSelectionDecision,
     EligibleDirectSelection,

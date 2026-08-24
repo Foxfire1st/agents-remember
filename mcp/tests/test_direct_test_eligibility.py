@@ -6,13 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agents_remember.testing.consumer_inventory import ACCEPTING_CONSUMER_INVENTORY
-from agents_remember.testing.eligibility import (
-    MAX_DIRECT_NODES,
-    classify_direct_selection,
-    direct_selection_is_current,
-)
-from agents_remember.testing.evidence import (
+from agents_remember.models.test_evidence import (
+    CandidateBinding,
     CertifyingTestEvidence,
     DiagnosticTestEvidence,
     EvidenceConsumer,
@@ -23,8 +18,13 @@ from agents_remember.testing.evidence import (
     require_certifying_evidence,
     test_evidence_payload,
 )
+from agents_remember.testing.consumer_inventory import ACCEPTING_CONSUMER_INVENTORY
+from agents_remember.testing.eligibility import (
+    MAX_DIRECT_NODES,
+    classify_direct_selection,
+    direct_selection_is_current,
+)
 from agents_remember.testing.selection_contract import (
-    CandidateBinding,
     DirectRefusalCode,
     EligibleDirectSelection,
     RefusedDirectSelection,

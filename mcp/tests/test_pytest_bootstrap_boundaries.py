@@ -8,27 +8,27 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.code_quality.dagger_environment import (
+from agents_remember.kernel.primitives.checkout_coordination import declared_execution_mode
+from agents_remember.models.test_evidence import (
+    DiagnosticTestEvidence,
+    EvidenceConsumer,
+    EvidenceConsumerRefusal,
+    require_certifying_evidence,
+)
+from agents_remember.testing.certifying_bootstrap import (
+    prepare_certifying_pytest_bootstrap,
+)
+from agents_remember.testing.dagger_admission import (
     DAGGER_TEST_ATTESTATION_ENV,
     DaggerAdmission,
     DaggerAdmissionError,
     dagger_admission_refusal,
     require_dagger_admission_capability,
 )
-from agents_remember.kernel.primitives.checkout_coordination import declared_execution_mode
-from agents_remember.testing.certifying_bootstrap import (
-    prepare_certifying_pytest_bootstrap,
-)
 from agents_remember.testing.diagnostic_bootstrap import (
     prepare_diagnostic_pytest_bootstrap,
 )
 from agents_remember.testing.eligibility import classify_direct_selection
-from agents_remember.testing.evidence import (
-    DiagnosticTestEvidence,
-    EvidenceConsumer,
-    EvidenceConsumerRefusal,
-    require_certifying_evidence,
-)
 from agents_remember.testing.global_state import (
     begin_pytest_process,
     end_pytest_process,
@@ -88,7 +88,7 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
         self.assertIsInstance(decision, EligibleDirectSelection)
         assert isinstance(decision, EligibleDirectSelection)
         with mock.patch(
-            "agents_remember.code_quality.dagger_environment.require_dagger_admission",
+            "agents_remember.testing.dagger_admission.require_dagger_admission",
             side_effect=AssertionError("diagnostics consulted admission"),
         ) as admission:
             diagnostic = prepare_diagnostic_pytest_bootstrap(decision)

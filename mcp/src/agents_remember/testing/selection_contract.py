@@ -7,6 +7,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TypeAlias
 
+from agents_remember.models.test_evidence import CandidateBinding
+
 
 class UnsafeEffectFamily(StrEnum):
     """Closed effect families that Candidate A keeps in Dagger."""
@@ -59,15 +61,6 @@ class ResolvedDependencyClosure:
 
     paths: tuple[str, ...]
     observations: tuple[DependencyObservation, ...]
-
-
-@dataclass(frozen=True)
-class CandidateBinding:
-    """Content binding that invalidates a decision when code or config moves."""
-
-    digest: str
-    policy_version: str
-    configuration_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True)

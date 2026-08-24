@@ -10,10 +10,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final, Literal
 
-QUALITY_MANIFEST_SCHEMA_VERSION: Final[Literal["1.0"]] = "1.0"
+QUALITY_MANIFEST_SCHEMA_VERSION: Final[Literal["2.0"]] = "2.0"
 REPORT_SET_MANIFEST = "quality-report-set.json"
 _MANIFEST_ERROR = "no complete Dagger report generation is published"
-_ALLOWED_ROOT_FIELDS = frozenset({"schemaVersion", "generation", "files", "attestation"})
+_ALLOWED_ROOT_FIELDS = frozenset(
+    {"schemaVersion", "generation", "candidateTree", "files", "attestation"}
+)
 
 
 class PublishedQualityManifestError(RuntimeError):
@@ -28,8 +30,9 @@ class PublishedQualityFile:
 
 @dataclass(frozen=True)
 class PublishedQualityManifest:
-    schema_version: Literal["1.0"]
+    schema_version: Literal["2.0"]
     generation: str
+    candidate_tree: str
     files: Mapping[str, PublishedQualityFile]
     attestation: Mapping[str, str] | None
 
@@ -64,6 +67,10 @@ def _parse_manifest(raw: object) -> PublishedQualityManifest:
     if not isinstance(generation, str) or not re.fullmatch(r"[0-9a-f]{64}", generation):
         raise ValueError("quality manifest generation id is invalid")
 
+    candidate_tree = raw.get("candidateTree")
+    if not isinstance(candidate_tree, str) or not re.fullmatch(r"[0-9a-f]{40,64}", candidate_tree):
+        raise ValueError("quality manifest candidate tree is invalid")
+
     raw_files = raw.get("files")
     if not isinstance(raw_files, dict):
         raise ValueError("quality manifest files must be an object")
@@ -88,6 +95,7 @@ def _parse_manifest(raw: object) -> PublishedQualityManifest:
     return PublishedQualityManifest(
         schema_version=QUALITY_MANIFEST_SCHEMA_VERSION,
         generation=generation,
+        candidate_tree=candidate_tree,
         files=MappingProxyType(files),
         attestation=attestation,
     )

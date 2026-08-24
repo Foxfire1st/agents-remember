@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check
 from test_code_quality_check import (
     ENVIRONMENT_NAME,
@@ -55,6 +56,7 @@ class GateScopeDerivationTests(unittest.TestCase):
                     check.CheckConfig(
                         project_root=root,
                         scope=scope,
+                        admission=QUALITY_TEST_ADMISSION,
                         coverage_json=None,
                         threshold=30.0,
                         top=5,

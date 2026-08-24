@@ -16,6 +16,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, diff_coverage, targeted
 from agents_remember.code_quality.scope import ScopeError
 
@@ -376,7 +377,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 targeted=True,
                 memory_cap_bytes=None,
             )
-            config = check.config_from_args(args)
+            config = check.config_from_args(args, admission=QUALITY_TEST_ADMISSION)
             commands: list[list[str]] = []
             output: list[str] = []
 
@@ -504,6 +505,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             config = check.CheckConfig(
                 project_root=root,
                 scope=derived.to_gate_scope(full),
+                admission=QUALITY_TEST_ADMISSION,
                 coverage_json=root / "coverage.json",
                 threshold=30.0,
                 top=5,
@@ -545,7 +547,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 targeted=True,
                 memory_cap_bytes=None,
             )
-            config = check.config_from_args(args)
+            config = check.config_from_args(args, admission=QUALITY_TEST_ADMISSION)
             commands: list[list[str]] = []
             output: list[str] = []
 
@@ -589,7 +591,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 targeted=True,
                 memory_cap_bytes=None,
             )
-            config = check.config_from_args(args)
+            config = check.config_from_args(args, admission=QUALITY_TEST_ADMISSION)
             commands: list[list[str]] = []
             output: list[str] = []
 

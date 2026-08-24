@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.code_quality.dagger_environment import (
+from agents_remember.testing.dagger_admission import (
     DaggerAdmission,
     require_dagger_admission,
 )

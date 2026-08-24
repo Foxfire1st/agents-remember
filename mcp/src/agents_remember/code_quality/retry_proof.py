@@ -36,6 +36,10 @@ from coverage import CoverageData
 
 from agents_remember.kernel import git_command
 from agents_remember.kernel.atomic_write import atomic_replace
+from agents_remember.testing.dagger_admission import (
+    DaggerAdmission,
+    require_dagger_admission_capability,
+)
 
 SCHEMA_VERSION = 1
 CACHE_DIRECTORY = "agents-remember-quality-retry"
@@ -135,8 +139,14 @@ class RetryPlan:
             self.active_data_path.unlink(missing_ok=True)
 
 
-def prepare(inputs: RetryInputs, *, printer: Printer) -> RetryPlan | None:
+def prepare(
+    inputs: RetryInputs,
+    *,
+    admission: DaggerAdmission,
+    printer: Printer,
+) -> RetryPlan | None:
     """Return a fail-closed retry plan, or None when caching is unavailable."""
+    require_dagger_admission_capability(admission)
     disabled_reason = _disabled_reason(inputs)
     if disabled_reason is not None:
         printer(f"retry-proof: disabled ({disabled_reason})")

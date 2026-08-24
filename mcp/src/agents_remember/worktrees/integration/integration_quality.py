@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.models.lifecycles.operation import IntegrationQualityCertification
+from agents_remember.models.test_evidence import EvidenceConsumer
 from agents_remember.worktrees.integration.integration_quality_checkout import (
     integration_quality_checkout,
 )
@@ -21,6 +22,9 @@ from agents_remember.worktrees.integration.organizational_completion import (
 from agents_remember.worktrees.integration.organizational_completion_integration import (
     preview_organizational_completion,
 )
+from agents_remember.worktrees.modules.clean_quality_executor import (
+    require_published_quality_evidence,
+)
 from agents_remember.worktrees.modules.code_quality_gate import (
     GATE_FULL,
     QualityGatePlan,
@@ -31,6 +35,7 @@ from agents_remember.worktrees.modules.code_quality_gate import (
     requires_strict_code_quality,
     run_strict_code_quality_gate,
 )
+from agents_remember.worktrees.modules.git import require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 INTEGRATION_QUALITY_DECISION_SURFACE = (
@@ -194,6 +199,11 @@ def run_integration_quality_gate(
                 plan=plan,
                 invocation="master-integration",
                 attestation=attestation,
+            )
+            require_published_quality_evidence(
+                contract.worktree_group / "reports",
+                candidate_tree=require_git(checkout, ["write-tree"]),
+                consumer=EvidenceConsumer.INTEGRATION,
             )
     except RuntimeError as error:
         raise integration_quality_failure(

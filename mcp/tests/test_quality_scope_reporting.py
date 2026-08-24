@@ -18,6 +18,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, diff_coverage, scope, scope_reporting
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -92,6 +93,7 @@ def config_for(root: Path, derived: scope.GateScope) -> check.CheckConfig:
     return check.CheckConfig(
         project_root=root,
         scope=derived,
+        admission=QUALITY_TEST_ADMISSION,
         coverage_json=root / "coverage.json",
         threshold=30.0,
         top=5,

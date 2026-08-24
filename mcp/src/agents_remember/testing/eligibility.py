@@ -7,9 +7,9 @@ import hashlib
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
+from agents_remember.models.test_evidence import CandidateBinding
 from agents_remember.testing.dependency_closure import DependencyClosureAnalyzer
 from agents_remember.testing.selection_contract import (
-    CandidateBinding,
     ClosureRefusal,
     DirectRefusalCode,
     DirectSelectionDecision,

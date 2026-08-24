@@ -9,6 +9,7 @@ from unittest import mock
 
 import organizational_completion_test_support as fixture_mod
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.models.test_evidence import _certifying_evidence_from_verified_dagger
 from agents_remember.worktrees.integration import integration_quality as quality
 from agents_remember.worktrees.integration import integration_ref_transaction as ref_transaction
 from agents_remember.worktrees.integration import (
@@ -41,25 +42,29 @@ class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
             export.mkdir()
             result_path = export / "clean-quality-results.json"
             result_path.write_text("not json\n", encoding="utf-8")
-            clean_quality_executor._publish_reports(export, reports, attestation={"id": "one"})
+            with self.assertRaisesRegex(RuntimeError, "no valid authoritative result"):
+                clean_quality_executor._publish_reports(
+                    export,
+                    reports,
+                    candidate_tree="c" * 40,
+                    attestation={"id": "one"},
+                )
             target = code_quality_gate.QualityGateTarget(
                 code_worktree=root,
                 worktree_group=root,
             )
             plan = code_quality_gate.QualityGatePlan(mode="full", executor="dagger")
-            with self.assertRaisesRegex(RuntimeError, "unreadable"):
-                code_quality_gate.recover_strict_code_quality_gate(
-                    target,
-                    diff_base="a" * 40,
-                    plan=plan,
-                    attestation={"id": "one"},
-                )
 
             result_path.write_text(
                 json.dumps({"status": "failed", "exitCode": 1}) + "\n",
                 encoding="utf-8",
             )
-            clean_quality_executor._publish_reports(export, reports, attestation={"id": "one"})
+            clean_quality_executor._publish_reports(
+                export,
+                reports,
+                candidate_tree="c" * 40,
+                attestation={"id": "one"},
+            )
             self.assertIsNone(
                 code_quality_gate.recover_strict_code_quality_gate(
                     target,
@@ -129,7 +134,13 @@ class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
                 json.dumps({"status": "passed", "exitCode": 0}) + "\n",
                 encoding="utf-8",
             )
-            clean_quality_executor._publish_reports(export, reports, attestation={"id": "one"})
+            candidate_tree = "c" * 40
+            clean_quality_executor._publish_reports(
+                export,
+                reports,
+                candidate_tree=candidate_tree,
+                attestation={"id": "one"},
+            )
             target = code_quality_gate.QualityGateTarget(
                 code_worktree=root,
                 worktree_group=root,
@@ -139,13 +150,22 @@ class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
                 target,
                 diff_base="a" * 40,
                 plan=plan,
+                evidence=_certifying_evidence_from_verified_dagger(
+                    candidate_tree=candidate_tree,
+                    result_sha256="d" * 64,
+                ),
             )
-            recovered = code_quality_gate.recover_strict_code_quality_gate(
-                target,
-                diff_base="a" * 40,
-                plan=plan,
-                attestation={"id": "one"},
-            )
+            with mock.patch.object(
+                code_quality_gate,
+                "require_git",
+                return_value=candidate_tree,
+            ):
+                recovered = code_quality_gate.recover_strict_code_quality_gate(
+                    target,
+                    diff_base="a" * 40,
+                    plan=plan,
+                    attestation={"id": "one"},
+                )
             assert recovered is not None
             self.assertEqual(recovered["reportPath"], fresh["reportPath"])
             self.assertEqual(Path(str(fresh["reportPath"])).name, "test-results.md")
@@ -155,12 +175,11 @@ class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
             self.assertEqual(json.loads(published.read_text(encoding="utf-8"))["exitCode"], 0)
 
             (export / "clean-quality-results.json").write_text("[]\n", encoding="utf-8")
-            clean_quality_executor._publish_reports(export, reports, attestation={"id": "two"})
-            with self.assertRaisesRegex(RuntimeError, "result is unreadable"):
-                code_quality_gate.recover_strict_code_quality_gate(
-                    target,
-                    diff_base="a" * 40,
-                    plan=plan,
+            with self.assertRaisesRegex(RuntimeError, "no valid authoritative result"):
+                clean_quality_executor._publish_reports(
+                    export,
+                    reports,
+                    candidate_tree=candidate_tree,
                     attestation={"id": "two"},
                 )
 

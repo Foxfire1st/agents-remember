@@ -21,6 +21,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import (
     check,
     crap_calculator,
@@ -113,9 +114,12 @@ class CodeQualityCheckTests(unittest.TestCase):
                 mock.patch.object(check, "derive_scope", return_value=full_scope),
                 mock.patch.object(check.quality_scope, "file_size_armed", return_value=True),
             ):
-                config = check.config_from_args(args)
+                config = check.config_from_args(args, admission=QUALITY_TEST_ADMISSION)
                 args.progress_report = explicit_progress_report
-                explicit_config = check.config_from_args(args)
+                explicit_config = check.config_from_args(
+                    args,
+                    admission=QUALITY_TEST_ADMISSION,
+                )
 
             self.assertTrue(config.targeted)
             self.assertTrue(config.file_size_armed)
@@ -1038,6 +1042,7 @@ def sample_config(
     return check.CheckConfig(
         project_root=root,
         scope=sample_scope(root, source),
+        admission=QUALITY_TEST_ADMISSION,
         coverage_json=coverage_json if coverage_json is not None else root / "coverage.json",
         threshold=threshold,
         top=top,

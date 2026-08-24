@@ -10,7 +10,8 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import check, dagger_environment
+from agents_remember.code_quality import check
+from agents_remember.testing import dagger_admission
 
 
 class CodeQualityEnvironmentGuardTests(unittest.TestCase):
@@ -35,10 +36,10 @@ class CodeQualityEnvironmentGuardTests(unittest.TestCase):
             attestation = Path(tmp) / "dagger-test-attestation"
             attestation.write_text("f" * 32, encoding="utf-8")
             with (
-                mock.patch.object(dagger_environment, "DAGGER_TEST_ATTESTATION_PATH", attestation),
+                mock.patch.object(dagger_admission, "DAGGER_TEST_ATTESTATION_PATH", attestation),
                 mock.patch.dict(
                     check.os.environ,
-                    {dagger_environment.DAGGER_TEST_ATTESTATION_ENV: "0" * 32},
+                    {dagger_admission.DAGGER_TEST_ATTESTATION_ENV: "0" * 32},
                     clear=True,
                 ),
                 mock.patch.object(check, "build_parser") as parser,

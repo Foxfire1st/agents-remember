@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from agents_remember.testing.eligibility import direct_selection_is_current
 from agents_remember.testing.hermetic_bootstrap import (
     CandidateTestProcess,
     candidate_test_process,
+    hermetic_pytest_environment,
 )
 from agents_remember.testing.selection_contract import EligibleDirectSelection
 
@@ -22,6 +25,9 @@ class DiagnosticPytestBootstrap:
 
     process: CandidateTestProcess
     selection: EligibleDirectSelection
+
+
+DAGGER_ATTESTATION_ENV = "AR_DAGGER_TEST_ATTESTATION"
 
 
 def prepare_diagnostic_pytest_bootstrap(
@@ -39,3 +45,20 @@ def prepare_diagnostic_pytest_bootstrap(
         candidate_test_process(selection.candidate_root),
         selection,
     )
+
+
+def diagnostic_pytest_environment(
+    bootstrap: DiagnosticPytestBootstrap,
+    environ: Mapping[str, str],
+    *,
+    cache_root: Path,
+) -> dict[str, str]:
+    """Build a hermetic child environment without copying the Dagger secret."""
+
+    result = hermetic_pytest_environment(
+        bootstrap.process,
+        environ,
+        cache_root=cache_root,
+    )
+    result.pop(DAGGER_ATTESTATION_ENV, None)
+    return result

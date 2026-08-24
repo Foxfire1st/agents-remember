@@ -16,6 +16,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, file_size
 from agents_remember.code_quality import scope as quality_scope
 from test_code_quality_check import REPOSITORY_ROOT, sample_config
@@ -150,6 +151,7 @@ class FileSizeWrapperWiringTests(unittest.TestCase):
                 check.CheckConfig(
                     project_root=root,
                     scope=base_config.scope,
+                    admission=QUALITY_TEST_ADMISSION,
                     coverage_json=base_config.coverage_json,
                     threshold=base_config.threshold,
                     top=base_config.top,

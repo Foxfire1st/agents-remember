@@ -24,6 +24,12 @@ from agents_remember.kernel.platform_subprocess import (
     native_path_environment,
     windows_interop_reason,
 )
+from agents_remember.models.test_evidence import (
+    CertifyingTestEvidence,
+    EvidenceConsumer,
+    _certifying_evidence_from_verified_dagger,
+    require_certifying_evidence,
+)
 from agents_remember.worktrees.modules.published_quality_manifest import (
     QUALITY_MANIFEST_SCHEMA_VERSION,
     REPORT_SET_MANIFEST,
@@ -68,6 +74,36 @@ class CleanQualityRequest:
     attestation: Mapping[str, str] | None = None
 
 
+@dataclass(frozen=True)
+class CleanQualityOutcome:
+    """Dagger process result paired with governed test evidence when it published."""
+
+    process: subprocess.CompletedProcess[str]
+    evidence: CertifyingTestEvidence | None
+
+    @property
+    def args(self) -> object:
+        return self.process.args
+
+    @property
+    def returncode(self) -> int:
+        return self.process.returncode
+
+    @property
+    def stdout(self) -> str | None:
+        return self.process.stdout
+
+    @property
+    def stderr(self) -> str | None:
+        return self.process.stderr
+
+
+@dataclass(frozen=True)
+class _PreparedSandbox:
+    root: Path
+    candidate_tree: str
+
+
 def clean_sandbox_root(worktree_group: Path) -> Path:
     return worktree_group / "reports" / CLEAN_SANDBOX_NAME
 
@@ -77,17 +113,17 @@ def run_clean_quality(
     *,
     runner: CommandRunner | None = None,
     dagger_resolver: DaggerResolver | None = None,
-) -> subprocess.CompletedProcess[str]:
+) -> CleanQualityOutcome:
     """Run the canonical Dagger pipeline; never fall back to host quality rails."""
     if request.mode not in {"targeted", "full"}:
         raise ValueError(f"unknown clean quality mode: {request.mode}")
     for path in (request.code_worktree, request.worktree_group):
         if reason := windows_interop_reason(path):
             raise RuntimeError(f"clean quality refuses {path}: {reason}")
-    sandbox = _prepare_sandbox(request)
-    source = sandbox / "source"
-    bundle = sandbox / "candidate.bundle"
-    export_root = sandbox / "export"
+    prepared = _prepare_sandbox(request)
+    source = prepared.root / "source"
+    bundle = prepared.root / "candidate.bundle"
+    export_root = prepared.root / "export"
     env = native_path_environment(os.environ)
     dagger = (dagger_resolver or _resolve_dagger)(env)
     execute = runner or (
@@ -122,12 +158,21 @@ def run_clean_quality(
         _write_current(
             request.worktree_group, "failed", "Dagger pipeline/export failed", status="failed"
         )
-        return exported
+        return CleanQualityOutcome(exported, None)
     pipeline_exit = _exported_pipeline_exit(export_root)
-    _publish_reports(
+    manifest = _publish_reports(
         export_root,
         request.worktree_group / "reports",
+        candidate_tree=prepared.candidate_tree,
         attestation=request.attestation,
+    )
+    evidence = (
+        _certifying_evidence_from_verified_dagger(
+            candidate_tree=prepared.candidate_tree,
+            result_sha256=_published_result_sha256(manifest),
+        )
+        if pipeline_exit == 0
+        else None
     )
     outcome = "passed" if pipeline_exit == 0 else "failed"
     _write_current(
@@ -136,15 +181,18 @@ def run_clean_quality(
         f"Dagger Ubuntu quality {outcome}",
         status="completed" if pipeline_exit == 0 else "failed",
     )
-    return subprocess.CompletedProcess(
-        exported.args,
-        pipeline_exit,
-        stdout=_bounded_text_tail(exported.stdout, max_bytes=DAGGER_RESULT_MAX_BYTES),
-        stderr=exported.stderr,
+    return CleanQualityOutcome(
+        subprocess.CompletedProcess(
+            exported.args,
+            pipeline_exit,
+            stdout=_bounded_text_tail(exported.stdout, max_bytes=DAGGER_RESULT_MAX_BYTES),
+            stderr=exported.stderr,
+        ),
+        evidence,
     )
 
 
-def _prepare_sandbox(request: CleanQualityRequest) -> Path:
+def _prepare_sandbox(request: CleanQualityRequest) -> _PreparedSandbox:
     sandbox = clean_sandbox_root(request.worktree_group)
     if sandbox.exists():
         shutil.rmtree(sandbox)
@@ -173,6 +221,7 @@ def _prepare_sandbox(request: CleanQualityRequest) -> Path:
     )
     if staged:
         _git_ok(run_git(source, ["apply", "--index", "-"], input_text=staged), "apply overlay")
+    candidate_tree = _git_ok(run_git(source, ["write-tree"]), "resolve candidate tree")
     bundle = sandbox / "candidate.bundle"
     _git_ok(
         run_git(source, ["bundle", "create", bundle.as_posix(), "HEAD"]),
@@ -186,9 +235,23 @@ def _prepare_sandbox(request: CleanQualityRequest) -> Path:
         "image": PLAYWRIGHT_IMAGE,
         "codexVersion": CODEX_VERSION,
         "bundleSha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        "candidateTree": candidate_tree,
     }
     atomic_write_text(sandbox / "manifest.json", json.dumps(manifest, indent=2) + "\n")
-    return sandbox
+    return _PreparedSandbox(sandbox, candidate_tree)
+
+
+def _published_result_sha256(manifest: Mapping[str, object]) -> str:
+    raw_files = manifest.get("files")
+    if not isinstance(raw_files, dict):
+        raise RuntimeError("published Dagger manifest has no file inventory")
+    raw_result = raw_files.get("clean-quality-results.json")
+    if not isinstance(raw_result, dict):
+        raise RuntimeError("published Dagger manifest has no authoritative result")
+    digest = raw_result.get("sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise RuntimeError("published Dagger result digest is invalid")
+    return digest
 
 
 def _exported_pipeline_exit(export_root: Path) -> int:
@@ -213,6 +276,7 @@ def _publish_reports(
     source: Path,
     destination: Path,
     *,
+    candidate_tree: str,
     attestation: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Publish one immutable evidence generation, then atomically point readers at it.
@@ -224,6 +288,9 @@ def _publish_reports(
     """
     if not source.is_dir():
         raise RuntimeError(f"Dagger did not export its reports directory: {source}")
+    if re.fullmatch(r"[0-9a-f]{40,64}", candidate_tree) is None:
+        raise RuntimeError("Dagger publication candidate tree is invalid")
+    _exported_pipeline_exit(source)
     exported_names = {report.name for report in source.iterdir() if report.is_file()}
     unexpected = exported_names - EXPORTED_REPORT_NAMES
     if unexpected:
@@ -238,7 +305,11 @@ def _publish_reports(
         for name in sorted(exported_names)
     }
     generation = hashlib.sha256(
-        json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            {"candidateTree": candidate_tree, "files": files},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()
     generations = destination / REPORT_GENERATIONS_DIRECTORY
     generations.mkdir(parents=True, exist_ok=True)
@@ -261,6 +332,7 @@ def _publish_reports(
     manifest: dict[str, object] = {
         "schemaVersion": QUALITY_MANIFEST_SCHEMA_VERSION,
         "generation": generation,
+        "candidateTree": candidate_tree,
         "files": files,
     }
     if attestation is not None:
@@ -313,6 +385,63 @@ def published_quality_attestation(destination: Path) -> dict[str, str] | None:
 
     manifest = load_published_quality_manifest(destination)
     return None if manifest.attestation is None else dict(manifest.attestation)
+
+
+def certifying_evidence_from_published_quality(
+    destination: Path,
+    *,
+    candidate_tree: str,
+) -> CertifyingTestEvidence:
+    """Recover authority only from the verified immutable Dagger generation."""
+
+    manifest = load_published_quality_manifest(destination)
+    return certifying_evidence_from_published_manifest(
+        destination,
+        manifest,
+        candidate_tree=candidate_tree,
+    )
+
+
+def certifying_evidence_from_published_manifest(
+    destination: Path,
+    manifest: PublishedQualityManifest,
+    *,
+    candidate_tree: str,
+) -> CertifyingTestEvidence:
+    """Mint from one caller-held immutable generation snapshot."""
+
+    if manifest.candidate_tree != candidate_tree:
+        raise RuntimeError(
+            "published Dagger evidence targets another candidate tree: "
+            f"expected {candidate_tree}, found {manifest.candidate_tree}"
+        )
+    published_result = published_report_path_from_manifest(
+        destination,
+        manifest,
+        "clean-quality-results.json",
+    )
+    if _exported_pipeline_exit(published_result.parent) != 0:
+        raise RuntimeError("published Dagger result did not pass acceptance")
+    record = manifest.require_file("clean-quality-results.json")
+    return _certifying_evidence_from_verified_dagger(
+        candidate_tree=manifest.candidate_tree,
+        result_sha256=record.sha256,
+    )
+
+
+def require_published_quality_evidence(
+    destination: Path,
+    *,
+    candidate_tree: str,
+    consumer: EvidenceConsumer,
+) -> CertifyingTestEvidence:
+    """One serialized acceptance firewall shared by lifecycle consumers."""
+
+    evidence = certifying_evidence_from_published_quality(
+        destination,
+        candidate_tree=candidate_tree,
+    )
+    return require_certifying_evidence(evidence, consumer=consumer)
 
 
 def _validate_generation(root: Path, files: dict[str, dict[str, object]]) -> None:

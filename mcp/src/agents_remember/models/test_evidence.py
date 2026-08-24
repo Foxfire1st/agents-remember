@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, TypeAlias
 
-from agents_remember.testing.selection_contract import CandidateBinding
-
 EVIDENCE_SCHEMA_VERSION = "python-test-evidence/v1"
 
 
@@ -31,6 +29,15 @@ class EvidenceConsumer(StrEnum):
     LIFECYCLE = "lifecycle"
     CLOSEOUT = "closeout"
     INTEGRATION = "integration"
+
+
+@dataclass(frozen=True)
+class CandidateBinding:
+    """Content binding that invalidates evidence when code or config moves."""
+
+    digest: str
+    policy_version: str
+    configuration_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,11 @@ def _certifying_evidence_from_verified_dagger(
 ) -> CertifyingTestEvidence:
     """Mint a capability after the Dagger manifest loader has verified provenance."""
 
+    if re.fullmatch(r"[0-9a-f]{40,64}", candidate_tree) is None:
+        raise ValueError("certifying evidence candidate tree is invalid")
+    if re.fullmatch(r"[0-9a-f]{64}", result_sha256) is None:
+        raise ValueError("certifying evidence result digest is invalid")
+
     return CertifyingTestEvidence._mint(
         candidate_tree=candidate_tree,
         result_sha256=result_sha256,
@@ -107,7 +119,7 @@ def _certifying_evidence_from_verified_dagger(
 
 
 def require_certifying_evidence(
-    evidence: TestEvidence,
+    evidence: TestEvidence | None,
     *,
     consumer: EvidenceConsumer,
 ) -> CertifyingTestEvidence:

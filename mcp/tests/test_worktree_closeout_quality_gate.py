@@ -45,6 +45,16 @@ from test_worktree_support import (
 
 
 def _checkout_with_wrapper(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    repository = subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if repository.returncode != 0:
+        init_repo(root)
     wrapper = root / code_quality_gate.QUALITY_WRAPPER
     wrapper.parent.mkdir(parents=True, exist_ok=True)
     wrapper.write_text("# wrapper marker\n", encoding="utf-8")

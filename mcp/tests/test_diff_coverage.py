@@ -13,6 +13,7 @@ from unittest.mock import patch
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, diff_coverage
 
 
@@ -560,6 +561,7 @@ class WrapperIntegrationTests(unittest.TestCase):
             scope=check.GateScope(
                 lint_paths=[], type_paths=[], coverage_paths=[Path("pkg")], test_paths=[]
             ),
+            admission=QUALITY_TEST_ADMISSION,
             coverage_json=None,
             threshold=20.0,
             top=5,
@@ -649,6 +651,7 @@ class WrapperIntegrationTests(unittest.TestCase):
             config = check.CheckConfig(
                 project_root=root,
                 scope=check.derive_scope(root),
+                admission=QUALITY_TEST_ADMISSION,
                 coverage_json=report,
                 threshold=20.0,
                 top=5,

@@ -23,7 +23,7 @@ flowchart TD
 
 | Concern | Sole owner | Result |
 | --- | --- | --- |
-| Dagger nonce/file handshake | `code_quality.dagger_environment` | opaque `DaggerAdmission` or one controlled refusal |
+| Dagger nonce/file handshake | `testing.dagger_admission` | opaque `DaggerAdmission` or one controlled refusal |
 | Candidate source and process environment | `testing.hermetic_bootstrap` | candidate-bound import path, scrubbed Git selectors, disposable identity, isolated cache path |
 | Certifying composition | `testing.certifying_bootstrap` and root conftest | admission before plugin loading or collection |
 | Diagnostic composition | `testing.diagnostic_bootstrap` | still-current eligible selection, with no admission field |

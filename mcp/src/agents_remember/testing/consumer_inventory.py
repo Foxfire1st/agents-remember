@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents_remember.testing.evidence import EvidenceConsumer
+from agents_remember.models.test_evidence import EvidenceConsumer
 
 
 @dataclass(frozen=True)

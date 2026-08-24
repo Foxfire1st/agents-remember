@@ -8,8 +8,28 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from agents_remember.models.test_evidence import _certifying_evidence_from_verified_dagger
 from agents_remember.worktrees.modules import code_quality_gate
+from agents_remember.worktrees.modules.clean_quality_executor import CleanQualityOutcome
 from test_worktree_closeout_quality_gate import _checkout_with_wrapper, _quality_target
+
+
+def _successful_quality_outcome(request, *, stdout: str = "passed\n") -> CleanQualityOutcome:
+    candidate_tree = subprocess.run(
+        ["git", "write-tree"],
+        cwd=request.code_worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    evidence = _certifying_evidence_from_verified_dagger(
+        candidate_tree=candidate_tree,
+        result_sha256="0" * 64,
+    )
+    return CleanQualityOutcome(
+        subprocess.CompletedProcess(["dagger"], 0, stdout=stdout),
+        evidence,
+    )
 
 
 class CodeQualityGateTests(unittest.TestCase):
@@ -111,9 +131,13 @@ class CodeQualityGateTests(unittest.TestCase):
             root = Path(tmp)
             worktree = _checkout_with_wrapper(root / "code")
             target = _quality_target(worktree, root / "enclosure")
-            completed = subprocess.CompletedProcess(["dagger"], 0, stdout="dagger passed\n")
             with mock.patch.object(
-                code_quality_gate, "run_clean_quality", return_value=completed
+                code_quality_gate,
+                "run_clean_quality",
+                side_effect=lambda request: _successful_quality_outcome(
+                    request,
+                    stdout="dagger passed\n",
+                ),
             ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     target,
@@ -152,8 +176,9 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate,
                 "run_clean_quality",
-                side_effect=lambda _request: subprocess.CompletedProcess(
-                    ["dagger"], 0, stdout=next(outputs)
+                side_effect=lambda request: _successful_quality_outcome(
+                    request,
+                    stdout=next(outputs),
                 ),
             ):
                 code_quality_gate.run_strict_code_quality_gate(
@@ -206,7 +231,7 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate,
                 "run_clean_quality",
-                return_value=subprocess.CompletedProcess(["dagger"], 0, stdout="passed\n"),
+                side_effect=_successful_quality_outcome,
             ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
@@ -341,7 +366,7 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate,
                 "run_clean_quality",
-                return_value=subprocess.CompletedProcess(["dagger"], 0, stdout="passed\n"),
+                side_effect=_successful_quality_outcome,
             ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),
@@ -378,7 +403,7 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate,
                 "run_clean_quality",
-                return_value=subprocess.CompletedProcess(["dagger"], 0, stdout="passed\n"),
+                side_effect=_successful_quality_outcome,
             ) as clean:
                 result = code_quality_gate.run_strict_code_quality_gate(
                     _quality_target(worktree),

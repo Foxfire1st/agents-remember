@@ -18,6 +18,7 @@ class QualityGatePublicContractTests(unittest.TestCase):
     def test_recovery_uses_one_manifest_generation_when_the_pointer_rotates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            candidate_tree = "c" * 40
             export = root / "export"
             reports = root / "reports"
             export.mkdir()
@@ -29,6 +30,7 @@ class QualityGatePublicContractTests(unittest.TestCase):
             generation_a = clean_quality_executor._publish_reports(
                 export,
                 reports,
+                candidate_tree=candidate_tree,
                 attestation={"id": "a"},
             )["generation"]
             real_loader = code_quality_gate.load_published_quality_manifest
@@ -42,17 +44,25 @@ class QualityGatePublicContractTests(unittest.TestCase):
                 clean_quality_executor._publish_reports(
                     export,
                     reports,
+                    candidate_tree=candidate_tree,
                     attestation={"id": "b"},
                 )
                 return snapshot
 
             target = code_quality_gate.QualityGateTarget(root, root)
             plan = code_quality_gate.QualityGatePlan(mode="full", executor="dagger")
-            with mock.patch.object(
-                code_quality_gate,
-                "load_published_quality_manifest",
-                side_effect=rotate_after_snapshot,
-            ) as loader:
+            with (
+                mock.patch.object(
+                    code_quality_gate,
+                    "load_published_quality_manifest",
+                    side_effect=rotate_after_snapshot,
+                ) as loader,
+                mock.patch.object(
+                    code_quality_gate,
+                    "require_git",
+                    return_value=candidate_tree,
+                ),
+            ):
                 recovered = code_quality_gate.recover_strict_code_quality_gate(
                     target,
                     diff_base="a" * 40,

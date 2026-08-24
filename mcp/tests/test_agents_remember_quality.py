@@ -10,7 +10,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 import pytest
-from agents_remember.code_quality.dagger_environment import (
+from agents_remember.testing.dagger_admission import (
     DAGGER_TEST_ATTESTATION_ENV,
     DaggerAdmissionError,
     dagger_admission_refusal,

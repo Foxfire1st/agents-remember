@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.models.test_evidence import EvidenceConsumer
+from agents_remember.worktrees.modules.clean_quality_executor import (
+    require_published_quality_evidence,
+)
 from agents_remember.worktrees.modules.code_quality_gate import (
     QualityGatePlan,
     QualityGateTarget,
@@ -123,6 +127,14 @@ def gate_staged_code(
         diff_base=diff_base,
         plan=QualityGatePlan(mode="targeted", executor=executor),
     )
+    certified_tree = require_git(code_worktree, ["write-tree"])
+    evidence = require_published_quality_evidence(
+        worktree_group / "reports",
+        candidate_tree=certified_tree,
+        consumer=EvidenceConsumer.CLOSEOUT,
+    )
+    if candidate_tree is not None and evidence.candidate_tree != candidate_tree:
+        raise RuntimeError("closeout quality evidence does not match the reviewed candidate")
     return {
         **result,
         "preCommitHook": "passed" if pre_commit_hook_ran else "not-configured",

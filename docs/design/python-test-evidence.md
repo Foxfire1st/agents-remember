@@ -63,11 +63,18 @@ The executable inventory lives in
 | Closeout | `worktrees.queue.closeout_staged_quality.gate_staged_code` | certifying only |
 | Integration | `worktrees.integration.integration_quality.run_integration_quality_gate` | certifying only |
 
-`DiagnosticTestEvidence` and `CertifyingTestEvidence` are separate capabilities. Certifying
-evidence cannot be constructed through its public initializer; the verified Dagger publication
-loader mints it after candidate/provenance validation. The final evidence-firewall wiring routes
-each accepting consumer through `require_certifying_evidence`; a caller-provided string or a zero
-exit code has no authority.
+`DiagnosticTestEvidence` and `CertifyingTestEvidence` are separate capabilities in
+`models/test_evidence.py`. Certifying evidence cannot be constructed through its public
+initializer. The Dagger executor mints it only after a successful pipeline result is published in
+an immutable generation whose manifest binds the exact candidate tree and result digest. Recovery
+revalidates that same generation, passed result, and candidate binding before it can mint the
+capability again.
+
+Coverage and retry require the opaque `DaggerAdmission` capability before they can plan or publish
+their artifacts. Lifecycle, closeout, and integration require candidate-bound certifying evidence.
+Route review remains an independent plane-stamped verdict and exposes no test-evidence input at
+all. A caller-provided label, copied diagnostic JSON, renamed file, zero exit code, failed Dagger
+result, or manifest for another candidate has no authority.
 
 ## Intervention boundary
 
@@ -79,7 +86,7 @@ redesign, and broad test deletion or reclassification.
 
 | Changed surface | Requirement ownership |
 | --- | --- |
-| `testing/evidence.py`, `testing/consumer_inventory.py` | typed altitudes and accepting consumers |
+| `models/test_evidence.py`, `testing/consumer_inventory.py` | typed altitudes and accepting consumers |
 | `testing/selection_contract.py`, `testing/eligibility.py` | one total atomic classifier API |
 | `testing/python_source.py`, `testing/collection_closure.py`, `testing/dependency_closure.py` | structural collection/import/helper/fixture closure |
 | `testing/unsafe_effects.py` | closed unsafe-family taxonomy and positive effect model |

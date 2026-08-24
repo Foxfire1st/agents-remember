@@ -26,6 +26,15 @@ class QualityMemoryCap(StrictResponseModel):
     mechanism: Literal["container-wrapper"]
 
 
+class CertifyingTestEvidenceResult(StrictResponseModel):
+    """Public description of the governed evidence; not a loadable capability."""
+
+    schemaVersion: Literal["python-test-evidence/v1"]
+    altitude: Literal["certifying"]
+    candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    resultSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class QualityGateResult(StrictResponseModel):
     """Stable public meanings shared by closeout and integration quality results."""
 
@@ -47,3 +56,4 @@ class QualityGateResult(StrictResponseModel):
     scope: str | None = None
     completionFingerprint: str | None = None
     masterTaskDocumentRef: TaskDocumentRef | None = None
+    certifyingTestEvidence: CertifyingTestEvidenceResult | None = None

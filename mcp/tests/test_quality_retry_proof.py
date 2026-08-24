@@ -15,6 +15,7 @@ from coverage import CoverageData
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, retry_proof
 from agents_remember.code_quality.scope import GateScope
 
@@ -99,7 +100,11 @@ def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
     inputs = _inputs(root)
     output: list[str] = []
 
-    fresh = retry_proof.prepare(inputs, printer=output.append)
+    fresh = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
     assert fresh is not None and fresh.mode == "fresh"
     _write_context_coverage(fresh.active_data_path, root, test_path)
     coverage_json = root / "coverage.json"
@@ -107,7 +112,11 @@ def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
     fresh.record_pytest(0)
     fresh.finish(coverage_json, quality_passed=False)
 
-    exact = retry_proof.prepare(inputs, printer=output.append)
+    exact = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
     assert exact is not None and exact.exact
     exact.prepare_artifacts(coverage_json)
     exact.finish(coverage_json, quality_passed=False)
@@ -116,12 +125,20 @@ def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
         "def test_sample():\n    assert True\n\ndef test_more():\n    assert True\n",
         encoding="utf-8",
     )
-    delta = retry_proof.prepare(inputs, printer=output.append)
+    delta = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
     assert delta is not None and delta.delta
     assert delta.delta_tests == (Path("tests/test_sample.py"),)
 
     source_path.write_text("VALUE = 2\n", encoding="utf-8")
-    invalidated = retry_proof.prepare(inputs, printer=output.append)
+    invalidated = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
     assert invalidated is not None and invalidated.mode == "fresh"
 
 
@@ -172,6 +189,7 @@ def test_wrapper_retry_runs_only_changed_test_module(tmp_path: Path) -> None:
 
     config = check.CheckConfig(
         project_root=root,
+        admission=QUALITY_TEST_ADMISSION,
         scope=GateScope(
             lint_paths=[Path("src/sample.py"), Path("tests/test_sample.py")],
             type_paths=[Path("src/sample.py"), Path("tests/test_sample.py")],
@@ -233,7 +251,11 @@ def test_exact_proof_is_not_scored_when_a_cheap_rail_breaks(tmp_path: Path) -> N
     _git(root, "commit", "-m", "base")
     coverage_json = root / "coverage.json"
     inputs = _inputs(root)
-    proof = retry_proof.prepare(inputs, printer=lambda line: None)
+    proof = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=lambda line: None,
+    )
     assert proof is not None
     _write_context_coverage(proof.active_data_path, root, test_path)
     coverage_json.write_text(json.dumps({"meta": {"branch_coverage": True}}), encoding="utf-8")
@@ -241,6 +263,7 @@ def test_exact_proof_is_not_scored_when_a_cheap_rail_breaks(tmp_path: Path) -> N
     proof.finish(coverage_json, quality_passed=False)
     config = check.CheckConfig(
         project_root=root,
+        admission=QUALITY_TEST_ADMISSION,
         scope=GateScope(
             lint_paths=[Path("src/sample.py"), Path("tests/test_sample.py")],
             type_paths=[Path("src/sample.py"), Path("tests/test_sample.py")],
@@ -375,14 +398,28 @@ def test_prepare_disable_and_fail_closed_routes(tmp_path: Path) -> None:
     output: list[str] = []
 
     with mock.patch.dict(os.environ, {retry_proof.DISABLE_ENV: "1"}):
-        assert retry_proof.prepare(inputs, printer=output.append) is None
+        assert (
+            retry_proof.prepare(
+                inputs,
+                admission=QUALITY_TEST_ADMISSION,
+                printer=output.append,
+            )
+            is None
+        )
     assert retry_proof.DISABLE_ENV in output[-1]
 
     with mock.patch.dict(
         os.environ,
         {"AR_QUALITY_INVOCATION": retry_proof.CI_INVOCATION},
     ):
-        assert retry_proof.prepare(inputs, printer=output.append) is None
+        assert (
+            retry_proof.prepare(
+                inputs,
+                admission=QUALITY_TEST_ADMISSION,
+                printer=output.append,
+            )
+            is None
+        )
     assert "CI requires a fresh matrix proof" in output[-1]
 
     assert "untracked" in str(
@@ -397,11 +434,25 @@ def test_prepare_disable_and_fail_closed_routes(tmp_path: Path) -> None:
     )
 
     with mock.patch.object(retry_proof, "_fresh_plan", side_effect=RuntimeError("broken")):
-        assert retry_proof.prepare(inputs, printer=output.append) is None
+        assert (
+            retry_proof.prepare(
+                inputs,
+                admission=QUALITY_TEST_ADMISSION,
+                printer=output.append,
+            )
+            is None
+        )
     assert "unavailable (broken)" in output[-1]
 
     with mock.patch.object(retry_proof, "_fresh_plan", return_value=None):
-        assert retry_proof.prepare(inputs, printer=output.append) is None
+        assert (
+            retry_proof.prepare(
+                inputs,
+                admission=QUALITY_TEST_ADMISSION,
+                printer=output.append,
+            )
+            is None
+        )
     assert "selection has no concrete test modules" in output[-1]
 
     with (

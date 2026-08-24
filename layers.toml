@@ -53,6 +53,7 @@ order = [
   "application",
   "mcp",
   "cli",
+  "testing",
   "code_quality",
 ]
 
@@ -324,8 +325,18 @@ Command-line entry points. An entry point is a caller of the whole tree and a de
 of none of it.
 """
 
-[package.code_quality]
+[package.testing]
 rank = 23
+path = "testing/"
+present = true
+charter = """
+Repository-owned test classification, diagnostic execution, hermetic pytest composition,
+and Dagger admission capabilities. It may compose lower application and lifecycle services for
+test processes; production acceptance consumers import only the evidence vocabulary in models.
+"""
+
+[package.code_quality]
+rank = 24
 path = "code_quality/"
 present = true
 charter = """
