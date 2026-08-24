@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from _global_state import preserve_owned_mutable_state
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
 from agents_remember.kernel.primitives.runtime_config import (
@@ -32,6 +31,7 @@ from agents_remember.serving.sim import (
     parse_sim_speed,
 )
 from agents_remember.serving.static import dashboard_static_dir
+from agents_remember.testing.global_state import preserve_owned_mutable_state
 from test_serving import FIXTURE_DIR, _build_wire, _config
 
 

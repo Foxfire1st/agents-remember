@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from _global_state import preserve_owned_mutable_state
 from agents_remember.controlplane.durable_store import (
     OPERATOR_INBOX_OWNERSHIP,
     append_line,
@@ -27,6 +26,7 @@ from agents_remember.kernel.primitives.checkout_coordination import (
     resolve_checkout_location,
 )
 from agents_remember.kernel.primitives.runtime_config import ConfigError, load_config
+from agents_remember.testing.global_state import preserve_owned_mutable_state
 
 
 class CheckoutCoordinationIsolationTests(unittest.TestCase):

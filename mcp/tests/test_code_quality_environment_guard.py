@@ -72,7 +72,7 @@ class CodeQualityEnvironmentGuardTests(unittest.TestCase):
     def test_main_without_a_report_uses_the_native_default_temp_root(self) -> None:
         with (
             mock.patch.dict(os.environ, {}, clear=True),
-            mock.patch.object(check, "require_dagger_test_environment"),
+            mock.patch.object(check, "require_dagger_admission"),
             mock.patch.object(
                 check,
                 "native_subprocess_environment",

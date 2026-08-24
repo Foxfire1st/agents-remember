@@ -1,4 +1,4 @@
-"""Deterministic collection-order randomization for the scheduled suite run."""
+"""Deterministic collection-order randomization for scheduled pytest runs."""
 
 from __future__ import annotations
 
@@ -7,5 +7,4 @@ from typing import Any
 
 
 def shuffle_items(items: list[Any], seed: int) -> None:
-    """Shuffle the collected tests reproducibly with the exact reported seed."""
     random.Random(seed).shuffle(items)

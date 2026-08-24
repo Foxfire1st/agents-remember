@@ -45,8 +45,8 @@ from agents_remember.code_quality import (
 )
 from agents_remember.code_quality import scope as quality_scope
 from agents_remember.code_quality.dagger_environment import (
-    DaggerEnvironmentError,
-    require_dagger_test_environment,
+    DaggerAdmissionError,
+    require_dagger_admission,
 )
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.platform_subprocess import native_subprocess_environment
@@ -989,8 +989,8 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        require_dagger_test_environment(subject="Agents Remember quality wrapper")
-    except DaggerEnvironmentError as error:
+        require_dagger_admission(subject="Agents Remember quality wrapper")
+    except DaggerAdmissionError as error:
         print_line(str(error))
         print_line("result: quality-wrapper FAIL")
         return 1

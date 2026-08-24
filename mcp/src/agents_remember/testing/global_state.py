@@ -1,4 +1,4 @@
-"""Owned module-level mutable state that every test must leave as it found it."""
+"""Owned module-level state that every supported pytest route restores."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from agents_remember.kernel.primitives import checkout_coordination
 
 @dataclass(frozen=True)
 class OwnedMutableState:
-    """One deliberately-enumerated global and the operations needed to restore it."""
-
     name: str
     snapshot: Any
     restore: Any
@@ -28,8 +26,6 @@ def _declared_restore(snapshot: dict[str, checkout_coordination.ExecutionMode]) 
     checkout_coordination._declared.update(snapshot)
 
 
-# This is an ownership register, not a scan. Add a row only after proving that a mutable global
-# carries state from one test into another. The detector makes no claim about globals not listed.
 OWNED_MUTABLE_STATES = (
     OwnedMutableState(
         name="agents_remember.kernel.primitives.checkout_coordination._declared",
@@ -38,6 +34,8 @@ OWNED_MUTABLE_STATES = (
     ),
 )
 
+_PYTEST_PROCESS_SNAPSHOT: dict[str, Any] | None = None
+
 
 def snapshot_owned_mutable_state() -> dict[str, Any]:
     return {state.name: state.snapshot() for state in OWNED_MUTABLE_STATES}
@@ -45,6 +43,7 @@ def snapshot_owned_mutable_state() -> dict[str, Any]:
 
 def restore_owned_mutable_state(previous: dict[str, Any]) -> list[str]:
     """Restore every owned global, returning the complete list that changed."""
+
     changed: list[str] = []
     for state in OWNED_MUTABLE_STATES:
         after = state.snapshot()
@@ -54,9 +53,28 @@ def restore_owned_mutable_state(previous: dict[str, Any]) -> list[str]:
     return changed
 
 
+def begin_pytest_process() -> None:
+    """Declare the process before production collection imports, once per session."""
+
+    global _PYTEST_PROCESS_SNAPSHOT  # noqa: PLW0603
+    if _PYTEST_PROCESS_SNAPSHOT is None:
+        _PYTEST_PROCESS_SNAPSHOT = snapshot_owned_mutable_state()
+    checkout_coordination.declare_test_process()
+
+
+def end_pytest_process() -> None:
+    """Restore the execution-mode registry after every pytest exit path."""
+
+    global _PYTEST_PROCESS_SNAPSHOT  # noqa: PLW0603
+    if _PYTEST_PROCESS_SNAPSHOT is not None:
+        restore_owned_mutable_state(_PYTEST_PROCESS_SNAPSHOT)
+        _PYTEST_PROCESS_SNAPSHOT = None
+
+
 @contextmanager
 def preserve_owned_mutable_state() -> Iterator[None]:
-    """Explicitly contain a production entry point whose contract is to set process state."""
+    """Contain a production entry point whose contract is to set process state."""
+
     previous = snapshot_owned_mutable_state()
     try:
         yield

@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from _global_state import preserve_owned_mutable_state
+from agents_remember.testing.global_state import preserve_owned_mutable_state
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))

@@ -38,7 +38,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from _global_state import preserve_owned_mutable_state
 from agents_remember.application.runtime import startup as server_startup
 from agents_remember.controlplane import attention_dismissals as attention_module
 from agents_remember.controlplane import durable_store
@@ -79,6 +78,7 @@ from agents_remember.controlplane.records import GateAnchor, GateRecord, create_
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel import atomic_write
 from agents_remember.mcp import server as server_module
+from agents_remember.testing.global_state import preserve_owned_mutable_state
 from pydantic import ValidationError
 from test_config import settings_payload
 

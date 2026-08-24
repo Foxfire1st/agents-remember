@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from _random_order import shuffle_items
+from agents_remember.testing.random_order import shuffle_items
 
 
 class RandomOrderTests(unittest.TestCase):

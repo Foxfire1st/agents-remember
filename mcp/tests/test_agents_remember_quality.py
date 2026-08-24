@@ -12,10 +12,10 @@ from unittest.mock import patch
 import pytest
 from agents_remember.code_quality.dagger_environment import (
     DAGGER_TEST_ATTESTATION_ENV,
-    DaggerEnvironmentError,
-    dagger_test_environment_error,
+    DaggerAdmissionError,
+    dagger_admission_refusal,
 )
-from conftest import require_dagger_test_environment
+from conftest import prepare_certifying_pytest_bootstrap
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DAGGER_MANIFEST = REPOSITORY_ROOT / "dagger.json"
@@ -115,9 +115,9 @@ def test_agents_remember_quality_module_is_pinned_and_parseable() -> None:
 
 def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path: Path) -> None:
     attestation = tmp_path / "dagger-test-attestation"
-    assert "absent or invalid" in (dagger_test_environment_error({}, attestation) or "")
+    assert "absent or invalid" in (dagger_admission_refusal({}, attestation) or "")
     assert "unavailable" in (
-        dagger_test_environment_error(
+        dagger_admission_refusal(
             {DAGGER_TEST_ATTESTATION_ENV: VALID_DAGGER_NONCE},
             attestation,
         )
@@ -125,7 +125,7 @@ def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path:
     )
     attestation.write_text("f" * 32, encoding="utf-8")
     assert "do not match" in (
-        dagger_test_environment_error(
+        dagger_admission_refusal(
             {DAGGER_TEST_ATTESTATION_ENV: VALID_DAGGER_NONCE},
             attestation,
         )
@@ -133,21 +133,21 @@ def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path:
     )
     with (
         patch(
-            "conftest._require_dagger_test_environment",
-            side_effect=DaggerEnvironmentError(
+            "conftest._prepare_certifying_pytest_bootstrap",
+            side_effect=DaggerAdmissionError(
                 "Agents Remember tests are Dagger-only; refusing host execution"
             ),
         ),
         pytest.raises(pytest.UsageError, match="refusing host execution"),
     ):
-        require_dagger_test_environment()
+        prepare_certifying_pytest_bootstrap()
 
 
 def test_python_suite_accepts_matching_dagger_attestation(tmp_path: Path) -> None:
     attestation = tmp_path / "dagger-test-attestation"
     attestation.write_text(VALID_DAGGER_NONCE, encoding="utf-8")
     assert (
-        dagger_test_environment_error(
+        dagger_admission_refusal(
             {DAGGER_TEST_ATTESTATION_ENV: VALID_DAGGER_NONCE},
             attestation,
         )

@@ -8,8 +8,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-from _global_state import preserve_owned_mutable_state
 from agents_remember.application.lifecycle import lifecycle_operation_worker
+from agents_remember.testing.global_state import preserve_owned_mutable_state
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
