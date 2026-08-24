@@ -17,6 +17,11 @@ class OwnedMutableState:
     restore: Any
 
 
+@dataclass
+class _PytestProcessState:
+    snapshot: dict[str, Any] | None = None
+
+
 def _declared_snapshot() -> dict[str, checkout_coordination.ExecutionMode]:
     return dict(checkout_coordination._declared)
 
@@ -34,7 +39,7 @@ OWNED_MUTABLE_STATES = (
     ),
 )
 
-_PYTEST_PROCESS_SNAPSHOT: dict[str, Any] | None = None
+_PYTEST_PROCESS_STATE = _PytestProcessState()
 
 
 def snapshot_owned_mutable_state() -> dict[str, Any]:
@@ -56,19 +61,17 @@ def restore_owned_mutable_state(previous: dict[str, Any]) -> list[str]:
 def begin_pytest_process() -> None:
     """Declare the process before production collection imports, once per session."""
 
-    global _PYTEST_PROCESS_SNAPSHOT  # noqa: PLW0603
-    if _PYTEST_PROCESS_SNAPSHOT is None:
-        _PYTEST_PROCESS_SNAPSHOT = snapshot_owned_mutable_state()
+    if _PYTEST_PROCESS_STATE.snapshot is None:
+        _PYTEST_PROCESS_STATE.snapshot = snapshot_owned_mutable_state()
     checkout_coordination.declare_test_process()
 
 
 def end_pytest_process() -> None:
     """Restore the execution-mode registry after every pytest exit path."""
 
-    global _PYTEST_PROCESS_SNAPSHOT  # noqa: PLW0603
-    if _PYTEST_PROCESS_SNAPSHOT is not None:
-        restore_owned_mutable_state(_PYTEST_PROCESS_SNAPSHOT)
-        _PYTEST_PROCESS_SNAPSHOT = None
+    if _PYTEST_PROCESS_STATE.snapshot is not None:
+        restore_owned_mutable_state(_PYTEST_PROCESS_STATE.snapshot)
+        _PYTEST_PROCESS_STATE.snapshot = None
 
 
 @contextmanager

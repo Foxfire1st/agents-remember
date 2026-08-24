@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -22,13 +23,20 @@ class _Report(Protocol):
 
 _IMPORTED_MONOTONIC = time.monotonic()
 _IMPORTED_AT = datetime.now(UTC).isoformat()
-_SESSION_STARTED_MONOTONIC: float | None = None
-_SESSION_STARTED_AT: str | None = None
-_COLLECTION_FINISHED_MONOTONIC: float | None = None
-_COLLECTION_FINISHED_AT: str | None = None
-_FIRST_NODE_STARTED_MONOTONIC: float | None = None
-_FIRST_NODE_STARTED_AT: str | None = None
-_NODE_OUTCOMES: dict[str, str] = {}
+
+
+@dataclass
+class _PhaseState:
+    session_started_monotonic: float | None = None
+    session_started_at: str | None = None
+    collection_finished_monotonic: float | None = None
+    collection_finished_at: str | None = None
+    first_node_started_monotonic: float | None = None
+    first_node_started_at: str | None = None
+    node_outcomes: dict[str, str] = field(default_factory=dict)
+
+
+_STATE = _PhaseState()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -42,38 +50,33 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     del session
-    global _SESSION_STARTED_MONOTONIC, _SESSION_STARTED_AT  # noqa: PLW0603
-    global _COLLECTION_FINISHED_MONOTONIC, _COLLECTION_FINISHED_AT  # noqa: PLW0603
-    global _FIRST_NODE_STARTED_MONOTONIC, _FIRST_NODE_STARTED_AT  # noqa: PLW0603
-    _SESSION_STARTED_MONOTONIC = time.monotonic()
-    _SESSION_STARTED_AT = datetime.now(UTC).isoformat()
-    _COLLECTION_FINISHED_MONOTONIC = None
-    _COLLECTION_FINISHED_AT = None
-    _FIRST_NODE_STARTED_MONOTONIC = None
-    _FIRST_NODE_STARTED_AT = None
-    _NODE_OUTCOMES.clear()
+    _STATE.session_started_monotonic = time.monotonic()
+    _STATE.session_started_at = datetime.now(UTC).isoformat()
+    _STATE.collection_finished_monotonic = None
+    _STATE.collection_finished_at = None
+    _STATE.first_node_started_monotonic = None
+    _STATE.first_node_started_at = None
+    _STATE.node_outcomes.clear()
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
     del session
-    global _COLLECTION_FINISHED_MONOTONIC, _COLLECTION_FINISHED_AT  # noqa: PLW0603
-    _COLLECTION_FINISHED_MONOTONIC = time.monotonic()
-    _COLLECTION_FINISHED_AT = datetime.now(UTC).isoformat()
+    _STATE.collection_finished_monotonic = time.monotonic()
+    _STATE.collection_finished_at = datetime.now(UTC).isoformat()
 
 
 def pytest_runtest_logstart(nodeid: str, location: tuple[str, int | None, str]) -> None:
     del nodeid, location
-    global _FIRST_NODE_STARTED_MONOTONIC, _FIRST_NODE_STARTED_AT  # noqa: PLW0603
-    if _FIRST_NODE_STARTED_MONOTONIC is None:
-        _FIRST_NODE_STARTED_MONOTONIC = time.monotonic()
-        _FIRST_NODE_STARTED_AT = datetime.now(UTC).isoformat()
+    if _STATE.first_node_started_monotonic is None:
+        _STATE.first_node_started_monotonic = time.monotonic()
+        _STATE.first_node_started_at = datetime.now(UTC).isoformat()
 
 
 def pytest_runtest_logreport(report: _Report) -> None:
     if report.when == "call" or (
         report.when in {"setup", "teardown"} and report.outcome != "passed"
     ):
-        _NODE_OUTCOMES[report.nodeid] = report.outcome
+        _STATE.node_outcomes[report.nodeid] = report.outcome
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -119,51 +122,45 @@ def _payload(
     reporting_finished_monotonic: float,
     reporting_finished_at: str,
 ) -> dict[str, object]:
-    session_started = _required_phase(_SESSION_STARTED_MONOTONIC, "session start")
-    collection_finished = _required_phase(
-        _COLLECTION_FINISHED_MONOTONIC,
-        "collection finish",
-    )
-    first_node_started = _FIRST_NODE_STARTED_MONOTONIC
+    session_started = _STATE.session_started_monotonic
+    collection_finished = _STATE.collection_finished_monotonic
+    first_node_started = _STATE.first_node_started_monotonic
     return {
         "schemaVersion": PYTEST_PHASE_REPORT_SCHEMA,
         "pytestExitCode": int(exitstatus),
         "timestamps": {
             "reporterImportedAt": _IMPORTED_AT,
-            "sessionStartedAt": _SESSION_STARTED_AT,
-            "collectionFinishedAt": _COLLECTION_FINISHED_AT,
-            "firstNodeStartedAt": _FIRST_NODE_STARTED_AT,
+            "sessionStartedAt": _STATE.session_started_at,
+            "collectionFinishedAt": _STATE.collection_finished_at,
+            "firstNodeStartedAt": _STATE.first_node_started_at,
             "reportingStartedAt": reporting_started_at,
             "reportingFinishedAt": reporting_finished_at,
         },
         "phaseSeconds": {
-            "bootstrap": _seconds(session_started - _IMPORTED_MONOTONIC),
-            "collection": _seconds(collection_finished - session_started),
-            "collectionToFirstNodeStart": (
-                None
-                if first_node_started is None
-                else _seconds(first_node_started - collection_finished)
+            "bootstrap": _duration(session_started, _IMPORTED_MONOTONIC),
+            "collection": _duration(collection_finished, session_started),
+            "collectionToFirstNodeStart": _duration(
+                first_node_started,
+                collection_finished,
             ),
             "execution": (
                 0.0
-                if first_node_started is None
-                else _seconds(reporting_started_monotonic - first_node_started)
+                if collection_finished is not None and first_node_started is None
+                else _duration(reporting_started_monotonic, first_node_started)
             ),
-            "reporting": _seconds(
-                reporting_finished_monotonic - reporting_started_monotonic
-            ),
+            "reporting": _seconds(reporting_finished_monotonic - reporting_started_monotonic),
         },
         "nodes": [
             {"nodeId": node_id, "outcome": outcome}
-            for node_id, outcome in _NODE_OUTCOMES.items()
+            for node_id, outcome in _STATE.node_outcomes.items()
         ],
     }
 
 
-def _required_phase(value: float | None, name: str) -> float:
-    if value is None:
-        raise pytest.UsageError(f"pytest phase reporter did not observe {name}")
-    return value
+def _duration(finished: float | None, started: float | None) -> float | None:
+    if finished is None or started is None:
+        return None
+    return _seconds(finished - started)
 
 
 def _seconds(value: float) -> float:

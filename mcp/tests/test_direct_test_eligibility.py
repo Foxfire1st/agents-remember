@@ -193,7 +193,6 @@ def test_value(value):
                 self.assertRefused(decision, DirectRefusalCode.UNSAFE_EFFECT, family)
 
     def test_transitive_unsafe_helper_refuses_before_execution(self) -> None:
-        sentinel = self.root / "executed"
         self._write(
             "mcp/tests/unsafe_helper.py",
             """\
@@ -205,11 +204,12 @@ def compute():
         )
         self._write(
             "mcp/tests/test_transitive.py",
-            f"""\
+            """\
 from unsafe_helper import compute
 
+RAISE_IF_IMPORTED = int("classification must not execute candidate code")
+
 def test_value():
-    {sentinel.as_posix()!r}  # no body-side sentinel is executed by classification
     assert compute() == 2
 """,
         )
@@ -221,7 +221,32 @@ def test_value():
             DirectRefusalCode.UNSAFE_EFFECT,
             UnsafeEffectFamily.PROCESS_CONTROL,
         )
-        self.assertFalse(sentinel.exists())
+
+    def test_same_named_methods_do_not_share_dependency_cache(self) -> None:
+        self._write(
+            "mcp/tests/test_duplicate_method_names.py",
+            """\
+class SafeValues:
+    def test_value(self):
+        assert 1 + 1 == 2
+
+class UnsafeValues:
+    def test_value(self):
+        import subprocess
+        assert subprocess is not None
+""",
+        )
+
+        decision = self._classify(
+            "mcp/tests/test_duplicate_method_names.py::SafeValues::test_value",
+            "mcp/tests/test_duplicate_method_names.py::UnsafeValues::test_value",
+        )
+
+        self.assertRefused(
+            decision,
+            DirectRefusalCode.MIXED_SELECTION,
+            UnsafeEffectFamily.PROCESS_CONTROL,
+        )
 
     def test_from_package_import_submodule_resolves_the_submodule_closure(self) -> None:
         self._write("mcp/src/agents_remember/helpers/__init__.py", "")

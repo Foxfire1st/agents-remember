@@ -43,7 +43,7 @@ class DependencyClosureAnalyzer:
         self._root = candidate_root
         self._graph = CandidatePythonGraph(candidate_root)
         self._import_scanned: set[Path] = set()
-        self._call_scanned: set[tuple[Path, str]] = set()
+        self._call_scanned: set[tuple[Path, str, int]] = set()
         self._observations: list[DependencyObservation] = []
         self._collection = CollectionClosure(
             self._analyze_import,
@@ -176,7 +176,7 @@ class DependencyClosureAnalyzer:
         *,
         fixture: bool,
     ) -> ClosureRefusal | None:
-        key = (module.relative, function.name)
+        key = (module.relative, function.name, function.lineno)
         if key in self._call_scanned:
             return None
         self._call_scanned.add(key)

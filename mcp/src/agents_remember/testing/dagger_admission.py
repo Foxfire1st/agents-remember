@@ -19,7 +19,7 @@ class DaggerAdmissionError(RuntimeError):
 
 
 class _DaggerAdmissionAuthority:
-    """Module-owned mint authority; callers cannot manufacture it from input data."""
+    """Module-owned mint authority that downstream callers cannot construct directly."""
 
 
 _DAGGER_ADMISSION_AUTHORITY: Final[_DaggerAdmissionAuthority] = _DaggerAdmissionAuthority()
@@ -27,7 +27,13 @@ _DAGGER_ADMISSION_AUTHORITY: Final[_DaggerAdmissionAuthority] = _DaggerAdmission
 
 @dataclass(frozen=True, init=False)
 class DaggerAdmission:
-    """Opaque certifying capability minted only from the nonce/file handshake."""
+    """Opaque in-process route capability minted only from the nonce/file handshake.
+
+    The handshake prevents ordinary unsupported host invocation; it is not hostile-host
+    authentication because a repository owner controls this module, its interpreter,
+    environment, and filesystem. Acceptance authority is established separately by the
+    Dagger executor's candidate-bound immutable publication.
+    """
 
     attestation_path: Path
     nonce_sha256: str

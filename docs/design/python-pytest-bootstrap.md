@@ -34,6 +34,13 @@ flowchart TD
 composition does not import it, accept it, or expose a boolean that could change evidence altitude.
 The only way to receive it is to pass the real nonce/file handshake.
 
+That handshake is an in-process route guard against ordinary unsupported host invocation, not
+authentication against a hostile repository owner. The host controls the source, interpreter,
+environment, and filesystem, so no check inside that same process can prove such an adversarial
+property. Certifying authority instead comes from the Dagger executor's candidate-bound immutable
+report generation; the handshake prevents the certifying pytest composition from starting through
+the wrong route.
+
 ## Component matrix
 
 | Protection | Certifying | Direct diagnostic | Reason |

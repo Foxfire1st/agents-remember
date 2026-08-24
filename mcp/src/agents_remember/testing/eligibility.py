@@ -11,6 +11,7 @@ from agents_remember.models.test_evidence import CandidateBinding
 from agents_remember.testing.dependency_closure import DependencyClosureAnalyzer
 from agents_remember.testing.selection_contract import (
     ClosureRefusal,
+    DependencyObservation,
     DirectRefusalCode,
     DirectSelectionDecision,
     EligibleDirectSelection,
@@ -308,7 +309,7 @@ def _refused(
     message: str,
     *,
     target: str | None = None,
-    dependency=None,
+    dependency: DependencyObservation | None = None,
     refused_nodes: tuple[str, ...] = (),
 ) -> RefusedDirectSelection:
     return RefusedDirectSelection(

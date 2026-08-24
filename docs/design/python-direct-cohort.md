@@ -3,6 +3,7 @@
 **Manifest:** `python-direct-cohort/v1`  
 **Policy:** `python-direct-eligibility/v1`  
 **Cohort size:** 7 exact nodes  
+**Classifier binding:** `46333612594ed382abedebf8922aa569e70497f9cd12e6a8b7cd115177447f36`
 **Expansion status:** closed; any expansion requires a separate decision
 
 This is the first bounded production cohort for `./scripts/test-python`. It isolates existing
@@ -50,13 +51,13 @@ the direct policy refuses them before pytest expansion.
 | Classification | Exact selectors |
 | --- | ---: |
 | Eligible | 7 |
-| Refused: unsafe effect | 3,727 |
-| Refused: unresolved dependency | 2,790 |
+| Refused: unsafe effect | 3,656 |
+| Refused: unresolved dependency | 2,864 |
 | Refused: parameterized target | 73 |
 | Refused: unsupported collection | 15 |
-| **Total** | **6,612** |
+| **Total** | **6,615** |
 
-Unsafe-family observations in the same pass were: machine state 2,637; process control 804;
+Unsafe-family observations in the same pass were: machine state 2,566; process control 804;
 durability/integration 140; browser/external 112; provider/container 27; socket/service 6; and
 Git/worktree 1. Mutable-global-state has a dedicated forcing sentinel even though it was not the
 first refusal encountered for a current production selector.

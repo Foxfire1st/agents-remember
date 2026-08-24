@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agents_remember.kernel.onboarding_doc import normalize_route
 from agents_remember.kernel.primitives.gate_policy import coerce_decision_role
 from agents_remember.kernel.primitives.gate_vocab import coerce_gate_kind
@@ -18,7 +17,8 @@ def provider_id_examples() -> tuple[str, str]:
 
 
 def _normalized_provider_ids(values: tuple[str, str]) -> tuple[str, str]:
-    return tuple(stable_provider_id(value) for value in values)
+    first, second = values
+    return stable_provider_id(first), stable_provider_id(second)
 
 
 def test_stable_provider_id_never_returns_empty(

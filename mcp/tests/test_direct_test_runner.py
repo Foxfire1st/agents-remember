@@ -10,6 +10,7 @@ import unittest
 from collections.abc import Mapping
 from pathlib import Path
 
+from agents_remember.testing import pytest_phase_reporter
 from agents_remember.testing.direct_runner import (
     DiagnosticExecutionError,
     DirectDiagnosticCompleted,
@@ -157,6 +158,29 @@ class DirectTestRunnerTests(unittest.TestCase):
                 target,
                 executor=lambda command, _cwd, _env: subprocess.CompletedProcess(command, 0),
             )
+
+    def test_phase_report_preserves_original_exit_when_collection_never_finishes(self) -> None:
+        report_path = self.root / "incomplete-phases.json"
+
+        class Config:
+            def getoption(self, option: str) -> Path | None:
+                return report_path if option == PYTEST_PHASE_REPORT_OPTION else None
+
+        class Session:
+            config = Config()
+
+        previous = pytest_phase_reporter._STATE
+        pytest_phase_reporter._STATE = pytest_phase_reporter._PhaseState()
+        try:
+            pytest_phase_reporter.pytest_sessionfinish(Session(), 4)  # type: ignore[arg-type]
+        finally:
+            pytest_phase_reporter._STATE = previous
+
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["pytestExitCode"], 4)
+        self.assertIsNone(payload["phaseSeconds"]["bootstrap"])
+        self.assertIsNone(payload["phaseSeconds"]["collection"])
+        self.assertIsNone(payload["phaseSeconds"]["execution"])
 
     def test_candidate_change_during_execution_discards_the_result(self) -> None:
         target = ("mcp/tests/test_plain.py::test_first",)
