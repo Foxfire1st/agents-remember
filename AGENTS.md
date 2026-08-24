@@ -162,7 +162,17 @@ acceptance gates. No host-wrapper or second Dagger projection is an acceptance g
 The Python, Playwright, and changed-lines coverage harnesses fail closed at startup unless the
 pinned Dagger graph supplies a matching per-run environment nonce and in-container attestation
 file. Direct targeted Vitest unit/component runs are supported as non-certifying diagnostic
-feedback; they never provide acceptance, changed-lines coverage, or lifecycle evidence. There is
+feedback. Python has one equally non-certifying, structurally bounded command for at most eight
+exact serial pytest nodes:
+
+```text
+./scripts/test-python mcp/tests/test_file.py::test_name [EXACT_NODE ...]
+```
+
+The command classifies the complete request before execution, refuses the whole request when any
+node or transitive closure is unsafe or unresolved, never accepts pytest flags, and never falls
+back to Dagger. Its JSON result records exact node outcomes and phase timings but never provides
+acceptance, changed-lines coverage, retry, lifecycle, closeout, or integration evidence. There is
 no host compatibility path for the guarded acceptance and integration harnesses.
 The graph runs the wrapper inside clean Ubuntu. Four steps enforce — ruff (lint),
 `ruff format --check`, Pyright, and the full pytest suite — followed by mandatory CRAP

@@ -355,8 +355,7 @@ class DependencyClosureAnalyzer:
         call: ast.Call,
         qualified: str,
     ) -> ClosureRefusal | None:
-        bare = qualified.rsplit(".", maxsplit=1)[-1]
-        if bare in DYNAMIC_CALLS:
+        if qualified in DYNAMIC_CALLS:
             return self._refusal(
                 DirectRefusalCode.DYNAMIC_DEPENDENCY,
                 module.relative,

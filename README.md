@@ -249,6 +249,10 @@ Agents Remember acceptance runs only through that Dagger graph. Keep
 `orchestration.qualityGate.executor` set to `"dagger"`; a direct host invocation of
 pytest or the Python wrapper is refused. Direct targeted Vitest unit/component runs are supported
 as fast diagnostic loops, but they do not create acceptance, coverage, or lifecycle evidence.
+For bounded Python feedback, `./scripts/test-python` accepts one to eight exact pytest node IDs,
+runs their structurally eligible closure serially, and emits non-certifying JSON with exact
+outcomes and phase timings. Any unsafe or unresolved node refuses the complete request before
+execution; the command never falls back to Dagger or supplies acceptance evidence.
 Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
 full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
 `diff-base`; the public Dagger function refuses an empty base instead of comparing

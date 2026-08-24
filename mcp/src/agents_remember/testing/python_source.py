@@ -164,10 +164,16 @@ class CandidatePythonGraph:
                 for alias in node.names
             ]
         imported_module = self.absolute_import_module(module, node)
-        return [
-            (alias.asname or alias.name, ImportBinding(imported_module, alias.name))
-            for alias in node.names
-        ]
+        bindings: list[tuple[str, ImportBinding]] = []
+        for alias in node.names:
+            local_submodule = f"{imported_module}.{alias.name}" if imported_module else alias.name
+            binding = (
+                ImportBinding(local_submodule)
+                if self.local_module_path(local_submodule) is not None
+                else ImportBinding(imported_module, alias.name)
+            )
+            bindings.append((alias.asname or alias.name, binding))
+        return bindings
 
     @staticmethod
     def absolute_import_module(module: SourceModule, node: ast.ImportFrom) -> str:

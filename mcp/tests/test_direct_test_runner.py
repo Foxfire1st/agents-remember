@@ -18,9 +18,9 @@ from agents_remember.testing.direct_runner import (
     main,
     run_direct_diagnostic,
 )
-from agents_remember.testing.pytest_diagnostic_reporter import (
-    DIAGNOSTIC_REPORT_ENV,
-    DIAGNOSTIC_REPORT_SCHEMA,
+from agents_remember.testing.pytest_phase_reporter import (
+    PYTEST_PHASE_REPORT_OPTION,
+    PYTEST_PHASE_REPORT_SCHEMA,
 )
 
 
@@ -60,12 +60,28 @@ class DirectTestRunnerTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append((command, cwd, environ))
         nodes = command[command.index("--basetemp") + 2 :]
+        report_path = Path(command[command.index(PYTEST_PHASE_REPORT_OPTION) + 1])
         report = {
-            "schemaVersion": DIAGNOSTIC_REPORT_SCHEMA,
+            "schemaVersion": PYTEST_PHASE_REPORT_SCHEMA,
             "pytestExitCode": 0,
+            "timestamps": {
+                "reporterImportedAt": "2026-08-24T12:00:00+00:00",
+                "sessionStartedAt": "2026-08-24T12:00:00.010000+00:00",
+                "collectionFinishedAt": "2026-08-24T12:00:00.020000+00:00",
+                "firstNodeStartedAt": "2026-08-24T12:00:00.030000+00:00",
+                "reportingStartedAt": "2026-08-24T12:00:00.040000+00:00",
+                "reportingFinishedAt": "2026-08-24T12:00:00.041000+00:00",
+            },
+            "phaseSeconds": {
+                "bootstrap": 0.01,
+                "collection": 0.01,
+                "collectionToFirstNodeStart": 0.01,
+                "execution": 0.01,
+                "reporting": 0.001,
+            },
             "nodes": [{"nodeId": node, "outcome": "passed"} for node in nodes],
         }
-        Path(environ[DIAGNOSTIC_REPORT_ENV]).write_text(
+        report_path.write_text(
             json.dumps(report),
             encoding="utf-8",
         )
@@ -87,6 +103,7 @@ class DirectTestRunnerTests(unittest.TestCase):
             environ={
                 "AR_DAGGER_TEST_ATTESTATION": "secret-not-for-diagnostics",
                 "GIT_DIR": "/real/repository/.git",
+                "PATH": "/usr/bin",
             },
             executor=self.executor,
         )
@@ -102,7 +119,7 @@ class DirectTestRunnerTests(unittest.TestCase):
         self.assertIn((self.root / "pyproject.toml").as_posix(), command)
         self.assertIn("--noconftest", command)
         self.assertIn("agents_remember.testing.pytest_bootstrap", command)
-        self.assertIn("agents_remember.testing.pytest_diagnostic_reporter", command)
+        self.assertIn("agents_remember.testing.pytest_phase_reporter", command)
         self.assertIn("-n=0", command)
         self.assertEqual(tuple(command[-2:]), targets)
         self.assertNotIn("AR_DAGGER_TEST_ATTESTATION", environment)

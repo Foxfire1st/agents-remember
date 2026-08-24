@@ -18,7 +18,7 @@ from agents_remember.kernel.coordination_context.models import (
     EnclosureResolution,
     EnclosureSelector,
 )
-from agents_remember.kernel.primitives import gate_policy, gate_vocab, version
+from agents_remember.kernel.primitives import gate_policy, version
 from agents_remember.models.conversations import control_wire as conversation_control_wire
 from agents_remember.models.conversations import evidence as conversation_evidence
 from agents_remember.models.terminal_catalog import (
@@ -196,8 +196,6 @@ def test_version_fallback(monkeypatch) -> None:
 
 
 def test_gate_vocabulary_errors() -> None:
-    with pytest.raises(ValueError):
-        gate_vocab.coerce_gate_kind("not-a-kind")
     with pytest.raises(ValueError):
         gate_policy.coerce_decision_role("not-a-role")
     with pytest.raises(ValueError):

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
+from agents_remember.kernel.platform_subprocess import native_subprocess_environment
 
 DISPOSABLE_GIT_IDENTITY = {
     "GIT_AUTHOR_NAME": "Agents Remember Tests",
@@ -71,7 +72,10 @@ def hermetic_pytest_environment(
         process.candidate_root
     ):
         raise BootstrapConfigurationError("pytest cache root must be outside the candidate")
-    result = dict(environ)
+    result = native_subprocess_environment(
+        environ,
+        temp_root=resolved_cache / "tmp",
+    )
     for name in GIT_REPOSITORY_SELECTOR_ENV:
         result.pop(name, None)
     result.update(DISPOSABLE_GIT_IDENTITY)

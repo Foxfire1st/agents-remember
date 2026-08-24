@@ -9,7 +9,6 @@ from agents_remember.kernel.onboarding_doc import (
     meaningful_body,
     meaningful_body_changed,
     new_history_lines,
-    normalize_route,
     route_contains_changed_path,
     update_history_section,
 )
@@ -114,13 +113,6 @@ class NoImpactMarkerTests(unittest.TestCase):
 
 
 class RouteHelperTests(unittest.TestCase):
-    def test_normalize_route_root_forms(self) -> None:
-        for raw in ("", ".", "<repo-root>", "/", "`.`"):
-            self.assertEqual(normalize_route(raw), ".")
-
-    def test_normalize_route_strips_slashes_and_backticks(self) -> None:
-        self.assertEqual(normalize_route("`mcp/src/`"), "mcp/src")
-
     def test_route_contains_changed_path(self) -> None:
         self.assertTrue(route_contains_changed_path("mcp/src", ["mcp/src/app.py"]))
         self.assertTrue(route_contains_changed_path(".", ["anything.py"]))

@@ -130,6 +130,23 @@ class ValueTests(unittest.TestCase):
         )
         self.assertTrue(direct_selection_is_current(decision))
 
+    def test_qualified_safe_call_is_not_confused_with_dynamic_builtin(self) -> None:
+        self._write(
+            "mcp/tests/test_regex.py",
+            """\
+import re
+
+PATTERN = re.compile(r"^[a-z]+$")
+
+def test_pattern():
+    assert PATTERN.pattern == r"^[a-z]+$"
+""",
+        )
+
+        decision = self._classify("mcp/tests/test_regex.py::test_pattern")
+
+        self.assertIsInstance(decision, EligibleDirectSelection)
+
     def test_allowed_fixture_and_transitive_helper_chain_are_resolved(self) -> None:
         self._write(
             "mcp/tests/test_fixture.py",
@@ -205,6 +222,30 @@ def test_value():
             UnsafeEffectFamily.PROCESS_CONTROL,
         )
         self.assertFalse(sentinel.exists())
+
+    def test_from_package_import_submodule_resolves_the_submodule_closure(self) -> None:
+        self._write("mcp/src/agents_remember/helpers/__init__.py", "")
+        self._write(
+            "mcp/src/agents_remember/helpers/unsafe_child.py",
+            "import subprocess\n",
+        )
+        self._write(
+            "mcp/tests/test_imported_submodule.py",
+            """\
+from agents_remember.helpers import unsafe_child
+
+def test_value():
+    assert unsafe_child is not None
+""",
+        )
+
+        decision = self._classify("mcp/tests/test_imported_submodule.py::test_value")
+
+        self.assertRefused(
+            decision,
+            DirectRefusalCode.UNSAFE_EFFECT,
+            UnsafeEffectFamily.PROCESS_CONTROL,
+        )
 
     def test_unsafe_autouse_fixture_refuses_even_when_the_body_is_pure(self) -> None:
         self._write(

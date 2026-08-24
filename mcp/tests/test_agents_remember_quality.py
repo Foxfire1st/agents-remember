@@ -214,9 +214,11 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
         command for command in commands if "agents_remember.code_quality.check" in command
     )
     assert "--targeted" in wrapper
+    assert wrapper[wrapper.index("--pytest-phase-report") + 1] == "/reports/pytest-phases.json"
     assert wrapper[-4:] == ["--diff-base", "a" * 40, "--memory-cap-bytes", "1024"]
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
     assert payload["status"] == "passed"
+    assert payload["startedAt"] <= payload["finishedAt"]
     assert payload["attemptNonce"] == VALID_DAGGER_NONCE
     assert (
         "AR_DAGGER_TEST_ATTESTATION",

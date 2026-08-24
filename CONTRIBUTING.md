@@ -69,7 +69,20 @@ For this repository, only the pinned Dagger Ubuntu graph produces acceptance
 evidence. Host `pytest`, Playwright, and direct `agents_remember.code_quality.check`
 execution refuse before test or retry planning. A direct targeted `npm test -- <files>` Vitest
 run is supported as a fast unit/component diagnostic loop; it never substitutes for Dagger
-acceptance, changed-lines coverage, or lifecycle evidence.
+acceptance, changed-lines coverage, or lifecycle evidence. For Python, the only supported direct
+diagnostic command is:
+
+```text
+./scripts/test-python mcp/tests/test_file.py::test_name [EXACT_NODE ...]
+```
+
+Pass one to eight exact pytest function or class-method node IDs. The command runs serially,
+classifies the complete transitive collection/execution closure before pytest starts, and refuses
+the whole request if any node is unsafe, unresolved, parameterized, duplicated, or otherwise
+outside the closed policy. It accepts no pytest flags, never runs an eligible subset, never falls
+back to Dagger, and marks every JSON result `altitude=diagnostic`, `certifying=false`. The timing
+record separates admission, bootstrap, collection, first-node delay, execution, and reporting;
+none of those measurements or outcomes is acceptance evidence.
 The lifecycle tools own the two accepted invocations:
 
 - `mode=targeted` for focused leaf acceptance (changed files, reverse-import closure,

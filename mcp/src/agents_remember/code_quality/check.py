@@ -104,6 +104,7 @@ class CheckConfig:
     targeted_scope: targeted.TargetedScopeResult | None = None
     file_size_armed: bool = False
     pytest_report_log: Path | None = None
+    pytest_phase_report: Path | None = None
     coverage_data: Path | None = None
     progress_report: Path | None = None
     progress: QualityProgress | None = None
@@ -278,6 +279,13 @@ def _pytest_step(
     pytest_args = [sys.executable, "-m", "pytest", *test_args]
     if config.pytest_report_log is not None:
         pytest_args.append(f"--report-log={config.pytest_report_log.as_posix()}")
+    if config.pytest_phase_report is not None:
+        pytest_args += [
+            "-p",
+            "agents_remember.testing.pytest_phase_reporter",
+            "--ar-pytest-phase-report",
+            config.pytest_phase_report.as_posix(),
+        ]
     if config.scope.coverage_paths:
         pytest_args += [
             *(f"--cov={module}" for module in coverage_args),
@@ -494,6 +502,9 @@ def execute_quality_rails(
     if config.pytest_report_log is not None:
         config.pytest_report_log.parent.mkdir(parents=True, exist_ok=True)
         config.pytest_report_log.unlink(missing_ok=True)
+    if config.pytest_phase_report is not None:
+        config.pytest_phase_report.parent.mkdir(parents=True, exist_ok=True)
+        config.pytest_phase_report.unlink(missing_ok=True)
     retry_plan = initialized_retry_plan(
         config,
         coverage_json,
@@ -904,6 +915,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--pytest-phase-report",
+        type=Path,
+        help=(
+            "Replace this JSON file with route-neutral pytest phase timestamps and node outcomes."
+        ),
+    )
+    parser.add_argument(
         "--coverage-data",
         type=Path,
         help="Keep the Coverage.py data file at this report-local path.",
@@ -981,6 +999,7 @@ def config_from_args(
             targeted_scope=derived,
             file_size_armed=quality_scope.file_size_armed(project_root),
             pytest_report_log=getattr(args, "pytest_report_log", None),
+            pytest_phase_report=getattr(args, "pytest_phase_report", None),
             coverage_data=configured_coverage_data,
             progress_report=configured_progress,
         )
@@ -995,6 +1014,7 @@ def config_from_args(
         diff_floor=args.diff_floor,
         file_size_armed=quality_scope.file_size_armed(project_root),
         pytest_report_log=getattr(args, "pytest_report_log", None),
+        pytest_phase_report=getattr(args, "pytest_phase_report", None),
         coverage_data=configured_coverage_data,
         progress_report=configured_progress,
     )

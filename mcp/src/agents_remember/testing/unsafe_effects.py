@@ -156,6 +156,7 @@ SAFE_BUILTIN_CALLS = frozenset(
         "str",
         "sum",
         "tuple",
+        "ValueError",
         "zip",
     }
 )
@@ -194,6 +195,7 @@ SAFE_QUALIFIED_CALL_PREFIXES = (
     "statistics.",
     "textwrap.",
     "typing.cast",
+    "typing.get_args",
     "unittest.skip",
     "unittest.skipIf",
     "unittest.skipUnless",

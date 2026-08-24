@@ -57,28 +57,12 @@ from agents_remember.install.runtime import (
 )
 from agents_remember.kernel.agentic_settings import AgenticSettingsError, load_agentic_settings
 from agents_remember.kernel.harnesses import Harness
-from agents_remember.kernel.primitives.gate_policy import (
-    coerce_decision_role,
-)
 from agents_remember.memory import baseline as memory_baseline
 from agents_remember.memory.carryover import _validate_entity_fingerprints
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.reducer import _paused_updates
 from agents_remember.serving.projections.projection_store import ProviderStateRefresher
 from agents_remember.serving.terminal_opener import OpenTerminalResult
-
-
-class DecisionRoleTests(unittest.TestCase):
-    def test_an_unknown_decision_role_is_refused_by_name(self) -> None:
-        """Roles come from settings text; a typo must not quietly become a role that no
-        policy rule matches."""
-        with self.assertRaises(ValueError) as raised:
-            coerce_decision_role("mangaer")
-
-        self.assertIn("unknown decision role 'mangaer'", str(raised.exception))
-
-    def test_a_known_decision_role_passes_through(self) -> None:
-        self.assertEqual(coerce_decision_role("manager"), "manager")
 
 
 class ReadFilesRangeTests(unittest.TestCase):

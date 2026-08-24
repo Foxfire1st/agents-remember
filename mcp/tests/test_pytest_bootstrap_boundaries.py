@@ -49,7 +49,7 @@ VALID_NONCE = "0123456789abcdef0123456789abcdef"
 
 class PytestBootstrapBoundaryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
+        self.temporary = tempfile.TemporaryDirectory(dir="/tmp")
         self.root = Path(self.temporary.name)
         package = self.root / "mcp" / "src" / "agents_remember"
         package.mkdir(parents=True)
@@ -131,6 +131,7 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
             "GIT_WORK_TREE": "/real/repository",
             "GIT_AUTHOR_NAME": "Real Developer",
             "PYTHONPATH": "/wrong/checkout",
+            "PATH": "/usr/bin",
             "KEEP": "yes",
         }
         child = hermetic_pytest_environment(
@@ -143,6 +144,11 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
         self.assertEqual(child["GIT_AUTHOR_NAME"], DISPOSABLE_GIT_IDENTITY["GIT_AUTHOR_NAME"])
         self.assertEqual(child["PYTHONPATH"], process.source_root.as_posix())
         self.assertEqual(child["KEEP"], "yes")
+        expected_temp = (self.root.parent / "isolated-cache" / "tmp").as_posix()
+        self.assertEqual(
+            {child[name] for name in ("TMPDIR", "TMP", "TEMP")},
+            {expected_temp},
+        )
 
         current = dict(hostile)
         before = dict(current)

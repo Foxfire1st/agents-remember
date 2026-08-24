@@ -51,13 +51,16 @@ class CodeQualityCheckTests(unittest.TestCase):
             progress = root / "reports/quality-progress.json"
             coverage_data = root / "reports/coverage.data"
             pytest_events = root / "reports/pytest-events.jsonl"
+            pytest_phases = root / "reports/pytest-phases.json"
             pytest_events.parent.mkdir(parents=True, exist_ok=True)
             pytest_events.write_text("stale\n", encoding="utf-8")
+            pytest_phases.write_text("stale\n", encoding="utf-8")
             config = replace(
                 sample_config(root, source),
                 progress_report=progress,
                 coverage_data=coverage_data,
                 pytest_report_log=pytest_events,
+                pytest_phase_report=pytest_phases,
             )
 
             exit_code = check.run_quality_check(
@@ -73,6 +76,7 @@ class CodeQualityCheckTests(unittest.TestCase):
             self.assertIn("pytest", payload["completedSteps"])
             self.assertEqual(check.subprocess_env(config)["COVERAGE_FILE"], str(coverage_data))
             self.assertFalse(pytest_events.exists())
+            self.assertFalse(pytest_phases.exists())
 
     def test_targeted_config_keeps_the_repository_file_size_arm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

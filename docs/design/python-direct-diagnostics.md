@@ -53,12 +53,22 @@ Successful and ordinary failing tests produce `python-direct-diagnostic/v1` with
 - the exact ordered node outcomes
 - a content binding over the selected dependency closure and canonical configuration
 - the pytest exit code and elapsed diagnostic duration
+- reproducible route and pytest phase timestamps for admission, bootstrap, collection,
+  first-node start, execution, and reporting
 - bounded pytest stdout/stderr captured inside the same non-certifying JSON object
 
 A classified refusal has `status: refused`, `executed: false`, `executedNodeCount: 0`, a stable
 refusal code, source-backed target/dependency context when available, and the explicit next action.
 An infrastructure contradiction such as a missing child report, changed candidate, or signal
 termination has `status: error` and also grants no evidence.
+
+The shared `pytest_phase_reporter` emits the same timestamp, node-ID, and outcome vocabulary in
+the direct process and the Dagger quality process. Dagger exports `pytest-phases.json` inside the
+same immutable report generation as its authoritative result; the direct command embeds the
+phase record in its local JSON. This makes route measurements comparable without making the
+diagnostic record certifying. The hermetic child also routes `TMPDIR`, `TMP`, and `TEMP` through
+native POSIX scratch storage, so inherited Windows temp paths cannot redirect or break pytest in
+WSL.
 
 ## Evidence firewall
 

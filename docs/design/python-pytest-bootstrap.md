@@ -24,7 +24,7 @@ flowchart TD
 | Concern | Sole owner | Result |
 | --- | --- | --- |
 | Dagger nonce/file handshake | `testing.dagger_admission` | opaque `DaggerAdmission` or one controlled refusal |
-| Candidate source and process environment | `testing.hermetic_bootstrap` | candidate-bound import path, scrubbed Git selectors, disposable identity, isolated cache path |
+| Candidate source and process environment | `testing.hermetic_bootstrap` | candidate-bound import path, scrubbed Git selectors, disposable identity, isolated cache and native POSIX temp paths |
 | Certifying composition | `testing.certifying_bootstrap` and root conftest | admission before plugin loading or collection |
 | Diagnostic composition | `testing.diagnostic_bootstrap` | still-current eligible selection, with no admission field |
 | Shared pytest behavior | `testing.pytest_bootstrap` | test-process declaration, cache isolation, deterministic order, owned-global restoration |
@@ -45,6 +45,7 @@ The only way to receive it is to pass the real nonce/file handshake.
 | Per-process/worker cache isolation | yes | yes | independent executions cannot share application cache state |
 | Owned-global leak restoration | yes | yes | pass, failure, and teardown restore registered state |
 | Deterministic random-order support | yes | yes | one pytest configuration and hook implementation |
+| Route-neutral phase/node report | yes | yes | one reporter vocabulary supports parity and cost analysis without sharing authority |
 | Worktree/provider service composition | yes | no | Candidate A refuses any test whose closure needs these unsafe families |
 | Dagger admission capability | yes | no | diagnostic output cannot certify work |
 

@@ -92,6 +92,7 @@ class AgentsRememberQuality:
         ] = 0,
     ) -> QualityResult:
         """Run the canonical clean-Ubuntu acceptance gate and export its reports."""
+        started_at = datetime.now(UTC).isoformat()
         if mode not in {"targeted", "full"}:
             raise ValueError(f"unknown quality mode: {mode}")
         if not diff_base.strip():
@@ -216,6 +217,8 @@ class AgentsRememberQuality:
                 "agents_remember.code_quality.check",
                 "--pytest-report-log",
                 f"{reports}/pytest-events.jsonl",
+                "--pytest-phase-report",
+                f"{reports}/pytest-phases.json",
                 "--coverage-json",
                 f"{reports}/coverage.json",
                 "--coverage-data",
@@ -236,7 +239,8 @@ class AgentsRememberQuality:
             completed.extend(dashboard_completed)
         result = {
             "status": "passed" if exit_code == 0 else "failed",
-            "finishedAt": datetime.now(UTC).replace(microsecond=0).isoformat(),
+            "startedAt": started_at,
+            "finishedAt": datetime.now(UTC).isoformat(),
             "mode": mode,
             "codexMode": "real",
             "codexProtocol": "initialize -> initialized -> thread/list",

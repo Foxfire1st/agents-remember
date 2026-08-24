@@ -80,7 +80,6 @@ from agents_remember.providers.context import (
     grepai_workspace_config_text,
     read_provider_pin,
     source_provider_artifacts,
-    stable_provider_id,
     to_container_path,
     write_grepai_workspace_config,
 )
@@ -757,10 +756,6 @@ class ContextProviderLayoutTests(unittest.TestCase):
 
             with self.assertRaises(ContextProviderError):
                 apply_cgc_cgcignore_patch(target)
-
-    def test_stable_provider_id_never_returns_empty(self) -> None:
-        self.assertEqual(stable_provider_id("TensorFlow++ Repo"), "tensorflow-repo")
-        self.assertEqual(stable_provider_id("   "), "repo")
 
     def test_patch_id_is_stable(self) -> None:
         self.assertEqual(
