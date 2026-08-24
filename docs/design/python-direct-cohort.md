@@ -1,8 +1,8 @@
 # Python Direct Diagnostic Cohort Manifest
 
-**Manifest:** `python-direct-cohort/v1`  
-**Policy:** `python-direct-eligibility/v1`  
-**Cohort size:** 7 exact nodes  
+**Manifest:** `python-direct-cohort/v1`
+**Policy:** `python-direct-eligibility/v1`
+**Cohort size:** 7 exact nodes
 **Classifier binding:** `46333612594ed382abedebf8922aa569e70497f9cd12e6a8b7cd115177447f36`
 **Expansion status:** closed; any expansion requires a separate decision
 
