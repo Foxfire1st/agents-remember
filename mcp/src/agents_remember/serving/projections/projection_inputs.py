@@ -201,6 +201,7 @@ class ProjectionInputState:
     def __init__(self, *, contract_cache: ContractSnapshotCache | None = None) -> None:
         self._contract_cache = contract_cache or ContractSnapshotCache()
         self._contracts: ContractSnapshot | None = None
+        self._task_refresh_pending = False
         self._enclosures: list[EnclosureNode] = []
         self._lifecycle_logs: list[list[Event]] = []
         self._providers: list[ProviderNode] = []
@@ -276,14 +277,24 @@ class ProjectionInputState:
         )
 
     def _refresh_tasks(self, config: McpRuntimeConfig, pass_: RefreshPass) -> bool:
-        if not pass_.refresh.affects(ProjectionDomain.TASKS) and self._contracts is not None:
+        if (
+            not pass_.refresh.affects(ProjectionDomain.TASKS)
+            and self._contracts is not None
+            and not self._task_refresh_pending
+        ):
             return False
-        self._contracts = self._contract_cache.build(config.coordination_root / "tasks")
-        self._enclosures = read_enclosures(config.coordination_root, contracts=self._contracts)
-        self._task_documents = read_task_documents(
-            config.coordination_root, enclosures=self._enclosures, now=pass_.now
+        self._task_refresh_pending = True
+        contracts = self._contract_cache.build(config.coordination_root / "tasks")
+        enclosures = read_enclosures(config.coordination_root, contracts=contracts)
+        task_documents = read_task_documents(
+            config.coordination_root, enclosures=enclosures, now=pass_.now
         )
-        self._series = read_series_documents(config.coordination_root, now=pass_.now)
+        series = read_series_documents(config.coordination_root, now=pass_.now)
+        self._contracts = contracts
+        self._enclosures = enclosures
+        self._task_documents = task_documents
+        self._series = series
+        self._task_refresh_pending = False
         return True
 
     def _refresh_lifecycles(

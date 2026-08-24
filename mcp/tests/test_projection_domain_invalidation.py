@@ -7,12 +7,14 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import MappingProxyType
 from unittest import mock
 
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.serving.projections import projection_inputs
+from agents_remember.serving.projections.contract_snapshot import ContractSnapshot
 from agents_remember.serving.projections.projection_inputs import (
     ProjectionDomain,
     ProjectionInputState,
@@ -63,6 +65,81 @@ def _seed_task_documents(root: Path, count: int) -> list[Path]:
 
 
 class ProjectionInputStateTests(unittest.TestCase):
+    def test_failed_task_refresh_is_atomic_and_retried_on_heartbeat(self) -> None:
+        """A failed refresh retains the last good snapshot and cannot poison retry state."""
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            state = ProjectionInputState()
+            config = _config(root)
+            prior_contracts = ContractSnapshot(
+                contracts=MappingProxyType({}),
+                skipped=frozenset(),
+            )
+            refreshed_contracts = ContractSnapshot(
+                contracts=MappingProxyType({}),
+                skipped=frozenset(),
+            )
+            prior_enclosures = [mock.sentinel.prior_enclosure]
+            prior_documents = [mock.sentinel.prior_document]
+            prior_series = [mock.sentinel.prior_series]
+            state._contracts = prior_contracts
+            state._enclosures = prior_enclosures  # type: ignore[assignment]
+            state._task_documents = prior_documents  # type: ignore[assignment]
+            state._series = prior_series  # type: ignore[assignment]
+
+            with (
+                mock.patch.object(
+                    state._contract_cache,
+                    "build",
+                    return_value=refreshed_contracts,
+                ) as build,
+                mock.patch.object(
+                    projection_inputs,
+                    "read_enclosures",
+                    side_effect=[RuntimeError("transient task refresh failure"), []],
+                ) as enclosure_reader,
+                mock.patch.object(
+                    projection_inputs,
+                    "read_task_documents",
+                    return_value=[],
+                ) as task_reader,
+                mock.patch.object(
+                    projection_inputs,
+                    "read_series_documents",
+                    return_value=[],
+                ) as series_reader,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "transient task refresh failure"):
+                    state._refresh_tasks(
+                        config,
+                        RefreshPass(now=NOW, refresh=ProjectionRefresh.full()),
+                    )
+
+                self.assertIs(state._contracts, prior_contracts)
+                self.assertIs(state._enclosures, prior_enclosures)
+                self.assertIs(state._task_documents, prior_documents)
+                self.assertIs(state._series, prior_series)
+                self.assertTrue(state._task_refresh_pending)
+
+                changed = state._refresh_tasks(
+                    config,
+                    RefreshPass(
+                        now=NOW + timedelta(seconds=1),
+                        refresh=ProjectionRefresh.heartbeat(),
+                    ),
+                )
+
+            self.assertTrue(changed)
+            self.assertIs(state._contracts, refreshed_contracts)
+            self.assertEqual(state._enclosures, [])
+            self.assertEqual(state._task_documents, [])
+            self.assertEqual(state._series, [])
+            self.assertFalse(state._task_refresh_pending)
+            self.assertEqual(build.call_count, 2)
+            self.assertEqual(enclosure_reader.call_count, 2)
+            task_reader.assert_called_once()
+            series_reader.assert_called_once()
+
     def test_heartbeat_and_lifecycle_changes_skip_unrelated_heavy_readers(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             root = Path(raw_tmp)

@@ -439,6 +439,34 @@ class SnapshotReaderTests(unittest.TestCase):
         self.assertEqual(nodes[0].repoName, "repo-a")
         self.assertEqual(nodes[0].lifecycleId, "LC-1")
 
+    def test_read_enclosures_without_locator_preserves_structural_row(self) -> None:
+        """A pre-locator enclosure remains visible without inventing operation state."""
+        coord = (self.tmp / "coord").resolve()
+        contract = default_contract(
+            ContractTask(
+                name="Legacy Enclosure",
+                repo_name="repo-a",
+                coordination_root=coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="legacy", lifecycle_id="LC-legacy"),
+            code=RepoBranchPlan(
+                repo_path=coord / "repo-a",
+                source_branch="main",
+                work_branch="ar/legacy",
+                base_commit="0" * 40,
+            ),
+        )
+        contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+        write_contract(contract.contract_path, contract)
+
+        [node] = read_enclosures(coord)
+
+        self.assertEqual(node.enclosure, contract.contract_path.as_posix())
+        self.assertEqual(node.lifecycleId, "LC-legacy")
+        self.assertIsNone(node.lifecycleOperation)
+
     def test_read_enclosures_absent_is_empty(self) -> None:
         self.assertEqual(read_enclosures((self.tmp / "nope").resolve()), [])
 

@@ -706,6 +706,12 @@ def latest_operation_projection(contract_path: Path) -> LifecycleOperationProjec
     for kind in ("closeout", "integrate", "direct-landing"):
         try:
             record = _project_observed_record(_store(contract, kind).read())
+        except LifecycleOperationLocationError:
+            # Structural enclosure projection must remain total across pre-locator
+            # contracts and damaged locator state.  The task-addressed operation
+            # surfaces still return the exact adoption/repair refusal; this aggregate
+            # reader can only state that no operation is safely projectable.
+            return None
         except LifecycleOperationReadError as error:
             return lifecycle_journal_read_decision(kind, error).projection()
         if record is not None:
