@@ -117,7 +117,7 @@ def require_lifecycle_operation_compatible(
         contract,
         publish_worker_exits=publish_worker_exits,
     )
-    blockers = [kind for kind in active if kind != operation_kind]
+    blockers: list[LifecycleOperationKind] = [kind for kind in active if kind != operation_kind]
     if blockers:
         label = "terminal mutation" if operation_kind is None else operation_kind
         raise LifecycleOperationCompatibilityError(

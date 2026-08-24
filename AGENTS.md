@@ -159,9 +159,11 @@ closeout enforces targeted acceptance once and master integration enforces full 
 once; leaf integration, push, pull-request, tag, and publish paths do not rerun it.
 GitHub pull requests still run their deterministic non-test checks, but those are not
 acceptance gates. No host-wrapper or second Dagger projection is an acceptance gate.
-The Python, Vitest, and Playwright harnesses also fail closed at startup unless the pinned
-Dagger graph supplies a matching per-run environment nonce and in-container attestation file.
-There is no host-test compatibility path: invoking those suites outside Dagger is an error.
+The Python, Playwright, and changed-lines coverage harnesses fail closed at startup unless the
+pinned Dagger graph supplies a matching per-run environment nonce and in-container attestation
+file. Direct targeted Vitest unit/component runs are supported as non-certifying diagnostic
+feedback; they never provide acceptance, changed-lines coverage, or lifecycle evidence. There is
+no host compatibility path for the guarded acceptance and integration harnesses.
 The graph runs the wrapper inside clean Ubuntu. Four steps enforce — ruff (lint),
 `ruff format --check`, Pyright, and the full pytest suite — followed by mandatory CRAP
 threshold enforcement. Take no path arguments to it: there are none, because its scope is

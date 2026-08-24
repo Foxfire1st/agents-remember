@@ -32,7 +32,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.application.memory_tools import memory_quality_check_tool
+from agents_remember.application.memory_quality_controller import run_memory_quality_request
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -45,6 +45,7 @@ from agents_remember.mcp.tools import (
 )
 from agents_remember.memory_quality.check import DRIFT_CHECK_NAME
 from agents_remember.memory_quality.curator_checklist import split_commit_owned_findings
+from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -225,7 +226,13 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
     def test_a_contract_scoped_check_reads_the_leaf_tree(self) -> None:
         payload = memory_quality_check_payload(
-            self.config, REPO, checks=[DRIFT_CHECK_NAME], contract_path=self.contract_path
+            self.config,
+            MemoryQualitySyncRequest(
+                mode="sync",
+                repo_id=REPO,
+                checks=[DRIFT_CHECK_NAME],
+                contract_path=self.contract_path,
+            ),
         )
 
         self.assertEqual(payload["onboardingRoot"], self.enclosure.leaf_onboarding.as_posix())
@@ -235,9 +242,14 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
     def test_full_contract_check_replaces_one_enclosure_local_curator_report(self) -> None:
         expected = self.enclosure.contract.worktree_group / "reports" / "curator-memory-quality.md"
 
-        first = memory_quality_check_payload(self.config, REPO, contract_path=self.contract_path)
+        request = MemoryQualitySyncRequest(
+            mode="sync",
+            repo_id=REPO,
+            contract_path=self.contract_path,
+        )
+        first = memory_quality_check_payload(self.config, request)
         expected.write_text("obsolete predecessor\n", encoding="utf-8")
-        second = memory_quality_check_payload(self.config, REPO, contract_path=self.contract_path)
+        second = memory_quality_check_payload(self.config, request)
 
         self.assertEqual(first["reportPath"], expected.as_posix())
         self.assertEqual(second["reportPath"], expected.as_posix())
@@ -263,9 +275,12 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
         payload = memory_quality_check_payload(
             self.config,
-            REPO,
-            checks=[DRIFT_CHECK_NAME],
-            contract_path=self.contract_path,
+            MemoryQualitySyncRequest(
+                mode="sync",
+                repo_id=REPO,
+                checks=[DRIFT_CHECK_NAME],
+                contract_path=self.contract_path,
+            ),
         )
 
         self.assertNotIn("reportPath", payload)
@@ -291,20 +306,30 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
         self.assertEqual(closeout_owned, [findings[1]])
 
     def test_the_bare_call_still_reads_the_official_repo(self) -> None:
-        payload = memory_quality_check_payload(self.config, REPO, checks=[DRIFT_CHECK_NAME])
+        payload = memory_quality_check_payload(
+            self.config,
+            MemoryQualitySyncRequest(
+                mode="sync",
+                repo_id=REPO,
+                checks=[DRIFT_CHECK_NAME],
+            ),
+        )
 
         self.assertEqual(payload["onboardingRoot"], self.enclosure.official_onboarding.as_posix())
         self.assertEqual(payload["checks"][DRIFT_CHECK_NAME]["checkedCount"], 1)
 
     def test_a_contract_scoped_check_uses_the_leaf_base_for_unstamped_claims(self) -> None:
         with patch(
-            "agents_remember.application.memory_tools.run_memory_quality_check",
+            "agents_remember.application.memory_quality_controller.run_memory_quality_check",
             return_value={"ok": True, "findingCount": 0, "findings": []},
         ) as run_check:
-            memory_quality_check_tool(
+            run_memory_quality_request(
                 self.config,
-                repo_id=REPO,
-                contract_path=self.contract_path,
+                MemoryQualitySyncRequest(
+                    mode="sync",
+                    repo_id=REPO,
+                    contract_path=self.contract_path,
+                ),
             )
 
         drift_context = run_check.call_args.kwargs["drift_context"]
@@ -315,10 +340,13 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
     def test_the_bare_check_does_not_invent_unstamped_claim_provenance(self) -> None:
         with patch(
-            "agents_remember.application.memory_tools.run_memory_quality_check",
+            "agents_remember.application.memory_quality_controller.run_memory_quality_check",
             return_value={"ok": True, "findingCount": 0, "findings": []},
         ) as run_check:
-            memory_quality_check_tool(self.config, repo_id=REPO)
+            run_memory_quality_request(
+                self.config,
+                MemoryQualitySyncRequest(mode="sync", repo_id=REPO),
+            )
 
         drift_context = run_check.call_args.kwargs["drift_context"]
         self.assertIsNone(drift_context.unstamped_code_commit)
@@ -398,7 +426,14 @@ class RefusalTests(EnclosureScopeTestCase):
         )
 
         with self.assertRaises(ValueError) as raised:
-            memory_quality_check_payload(self.config, REPO, contract_path=self.contract_path)
+            memory_quality_check_payload(
+                self.config,
+                MemoryQualitySyncRequest(
+                    mode="sync",
+                    repo_id=REPO,
+                    contract_path=self.contract_path,
+                ),
+            )
 
         self.assertIn("has no onboarding tree at", str(raised.exception))
         self.assertNotIn("memory-repos", str(raised.exception))

@@ -41,7 +41,6 @@ from agents_remember.tasks.readiness import (
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_evidence import (
-    register_scaffold_sections,
     require_register_sections_valid,
 )
 from agents_remember.worktrees.task_resolver import (
@@ -78,6 +77,7 @@ from .task_doc_route_review import (
     _RouteReviewBinding,
     _validate,
 )
+from .task_doc_section_scaffolding import scaffold_register_sections
 from .task_execution_topology import (
     ExecutionTopologyAuthoringRequest,
     ExecutionTopologyEditRequest,
@@ -568,7 +568,7 @@ def _build_doc(
         # contract is a subTask; anything else (no contract, or a standalone
         # top-level task) is a master.
         data["kind"] = "subTask" if (contract is not None and contract.kind == "leaf") else "master"
-    _scaffold_register_sections(data)
+    scaffold_register_sections(data)
     if contract is not None:
         # A master spans the series, not one lifecycle, so it never takes a lifecycleId.
         if contract.kind == "leaf" and contract.lifecycle_id and data.get("kind") != "master":
@@ -582,22 +582,6 @@ def _build_doc(
                 }
             ]
     return _validate(data)
-
-
-def _scaffold_register_sections(data: dict[str, Any]) -> None:
-    """Scaffold the empty canonical planning registers at sprint creation (L13-R6).
-
-    A new orchestration sprint gains the Judgment and Priority Register sections as
-    empty canonical tables so set-grade never dead-ends on a missing register; the
-    strategist/orchestrator still authors every row by judgment.
-    """
-    if data.get("kind") != "master" or not data.get("orchestrates"):
-        return
-    sections: list[dict[str, Any]] = data.setdefault("sections", [])
-    present = {str(section.get("heading", "")).strip().casefold() for section in sections}
-    for scaffold in register_scaffold_sections():
-        if scaffold["heading"].strip().casefold() not in present:
-            sections.append(dict(scaffold))
 
 
 def _enforce_register_section_shapes(doc: TaskDocument) -> None:

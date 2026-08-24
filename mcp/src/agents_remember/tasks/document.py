@@ -221,8 +221,8 @@ class SprintExecutionNode(_Doc):
     Legacy graphs persist lump nodes as bare ``{"repository", "path"}`` refs. The
     before-validator lifts those into lump nodes and the serializer emits the bare
     shape back, so a lump-only graph parses and re-serializes byte-identically
-    (L11-R7). A lump node compares equal to its bare ref, so ref-keyed lookups keep
-    working unchanged for lump graphs.
+    (L11-R7). Python equality remains structural node identity; callers that need
+    owning-master identity compare ``node.ref`` explicitly.
     """
 
     kind: Literal["master", "segment"] = "master"
@@ -258,18 +258,12 @@ class SprintExecutionNode(_Doc):
         return self
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, SprintExecutionNode):
-            return (
-                self.kind == other.kind and self.ref == other.ref and self.leafIds == other.leafIds
-            )
-        if isinstance(other, TaskDocumentRef):
-            return self.kind == "master" and self.ref == other
-        return NotImplemented
+        if not isinstance(other, SprintExecutionNode):
+            return NotImplemented
+        return self.kind == other.kind and self.ref == other.ref and self.leafIds == other.leafIds
 
     def __hash__(self) -> int:
-        if self.kind == "master":
-            return hash((self.ref.repository, self.ref.path))
-        return hash((self.ref.repository, self.ref.path, tuple(self.leafIds)))
+        return hash((self.kind, self.ref, tuple(self.leafIds)))
 
     @model_serializer
     def _serialize(self) -> dict[str, Any]:

@@ -124,8 +124,9 @@ report_untracked_scope() {
 }
 
 # The host frontend rail is intentionally non-test: codegen, lint, and typecheck.
-# Vitest and Playwright refuse outside the pinned Dagger graph. A fresh checkout
-# without node_modules fails with the install instruction instead of skipping the gate.
+# Playwright refuses outside the pinned Dagger graph. Direct targeted Vitest is a
+# diagnostic-only developer loop, not part of this hook or acceptance evidence. A fresh
+# checkout without node_modules fails with the install instruction instead of skipping the gate.
 dashboard_checks() {
   if [ ! -f "dashboard/package.json" ]; then
     echo "[$label] dashboard/package.json missing; skipping the frontend rail." >&2
@@ -205,7 +206,7 @@ run_targeted_checks() {
 }
 
 run_full_checks() {
-  echo "[$label] tests are Dagger-only; refusing host full-suite execution." >&2
+  echo "[$label] acceptance is Dagger-only; refusing host full-suite execution." >&2
   echo "[$label] run the pinned 'dagger call quality ... --mode=full' graph." >&2
   return 2
 }

@@ -125,9 +125,7 @@ def _admit_direct(tmp_path: Path):
         intent_note="approve retained direct landing",
     )
     with (
-        mock.patch(
-            "agents_remember.worktrees.direct_landing.require_first_ready_generation"
-        ),
+        mock.patch("agents_remember.worktrees.direct_landing.require_first_ready_generation"),
         mock.patch(
             "agents_remember.worktrees.direct_landing.execute_or_require_direct_landing_recovery",
             return_value={"ok": True, "state": "admitted"},

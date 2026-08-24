@@ -195,7 +195,11 @@ class ExecutionGraphViewBuilderTests(unittest.TestCase):
                 "repo-a/master-a/task.json": "Title of master-a",
                 "repo-a/atomic-f/task.json": "Title of atomic-f",
             },
-            leaf_titles={"A-L1": "Leaf one", "A-L2": "Leaf two", "A-L3": "Leaf three"},
+            leaf_titles={
+                (MASTER_A, "A-L1"): "Leaf one",
+                (MASTER_A, "A-L2"): "Leaf two",
+                (MASTER_A, "A-L3"): "Leaf three",
+            },
         )
         view = _walk(graph, masters, titles=titles)
         self.assertEqual([node.waveIndex for node in view.nodes], [1, 2, 3])

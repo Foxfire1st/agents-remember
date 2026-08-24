@@ -56,10 +56,13 @@ class ExecutionGraphSegmentSchemaTests(unittest.TestCase):
         self.assertEqual(graph.model_dump(mode="json"), payload)
         self.assertEqual(len(graph.derived_waves()), 1)
 
-    def test_constructor_lifts_bare_ref_instances_and_compares_equal_for_lumps(self) -> None:
+    def test_constructor_lifts_bare_ref_instances_without_cross_type_equality(self) -> None:
         graph = SprintExecutionGraph.model_validate({"nodes": [MASTER_A, MASTER_B], "edges": []})
-        self.assertEqual(graph.derived_waves(), [[MASTER_A, MASTER_B]])
-        self.assertIn(MASTER_A, graph.nodes)
+        self.assertEqual(
+            [[node.ref for node in wave] for wave in graph.derived_waves()],
+            [[MASTER_A, MASTER_B]],
+        )
+        self.assertIn(MASTER_A, [node.ref for node in graph.nodes])
         self.assertEqual(graph.master_refs(), [MASTER_A, MASTER_B])
 
     def test_segment_shape_rules(self) -> None:
@@ -231,10 +234,35 @@ class ExecutionGraphSegmentSchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             SprintExecutionEndpoint.model_validate({"ref": MASTER_A.model_dump(), "leafId": " "})
 
-    def test_nodes_compare_unequal_to_other_types(self) -> None:
-        node = SprintExecutionGraph.model_validate({"nodes": [MASTER_A.model_dump()]}).nodes[0]
-        self.assertFalse(node == "master-a/task.json")
-        self.assertTrue(node != "master-a/task.json")
+    def test_nodes_compare_structurally_without_cross_type_aliases(self) -> None:
+        lump = SprintExecutionGraph.model_validate({"nodes": [MASTER_A.model_dump()]}).nodes[0]
+        segment = SprintExecutionGraph.model_validate(
+            {"nodes": [_segment(MASTER_A, ["L1"])]}
+        ).nodes[0]
+        equal_lump = SprintExecutionGraph.model_validate({"nodes": [MASTER_A.model_dump()]}).nodes[
+            0
+        ]
+        other_segment = SprintExecutionGraph.model_validate(
+            {"nodes": [_segment(MASTER_A, ["L2"])]}
+        ).nodes[0]
+
+        for node in (lump, segment):
+            with self.subTest(kind=node.kind):
+                self.assertFalse(node == "master-a/task.json")
+                self.assertTrue(node != "master-a/task.json")
+                self.assertFalse(node == MASTER_A)
+                self.assertFalse(node == MASTER_A)
+                self.assertEqual(len({node, MASTER_A}), 2)
+                self.assertEqual(len({MASTER_A, node}), 2)
+                self.assertNotIn(MASTER_A, {node: "node"})
+                self.assertNotIn(node, {MASTER_A: "ref"})
+                self.assertEqual(
+                    {node: "node", MASTER_A: "ref"},
+                    {MASTER_A: "ref", node: "node"},
+                )
+
+        self.assertEqual(len({lump, equal_lump}), 1)
+        self.assertEqual(len({lump, segment, other_segment}), 3)
 
     def test_cross_addressed_self_edge_is_refused_at_resolution(self) -> None:
         # A bare ref addresses the master's only node; so does the leaf sample of it.

@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -8,8 +10,22 @@ import {
 
 const statement = (start, end) => ({ start: { line: start }, end: { line: end } });
 const entry = (statementMap, counts) => ({ statementMap, s: counts });
+const cliPath = resolve(process.cwd(), "scripts/check-diff-coverage.mjs");
 
 describe("check-diff-coverage executable-statement semantics", () => {
+  test("the direct changed-lines CLI refuses before reading Git or coverage", () => {
+    const env = { ...process.env };
+    delete env.AR_DAGGER_TEST_ATTESTATION;
+    const result = spawnSync(process.execPath, [cliPath], {
+      encoding: "utf8",
+      env,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("changed-lines coverage is Dagger-only");
+    expect(result.stdout).not.toContain("[diff-coverage] base=");
+  });
+
   test("executableStatementLines spans every statement range", () => {
     const lines = executableStatementLines(
       entry(

@@ -76,8 +76,93 @@ class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
             self.assertIsNone(clean_quality_executor.published_quality_attestation(reports))
             manifest["attestation"] = "invalid"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "attestation is invalid"):
+            with self.assertRaisesRegex(RuntimeError, "no complete Dagger report"):
                 clean_quality_executor.published_quality_attestation(reports)
+
+    def test_manifest_shape_is_object_root_and_shared_by_both_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports = root / "reports"
+            reports.mkdir()
+            manifest_path = reports / clean_quality_executor.REPORT_SET_MANIFEST
+            hostile_roots = (
+                [],
+                None,
+                True,
+                "generation",
+                {"schemaVersion": "2.0", "generation": "a" * 64, "files": {}},
+                {"schemaVersion": "1.0", "generation": "a" * 64, "files": []},
+                {
+                    "schemaVersion": "1.0",
+                    "generation": "a" * 64,
+                    "files": {"result.json": {"sha256": "a" * 64, "size": "1"}},
+                },
+            )
+            for hostile in hostile_roots:
+                with self.subTest(hostile=hostile):
+                    manifest_path.write_text(json.dumps(hostile), encoding="utf-8")
+                    errors = []
+                    for consume in (
+                        lambda: clean_quality_executor.published_report_path(
+                            reports, "result.json"
+                        ),
+                        lambda: clean_quality_executor.published_quality_attestation(reports),
+                    ):
+                        with self.assertRaises(RuntimeError) as raised:
+                            consume()
+                        errors.append((type(raised.exception), str(raised.exception)))
+                    self.assertEqual(errors[0], errors[1])
+                    self.assertEqual(
+                        errors[0][1],
+                        "no complete Dagger report generation is published",
+                    )
+
+    def test_recovery_preserves_wrapper_path_and_exposes_published_result_separately(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export = root / "export"
+            reports = root / "reports"
+            export.mkdir()
+            (export / "clean-quality-results.json").write_text(
+                json.dumps({"status": "passed", "exitCode": 0}) + "\n",
+                encoding="utf-8",
+            )
+            clean_quality_executor._publish_reports(export, reports, attestation={"id": "one"})
+            target = code_quality_gate.QualityGateTarget(
+                code_worktree=root,
+                worktree_group=root,
+            )
+            plan = code_quality_gate.QualityGatePlan(mode="full", executor="dagger")
+            fresh = code_quality_gate._strict_quality_success_payload(
+                target,
+                diff_base="a" * 40,
+                plan=plan,
+            )
+            recovered = code_quality_gate.recover_strict_code_quality_gate(
+                target,
+                diff_base="a" * 40,
+                plan=plan,
+                attestation={"id": "one"},
+            )
+            assert recovered is not None
+            self.assertEqual(recovered["reportPath"], fresh["reportPath"])
+            self.assertEqual(Path(str(fresh["reportPath"])).name, "test-results.md")
+            self.assertNotIn("publishedResultPath", fresh)
+            published = Path(str(recovered["publishedResultPath"]))
+            self.assertEqual(published.name, "clean-quality-results.json")
+            self.assertEqual(json.loads(published.read_text(encoding="utf-8"))["exitCode"], 0)
+
+            (export / "clean-quality-results.json").write_text("[]\n", encoding="utf-8")
+            clean_quality_executor._publish_reports(export, reports, attestation={"id": "two"})
+            with self.assertRaisesRegex(RuntimeError, "result is unreadable"):
+                code_quality_gate.recover_strict_code_quality_gate(
+                    target,
+                    diff_base="a" * 40,
+                    plan=plan,
+                    attestation={"id": "two"},
+                )
 
     def test_organizational_gate_returns_a_certificate_without_a_sink(self) -> None:
         contract = self.owner._certified_contract(final=True)

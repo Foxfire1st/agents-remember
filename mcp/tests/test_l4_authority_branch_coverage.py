@@ -499,7 +499,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                 external.repo_name,
             )
             with self.assertRaises(ConfiguredContractAuthorityError) as raised:
-                configured_contract_authority._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_repository_authority(
                     replace(external, memory_repo_path=None),
                     configured,
                     Path("/code"),
@@ -515,7 +515,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                 ),
                 self.assertRaises(ConfiguredContractAuthorityError) as raised,
             ):
-                configured_contract_authority._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_repository_authority(
                     external,
                     configured,
                     Path("/code"),
@@ -531,7 +531,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                 ),
                 self.assertRaises(ConfiguredContractAuthorityError) as raised,
             ):
-                configured_contract_authority._require_external_memory_authority(
+                configured_contract_authority._require_external_memory_repository_authority(
                     external,
                     configured,
                     Path("/same"),
@@ -540,34 +540,20 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                 (raised.exception.side, raised.exception.name),
                 ("memory", "repository-separation"),
             )
-            with (
-                mock.patch.object(
-                    configured_contract_authority,
-                    "repository_identity",
-                    side_effect=[Path("/memory"), Path("/memory")],
-                ),
-                self.assertRaises(ConfiguredContractAuthorityError) as raised,
-            ):
-                configured_contract_authority._require_external_memory_authority(
+            with self.assertRaises(ConfiguredContractAuthorityError) as raised:
+                configured_contract_authority.require_configured_contract_repositories(
                     replace(external, memory_worktree=None),
-                    configured,
-                    Path("/code"),
+                    external_fixture.config_path.as_posix(),
                 )
             self.assertEqual(
                 (raised.exception.side, raised.exception.name), ("memory", "candidate")
             )
-            with (
-                mock.patch.object(
-                    configured_contract_authority,
-                    "repository_identity",
-                    side_effect=[Path("/memory"), Path("/memory"), Path("/foreign")],
-                ),
-                self.assertRaises(ConfiguredContractAuthorityError) as raised,
-            ):
-                configured_contract_authority._require_external_memory_authority(
-                    external,
-                    configured,
-                    Path("/code"),
+            foreign_memory = root / "foreign-memory"
+            foreign_memory.mkdir()
+            with self.assertRaises(ConfiguredContractAuthorityError) as raised:
+                configured_contract_authority.require_configured_contract_repositories(
+                    replace(external, memory_worktree=foreign_memory),
+                    external_fixture.config_path.as_posix(),
                 )
             self.assertEqual(
                 (raised.exception.side, raised.exception.name), ("memory", "candidate")

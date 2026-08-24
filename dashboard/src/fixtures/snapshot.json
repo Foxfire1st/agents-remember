@@ -647,6 +647,44 @@
             "rationale": "a hand-written bucket list is what dropped awaiting-developer"
           }
         ],
+        "discardedCount": 1,
+        "discardedSubTasks": [
+          {
+            "discardedAt": "2026-06-14T08:47:00+00:00",
+            "disposition": "discard-unstarted",
+            "file": "00-retired.md",
+            "name": "retired planning leaf",
+            "number": "0",
+            "proof": {
+              "childJson": {
+                "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+                "size": 96,
+                "state": "present"
+              },
+              "childMarkdown": {
+                "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+                "size": 128,
+                "state": "present"
+              },
+              "commitState": "absent",
+              "doorState": "absent",
+              "enclosureState": "absent",
+              "fingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
+              "locatorState": "absent",
+              "operationState": "absent",
+              "reviewState": "absent",
+              "seatState": "absent",
+              "taskDocumentRef": {
+                "path": "00-retired.json",
+                "repository": "agents-remember"
+              },
+              "taskState": "planning-unstarted",
+              "version": "task-unstarted-evidence/v1"
+            },
+            "reason": "the planning branch was retired before execution",
+            "scope": "agents-remember"
+          }
+        ],
         "docPath": "/tasks/sim/series.md",
         "doneCount": 0,
         "objective": "keep the mirror and the server one contract",
@@ -731,6 +769,44 @@
           }
         ],
         "design": "two directions, both checked",
+        "discardedCount": 1,
+        "discardedSubTasks": [
+          {
+            "discardedAt": "2026-06-14T08:56:00+00:00",
+            "disposition": "discard-unstarted",
+            "file": "00-retired.md",
+            "name": "retired fixture leaf",
+            "number": "0",
+            "proof": {
+              "childJson": {
+                "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "size": 96,
+                "state": "present"
+              },
+              "childMarkdown": {
+                "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+                "size": 128,
+                "state": "present"
+              },
+              "commitState": "absent",
+              "doorState": "absent",
+              "enclosureState": "absent",
+              "fingerprint": "7777777777777777777777777777777777777777777777777777777777777777",
+              "locatorState": "absent",
+              "operationState": "absent",
+              "reviewState": "absent",
+              "seatState": "absent",
+              "taskDocumentRef": {
+                "path": "00-retired.json",
+                "repository": "agents-remember"
+              },
+              "taskState": "planning-unstarted",
+              "version": "task-unstarted-evidence/v1"
+            },
+            "reason": "the fixture branch was retired before execution",
+            "scope": "agents-remember"
+          }
+        ],
         "docPath": "/tasks/sim/01.md",
         "executionWaves": [],
         "id": "SIM-1",
@@ -1089,22 +1165,16 @@
   },
   "closeoutQueues": [
     {
-      "activeBlocker": {
-        "acquiredBy": "orchestrator",
-        "master": {
-          "path": "master-b/task.json",
-          "repository": "agents-remember"
-        },
-        "rationale": "atomic unit integration"
-      },
-      "candidates": [
+      "members": [
         {
-          "candidateState": "declared",
-          "gradePriority": "normal",
+          "classification": "ready",
+          "generationId": "8888888888888888888888888888888888888888888888888888888888888888",
+          "order": 0,
           "owningMaster": {
             "path": "master-a/task.json",
             "repository": "agents-remember"
           },
+          "priority": "normal",
           "reasons": [],
           "taskDocumentRef": {
             "path": "master-a/leaf-a.json",
@@ -1112,13 +1182,16 @@
           }
         },
         {
-          "candidateState": "declared",
+          "classification": "blocked",
+          "generationId": "9999999999999999999999999999999999999999999999999999999999999999",
+          "order": 1,
           "owningMaster": {
             "path": "master-b/task.json",
             "repository": "agents-remember"
           },
+          "priority": "low",
           "reasons": [
-            "explicit-grade-required"
+            "door-scheduling-provenance-stale"
           ],
           "taskDocumentRef": {
             "path": "master-b/leaf-b.json",
@@ -1126,8 +1199,19 @@
           }
         }
       ],
-      "graphRevision": "0000000000000000000000000000000000000000000000000000000000000000",
       "revision": 0,
+      "serviceCondition": "valid-built",
+      "sourceClassification": "active",
+      "sourceFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceProblems": [
+        {
+          "address": "/tasks/sim/series/task.json",
+          "errorType": "recovered-source-warning",
+          "kind": "series",
+          "repairAction": "rebuild the disposable queue after task changes",
+          "state": "invalid"
+        }
+      ],
       "sprintRef": {
         "path": "sprint/task.json",
         "repository": "agents-remember"
@@ -1173,6 +1257,66 @@
           }
         ],
         "phase": "failed",
+        "projectionEffects": [
+          {
+            "invalidation": {
+              "outcome": "persisted-empty",
+              "revision": 1
+            },
+            "nextAction": "the queue was rebuilt from current task truth",
+            "priorRevision": 0,
+            "priorSourceFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "queueExisted": true,
+            "rebuild": {
+              "memberCount": 2,
+              "outcome": "published",
+              "revision": 2,
+              "sourceClassification": "active",
+              "sourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "sourceProblems": []
+            },
+            "rebuiltRevision": 2,
+            "sprintTaskDocumentRef": {
+              "path": "sprint/task.json",
+              "repository": "agents-remember"
+            }
+          },
+          {
+            "invalidation": {
+              "diagnostic": {
+                "address": "/tasks/sim/series/task.json",
+                "errorType": "malformed-source",
+                "kind": "projection",
+                "repairAction": "repair task truth before rebuilding",
+                "state": "unreadable"
+              },
+              "outcome": "recovered-malformed",
+              "revision": 3
+            },
+            "nextAction": "repair task truth before rebuilding",
+            "priorRevision": 2,
+            "priorSourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "queueExisted": true,
+            "rebuild": {
+              "memberCount": 0,
+              "outcome": "source-unreadable",
+              "revision": 3,
+              "sourceProblems": [
+                {
+                  "address": "/tasks/sim/series/task.json",
+                  "errorType": "malformed-source",
+                  "kind": "task",
+                  "repairAction": "repair task truth before rebuilding",
+                  "state": "invalid"
+                }
+              ]
+            },
+            "sprintTaskDocumentRef": {
+              "path": "sprint/task.json",
+              "repository": "agents-remember"
+            }
+          }
+        ],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "result": {
           "reason": "fixture failure"
@@ -1205,6 +1349,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "queued",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "queued"
       },
@@ -1233,6 +1378,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "preflight",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1261,6 +1407,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "memory-preflight",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1289,6 +1436,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "quality",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1317,6 +1465,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "approval-claim",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1345,6 +1494,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "recovering-after-claim",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "input-required"
       },
@@ -1373,6 +1523,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "code-commit",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1401,6 +1552,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "memory-refresh",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1429,6 +1581,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "memory-commit",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1457,6 +1610,7 @@
         "kind": "closeout",
         "legalControls": [],
         "phase": "ledger-commit",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
         "status": "running"
       },
@@ -1485,6 +1639,7 @@
         "kind": "integrate",
         "legalControls": [],
         "phase": "integration-replay",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "running"
       },
@@ -1513,6 +1668,7 @@
         "kind": "integrate",
         "legalControls": [],
         "phase": "integration-quality",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "running"
       },
@@ -1541,6 +1697,7 @@
         "kind": "integrate",
         "legalControls": [],
         "phase": "source-merge",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "running"
       },
@@ -1569,6 +1726,7 @@
         "kind": "integrate",
         "legalControls": [],
         "phase": "contract-finalization",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "input-required"
       },
@@ -1597,6 +1755,7 @@
         "kind": "integrate",
         "legalControls": [],
         "phase": "completed",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "completed"
       },
@@ -1625,6 +1784,7 @@
         "kind": "integrate",
         "legalControls": [],
         "phase": "cancelled",
+        "projectionEffects": [],
         "reportPath": "/coordination/worktrees/sim-group/reports/integrate-operation.log",
         "status": "cancelled"
       },

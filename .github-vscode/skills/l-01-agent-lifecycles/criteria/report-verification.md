@@ -22,6 +22,27 @@ of the load-bearing ones.
   filesystem view as the claimed change set (a 9P/Windows client can show mode rows the WSL-side
   tree does not carry).
 
+  The same claim must also cover **every nonignored untracked path**, not only the `??` name shown
+  by status. Enumerate those paths with a NUL-delimited Git inventory (for example,
+  `git ls-files --others --exclude-standard -z`) or an equivalently path-safe API; never pass the
+  result through shell word splitting or newline parsing. For every exact path, in that same
+  filesystem view:
+
+  - use `lstat`-equivalent semantics and record the filesystem type plus numeric mode and any
+    executable significance;
+  - for a regular file, record its size and inspect bounded content: escaped/bounded text bytes,
+    or an explicit binary/sensitive classification with a content hash instead of an unlimited
+    raw dump;
+  - for a symlink, record the link itself and its link-target text without following the target;
+  - for a directory or special object, record its type and explicitly accept, reject, or route it
+    for further inspection rather than opening it as an ordinary file; and
+  - record whether the object is intended or unintended in the candidate.
+
+  If an object disappears, changes identity, or cannot be inspected between inventory and
+  evidence capture, report that race or limitation explicitly and re-establish a consistent view;
+  do not silently skip it or make a complete-tree claim. This is a semantic review obligation,
+  not a second verifier or permission to dump arbitrary untracked bytes into a report.
+
 - Catching evidence, three separate engagements (260703-L8): review 3 caught a **hand-aligned
   test** behind a wiring claim; cycle 6's closeout gate caught **"refreshed" overviews that were
   history-only**; review 4 caught the **OWNER's own canvas overclaim** (L8 decision log, cycle-7

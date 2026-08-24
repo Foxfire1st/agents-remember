@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-import agents_remember.application.task_docs.task_sprint_linkage as sprint_linkage
 from agents_remember.application.task_docs.task_doc_tools import (
     VALID_OPERATIONS,
     TaskDocCall,

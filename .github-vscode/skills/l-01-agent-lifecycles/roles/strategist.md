@@ -19,13 +19,15 @@ analysis. Spawned by the architect via `dispatch_agent` on the sprint document w
 `strategist`; the control plane owns its runtime occupant identity.
 
 The strategist is the sprint planner — a scrum master for agents (developer ruling 2026-07-06).
-It is proposed before execution when the canonical graph is absent and may be proposed again when
-runtime discoveries require a substantial graph reshape. It verifies the in-flight set is
+The architect presents it under the propose-first rule; a pass is warranted when the reasoned
+topology choice or portfolio classification is absent or stale, and may be proposed again when
+runtime discoveries require a substantial topology reshape. It verifies the in-flight set is
 **coherent and contradiction-free**, resolves dependency chains, classifies every master as
 `organizational` or `atomic`, establishes blast radius and priority, and moves still-planning
 leaves across masters only when their organizational identity is wrong. Even a single master can
-benefit from the pass. The required output is explicit topology, not a requirement that planning
-can happen only once before all implementation.
+benefit from the pass. The required output is an explicit, evidence-backed topology choice: adopt
+an `executionGraph` when dependency-aware scheduling is justified, or explicitly adopt the
+graph-less atomic-sequential default. Planning is mandatory; a persisted graph is not.
 
 In the three-party loop (see the loop doctrine in `../SKILL.md`) this seat is the **portfolio
 level's builder**: owner = architect, builder = strategist, reviewer = the adversarial reviewer
@@ -111,25 +113,31 @@ treatment as everything else.
    user-visible surfaces. Classified **low / medium / high** — and this register IS the input to
    the owning seat's per-leaf loop-tier scoring (the manager's dispatch scoring in
    `roles/manager.md`). Separately grade portfolio priority as **critical / high / normal / low**
-   with an explicit rationale and confidence. Priority is judgment; task id, graph node order, or
+   with an explicit rationale and confidence. Each schedulable candidate resolves to one effective
+   row: its candidate-specific row when present, otherwise its owning-master row as the inherited
+   default. The candidate row overrides rather than combines with the master default, and duplicate
+   current rows for one subject are invalid. Priority is judgment; task id, graph node order, or
    lexical order is only a deterministic tie-break among equally graded ready candidates.
 6. **Coherence & contradiction check** — cross-master sweep: two masters moving one surface in
    opposite directions, a leaf assuming state another leaf removes, duplicate work, vocabulary
    drift. **Directional contradictions are quo-vadis → architect** (via the drawing board; see
    Duties §5).
-7. **Canonical graph and blockers** — write one activity-on-node graph whose nodes exactly match
-   the sprint's commanded master documents. Each edge is predecessor → successor with a nonblank,
+7. **Topology choice, canonical graph, and blockers** — decide whether the evidence warrants an
+   explicit activity-on-node graph. When it does, write one whose nodes exactly match the sprint's
+   commanded master documents; each edge is predecessor → successor with a nonblank,
    evidence-backed reason. The control plane derives stable topological waves and refuses cycles;
    do not persist hand-numbered positions. CONFLICT relations become a predecessor edge or a
    still-planning leaf move. Place atomic masters as explicit blockers: predecessors finish before
    the block starts, the block exposes no partial result, and successors wait for its one landing.
-   The graph may place a block first, between waves, or last. A throwaway experiment that should
-   not stall the sprint stays outside the sprint graph and, if successful, follows its own
-   single-master landing path.
+   The graph may place a block first, between waves, or last. When no explicit graph is justified,
+   record the evidence-backed choice of the graph-less atomic-sequential default: one commanded
+   master fully integrates before the next starts. Never manufacture an edge merely to make the
+   plan look explicit. A throwaway experiment that should not stall the sprint stays outside the
+   sprint topology and, if successful, follows its own single-master landing path.
 8. **The orchestration task** — fill `../templates/orchestration-task.md`; the template REQUIRES
-   the shown work: dependency graph with per-edge evidence, blast-radius register, coherence
-   findings, execution-nature decisions, priority grades, leaf moves + rationale, canonical graph,
-   derived waves/blockers, and re-evaluation triggers. Then the
+   the shown work: evidence relations, blast-radius register, coherence findings, execution-nature
+   decisions, priority grades, leaf moves + rationale, the explicit topology choice and any
+   adopted graph/waves/blockers, and re-evaluation triggers. Then the
    drawing-board rounds begin.
 
 **Input quality bounds output:** thin task-doc scopes degrade the plan, but the method converts
@@ -154,9 +162,9 @@ against the route map; new surfaces by declaration — parent route + intended s
 ### 3 — Analysis
 
 Method phases 3–7: the evidence relation list, doctrine edges, execution-nature classifications,
-blast-radius and priority registers, coherence sweep, canonical graph, and blockers. Keep the
-evidence inventory (queries run, files read, citations per edge and judgment) as you go — the
-artifact requires it.
+blast-radius and priority registers, coherence sweep, explicit topology choice, and any canonical
+graph/blockers. Keep the evidence inventory (queries run, files read, citations per edge and
+judgment) as you go — the artifact requires it.
 
 ### 4 — The orchestration task
 
@@ -164,10 +172,13 @@ Method phase 8. Write the draft to the path the brief names (convention:
 `notes/<series>/orchestration-task.md` under the coordination tasks tree, or the series `notes/`
 folder). It is a **draft for adoption**: the architect rules it and the orchestrator adopts it into durable task form — you
 mutate nothing yourself. The adoption payload is mechanical: one `task_doc.attach_master` call
-per commanded master (typed `masterRef` row + `orchestrates` membership + graph node + the
-nature assertion with its ruling `judgmentId` in a single atomic batch) and
-`task_doc.author_execution_graph` for the edges — so the Judgment Register row ids your draft
-assigns are exactly what the attach/edge payloads cite.
+per commanded master owns the typed `masterRef` row, `orchestrates` membership, and nature
+assertion with its ruling `judgmentId`; it also maintains the node only when the sprint already has
+an `executionGraph`. A graph-less adoption stops after those attachments. When that graph-less
+sprint instead adopts an explicit graph, complete every attachment first, then send one
+`task_doc.author_execution_graph` batch that bootstraps the exact full `add_node` set plus its
+evidence-backed edges. The Judgment Register row ids your draft assigns are exactly what the
+nature/edge payloads cite; never author empty or ceremonial topology.
 
 ### 5 — Drawing-board rounds
 

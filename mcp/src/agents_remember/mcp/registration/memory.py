@@ -11,6 +11,11 @@ from agents_remember.application.memory_tools import (
     MemoryBranches,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.memory import (
+    MemoryQualityCheckRequest,
+    MemoryQualityPollRequest,
+    MemoryQualityStartRequest,
+)
 
 from ..tools import (
     citation_fix_payload,
@@ -60,13 +65,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
 
     @server.tool()
     def memory_quality_check(
-        repo_id: str,
-        checks: list[str] | None = None,
-        detail_limit: int = 50,
-        contract_path: str | None = None,
-        *,
-        wait: bool = True,
-        run_id: str | None = None,
+        request: MemoryQualityCheckRequest,
     ) -> dict[str, Any]:
         """Closeout memory-quality gate: runs drift-integrity and style checks over onboarding.
         It never changes code or memory. A full contract-scoped call atomically replaces the one
@@ -74,28 +73,17 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         structured, report-digest-bound `.json` attestation; subset and unscoped calls write
         neither. ok=false means findings exist (e.g. dirty-source
         drift), not that the tool failed. `curatorActionableCount` is the repair loop gate; final
-        commit stamps remain closeout-owned. Pass `checks` to run a subset; default runs all. Pass
-        `contract_path` to check that leaf's memory worktree instead of the official memory repo.
-        The full check can exceed the MCP request window: pass `wait=false` to start it
-        asynchronously and poll with the returned `runId` (the poll returns the identical
-        result; `run-not-found` means the run was evicted or the server restarted — rerun)."""
-        if run_id is not None:
-            return memory_quality_check_poll_payload(repo_id, run_id)
-        if not wait:
-            return memory_quality_check_start_payload(
-                config,
-                repo_id,
-                checks=checks,
-                detail_limit=detail_limit,
-                contract_path=contract_path,
-            )
-        return memory_quality_check_payload(
-            config,
-            repo_id,
-            checks=checks,
-            detail_limit=detail_limit,
-            contract_path=contract_path,
-        )
+        commit stamps remain closeout-owned. The request is exactly one discriminated mode:
+        `sync` and `start` carry repository plus optional scope/check/detail fields, while
+        `poll` carries only repository plus run id. A saturated unique start returns
+        `capacity-reached` without launching work. A poll returns the identical result;
+        `run-not-found` means the run was evicted, belongs to another repository, or the server
+        restarted, so submit a new start request."""
+        if isinstance(request, MemoryQualityPollRequest):
+            return memory_quality_check_poll_payload(config, request)
+        if isinstance(request, MemoryQualityStartRequest):
+            return memory_quality_check_start_payload(config, request)
+        return memory_quality_check_payload(config, request)
 
     @server.tool()
     def citation_fix(

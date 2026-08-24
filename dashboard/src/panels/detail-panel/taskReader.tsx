@@ -134,6 +134,36 @@ export function TaskContent({
 // The master overview: identity + objective, then its ordered render plan (`sections`). A
 // `subTasks` section renders the clickable index in place; `sharedDecisions` renders the decision
 // table. If no section drives the index but the master carries one, it is appended.
+function MasterOverviewHeader({
+  doc,
+  bodyState,
+  onOpenChangeSet,
+}: {
+  doc: MasterDocView;
+  bodyState: TaskDocumentBodyState | undefined;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+}) {
+  return (
+    <>
+      <div className={taskdocHead}>
+        <span className={badge}>{doc.kind}</span>
+        <span className={taskdocTitle}>{doc.title}</span>
+        <span className={taskdocStatus}>{doc.status}</span>
+      </div>
+      <TaskBodyNotice state={bodyState} />
+      {bodyState !== "loading" ? (
+        <DocChangeSetBar
+          kind="master"
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          onOpen={onOpenChangeSet}
+        />
+      ) : null}
+      <MasterTokenSummary total={doc.seriesTokenTotal} />
+    </>
+  );
+}
+
 export function MasterOverview({
   doc,
   bodyState,
@@ -155,21 +185,11 @@ export function MasterOverview({
 }) {
   return (
     <div className={taskdoc}>
-      <div className={taskdocHead}>
-        <span className={badge}>{doc.kind}</span>
-        <span className={taskdocTitle}>{doc.title}</span>
-        <span className={taskdocStatus}>{doc.status}</span>
-      </div>
-      <TaskBodyNotice state={bodyState} />
-      {bodyState !== "loading" ? (
-        <DocChangeSetBar
-          kind="master"
-          repo={doc.repository}
-          master={dirName(doc.docPath)}
-          onOpen={onOpenChangeSet}
-        />
-      ) : null}
-      <MasterTokenSummary total={doc.seriesTokenTotal} />
+      <MasterOverviewHeader
+        doc={doc}
+        bodyState={bodyState}
+        onOpenChangeSet={onOpenChangeSet}
+      />
       {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
       {doc.subTasks.length > 0 ? (

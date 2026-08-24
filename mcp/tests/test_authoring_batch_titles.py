@@ -1,10 +1,9 @@
-"""Direct unit tests for the authoring-batch graph-title join (L12-R1/R4).
+"""Direct unit tests for the publication-batch graph-title join (L12-R1/R4).
 
-``_authoring_batch_titles`` is the application seam that labels a sprint's
-mermaid render from the in-memory master documents of one authoring batch
-(``migrate_execution_topology`` / ``task_sprint_linkage``). The full authoring
-flow is heavy (judgment registers, integration locks), so the join is pinned
-directly here.
+The shared application seam labels a sprint's Mermaid render from the in-memory
+master documents of one topology-authoring or sprint-linkage batch. The full
+flows are heavy (judgment registers, integration locks), so the join is pinned
+directly at its single owner here.
 """
 
 from __future__ import annotations
@@ -12,7 +11,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from agents_remember.application.task_docs.task_execution_topology import _authoring_batch_titles
+from agents_remember.application.task_docs.task_doc_graph_titles import (
+    build_publication_batch_graph_titles,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
 
@@ -61,11 +62,11 @@ class AuthoringBatchTitlesTests(unittest.TestCase):
             (SPRINT_REF, Path("sprint"), _sprint()),
             (MASTER_A, Path("master-a"), _master()),
         ]
-        titles = _authoring_batch_titles(documents)
+        titles = build_publication_batch_graph_titles(documents)
         self.assertIsNotNone(titles)
         assert titles is not None
         self.assertEqual(titles.master_titles, {"repo-a/master-a/task.json": "Title master-a"})
-        self.assertEqual(titles.leaf_titles, {"A-L1": "Leaf one"})
+        self.assertEqual(titles.leaf_titles, {(MASTER_A, "A-L1"): "Leaf one"})
 
     def test_returns_none_when_no_document_carries_a_graph(self) -> None:
         plain = TaskDocument.model_validate(
@@ -82,4 +83,4 @@ class AuthoringBatchTitlesTests(unittest.TestCase):
             (SPRINT_REF, Path("sprint"), plain),
             (MASTER_A, Path("master-a"), _master()),
         ]
-        self.assertIsNone(_authoring_batch_titles(documents))
+        self.assertIsNone(build_publication_batch_graph_titles(documents))

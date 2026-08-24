@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireDaggerTestEnvironment } from "./require-dagger-test-environment.mjs";
 
 /** Lines v8 records as executable statements: every line inside a statement range. */
 export function executableStatementLines(entry) {
@@ -76,6 +77,7 @@ export function measureDiffCoverage(changedLines, coverageByRelative) {
 }
 
 function main() {
+  requireDaggerTestEnvironment("changed-lines coverage");
   const dashboardRoot = fileURLToPath(new URL("..", import.meta.url));
   const floor = Number(process.env.AR_DASHBOARD_DIFF_COVERAGE_FLOOR ?? 90);
   const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

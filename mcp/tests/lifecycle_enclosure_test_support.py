@@ -26,6 +26,7 @@ from agents_remember.worktrees.worktree_contract import (
     contract_publication_text,
     default_contract,
     default_series_contract,
+    load_contract,
 )
 
 
@@ -88,8 +89,6 @@ def terminalize_test_enclosure(
 
 
 def _contract_for_location(location: LifecycleOperationLocation) -> WorktreeContract:
-    from agents_remember.worktrees.worktree_contract import load_contract
-
     return load_contract(location.contract_path)
 
 

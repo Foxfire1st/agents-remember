@@ -26,11 +26,15 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
+from agents_remember.mcp.tools.direct_landing import direct_landing_payload
+from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.direct_landing import DirectLandingLedgerIntent
 from agents_remember.models.lifecycles.mutation_evidence import CloseoutMutationLeg
 from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
+)
+from agents_remember.worktrees.direct_landing import (
     direct_landing as _production_direct_landing,
 )
 from agents_remember.worktrees.integration.direct_landing import (
@@ -58,18 +62,14 @@ _RETRY_LEGS: tuple[CloseoutMutationLeg, CloseoutMutationLeg] = ("memory", "ledge
 def direct_landing(*args, **kwargs):
     """Exercise recovery below the independently covered scheduling fence."""
 
-    with mock.patch(
-        "agents_remember.worktrees.direct_landing.require_first_ready_generation"
-    ):
+    with mock.patch("agents_remember.worktrees.direct_landing.require_first_ready_generation"):
         return _production_direct_landing(*args, **kwargs)
 
 
 def direct_landing_tool(*args, **kwargs):
     """Exercise the public recovery surface below the same scheduling fence."""
 
-    with mock.patch(
-        "agents_remember.worktrees.direct_landing.require_first_ready_generation"
-    ):
+    with mock.patch("agents_remember.worktrees.direct_landing.require_first_ready_generation"):
         return _production_direct_landing_tool(*args, **kwargs)
 
 
@@ -121,10 +121,7 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
         assert recover is not None, (
             record.status,
             record.phase,
-            {
-                leg: evidence.state
-                for leg, evidence in sorted(record.mutationEvidence.items())
-            },
+            {leg: evidence.state for leg, evidence in sorted(record.mutationEvidence.items())},
             classification.state,
             classification.status,
             classification.detail,
@@ -207,6 +204,26 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
                 (successor_record.generation, successor_record.status),
                 (2, "completed"),
             )
+
+    def test_existing_action_required_operation_is_a_refused_landing_outcome(self) -> None:
+        fixture = self._fixture()
+        self._admit_without_execution(fixture)
+        record = direct_landing_store(fixture["contract"]).read()
+        assert record is not None
+
+        observed = direct_landing_payload(fixture["config"], self._request(fixture))
+
+        self.assertFalse(observed["ok"])
+        self.assertEqual(observed["state"], "refused")
+        self.assertEqual(
+            observed["status"],
+            "direct-landing-operation-action-required",
+        )
+        self.assertEqual(observed["lifecycleOperation"]["status"], record.status)
+        validated = DirectLandingResponse.model_validate(observed)
+        self.assertEqual(validated.state, "refused")
+        assert validated.lifecycleOperation is not None
+        self.assertEqual(validated.lifecycleOperation.status, record.status)
 
     def test_direct_retry_reset_preserves_memory_and_ledger_admission_identity(self) -> None:
         fixture = self._fixture()

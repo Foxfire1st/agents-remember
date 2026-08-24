@@ -13,11 +13,14 @@ from pathlib import Path
 from typing import NoReturn
 
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.models.quality import QualityGateResult
 from agents_remember.worktrees.modules.clean_quality_executor import (
     CleanQualityRequest,
-    published_quality_attestation,
-    published_report_path,
+    published_report_path_from_manifest,
     run_clean_quality,
+)
+from agents_remember.worktrees.modules.published_quality_manifest import (
+    load_published_quality_manifest,
 )
 
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
@@ -283,23 +286,31 @@ def recover_strict_code_quality_gate(
 
     reports = target.worktree_group / REPORT_DIRECTORY_NAME
     try:
-        published = published_quality_attestation(reports)
+        manifest = load_published_quality_manifest(reports)
     except RuntimeError:
         return None
+    published = None if manifest.attestation is None else dict(manifest.attestation)
     if published != dict(attestation):
         return None
-    report_path = published_report_path(reports, CLEAN_QUALITY_RESULTS_NAME)
+    published_result_path = published_report_path_from_manifest(
+        reports,
+        manifest,
+        CLEAN_QUALITY_RESULTS_NAME,
+    )
     try:
-        result = json.loads(report_path.read_text(encoding="utf-8"))
+        raw_result: object = json.loads(published_result_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError) as error:
         raise RuntimeError("published Dagger result is unreadable") from error
+    if not isinstance(raw_result, dict):
+        raise RuntimeError("published Dagger result is unreadable")
+    result = raw_result
     if result.get("status") != "passed" or result.get("exitCode") != 0:
         return None
     return _strict_quality_success_payload(
         target,
         diff_base=diff_base,
         plan=plan,
-        report_path=report_path,
+        published_result_path=published_result_path,
     )
 
 
@@ -308,9 +319,9 @@ def _strict_quality_success_payload(
     *,
     diff_base: str,
     plan: QualityGatePlan,
-    report_path: Path | None = None,
+    published_result_path: Path | None = None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "required": True,
         "status": GATE_ENFORCED,
         "passed": True,
@@ -323,7 +334,12 @@ def _strict_quality_success_payload(
         "diffBase": diff_base,
         "mode": plan.mode,
         "executor": plan.executor,
-        "reportPath": (report_path or test_results_report_path(target.worktree_group)).as_posix(),
+        "reportPath": test_results_report_path(target.worktree_group).as_posix(),
+        **(
+            {"publishedResultPath": published_result_path.as_posix()}
+            if published_result_path is not None
+            else {}
+        ),
         **(
             _memory_policy_payload(
                 executor=plan.executor,
@@ -333,6 +349,10 @@ def _strict_quality_success_payload(
             else {}
         ),
     }
+    return QualityGateResult.model_validate(payload).model_dump(
+        mode="json",
+        exclude_none=True,
+    )
 
 
 def run_local_quality_diagnostic(
@@ -341,10 +361,10 @@ def run_local_quality_diagnostic(
     diff_base: str = "",
     plan: QualityGatePlan | None = None,
 ) -> NoReturn:
-    """Refuse host quality execution; acceptance and test diagnostics are Dagger-only."""
+    """Refuse host quality execution; only the Dagger graph certifies acceptance."""
     del target, diff_base, plan
     raise RuntimeError(
-        "host quality execution is forbidden; run tests through the pinned Dagger graph"
+        "host quality execution is forbidden; run acceptance through the pinned Dagger graph"
     )
 
 

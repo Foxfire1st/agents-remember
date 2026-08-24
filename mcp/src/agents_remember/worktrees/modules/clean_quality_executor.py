@@ -24,6 +24,12 @@ from agents_remember.kernel.platform_subprocess import (
     native_path_environment,
     windows_interop_reason,
 )
+from agents_remember.worktrees.modules.published_quality_manifest import (
+    QUALITY_MANIFEST_SCHEMA_VERSION,
+    REPORT_SET_MANIFEST,
+    PublishedQualityManifest,
+    load_published_quality_manifest,
+)
 
 DAGGER_VERSION = "v0.21.8"
 CODEX_VERSION = "0.147.0"
@@ -37,7 +43,6 @@ DAGGER_RESULT_MAX_BYTES = 128 * 1024
 DAGGER_STREAM_CHUNK_BYTES = 64 * 1024
 DAGGER_PROGRESS_TRUNCATION = "[older Dagger output truncated]\n"
 REPORT_GENERATIONS_DIRECTORY = ".quality-report-generations"
-REPORT_SET_MANIFEST = "quality-report-set.json"
 EXPORTED_REPORT_NAMES = frozenset(
     {
         "clean-quality-results.json",
@@ -254,7 +259,7 @@ def _publish_reports(
     else:
         _validate_generation(generation_root, files)
     manifest: dict[str, object] = {
-        "schemaVersion": "1.0",
+        "schemaVersion": QUALITY_MANIFEST_SCHEMA_VERSION,
         "generation": generation,
         "files": files,
     }
@@ -275,27 +280,29 @@ def _publish_reports(
 
 def published_report_path(destination: Path, name: str) -> Path:
     """Resolve and verify one report from the currently published generation."""
-    try:
-        manifest = json.loads((destination / REPORT_SET_MANIFEST).read_text(encoding="utf-8"))
-        generation = manifest["generation"]
-        file_record = manifest["files"][name]
-        expected_hash = file_record["sha256"]
-        expected_size = file_record["size"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
-        raise RuntimeError("no complete Dagger report generation is published") from error
-    if not isinstance(generation, str) or not re.fullmatch(r"[0-9a-f]{64}", generation):
-        raise RuntimeError("published Dagger report generation id is invalid")
-    report = destination / REPORT_GENERATIONS_DIRECTORY / generation / name
+    return published_report_path_from_manifest(
+        destination,
+        load_published_quality_manifest(destination),
+        name,
+    )
+
+
+def published_report_path_from_manifest(
+    destination: Path,
+    manifest: PublishedQualityManifest,
+    name: str,
+) -> Path:
+    """Resolve one report against an already accepted immutable generation snapshot."""
+
+    file_record = manifest.require_file(name)
+    report = destination / REPORT_GENERATIONS_DIRECTORY / manifest.generation / name
     try:
         payload = report.read_bytes()
     except OSError as error:
         raise RuntimeError(f"published Dagger report is incomplete: {name}") from error
     if (
-        isinstance(expected_size, bool)
-        or not isinstance(expected_size, int)
-        or len(payload) != expected_size
-        or not isinstance(expected_hash, str)
-        or hashlib.sha256(payload).hexdigest() != expected_hash
+        len(payload) != file_record.size
+        or hashlib.sha256(payload).hexdigest() != file_record.sha256
     ):
         raise RuntimeError(f"published Dagger report failed generation verification: {name}")
     return report
@@ -304,18 +311,8 @@ def published_report_path(destination: Path, name: str) -> Path:
 def published_quality_attestation(destination: Path) -> dict[str, str] | None:
     """Return the exact caller-bound identity of the published report generation."""
 
-    try:
-        manifest = json.loads((destination / REPORT_SET_MANIFEST).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError) as error:
-        raise RuntimeError("no complete Dagger report generation is published") from error
-    attestation = manifest.get("attestation")
-    if attestation is None:
-        return None
-    if not isinstance(attestation, dict) or any(
-        not isinstance(key, str) or not isinstance(value, str) for key, value in attestation.items()
-    ):
-        raise RuntimeError("published Dagger quality attestation is invalid")
-    return dict(attestation)
+    manifest = load_published_quality_manifest(destination)
+    return None if manifest.attestation is None else dict(manifest.attestation)
 
 
 def _validate_generation(root: Path, files: dict[str, dict[str, object]]) -> None:

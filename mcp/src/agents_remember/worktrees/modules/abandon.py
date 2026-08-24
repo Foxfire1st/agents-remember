@@ -190,9 +190,7 @@ def _abandon_with_guard(
             terminal_authority = (
                 None
                 if args.dry_run
-                else terminal_contract_authority_if_present(
-                    load_contract(contract.contract_path)
-                )
+                else terminal_contract_authority_if_present(load_contract(contract.contract_path))
             )
 
             def publish(

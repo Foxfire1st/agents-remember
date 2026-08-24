@@ -177,7 +177,7 @@ def _classify_direct_live_evidence(
     )
     live.observed["ledgerMapping"] = mapping_observed
     if mapping_state == "conflict":
-        return _mapping_conflict(record, operation_input, live, outputs)
+        return _mapping_conflict(operation_input, live, outputs)
     if not _ledger_state_converges(record, operation_input, live, outputs):
         return _decision(
             "direct-landing-ledger-evidence-conflict",
@@ -187,8 +187,7 @@ def _classify_direct_live_evidence(
         )
     state: DirectRecoveryState = (
         "terminalizable"
-        if mapping_state == "exact"
-        or bool(outputs.memory_commit and outputs.ledger_commit)
+        if mapping_state == "exact" or bool(outputs.memory_commit and outputs.ledger_commit)
         else "recoverable"
     )
     return DirectLandingRecoveryClassification(
@@ -201,7 +200,6 @@ def _classify_direct_live_evidence(
 
 
 def _mapping_conflict(
-    record: LifecycleOperationRecord,
     operation_input: DirectLandingOperationInput,
     live: _DirectLiveEvidence,
     outputs: _DirectRecoveryOutputs,

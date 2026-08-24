@@ -184,9 +184,7 @@ class TaskFactPublicationTests(unittest.TestCase):
             mock.patch.object(
                 publication,
                 "rebuild_invalidated_closeout_projection",
-                side_effect=lambda _root, receipt, **_kwargs: _complete_effect(
-                    receipt.sprint_ref
-                ),
+                side_effect=lambda _root, receipt, **_kwargs: _complete_effect(receipt.sprint_ref),
             ),
         ):
             result = publication.publish_task_fact_mutation(
@@ -215,9 +213,7 @@ class TaskFactPublicationTests(unittest.TestCase):
             mock.patch.object(
                 publication,
                 "rebuild_invalidated_closeout_projection",
-                side_effect=lambda _root, receipt, **_kwargs: _complete_effect(
-                    receipt.sprint_ref
-                ),
+                side_effect=lambda _root, receipt, **_kwargs: _complete_effect(receipt.sprint_ref),
             ),
         ):
             result = publication.publish_task_fact_mutation(

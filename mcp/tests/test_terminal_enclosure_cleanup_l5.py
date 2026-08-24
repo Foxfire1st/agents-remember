@@ -50,9 +50,7 @@ def test_terminal_archive_reads_back_before_root_deletion_and_survives_retry(
     archive_path = Path(str(published.payload["archivePath"]))
     archive = TerminalEnclosureArchive.model_validate_json(archive_path.read_bytes())
     assert archive.cleanupOperation == "worktree_abandon"
-    assert {item.relativePath for item in archive.canonicalEntries} == {
-        "enclosure-manifest.json"
-    }
+    assert {item.relativePath for item in archive.canonicalEntries} == {"enclosure-manifest.json"}
 
     shutil.rmtree(contract.worktree_group)
     retried = terminal_archive_required_result(
@@ -94,10 +92,13 @@ def test_terminal_archive_reuses_bytes_after_crash_before_locator_publication(
         live.locator.publicationRequestId,
     )
     accepted_bytes = accepted.read_bytes()
-    assert inspect_lifecycle_operation_locator(
-        contract.coordination_root,
-        contract.contract_path,
-    ).state == "addressable"
+    assert (
+        inspect_lifecycle_operation_locator(
+            contract.coordination_root,
+            contract.contract_path,
+        ).state
+        == "addressable"
+    )
 
     recovered = terminal_archive_required_result(
         contract,
@@ -108,10 +109,13 @@ def test_terminal_archive_reuses_bytes_after_crash_before_locator_publication(
 
     assert recovered.returncode == 0
     assert accepted.read_bytes() == accepted_bytes
-    assert inspect_lifecycle_operation_locator(
-        contract.coordination_root,
-        contract.contract_path,
-    ).state == "terminal-archived"
+    assert (
+        inspect_lifecycle_operation_locator(
+            contract.coordination_root,
+            contract.contract_path,
+        ).state
+        == "terminal-archived"
+    )
 
 
 def test_terminal_archive_refuses_live_operation_and_preserves_enclosure(
@@ -139,10 +143,13 @@ def test_terminal_archive_refuses_live_operation_and_preserves_enclosure(
         "contract_path": contract.contract_path.as_posix(),
     }
     assert contract.worktree_group.is_dir()
-    assert inspect_lifecycle_operation_locator(
-        contract.coordination_root,
-        contract.contract_path,
-    ).state == "addressable"
+    assert (
+        inspect_lifecycle_operation_locator(
+            contract.coordination_root,
+            contract.contract_path,
+        ).state
+        == "addressable"
+    )
 
 
 def test_terminal_archive_binds_one_cleanup_disposition(tmp_path: Path) -> None:

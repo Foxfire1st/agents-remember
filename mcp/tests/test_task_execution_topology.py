@@ -116,7 +116,10 @@ def _judgment_row(judgment_id: str, author: str = "strategist") -> str:
 class ExecutionGraphSchemaTests(unittest.TestCase):
     def test_graph_derives_stable_waves_without_persisting_positions(self) -> None:
         graph = SprintExecutionGraph.model_validate(_graph())
-        self.assertEqual(graph.derived_waves(), [[MASTER_A], [MASTER_B]])
+        self.assertEqual(
+            [[node.ref for node in wave] for wave in graph.derived_waves()],
+            [[MASTER_A], [MASTER_B]],
+        )
         self.assertNotIn("wave", graph.model_dump(mode="json"))
         self.assertNotIn("position", graph.model_dump(mode="json"))
 
@@ -142,7 +145,10 @@ class ExecutionGraphSchemaTests(unittest.TestCase):
                 ],
             }
         )
-        self.assertEqual(graph.derived_waves(), [[MASTER_A, MASTER_B], [MASTER_C]])
+        self.assertEqual(
+            [[node.ref for node in wave] for wave in graph.derived_waves()],
+            [[MASTER_A, MASTER_B], [MASTER_C]],
+        )
 
     def test_graph_refuses_duplicates_unknown_endpoints_self_edges_blank_reasons_and_cycles(
         self,
@@ -739,12 +745,18 @@ class ExecutionTopologyTests(unittest.TestCase):
         self.assertEqual(master_b.executionNature, "atomic")
         self.assertIsNotNone(sprint.executionGraph)
         assert sprint.executionGraph is not None
-        self.assertEqual(sprint.executionGraph.derived_waves(), [[MASTER_A], [MASTER_B]])
+        self.assertEqual(
+            [[node.ref for node in wave] for wave in sprint.executionGraph.derived_waves()],
+            [[MASTER_A], [MASTER_B]],
+        )
         self.assertEqual(
             [item.ref for item in self.topology.validate_execution_topology(SPRINT)],
             [MASTER_A, MASTER_B],
         )
-        self.assertEqual(self.topology.execution_waves(SPRINT), [[MASTER_A], [MASTER_B]])
+        self.assertEqual(
+            [[node.ref for node in wave] for wave in self.topology.execution_waves(SPRINT)],
+            [[MASTER_A], [MASTER_B]],
+        )
         rendered = (self.tasks / "sprint" / "task.md").read_text(encoding="utf-8")
         self.assertIn("## Execution Graph", rendered)
         self.assertIn(f"- `{MASTER_A.key}`", rendered)
@@ -843,7 +855,10 @@ class ExecutionTopologyTests(unittest.TestCase):
             "read_task_doc_with_source",
             side_effect=counted_source_read,
         ):
-            self.assertEqual(self.topology.execution_waves(SPRINT), [[MASTER_A], [MASTER_B]])
+            self.assertEqual(
+                [[node.ref for node in wave] for wave in self.topology.execution_waves(SPRINT)],
+                [[MASTER_A], [MASTER_B]],
+            )
         self.assertEqual(sprint_reads, 1)
 
     def test_bootstrap_refuses_a_segment_node_on_an_atomic_master(self) -> None:

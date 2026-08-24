@@ -24,6 +24,8 @@ server, never from a checkout whose server is a different build.
 from __future__ import annotations
 
 import json
+import stat
+from email.parser import Parser
 from importlib import metadata
 from pathlib import Path
 
@@ -46,6 +48,7 @@ TOPOLOGY_SCHEMA_VERSION = "ar-execution-topology/v1"
 TOPOLOGY_SERVING_VERSION_FLOOR = "3.0.0rc8"
 
 _TOPOLOGY_MODEL_FIELDS = ("executionNature", "executionGraph")
+_MIGRATION_GUIDE = "docs/reference/execution-topology-migration.md"
 
 
 class TopologyServingBuildError(AgentsRememberError):
@@ -66,25 +69,37 @@ def require_serving_topology_schema() -> None:
             "task-execution-topology-serving-build-unsupported: the running build's "
             f"TaskDocument model lacks topology field(s) {missing!r}; upgrade the served "
             "build before authoring an execution graph -- see "
-            "docs/reference/execution-topology-migration.md (served-build preflight)"
+            f"{_MIGRATION_GUIDE} (served-build preflight)"
         )
-    dist = _installed_distribution()
+    try:
+        dist = _installed_distribution()
+    except (OSError, ValueError) as error:
+        raise _unverifiable_serving_build(error) from error
     if dist is None:
         # Source-tree run without an installed distribution: leg 2 cannot prove the
         # serving build. The operator contract (run authoring through the deployed
         # serving server) is documented in execution-topology-migration.md.
         return
-    if _is_editable_install(dist):
+    try:
+        editable = _is_editable_install(dist)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise _unverifiable_serving_build(error) from error
+    if editable:
         # The editable install resolves to this checkout, so the checkout code is
         # the serving code; the model self-probe above already proved it.
         return
-    if _below_floor(dist.version):
+    try:
+        version_text = _distribution_version_text(dist)
+        below_floor = _below_floor(version_text)
+    except (OSError, ValueError) as error:
+        raise _unverifiable_serving_build(error) from error
+    if below_floor:
         raise TopologyServingBuildError(
             "task-execution-topology-serving-build-unsupported: the installed "
-            f"agents-remember-mcp {dist.version} predates the execution-topology schema "
+            f"agents-remember-mcp {version_text} predates the execution-topology schema "
             f"(floor {TOPOLOGY_SERVING_VERSION_FLOOR}); upgrade the served build before "
             "authoring an execution graph -- see "
-            "docs/reference/execution-topology-migration.md (served-build preflight)"
+            f"{_MIGRATION_GUIDE} (served-build preflight)"
         )
 
 
@@ -111,14 +126,16 @@ def _is_editable_install(dist: metadata.Distribution) -> bool:
     source tree and fails all three, leaving the version-floor check in charge.
     """
 
-    info_dir = getattr(dist, "_path", None)
-    if info_dir is not None and _path_is_within(_PACKAGE_SOURCE_ROOT, info_dir):
-        return True
-    direct_url_text: str | None = None
-    try:
-        direct_url_text = dist.read_text("direct_url.json")
-    except (OSError, ValueError):
-        direct_url_text = None
+    raw_info_dir = getattr(dist, "_path", None)
+    info_dir = Path(raw_info_dir) if raw_info_dir is not None else None
+    info_dir_is_directory = False
+    if info_dir is not None:
+        info_dir_is_directory = stat.S_ISDIR(info_dir.stat().st_mode)
+        if not info_dir_is_directory:
+            return False
+        if _path_is_within(_PACKAGE_SOURCE_ROOT, info_dir):
+            return True
+    direct_url_text = _direct_url_text(dist, info_dir)
     if direct_url_text:
         try:
             direct = json.loads(direct_url_text)
@@ -127,17 +144,64 @@ def _is_editable_install(dist: metadata.Distribution) -> bool:
         if isinstance(direct, dict) and isinstance(direct.get("dir_info"), dict):
             return direct["dir_info"].get("editable") is True
     # Legacy editable marker: an ``__editable__*.pth`` beside the dist-info dir.
-    if info_dir is not None and info_dir.is_dir():
+    if info_dir is not None and info_dir_is_directory:
         return any(path.name.startswith("__editable__") for path in info_dir.parent.iterdir())
     return False
 
 
-def _path_is_within(root: Path, path: Path) -> bool:
+def _direct_url_text(dist: metadata.Distribution, info_dir: Path | None) -> str | None:
+    """Read editable metadata without PathDistribution's error-suppressing adapter."""
+
+    if info_dir is None:
+        return dist.read_text("direct_url.json")
+    direct_url = info_dir / "direct_url.json"
     try:
-        path.resolve().relative_to(root.resolve())
+        return direct_url.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Absence of this optional file is ordinary. Re-stat the metadata root so a
+        # concurrently lost/unreadable distribution is not mistaken for absence.
+        info_dir.stat()
+        return None
+
+
+def _distribution_version_text(dist: metadata.Distribution) -> str:
+    """Read standard path-backed version metadata without suppressed filesystem errors."""
+
+    raw_info_path = getattr(dist, "_path", None)
+    if raw_info_path is None:
+        return dist.version
+    info_path = Path(raw_info_path)
+    mode = info_path.stat().st_mode
+    if stat.S_ISDIR(mode):
+        filename = "PKG-INFO" if info_path.name.endswith(".egg-info") else "METADATA"
+        metadata_path = info_path / filename
+    else:
+        metadata_path = info_path
+    message = Parser().parsestr(metadata_path.read_text(encoding="utf-8"))
+    version_text = message.get("Version")
+    if not isinstance(version_text, str) or not version_text.strip():
+        raise ValueError("installed distribution metadata has no Version field")
+    return version_text
+
+
+def _path_is_within(root: Path, path: Path) -> bool:
+    resolved_path = path.resolve()
+    resolved_root = root.resolve()
+    try:
+        resolved_path.relative_to(resolved_root)
     except ValueError:
         return False
     return True
+
+
+def _unverifiable_serving_build(error: BaseException) -> TopologyServingBuildError:
+    return TopologyServingBuildError(
+        "task-execution-topology-serving-build-unverifiable: filesystem or distribution "
+        "metadata prevented the serving build from proving execution-topology support; "
+        "repair the metadata/filesystem access or upgrade the served build before authoring "
+        f"an execution graph -- see {_MIGRATION_GUIDE} (served-build preflight; "
+        f"cause {type(error).__name__})"
+    )
 
 
 def _below_floor(version_text: str) -> bool:

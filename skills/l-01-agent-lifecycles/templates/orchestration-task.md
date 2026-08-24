@@ -4,12 +4,12 @@ The reviewable sprint plan a **strategist** drafts for the **architect**
 (`roles/strategist.md`). The architect proposes the strategist pass; the strategist drafts only
 after developer approval; the architect rules the result; and the orchestrator adopts the ruled
 plan into JSON-primary task documents. When the developer sanctions a strategist skip, the
-orchestrator authors the same complete artifact. A skip never permits missing topology or an
-implicit execution nature.
+orchestrator authors the same complete artifact. A skip never permits missing topology reasoning,
+classification, or an implicit execution nature; it does not make a persisted graph mandatory.
 
 The notes artifact shows the evidence and judgments. The task documents carry executable
-identity: the sprint's `orchestrates`, `integrationBranch`, and `executionGraph`, plus every
-commanded master's `executionNature`.
+identity: the sprint's `orchestrates` and `integrationBranch`, every commanded master's
+`executionNature`, and `executionGraph` when the adopted topology uses one.
 
 ## Rules
 
@@ -19,7 +19,10 @@ commanded master's `executionNature`.
    and reprioritization go in the canonical Judgment Register with rationale, evidence, author,
    confidence, and supersession history. The nature, blast-radius, priority, relation, blocker, and
    leaf-move sections are projections that cite their owning judgment row rather than becoming
-   parallel judgment authorities.
+   parallel judgment authorities. Every schedulable candidate resolves to one effective priority
+   row: its candidate-specific row when present, otherwise the owning-master row as the inherited
+   default. Candidate priority overrides rather than combines with that default, and duplicate
+   current rows for one subject are invalid.
    Stable task/node order is a tie-break, never priority judgment.
 2. **Shown work is required.** Every dependency edge carries evidence (tool query, file,
    decision-log entry, design citation, or declaration cross-reference) and cites the owning
@@ -29,10 +32,12 @@ commanded master's `executionNature`.
 3. **Surfaces are two-sided.** Existing surfaces map to route indexes/onboarding. New surfaces map
    by declaration: parent route/location, intended shape, and wiring point. A leaf that names
    neither becomes `unplannable as scoped`; a merely new surface does not.
-4. **The canonical graph is activity-on-node.** Its nodes are exact `TaskDocumentRef` objects and
-   must match `orchestrates` exactly. Its edges are predecessor → successor with a nonblank reason.
-   The control plane derives deterministic waves and refuses cycles; never persist manual wave or
-   position fields.
+4. **An authored canonical graph is activity-on-node.** When adopted, its nodes are exact
+   `TaskDocumentRef` objects and must match `orchestrates` exactly. Its edges are predecessor →
+   successor with a nonblank reason. The control plane derives deterministic waves and refuses
+   cycles; never persist manual wave or position fields. When the evidence does not justify an
+   explicit graph, record the graph-less atomic-sequential choice and its rationale instead of
+   manufacturing nodes or edges to make the plan look complete.
 5. **Classification is dependency/risk-driven.** `organizational` means the master is a logical
    ownership group whose leaves can land independently on super. `atomic` means partial exposure
    is invalid or unsafe and the whole block must land once. Large size alone is insufficient. A
@@ -43,11 +48,13 @@ commanded master's `executionNature`.
 6. **Adoption is explicit.** The strategist writes this draft but does not edit task docs. The
    orchestrator adopts it through previewed `task_doc` operations and records the architect ruling:
    one `task_doc.attach_master` call per commanded master (the typed `masterRef` subTasks row,
-   `orchestrates` membership, graph node, and nature assertion as one atomic batch), then
-   `task_doc.author_execution_graph` for the edges.
-   A sprint adopted without an `executionGraph` runs the atomic-sequential default;
-   `task_doc.author_execution_graph` bootstraps or edits the graph — it is never a runtime
-   fallback.
+   `orchestrates` membership, and nature assertion as one atomic batch); the operation also
+   maintains the node only when the sprint already has an `executionGraph`. A graph-less adoption
+   stops after those attachments, explicitly selects the atomic-sequential default, and states the
+   evidence-backed reason. To adopt an explicit graph from graph-less state, complete every
+   attachment first, then send one `task_doc.author_execution_graph` batch containing the exact
+   full `add_node` set and its evidence-backed edges. Graph authoring bootstraps or edits the graph
+   — it is never a runtime fallback and is not called to create ceremonial empty topology.
 7. **Review before adoption.** Run `../criteria/plan-review.md`; revisions append round sections
    rather than erasing history. The artifact remains standing scope after adoption.
 
@@ -95,24 +102,48 @@ commanded master's `executionNature`.
 | ---- | ---------------------------- | ------------ | ----------- |
 
 ## Priority Register (explicit judgment)
-| Candidate/master | Grade (critical, high, normal, or low) | Affected dependents | Judgment id |
-| ---------------- | ------------------------------------ | ------------------- | ----------- |
+| Subject (candidate or owning-master default) | Grade (critical, high, normal, or low) | Affected dependents | Judgment id |
+| -------------------------------------------- | ------------------------------------ | ------------------- | ----------- |
 
-## Canonical executionGraph Adoption Payload
+Resolve one effective row per candidate: use the candidate row when present, otherwise its
+owning-master default. Never combine both grades; duplicate current rows for one subject are
+invalid.
+
+## Topology Choice And Canonical executionGraph Adoption Payload
+Topology choice: `explicit executionGraph` | `graph-less atomic-sequential default`
+
+Evidence-backed reason: <why the chosen topology fits this sprint>
+
 One `task_doc.attach_master` call per commanded master (the row number is the sprint's master
-index position), then one `task_doc.author_execution_graph` batch for the edges:
+index position) owns its typed row, `orchestrates` membership, and execution-nature assertion; if
+the sprint already has an explicit graph, the same operation maintains its node. Attachment fields:
 ```json
 {
-  "attach_master": {
-    "masterRef": {"repository": "<repo>", "path": "<master-slug>/task.json"},
-    "number": "<sprint row number>",
-    "executionNature": "organizational | atomic",
-    "judgmentId": "<Judgment Register row>"
-  },
-  "edges": [
+  "masterRef": {"repository": "<repo>", "path": "<master-slug>/task.json"},
+  "number": "<sprint row number>",
+  "executionNature": "organizational | atomic",
+  "judgmentId": "<Judgment Register row>"
+}
+```
+
+The graph-less choice stops after every attachment. To adopt an explicit graph from that state,
+complete all attachments first, then send one `task_doc.author_execution_graph` batch with one
+`add_node` mutation per commanded master and the evidence-backed edges. Example with two masters:
+```json
+{
+  "mutations": [
     {
-      "predecessor": {"repository": "<repo>", "path": "<foundation>/task.json"},
-      "successor": {"repository": "<repo>", "path": "<dependent>/task.json"},
+      "op": "add_node",
+      "ref": {"repository": "<repo>", "path": "<master-a>/task.json"}
+    },
+    {
+      "op": "add_node",
+      "ref": {"repository": "<repo>", "path": "<master-b>/task.json"}
+    },
+    {
+      "op": "add_edge",
+      "predecessor": {"repository": "<repo>", "path": "<master-a>/task.json"},
+      "successor": {"repository": "<repo>", "path": "<master-b>/task.json"},
       "reason": "<evidence-backed dependency reason>",
       "judgmentId": "<Judgment Register row>"
     }
@@ -121,9 +152,10 @@ index position), then one `task_doc.author_execution_graph` batch for the edges:
 ```
 
 ## Derived Waves And Blocker Walk
-- Wave <n> (mechanically derived, not persisted): <master refs>
-- Atomic blocker: <master ref> · predecessors <refs> · successors <refs> · blocker-placement judgment <id>
-- Deterministic equal-priority tie-break: canonical graph node order
+- Explicit graph: Wave <n> (mechanically derived, not persisted): <master refs>
+- Explicit graph: Atomic blocker: <master ref> · predecessors <refs> · successors <refs> · blocker-placement judgment <id>
+- Graph-less default: <canonical commanded-master order; each fully integrates before the next starts>
+- Deterministic equal-priority tie-break: canonical graph node order when present; otherwise canonical commanded-master order
 
 ## Leaf Moves
 | Leaf | From (master) | To (master) | Judgment id |

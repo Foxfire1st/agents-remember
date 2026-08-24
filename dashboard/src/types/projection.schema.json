@@ -554,13 +554,13 @@
           "title": "Generationid",
           "type": "string"
         },
-        "owningMaster": {
-          "$ref": "#/$defs/TaskDocumentRef"
-        },
         "order": {
           "default": 0,
           "title": "Order",
           "type": "integer"
+        },
+        "owningMaster": {
+          "$ref": "#/$defs/TaskDocumentRef"
         },
         "priority": {
           "title": "Priority",
@@ -592,13 +592,34 @@
       "additionalProperties": false,
       "description": "Bounded repair evidence for a non-admitting projection.",
       "properties": {
-        "address": {"title": "Address", "type": "string"},
-        "errorType": {"title": "Errortype", "type": "string"},
-        "kind": {"title": "Kind", "type": "string"},
-        "repairAction": {"title": "Repairaction", "type": "string"},
-        "state": {"title": "State", "type": "string"}
+        "address": {
+          "title": "Address",
+          "type": "string"
+        },
+        "errorType": {
+          "title": "Errortype",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "repairAction": {
+          "title": "Repairaction",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
       },
-      "required": ["kind", "address", "state", "errorType", "repairAction"],
+      "required": [
+        "kind",
+        "address",
+        "state",
+        "errorType",
+        "repairAction"
+      ],
       "title": "CloseoutProjectionProblemNode",
       "type": "object"
     },
@@ -624,17 +645,33 @@
           "type": "string"
         },
         "sourceClassification": {
-          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
           "title": "Sourceclassification"
         },
         "sourceFingerprint": {
-          "anyOf": [{"type": "string"}, {"type": "null"}],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
           "title": "Sourcefingerprint"
         },
         "sourceProblems": {
-          "items": {"$ref": "#/$defs/CloseoutProjectionProblemNode"},
+          "items": {
+            "$ref": "#/$defs/CloseoutProjectionProblemNode"
+          },
           "maxItems": 256,
           "title": "Sourceproblems",
           "type": "array"
@@ -747,6 +784,16 @@
       "additionalProperties": false,
       "description": "Persisted proof facts retained after an unstarted leaf source is discarded.",
       "properties": {
+        "childJson": {
+          "additionalProperties": true,
+          "title": "Childjson",
+          "type": "object"
+        },
+        "childMarkdown": {
+          "additionalProperties": true,
+          "title": "Childmarkdown",
+          "type": "object"
+        },
         "commitState": {
           "title": "Commitstate",
           "type": "string"
@@ -802,6 +849,8 @@
         "seatState",
         "reviewState",
         "commitState",
+        "childJson",
+        "childMarkdown",
         "fingerprint"
       ],
       "title": "DiscardUnstartedProofNode",
@@ -1909,6 +1958,14 @@
           "title": "Phase",
           "type": "string"
         },
+        "projectionEffects": {
+          "items": {
+            "$ref": "#/$defs/TaskDocProjectionEffect"
+          },
+          "maxItems": 8,
+          "title": "Projectioneffects",
+          "type": "array"
+        },
         "reportPath": {
           "title": "Reportpath",
           "type": "string"
@@ -2170,6 +2227,182 @@
         }
       },
       "title": "Metrics",
+      "type": "object"
+    },
+    "ProjectionInvalidationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "diagnostic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectionSourceProblem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outcome": {
+          "enum": [
+            "persisted-empty",
+            "already-empty",
+            "not-created",
+            "recovered-malformed",
+            "would-recover-malformed",
+            "would-persist-empty",
+            "failed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "ProjectionInvalidationResult",
+      "type": "object"
+    },
+    "ProjectionRebuildResult": {
+      "additionalProperties": false,
+      "properties": {
+        "memberCount": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Membercount",
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "published",
+            "already-current",
+            "source-changed",
+            "source-unreadable",
+            "would-publish",
+            "not-attempted"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "sourceClassification": {
+          "anyOf": [
+            {
+              "enum": [
+                "active",
+                "terminal"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceclassification"
+        },
+        "sourceFingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourcefingerprint"
+        },
+        "sourceProblems": {
+          "items": {
+            "$ref": "#/$defs/ProjectionSourceProblem"
+          },
+          "maxItems": 256,
+          "title": "Sourceproblems",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "ProjectionRebuildResult",
+      "type": "object"
+    },
+    "ProjectionSourceProblem": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Address",
+          "type": "string"
+        },
+        "errorType": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Errortype",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "task",
+            "door",
+            "series",
+            "projection"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "repairAction": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Repairaction",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "missing",
+            "unreadable",
+            "invalid"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "address",
+        "state",
+        "errorType",
+        "repairAction"
+      ],
+      "title": "ProjectionSourceProblem",
       "type": "object"
     },
     "ProviderBootNode": {
@@ -3198,6 +3431,84 @@
         "docPath"
       ],
       "title": "TaskDocNode",
+      "type": "object"
+    },
+    "TaskDocProjectionEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "invalidation": {
+          "$ref": "#/$defs/ProjectionInvalidationResult"
+        },
+        "nextAction": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextaction"
+        },
+        "priorRevision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priorrevision"
+        },
+        "priorSourceFingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priorsourcefingerprint"
+        },
+        "queueExisted": {
+          "title": "Queueexisted",
+          "type": "boolean"
+        },
+        "rebuild": {
+          "$ref": "#/$defs/ProjectionRebuildResult"
+        },
+        "rebuiltRevision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rebuiltrevision"
+        },
+        "sprintTaskDocumentRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "sprintTaskDocumentRef",
+        "queueExisted",
+        "invalidation",
+        "rebuild"
+      ],
+      "title": "TaskDocProjectionEffect",
       "type": "object"
     },
     "TaskDocumentRef": {

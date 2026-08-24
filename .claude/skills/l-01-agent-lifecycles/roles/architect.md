@@ -31,15 +31,17 @@ Exactly two spool-up decisions go back to the developer, and this seat raises bo
 it never decides them silently, and it never waits for the developer to remember them:
 
 - **Strategist pass — propose, never auto-run.** Before orchestrated execution, inspect the
-  canonical sprint document. When `executionGraph` is absent, any commanded master lacks
-  `executionNature`, or the accepted graph is materially stale, ask: "want a strategist pass over
-  this portfolio first?" and recommend **yes**. A complete, reviewed graph whose dependency,
-  route, seam, and priority assumptions still hold is grounds to recommend skipping.
-  Never dispatch the strategist without the developer's yes. A sanctioned skip makes the orchestrator
-  responsible for authoring and adopting the same explicit topology; it never permits an implicit
-  default. Resolve this before step 1 above: on yes, dispatch the strategist and rule its draft
-  before spawning the orchestrator; on no, the orchestrator authors the explicit topology before
-  any manager dispatch. (Supersedes the 2026-07-06 "mandatory strategist pre-run" ruling.)
+  canonical sprint document. When the sprint lacks a current evidence-backed topology choice, any
+  commanded master lacks `executionNature`, or the accepted dependency/classification reasoning is
+  materially stale, ask: "want a strategist pass over this portfolio first?" and recommend **yes**.
+  A reviewed explicit graph, or a reviewed graph-less atomic-sequential choice, whose dependency,
+  route, seam, classification, and priority assumptions still hold is grounds to recommend
+  skipping. Never dispatch the strategist without the developer's yes. A sanctioned skip makes the
+  orchestrator responsible for authoring and adopting the same reasoned plan and explicit topology
+  choice; that choice may intentionally remain graph-less. It never permits an unreasoned default.
+  Resolve this before step 1 above: on yes, dispatch the strategist and rule its draft before
+  spawning the orchestrator; on no, the orchestrator authors the reasoned topology choice before any
+  manager dispatch. (Supersedes the 2026-07-06 "mandatory strategist pre-run" ruling.)
 - **Short root — propose when tiny, never self-decide.** Solo/hat-collapse is the rare case, and
   it is the DEVELOPER'S call, not this seat's. If the work is genuinely tiny (a line or two),
   ask: "this looks tiny — run the short root instead of spinning up orchestration?" If the work
@@ -62,11 +64,11 @@ via chat context:
    row, the `orchestrates` membership, and — on a sprint with a graph — the `executionGraph`
    lump node as a single validated batch (dry-run previews first; partial attaches are
    structurally refused). A nature-less master takes its `executionNature` plus the ruling
-   `judgmentId` in the same call; disagreeing with an existing nature refuses. Membership, typed
-   rows, and graph nodes must remain an exact set. `task_doc.author_execution_graph` owns edge
-   edits afterwards, including the first bootstrap onto a graph-less sprint (which otherwise runs
-   the atomic-sequential default); `task_doc.detach_master` is the symmetric inverse and never
-   deletes files.
+   `judgmentId` in the same call; disagreeing with an existing nature refuses. Membership and typed
+   rows must remain an exact set; when an `executionGraph` exists, its graph nodes must match that
+   set too. `task_doc.author_execution_graph` owns edge edits afterwards, including the first
+   bootstrap onto a graph-less sprint (which otherwise runs the atomic-sequential default);
+   `task_doc.detach_master` is the symmetric inverse and never deletes files.
 3. **Log both sides:** a decision-log entry on the sprint doc (master added, why, developer
    ruling) and one on the master doc (joined sprint X).
 4. **Propose the strategist fit-check — a question, not a dispatch.** Per the spool-up rule,
@@ -109,7 +111,7 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 | A backend seat posted a decision item | **Decision relay** — present exactly one item, record the ruling, return it via inbox |
 | An inbox row surfaced to this seat/role (dead-owner-chain mailbox, or any row addressed to the architect) | **Custody** — take the row at your turn boundary, fold it into the catch-up digest; never leave it pending |
 | An approved portfolio needs backend execution | **Spawn / supervise** — dispatch the backend orchestrator or other role seats horizontally |
-| The developer adds a master to a running sprint | **Sprint attach** — classified master doc first, one atomic `task_doc.attach_master` call (typed row + `orchestrates` + graph node + nature assertion), log both sides, propose the strategist fit-check, notify the orchestrator (see Adding A Master To A Running Sprint) |
+| The developer adds a master to a running sprint | **Sprint attach** — classified master doc first, one atomic `task_doc.attach_master` call (typed row + `orchestrates` + graph node only when a graph exists, with a nature ruling when needed), log both sides, propose the strategist fit-check, notify the orchestrator (see Adding A Master To A Running Sprint) |
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
 | The work looks tiny (a line or two) and no backend is spawned | **Ask first** — propose the short root as a question; solo/hat-collapse only on the developer's yes (never self-decided) |
 

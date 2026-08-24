@@ -9,9 +9,9 @@
 
 The orchestrator is a backend seat spawned by the architect or by an approved orchestration plan.
 It never converses with the developer directly. It owns the portfolio bird's-eye, the canonical
-execution graph, explicit priority judgments, the recomputed ready frontier, the super integration
-branch, the **spirit test**, and the **integrity bulwark** against "fixed one thing, broke two
-others." The architect owns the design conversation and developer relay.
+topology choice and execution graph when present, explicit priority judgments, the recomputed ready
+frontier, the super integration branch, the **spirit test**, and the **integrity bulwark** against
+"fixed one thing, broke two others." The architect owns the design conversation and developer relay.
 
 Its real state is the **task tree** — masters, leaves, statuses, decision logs, `openQuestions`,
 contracts, inbox rows — never the transcript. That is why sessions can die, compact, and resume
@@ -204,9 +204,10 @@ the design: run the bulwark check against the portfolio and the past before disp
   Initial planning is already resolved before this seat is spawned: it receives either an
   architect-ruled strategist artifact or a sanctioned skip. On a
   skip, this seat authors the same explicit orchestration task before any manager dispatch. At
-  runtime, if a missing `executionGraph`, missing commanded-master `executionNature`, or
-  materially stale dependency/classification model warrants a fresh pass, raise ONE decision item
-  through the architect relay; never dispatch the strategist on this seat's authority. After the
+  runtime, if the ruled topology choice is missing or invalid, a commanded-master
+  `executionNature` is missing, or the dependency/classification model is materially stale, raise
+  ONE decision item through the architect relay; never dispatch the strategist on this seat's
+  authority. After the
   developer's yes, the architect dispatches the optional sprint strategist seat
   (`roles/strategist.md`) with **refs to durable portfolio state** (task-doc paths, series
   contracts, notes folders, the route-index root, compiled trust facts), never pasted state.
@@ -214,9 +215,11 @@ the design: run the bulwark check against the portfolio and the past before disp
   This seat supplies current runtime evidence and
   is the builder only when the developer sanctioned a strategist skip. The independent reviewer
   uses `../criteria/plan-review.md`; drawing-board rounds and quo-vadis items stay with the
-  architect. The resulting **ORCHESTRATION TASK** carries the evidence-cited dependency graph,
-  blast-radius register, execution-nature and priority judgments, coherence findings, leaf moves,
-  and canonical AON graph with derived waves/blockers. Only after the architect rules it does this
+  architect. The resulting **ORCHESTRATION TASK** carries evidence-cited dependency findings, a
+  reasoned topology choice, the blast-radius register, execution-nature and priority judgments,
+  coherence findings, and leaf moves. When the chosen topology is explicit, it also carries the
+  canonical AON graph with derived waves/blockers; choosing the graph-less atomic-sequential
+  default never removes the reasoning obligations. Only after the architect rules it does this
   seat adopt the artifact into durable task form with a decision-log entry.
 - **Re-evaluation rules:** ordinary readiness changes, candidate arrivals, landed leaves, and
   bounded reprioritization are this seat's job; recompute without a strategist. A new dependency,
@@ -229,22 +232,25 @@ the design: run the bulwark check against the portfolio and the past before disp
   (architect, orchestrator, strategist, …) live in the sprint document's `seats` structure —
   identity, label, state — and never as subTasks rows (existing seat task documents stay on disk
   as historical records); body = evidence,
-  priority and classification judgments, conflict decisions, and (once Job O starts) the super
-  branch name; `executionGraph` = the exact persisted AON graph and every commanded master carries
-  `executionNature`; decision log =
+  priority and classification judgments, conflict decisions, the reasoned topology choice, and
+  (once Job O starts) the super branch name; every commanded master carries `executionNature`, and
+  `executionGraph` is present only when the explicit-graph topology was chosen, in which case it is
+  the exact persisted AON graph; decision log =
   every spirit-test act and reshape; `openQuestions` = the standing decision surface; the
   orchestration task = the sprint scope the run executes. Its durable form is a `kind:"master"`
   task doc carrying a top-level `orchestrates` list naming the master tasks it commands — the
   dashboard derives the orchestration > master > leaf hierarchy (and the rank insignia) from that
-  field. The typed subTasks rows (`masterRef`), `orchestrates`, and `executionGraph.nodes` must
-  agree exactly — `task_doc.linkage_report` (and `linkageFacts` on `task_doc.get`) surfaces any
-  drift as facts;
-  adoption attaches each master with one previewed `task_doc.attach_master` call (row +
-  membership + graph node + nature assertion in a single atomic batch that refuses partial
-  attaches; `detach_master` is its symmetric inverse and never deletes files). A sprint without an
+  field. The typed subTasks rows (`masterRef`) and `orchestrates` must agree exactly; when an
+  `executionGraph` exists, its nodes must agree with them too — `task_doc.linkage_report` (and
+  `linkageFacts` on `task_doc.get`) surfaces any drift as facts. Adoption attaches each master with
+  one previewed `task_doc.attach_master` call (row + membership + nature assertion, plus a graph
+  node only when a graph already exists, in a single atomic batch that refuses partial attaches;
+  `detach_master` is its symmetric inverse and never deletes files). A sprint without an
   `executionGraph` runs the atomic-sequential default (one master fully integrates before the next
-  starts); `task_doc.author_execution_graph` bootstraps a graph onto it (first `add_node` batch)
-  and edits one incrementally afterwards (edges are always its job).
+  starts). If the ruled topology instead adopts an explicit graph from that state, attach every
+  commanded master first, then use one complete `task_doc.author_execution_graph` batch containing
+  every node and evidence-backed edge; edit the graph incrementally only after that bootstrap
+  (edges are always graph-authoring work).
 - **Gate:** the portfolio plan gate — one wholesale architect/developer review of the reshaped
   portfolio + the orchestration task (sprint scope + DAG + dispatch order). **No git surface** —
   not even the super branch exists yet.

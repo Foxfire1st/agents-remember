@@ -24,13 +24,14 @@ class SprintGraphTitles:
     """Titles joined for one execution graph render.
 
     Keys are the same identities the graph uses: a master ref's ``key``
-    (``repository/path``) for ``master_titles`` and the leaf id for
-    ``leaf_titles``. Absent keys mean the source document was missing or
-    invalid; callers fall back to the raw key / leaf id.
+    (``repository/path``) for ``master_titles`` and ``(master ref, leaf id)``
+    for ``leaf_titles``. Absent keys mean the source document was missing or
+    invalid; callers fall back to the raw key / leaf id without borrowing a
+    same-numbered leaf from another master.
     """
 
     master_titles: dict[str, str] = field(default_factory=dict)
-    leaf_titles: dict[str, str] = field(default_factory=dict)
+    leaf_titles: dict[tuple[TaskDocumentRef, str], str] = field(default_factory=dict)
 
 
 def build_graph_titles(
@@ -39,21 +40,22 @@ def build_graph_titles(
 ) -> SprintGraphTitles:
     """Join one graph's master/leaf titles from in-memory master documents.
 
-    Leaf titles come from the master's ``subTasks`` index rows: the graph's
-    leaf ids ARE the row ``number`` values (sprint-wide unique per the L11
-    contract), so the row ``name`` is the leaf's title. Masters the caller did
-    not supply are skipped -- the caller's fallback labels cover them.
+    Leaf titles come from each master's ``subTasks`` index rows. Explicitly
+    placed graph leaf ids are sprint-wide unique, but unplaced/lump-mode rows
+    may reuse another master's local number, so every title retains its owning
+    ref. Masters the caller did not supply are skipped -- the caller's fallback
+    labels cover them.
     """
 
     master_titles: dict[str, str] = {}
-    leaf_titles: dict[str, str] = {}
+    leaf_titles: dict[tuple[TaskDocumentRef, str], str] = {}
     for ref in graph.master_refs():
         master = masters.get(ref)
         if master is None:
             continue
         master_titles[ref.key] = master.title
         for row in master.subTasks:
-            leaf_titles[row.number] = row.name
+            leaf_titles[(ref, row.number)] = row.name
     return SprintGraphTitles(master_titles=master_titles, leaf_titles=leaf_titles)
 
 

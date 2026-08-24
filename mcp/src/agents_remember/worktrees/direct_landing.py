@@ -799,9 +799,10 @@ def _direct_landing_observation(
         mode="json", exclude_none=True
     )
     return {
-        "ok": True,
+        "ok": False,
         "operation": "direct_landing",
-        "state": record.status,
+        "state": "refused",
+        "status": "direct-landing-operation-action-required",
         "summary": "The accepted direct-landing generation already exists; use its "
         "advertised task-addressed action.",
         "contractPath": record.contractPath,

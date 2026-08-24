@@ -201,9 +201,7 @@ class TerminalWorktreeAbandonArguments(StrictResponseModel):
     force: bool
 
 
-TerminalCleanupArguments = (
-    TerminalWorktreeCleanupArguments | TerminalWorktreeAbandonArguments
-)
+TerminalCleanupArguments = TerminalWorktreeCleanupArguments | TerminalWorktreeAbandonArguments
 
 
 def _require_cleanup_arguments(
@@ -250,8 +248,8 @@ class TerminalEnclosureArchive(StrictResponseModel):
         if (
             self.locator.publicationRequestId != self.manifest.publicationRequestId
             or self.locator.bindingFingerprint != self.manifest.bindingFingerprint
-            or self.locator.manifestPath != self.manifest.lifecycleDirectory
-            + "/enclosure-manifest.json"
+            or self.locator.manifestPath
+            != self.manifest.lifecycleDirectory + "/enclosure-manifest.json"
             or self.contractPath != self.locator.stableAddress
             or self.contractPath != self.manifest.contractPath
         ):
@@ -271,17 +269,22 @@ class TerminalEnclosureArchive(StrictResponseModel):
         if len(paths) != len(set(paths)):
             raise ValueError("terminal archive canonical entry paths must be unique")
         manifest_entries = [
-            entry for entry in self.canonicalEntries if entry.relativePath == "enclosure-manifest.json"
+            entry
+            for entry in self.canonicalEntries
+            if entry.relativePath == "enclosure-manifest.json"
         ]
         if len(manifest_entries) != 1:
             raise ValueError("terminal archive requires the exact enclosure manifest entry")
         manifest_exclude = (
             {"predecessorTerminal"} if self.manifest.predecessorTerminal is None else None
         )
-        expected_manifest = self.manifest.model_dump_json(
-            indent=2,
-            exclude=manifest_exclude,
-        ) + "\n"
+        expected_manifest = (
+            self.manifest.model_dump_json(
+                indent=2,
+                exclude=manifest_exclude,
+            )
+            + "\n"
+        )
         if manifest_entries[0].content != expected_manifest:
             raise ValueError("terminal archive manifest entry contradicts the typed manifest")
         manifest_sha256 = hashlib.sha256(expected_manifest.encode("utf-8")).hexdigest()

@@ -1,9 +1,8 @@
-"""Bounded background registry for long-running memory-quality checks (L15-R7).
+"""Bounded single-flight registry for asynchronous memory-quality checks.
 
-The full contract-scoped check exceeds the MCP client's request window; this
-registry runs it on a daemon thread and lets the caller poll a bounded,
-evictable result. Runtime store only (D4): a dropped or evicted run simply
-needs a rerun -- the check is read-only plus one atomic checklist write.
+This process-local store is a working surface, never recovery evidence. Running
+work is retained for polling, terminal history is evictable, and new unique work
+is refused when live operations occupy the configured capacity.
 """
 
 from __future__ import annotations
@@ -11,22 +10,56 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Literal
+
+from agents_remember.application.memory_scope import MemoryScopeIdentity
 
 MAX_QUALITY_RUNS = 8
 QUALITY_RUN_TTL_SECONDS = 1800
+
+QualityRunStatus = Literal["running", "completed", "failed"]
+QualityRunAdmissionState = Literal["started", "running", "capacity-reached"]
+
+
+@dataclass(frozen=True)
+class QualityRunIdentity:
+    """Every canonical request semantic that affects work or its result."""
+
+    repo_id: str
+    scope: MemoryScopeIdentity
+    checks: tuple[str, ...]
+    detail_limit: int
+    publish_curator_report: bool
+
+
+@dataclass(frozen=True)
+class QualityRunAdmission:
+    state: QualityRunAdmissionState
+    run_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.state == "capacity-reached") != (self.run_id is None):
+            raise ValueError("memory-quality admission state and run id disagree")
+
+
+@dataclass(frozen=True)
+class QualityRunSnapshot:
+    status: QualityRunStatus
+    run_id: str
+    result: Mapping[str, object] | None = None
+    error: str | None = None
 
 
 @dataclass
 class _QualityRun:
     run_id: str
-    key: str
-    status: str = "running"  # running | completed | failed
+    identity: QualityRunIdentity
+    status: QualityRunStatus = "running"
     started_at: float = field(default_factory=time.monotonic)
     completed_at: float | None = None
-    result: dict[str, Any] | None = None
+    result: dict[str, object] | None = None
     error: str | None = None
 
 
@@ -34,66 +67,95 @@ _registry: dict[str, _QualityRun] = {}
 _lock = threading.Lock()
 
 
-def start_quality_run(key: str, fn: Callable[[], dict[str, Any]]) -> tuple[str, str]:
-    """Start one background quality run, single-flight per key.
-
-    Returns ``(run_id, status)``: ``("started", ...)`` for a new run, or the
-    active run already serving the same key (``status="running"``) so two
-    callers cannot race the same checklist write.
-    """
+def start_quality_run(
+    identity: QualityRunIdentity,
+    fn: Callable[[], dict[str, object]],
+) -> QualityRunAdmission:
+    """Reuse active equivalent work or atomically admit one bounded worker."""
 
     with _lock:
         existing = next(
-            (run for run in _registry.values() if run.key == key and run.status == "running"),
+            (
+                run
+                for run in _registry.values()
+                if run.identity == identity and run.status == "running"
+            ),
             None,
         )
         if existing is not None:
-            return existing.run_id, "running"
-        _evict_locked()
-        run = _QualityRun(run_id=uuid.uuid4().hex[:16], key=key)
+            return QualityRunAdmission(state="running", run_id=existing.run_id)
+        _prune_terminal_locked()
+        if len(_registry) >= MAX_QUALITY_RUNS:
+            return QualityRunAdmission(state="capacity-reached")
+
+        run = _QualityRun(run_id=uuid.uuid4().hex[:16], identity=identity)
+        worker = threading.Thread(
+            target=_complete_quality_run,
+            args=(run, fn),
+            name=f"quality-run-{run.run_id}",
+            daemon=True,
+        )
         _registry[run.run_id] = run
-
-    def _worker() -> None:
         try:
-            result = fn()
-        except Exception as exc:  # the run record carries the failure
-            with _lock:
-                run.status = "failed"
-                run.completed_at = time.monotonic()
-                run.error = f"{type(exc).__name__}: {exc}"
-            return
-        with _lock:
-            run.status = "completed"
-            run.completed_at = time.monotonic()
-            run.result = result
-
-    threading.Thread(target=_worker, name=f"quality-run-{run.run_id}", daemon=True).start()
-    return run.run_id, "started"
+            worker.start()
+        except RuntimeError:
+            del _registry[run.run_id]
+            raise
+        return QualityRunAdmission(state="started", run_id=run.run_id)
 
 
-def poll_quality_run(run_id: str) -> dict[str, Any] | None:
-    """Return the run envelope, or ``None`` when the run id is unknown/evicted."""
+def poll_quality_run(repo_id: str, run_id: str) -> QualityRunSnapshot | None:
+    """Return one repository-owned run without disclosing cross-repo existence."""
 
     with _lock:
         run = _registry.get(run_id)
-        if run is None:
+        if run is None or run.identity.repo_id != repo_id:
             return None
-        if run.status == "running":
-            return {"status": "running", "runId": run.run_id}
-        if run.status == "failed":
-            return {"status": "failed", "runId": run.run_id, "error": run.error}
-        return {"status": "completed", "runId": run.run_id, **(run.result or {})}
-
-
-def _evict_locked() -> None:
-    now = time.monotonic()
-    for run_id, run in list(_registry.items()):
-        if run.completed_at is not None and now - run.completed_at > QUALITY_RUN_TTL_SECONDS:
-            del _registry[run_id]
-    if len(_registry) >= MAX_QUALITY_RUNS:
-        completed = sorted(
-            (run for run in _registry.values() if run.completed_at is not None),
-            key=lambda run: run.completed_at or 0.0,
+        return QualityRunSnapshot(
+            status=run.status,
+            run_id=run.run_id,
+            result=None if run.result is None else dict(run.result),
+            error=run.error,
         )
-        if completed:
-            del _registry[completed[0].run_id]
+
+
+def _complete_quality_run(
+    run: _QualityRun,
+    fn: Callable[[], dict[str, object]],
+) -> None:
+    try:
+        result = fn()
+    except Exception as exc:  # the retained run translates arbitrary worker failure
+        with _lock:
+            run.status = "failed"
+            run.completed_at = time.monotonic()
+            run.error = f"{type(exc).__name__}: {exc}"
+        return
+    with _lock:
+        run.status = "completed"
+        run.completed_at = time.monotonic()
+        run.result = result
+
+
+def _prune_terminal_locked() -> None:
+    """Drop expired history, then only enough oldest terminal rows for admission."""
+
+    now = time.monotonic()
+    for run_id, run in tuple(_registry.items()):
+        if (
+            run.status != "running"
+            and run.completed_at is not None
+            and now - run.completed_at > QUALITY_RUN_TTL_SECONDS
+        ):
+            del _registry[run_id]
+
+    terminal = sorted(
+        (
+            run
+            for run in _registry.values()
+            if run.status != "running" and run.completed_at is not None
+        ),
+        key=lambda run: run.completed_at or 0.0,
+    )
+    while len(_registry) >= MAX_QUALITY_RUNS and terminal:
+        del _registry[terminal.pop(0).run_id]

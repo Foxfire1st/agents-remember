@@ -66,8 +66,10 @@ For larger workflow changes, open a discussion or draft pull request early inste
 ### Acceptance runs in Dagger
 
 For this repository, only the pinned Dagger Ubuntu graph produces acceptance
-evidence. Host `pytest`, Vitest, Playwright, and direct
-`agents_remember.code_quality.check` execution refuse before test or retry planning.
+evidence. Host `pytest`, Playwright, and direct `agents_remember.code_quality.check`
+execution refuse before test or retry planning. A direct targeted `npm test -- <files>` Vitest
+run is supported as a fast unit/component diagnostic loop; it never substitutes for Dagger
+acceptance, changed-lines coverage, or lifecycle evidence.
 The lifecycle tools own the two accepted invocations:
 
 - `mode=targeted` for focused leaf acceptance (changed files, reverse-import closure,

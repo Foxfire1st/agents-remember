@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../../data/store";
@@ -121,5 +121,54 @@ describe("sprint page shell (L12-R5)", () => {
     expect(screen.queryByTestId("sprint-graph")).toBeNull();
     expect(screen.getByTestId("closeout-queue")).toBeTruthy();
     expect(screen.getByText("rev 3 · valid-built · active")).toBeTruthy();
+  });
+
+  it("removes a seeded queue and its mounted sprint view through the canonical reset", () => {
+    const staleCandidatePath = "scenario-a/stale-closeout-candidate.json";
+    const staleQueueMetadata = "rev 731 · valid-built · scenario-a-stale-source";
+    const sprint = taskDoc({
+      id: "SPRINT",
+      kind: "master",
+      title: "Scenario reset sprint",
+      orchestrates: ["master-a"],
+      docPath: "/tasks/repo-a/sprint/task.json",
+      executionGraphView: sprintGraph(),
+    });
+    seedTaskDocuments([sprint]);
+    dashboardStore.setState({
+      closeoutQueues: [
+        queue({
+          revision: 731,
+          sourceClassification: "scenario-a-stale-source",
+          members: [
+            {
+              generationId: "ef".repeat(32),
+              taskDocumentRef: { repository: "repo-a", path: staleCandidatePath },
+              owningMaster: { repository: "repo-a", path: "master-a/task.json" },
+              classification: "ready",
+              priority: "high",
+              order: 0,
+              reasons: [],
+            },
+          ],
+        }),
+      ],
+    });
+
+    render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
+
+    expect(dashboardStore.getState().closeoutQueues).toHaveLength(1);
+    expect(screen.getByTestId("closeout-queue")).toBeTruthy();
+    expect(screen.getByText(staleCandidatePath)).toBeTruthy();
+    expect(screen.getByText(staleQueueMetadata)).toBeTruthy();
+
+    act(() => {
+      dashboardStore.getState().reset();
+    });
+
+    expect(dashboardStore.getState().closeoutQueues).toEqual([]);
+    expect(screen.queryByTestId("closeout-queue")).toBeNull();
+    expect(screen.queryByText(staleCandidatePath)).toBeNull();
+    expect(screen.queryByText(staleQueueMetadata)).toBeNull();
   });
 });

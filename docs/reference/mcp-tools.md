@@ -59,20 +59,27 @@ not registered as agent MCP tools and must not appear in role briefs or handoffs
 | --- | --- | --- |
 | `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
 | `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50`, `contract_path=None` |
-| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `repo_id`, `checks=None`, `detail_limit=50`, `contract_path=None` |
+| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). A full contract-scoped call also atomically replaces the curator worklist at `<worktree enclosure>/reports/curator-memory-quality.md`, combining quality findings, current-addition onboarding coverage, route-index preview, drift candidates, and report-only evidence. | `request={"mode":"sync", "repo_id":..., "checks":..., "detail_limit":50, "contract_path":...}`; use `mode:"start"` for async admission and poll only with `mode:"poll"`, `repo_id`, `run_id` |
 | `citation_fix` | Regenerate anchored citation ranges only inside a contract-selected leaf memory worktree; official memory, ambiguous anchors, renames, and deletions refuse. | `repo_id`, `contract_path`, `document=None`, `expected_snapshot=None`, `dry_run=false` |
 | `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
 
-The three rows above take the same optional `contract_path` as the `worktree_*` verbs: a leaf
-enclosure contract path. Omitted, they resolve the configured **official** memory repo (unchanged).
-Supplied, they act on that leaf's **memory worktree** and measure it against the leaf's code
+`memory_quality_check.request` is exactly one shape. `sync` and `start` accept repository,
+scope, checks, and detail fields; `poll` accepts only `mode`, `repo_id`, and `run_id`. Do not resend
+start fields while polling, even when their values equal defaults: the discriminated boundary
+rejects contradictory presence before it reads the run registry. A unique start at capacity returns
+`capacity-reached` without a `runId`; poll or wait for active work, then submit a new start request.
+
+The three rows above support the same optional `contract_path` as the `worktree_*` verbs: a leaf
+enclosure contract path. `memory_quality_check` carries it inside its discriminated `request`;
+the other two tools take it directly. Omitted, they resolve the configured **official** memory repo
+(unchanged). Supplied, they act on that leaf's **memory worktree** and measure it against the leaf's code
 worktree — how a curator checks its own change-set before handing it back, and the only correct way
 to run `route_index_refresh` from inside a leaf, since without it that tool writes indexes into the
 official repo and leaves it dirty. A contract naming another repo, or one whose memory worktree is
 gone, is refused; nothing falls back to the official repo. The response carries `onboardingRoot`, so
 which tree was acted on is always visible.
 
-Only a full leaf-scoped `memory_quality_check` writes the curator checklist. It reports
+Only a full leaf-scoped sync/start `memory_quality_check` request writes the curator checklist. It reports
 `curatorActionableCount` and `checklistStatus`; the curator reruns it until the actionable count is
 zero. Subset checks and official-repository checks do not create that artifact. The checklist is
 outside both Git worktrees, replaces its predecessor instead of accumulating timestamped files,
@@ -96,6 +103,13 @@ exit code, memory-cap facts when applicable, and the complete wrapper output (in
 A failed gate writes the report before refusing and names its path in the error. An interrupted
 run cannot replace the previous completed result, and cleanup/abandon removes the file with the
 same `reports/` directory. The gate payload returns that stable path as `reportPath`.
+
+Executed closeout and integration gates expose their typed result under `code_quality_gate` or
+`quality_gate`. A successful fresh gate always uses `reportPath` for the developer-facing
+`reports/test-results.md` wrapper and omits `publishedResultPath`. Crash recovery keeps that same
+wrapper meaning and additionally returns `publishedResultPath` for the manifest-verified immutable
+generation's `clean-quality-results.json`. The immutable path is machine-result evidence; it never
+replaces, renames, or falls back for the human wrapper.
 
 Citation ranges are not repaired by hand. MCP `citation_fix(repo_id=<id>,
 contract_path=<enclosure contract>, dry_run=true|false)` regenerates every range that can be

@@ -231,6 +231,14 @@ const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, "project
   "projection.analytics.engineProcesses[].retryArgs": "the retry call's own kwargs",
   "projection.analytics.engineProcesses[].sourceLineage.recoveries[].args":
     "the contract-addressed worktree_sync call's own kwargs",
+  "projection.analytics.series[].discardedSubTasks[].proof.childJson":
+    "the accepted JSON source digest is preserved as an opaque proof record",
+  "projection.analytics.series[].discardedSubTasks[].proof.childMarkdown":
+    "the accepted Markdown source digest is preserved as an opaque proof record",
+  "projection.analytics.taskDocuments[].discardedSubTasks[].proof.childJson":
+    "the task projection preserves the opaque JSON source proof",
+  "projection.analytics.taskDocuments[].discardedSubTasks[].proof.childMarkdown":
+    "the task projection preserves the opaque Markdown source proof",
   "projection.enclosures[].lifecycleOperation.result":
     "the lifecycle operation result is the underlying closeout or integration payload",
   "projection.enclosures[].lifecycleOperation.legalControls[]":
@@ -328,14 +336,20 @@ const VOCABULARIES: Record<
     "waiting",
     "in-flight",
   ],
-  "projection.enclosures[].lifecycleOperation.kind": ["closeout", "integrate"],
+  "projection.enclosures[].lifecycleOperation.kind": [
+    "closeout",
+    "integrate",
+    "direct-landing",
+  ],
   "projection.enclosures[].lifecycleOperation.status": [
     "queued",
     "running",
     "input-required",
+    "termination-required",
     "completed",
     "failed",
     "cancelled",
+    "unreadable",
   ],
   "projection.enclosures[].lifecycleOperation.phase": [
     "queued",
@@ -352,9 +366,58 @@ const VOCABULARIES: Record<
     "integration-quality",
     "source-merge",
     "contract-finalization",
+    "door-publication",
+    "termination-required",
+    "direct-preflight",
+    "direct-memory-commit",
+    "direct-ledger-commit",
+    "direct-terminal-publication",
     "completed",
     "failed",
     "cancelled",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].invalidation.outcome": [
+    "persisted-empty",
+    "already-empty",
+    "not-created",
+    "recovered-malformed",
+    "would-recover-malformed",
+    "would-persist-empty",
+    "failed",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].invalidation.diagnostic.kind": [
+    "task",
+    "door",
+    "series",
+    "projection",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].invalidation.diagnostic.state": [
+    "missing",
+    "unreadable",
+    "invalid",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].rebuild.outcome": [
+    "published",
+    "already-current",
+    "source-changed",
+    "source-unreadable",
+    "would-publish",
+    "not-attempted",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].rebuild.sourceClassification": [
+    "active",
+    "terminal",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].rebuild.sourceProblems[].kind": [
+    "task",
+    "door",
+    "series",
+    "projection",
+  ],
+  "projection.enclosures[].lifecycleOperation.projectionEffects[].rebuild.sourceProblems[].state": [
+    "missing",
+    "unreadable",
+    "invalid",
   ],
 };
 

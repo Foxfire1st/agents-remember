@@ -73,7 +73,7 @@ At task start the agent orients and checks memory health:
 
 ```text
 context_packet(repo_id="my-app")
-memory_quality_check(repo_id="my-app")
+memory_quality_check(request={"mode":"sync", "repo_id":"my-app"})
 ```
 
 It then reads the source file and its onboarding note together before proposing a change. After the change is approved and lands, the onboarding is refreshed and re-verified against the new commit — so the note stays true to the code.
@@ -247,7 +247,8 @@ CONTRIBUTING.md for the tier table and staged-content contract.
 
 Agents Remember acceptance runs only through that Dagger graph. Keep
 `orchestration.qualityGate.executor` set to `"dagger"`; a direct host invocation of
-pytest or the Python wrapper is refused, not treated as diagnostic evidence.
+pytest or the Python wrapper is refused. Direct targeted Vitest unit/component runs are supported
+as fast diagnostic loops, but they do not create acceptance, coverage, or lifecycle evidence.
 Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
 full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
 `diff-base`; the public Dagger function refuses an empty base instead of comparing

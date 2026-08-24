@@ -96,6 +96,8 @@ describe("DetailPanel master series navigation (6g)", () => {
           reason: "No implementation was needed",
           discardedAt: "2026-08-24T12:00:00+00:00",
           proof: {
+            childJson: { state: "missing" },
+            childMarkdown: { state: "missing" },
             version: "task-unstarted-evidence/v1",
             taskDocumentRef: {
               repository: "repo-a",

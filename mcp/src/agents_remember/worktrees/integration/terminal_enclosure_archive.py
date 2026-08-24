@@ -702,10 +702,7 @@ def _cleanup_request_id(
     contract_sha256: str,
 ) -> str:
     payload = (
-        f"{publication_request_id}\n"
-        f"{operation}\n"
-        f"{arguments.model_dump_json()}\n"
-        f"{contract_sha256}\n"
+        f"{publication_request_id}\n{operation}\n{arguments.model_dump_json()}\n{contract_sha256}\n"
     ).encode()
     return _sha256(payload)
 

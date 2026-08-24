@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
+from agents_remember.models.memory import (
+    MemoryQualityCheckRequest,
+    MemoryQualityPollRequest,
+    MemoryQualityStartRequest,
+    MemoryQualitySyncRequest,
+)
+from pydantic import TypeAdapter, ValidationError
 from test_mcp_registration_wiring import RegistrationWiringTests
 
 
@@ -306,43 +316,110 @@ class RegistrationWiringTests1(RegistrationWiringTests):
         recorder = self.invoke(
             "memory_quality_check",
             "agents_remember.mcp.registration.memory.memory_quality_check_payload",
-            {"repo_id": "agents-remember"},
+            {"request": {"mode": "sync", "repo_id": "agents-remember"}},
         )
 
         self.assertEqual(
-            recorder.kwargs, {"checks": None, "detail_limit": 50, "contract_path": None}
+            recorder.args,
+            (
+                self.config,
+                MemoryQualitySyncRequest(mode="sync", repo_id="agents-remember"),
+            ),
         )
+        self.assertEqual(recorder.kwargs, {})
 
-    def test_memory_quality_check_wait_false_starts_a_background_run(self) -> None:
+    def test_memory_quality_check_start_mode_starts_a_background_run(self) -> None:
         recorder = self.invoke(
             "memory_quality_check",
             "agents_remember.mcp.registration.memory.memory_quality_check_start_payload",
-            {"repo_id": "agents-remember", "wait": False},
+            {"request": {"mode": "start", "repo_id": "agents-remember"}},
         )
-        self.assertEqual(recorder.args, (self.config, "agents-remember"))
         self.assertEqual(
-            recorder.kwargs, {"checks": None, "detail_limit": 50, "contract_path": None}
+            recorder.args,
+            (
+                self.config,
+                MemoryQualityStartRequest(mode="start", repo_id="agents-remember"),
+            ),
         )
+        self.assertEqual(recorder.kwargs, {})
 
     def test_memory_quality_check_run_id_polls_the_run(self) -> None:
         recorder = self.invoke(
             "memory_quality_check",
             "agents_remember.mcp.registration.memory.memory_quality_check_poll_payload",
-            {"repo_id": "agents-remember", "run_id": "abc123"},
+            {
+                "request": {
+                    "mode": "poll",
+                    "repo_id": "agents-remember",
+                    "run_id": "abc123",
+                }
+            },
         )
-        self.assertEqual(recorder.args, ("agents-remember", "abc123"))
+        self.assertEqual(
+            recorder.args,
+            (
+                self.config,
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="agents-remember",
+                    run_id="abc123",
+                ),
+            ),
+        )
         self.assertEqual(recorder.kwargs, {})
 
     def test_memory_quality_check_forwards_a_named_subset(self) -> None:
         recorder = self.invoke(
             "memory_quality_check",
             "agents_remember.mcp.registration.memory.memory_quality_check_payload",
-            {"repo_id": "agents-remember", "checks": ["drift"], "detail_limit": 5},
+            {
+                "request": {
+                    "mode": "sync",
+                    "repo_id": "agents-remember",
+                    "checks": ["drift"],
+                    "detail_limit": 5,
+                }
+            },
         )
 
         self.assertEqual(
-            recorder.kwargs, {"checks": ["drift"], "detail_limit": 5, "contract_path": None}
+            recorder.args,
+            (
+                self.config,
+                MemoryQualitySyncRequest(
+                    mode="sync",
+                    repo_id="agents-remember",
+                    checks=["drift"],
+                    detail_limit=5,
+                ),
+            ),
         )
+        self.assertEqual(recorder.kwargs, {})
+
+    def test_memory_quality_poll_rejects_explicit_start_fields_before_dispatch(self) -> None:
+        adapter = TypeAdapter(MemoryQualityCheckRequest)
+        for field, value in (
+            ("checks", []),
+            ("detail_limit", 50),
+            ("contract_path", None),
+        ):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                adapter.validate_python(
+                    {
+                        "mode": "poll",
+                        "repo_id": "agents-remember",
+                        "run_id": "run-1",
+                        field: value,
+                    }
+                )
+
+    def test_memory_quality_tool_schema_exposes_the_three_request_modes(self) -> None:
+        tools = {tool.name: tool for tool in asyncio.run(self.server.list_tools())}
+        schema = json.dumps(tools["memory_quality_check"].inputSchema)
+        self.assertIn('"sync"', schema)
+        self.assertIn('"start"', schema)
+        self.assertIn('"poll"', schema)
+        self.assertIn('"discriminator"', schema)
 
     def test_route_index_refresh_writes_unless_previewed(self) -> None:
         recorder = self.invoke(
@@ -364,11 +441,6 @@ class RegistrationWiringTests1(RegistrationWiringTests):
         """
         for tool, builder, extra in (
             ("drift_check", "drift_check_payload", {"detail_limit": 50}),
-            (
-                "memory_quality_check",
-                "memory_quality_check_payload",
-                {"checks": None, "detail_limit": 50},
-            ),
             ("route_index_refresh", "route_index_refresh_payload", {"dry_run": False}),
         ):
             with self.subTest(tool=tool):
@@ -379,6 +451,30 @@ class RegistrationWiringTests1(RegistrationWiringTests):
                 )
 
                 self.assertEqual(recorder.kwargs, {**extra, "contract_path": "/coord/leaf.md"})
+
+        recorder = self.invoke(
+            "memory_quality_check",
+            "agents_remember.mcp.registration.memory.memory_quality_check_payload",
+            {
+                "request": {
+                    "mode": "sync",
+                    "repo_id": "agents-remember",
+                    "contract_path": "/coord/leaf.md",
+                }
+            },
+        )
+        self.assertEqual(
+            recorder.args,
+            (
+                self.config,
+                MemoryQualitySyncRequest(
+                    mode="sync",
+                    repo_id="agents-remember",
+                    contract_path="/coord/leaf.md",
+                ),
+            ),
+        )
+        self.assertEqual(recorder.kwargs, {})
 
     def test_memory_init_initializes_git_by_default(self) -> None:
         recorder = self.invoke(

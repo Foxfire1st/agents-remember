@@ -366,17 +366,19 @@ class CleanQualityExecutorTests(unittest.TestCase):
             manifest_path.write_text(
                 json.dumps(
                     {
+                        "schemaVersion": "1.0",
                         "generation": "invalid",
                         "files": {"result.json": {"sha256": "", "size": 0}},
                     }
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(RuntimeError, "generation id is invalid"):
+            with self.assertRaisesRegex(RuntimeError, "no complete Dagger report"):
                 clean_quality_executor.published_report_path(reports, "result.json")
 
             generation = "a" * 64
             manifest = {
+                "schemaVersion": "1.0",
                 "generation": generation,
                 "files": {"result.json": {"sha256": "0" * 64, "size": 1}},
             }

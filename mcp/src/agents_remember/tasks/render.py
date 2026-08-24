@@ -14,8 +14,6 @@ normalization that would corrupt blank lines inside code fences).
 
 from __future__ import annotations
 
-import re
-
 from .document import (
     CodeExample,
     Decision,
@@ -225,11 +223,12 @@ def _execution_graph_lines(
         f"- Wave {index}: " + ", ".join(_graph_node_label(node) for node in wave)
         for index, wave in enumerate(graph.derived_waves(), start=1)
     ]
+    leaf_ids = _mermaid_leaf_ids(graph)
     return [
         "```mermaid",
         "flowchart TD",
-        *_mermaid_node_lines(graph, titles),
-        *_mermaid_edge_lines(graph),
+        *_mermaid_node_lines(graph, titles, leaf_ids),
+        *_mermaid_edge_lines(graph, leaf_ids),
         "```",
         "",
         "### Nodes",
@@ -281,8 +280,16 @@ def _mermaid_subgraph_id(first_index: int) -> str:
     return f"sg{first_index}"
 
 
-def _mermaid_leaf_id(leaf: str) -> str:
-    return "leaf_" + re.sub(r"[^A-Za-z0-9_-]", "_", leaf)
+def _mermaid_leaf_ids(
+    graph: SprintExecutionGraph,
+) -> dict[tuple[SprintExecutionNode, str], str]:
+    """Private leaf ids allocated from canonical node and within-node ordinals."""
+
+    return {
+        (node, leaf): f"n{node_index}_l{leaf_index}"
+        for node_index, node in enumerate(graph.nodes)
+        for leaf_index, leaf in enumerate(node.leafIds)
+    }
 
 
 def _mermaid_master_order(graph: SprintExecutionGraph) -> list[TaskDocumentRef]:
@@ -300,7 +307,11 @@ def _mermaid_master_order(graph: SprintExecutionGraph) -> list[TaskDocumentRef]:
     return ordered
 
 
-def _mermaid_node_lines(graph: SprintExecutionGraph, titles: SprintGraphTitles | None) -> list[str]:
+def _mermaid_node_lines(
+    graph: SprintExecutionGraph,
+    titles: SprintGraphTitles | None,
+    leaf_ids: dict[tuple[SprintExecutionNode, str], str],
+) -> list[str]:
     index_of = {node: index for index, node in enumerate(graph.nodes)}
     wave_of = {node: index for index, wave in enumerate(graph.derived_waves()) for node in wave}
     lines: list[str] = []
@@ -312,7 +323,7 @@ def _mermaid_node_lines(graph: SprintExecutionGraph, titles: SprintGraphTitles |
             lines.append(f'{_mermaid_node_id(index_of[master_nodes[0]])}["{label}"]')
             continue
         lines.append(f'subgraph {_mermaid_subgraph_id(index_of[master_nodes[0]])}["{label}"]')
-        lines.extend(_mermaid_segment_lines(master_nodes, wave_of, index_of, titles))
+        lines.extend(_mermaid_segment_lines(master_nodes, wave_of, index_of, titles, leaf_ids))
         lines.append("end")
     return lines
 
@@ -322,18 +333,22 @@ def _mermaid_segment_lines(
     wave_of: dict[SprintExecutionNode, int],
     index_of: dict[SprintExecutionNode, int],
     titles: SprintGraphTitles | None,
+    leaf_ids: dict[tuple[SprintExecutionNode, str], str],
 ) -> list[str]:
     """One leaf node line per segment leaf, ordered by wave then declaration."""
     lines: list[str] = []
     for segment in sorted(master_nodes, key=lambda node: (wave_of[node], index_of[node])):
         for leaf in segment.leafIds:
-            leaf_title = titles.leaf_titles.get(leaf, leaf) if titles else leaf
+            leaf_title = titles.leaf_titles.get((segment.ref, leaf), leaf) if titles else leaf
             leaf_label = _mermaid_label(f"{leaf} — {leaf_title}", _MERMAID_LEAF_TITLE_MAX)
-            lines.append(f'{_mermaid_leaf_id(leaf)}["{leaf_label}"]')
+            lines.append(f'{leaf_ids[(segment, leaf)]}["{leaf_label}"]')
     return lines
 
 
-def _mermaid_edge_lines(graph: SprintExecutionGraph) -> list[str]:
+def _mermaid_edge_lines(
+    graph: SprintExecutionGraph,
+    leaf_ids: dict[tuple[SprintExecutionNode, str], str],
+) -> list[str]:
     index_of = {node: index for index, node in enumerate(graph.nodes)}
     lines: list[str] = []
     for edge in graph.edges:
@@ -341,14 +356,16 @@ def _mermaid_edge_lines(graph: SprintExecutionGraph) -> list[str]:
         successor = graph.resolve_endpoint(edge.successor)
         reason = _mermaid_label(edge.reason, _MERMAID_REASON_MAX)
         lines.append(
-            f"{_mermaid_endpoint_id(index_of, predecessor, edge.predecessor)} -->|{reason}| "
-            f"{_mermaid_endpoint_id(index_of, successor, edge.successor)}"
+            f"{_mermaid_endpoint_id(index_of, leaf_ids, predecessor, edge.predecessor)} "
+            f"-->|{reason}| "
+            f"{_mermaid_endpoint_id(index_of, leaf_ids, successor, edge.successor)}"
         )
     return lines
 
 
 def _mermaid_endpoint_id(
     index_of: dict[SprintExecutionNode, int],
+    leaf_ids: dict[tuple[SprintExecutionNode, str], str],
     resolved: SprintExecutionNode,
     endpoint: TaskDocumentRef | SprintExecutionEndpoint,
 ) -> str:
@@ -359,7 +376,7 @@ def _mermaid_endpoint_id(
     """
 
     if isinstance(endpoint, SprintExecutionEndpoint) and endpoint.leafId is not None:
-        return _mermaid_leaf_id(endpoint.leafId)
+        return leaf_ids[(resolved, endpoint.leafId)]
     if resolved.kind == "master":
         return _mermaid_node_id(index_of[resolved])
     return _mermaid_subgraph_id(index_of[resolved])

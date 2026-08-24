@@ -25,11 +25,14 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.kernel.memory_ledger import LedgerError, create_initial_ledger, write_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
+from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.door import CloseoutDoorRequest
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
 from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
+)
+from agents_remember.worktrees.direct_landing import (
     direct_landing as _production_direct_landing,
 )
 from agents_remember.worktrees.integration.closeout_door_source import door_task_context
@@ -58,9 +61,7 @@ from test_worktree_support import git, init_repo
 def direct_landing(*args, **kwargs):
     """Exercise direct landing below the independently covered scheduling fence."""
 
-    with mock.patch(
-        "agents_remember.worktrees.direct_landing.require_first_ready_generation"
-    ):
+    with mock.patch("agents_remember.worktrees.direct_landing.require_first_ready_generation"):
         return _production_direct_landing(*args, **kwargs)
 
 
@@ -275,6 +276,7 @@ class DirectLandingTests(unittest.TestCase):
             contract,
         )
         self.assertEqual(preview["state"], "would-land")
+        self.assertEqual(DirectLandingResponse.model_validate(preview).state, "would-land")
         self.assertEqual(preview["codeCommit"], fixture["code_head"])
         self.assertEqual(_byte_tree(root), before_preview)
         before = git(memory, "rev-parse", "HEAD")
@@ -295,6 +297,7 @@ class DirectLandingTests(unittest.TestCase):
             contract,
         )
         self.assertEqual(landed["state"], "landed")
+        self.assertEqual(DirectLandingResponse.model_validate(landed).state, "landed")
         self.assertEqual(landed["codeCommit"], fixture["code_head"])
         self.assertTrue(landed["memoryContentCommit"])
         self.assertTrue(landed["ledgerCommit"])

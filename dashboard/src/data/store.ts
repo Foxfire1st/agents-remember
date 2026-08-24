@@ -389,6 +389,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
       enclosures: {},
       providers: {},
       activeWorktreeGroups: [],
+      closeoutQueues: [],
       metrics: null,
       analytics: null,
       servingBuild: null,

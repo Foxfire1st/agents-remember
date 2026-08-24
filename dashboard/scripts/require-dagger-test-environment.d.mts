@@ -6,4 +6,4 @@ export function daggerTestEnvironmentError(
   readAttestation?: (path: string) => string,
 ): string | null;
 
-export function requireDaggerTestEnvironment(): void;
+export function requireDaggerTestEnvironment(subject?: string): void;

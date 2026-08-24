@@ -755,9 +755,7 @@ def _cleanup_with_guard(
             terminal_authority = (
                 None
                 if args.dry_run
-                else terminal_contract_authority_if_present(
-                    load_contract(contract.contract_path)
-                )
+                else terminal_contract_authority_if_present(load_contract(contract.contract_path))
             )
 
             def publish(
@@ -815,9 +813,7 @@ def _terminal_archive_observation(
         return terminal_archive_required_result(
             contract,
             operation="worktree_cleanup",
-            arguments=TerminalWorktreeCleanupArguments(
-                teardown_providers=teardown_providers
-            ),
+            arguments=TerminalWorktreeCleanupArguments(teardown_providers=teardown_providers),
             dry_run=False,
         )
 

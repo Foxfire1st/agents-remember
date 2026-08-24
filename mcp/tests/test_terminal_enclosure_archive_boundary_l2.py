@@ -160,9 +160,7 @@ def test_public_terminal_operation_retries_same_disposition_after_destructive_cu
             raise RuntimeError("forced cut after destructive outputs")
         write_contract(path, value)
 
-    publication_module = (
-        cleanup_module if operation == "worktree_cleanup" else abandon_module
-    )
+    publication_module = cleanup_module if operation == "worktree_cleanup" else abandon_module
     accepted_force = operation == "worktree_abandon"
     with mock.patch.object(
         publication_module,
@@ -252,9 +250,7 @@ def _start_closeout_record(contract: WorktreeContract) -> LifecycleOperationStor
         launcher=lambda *_: None,
         fixture_bypass_scheduling=True,
     )
-    return LifecycleOperationStore(
-        operation_record_path(contract.worktree_group, "closeout")
-    )
+    return LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
 
 
 def _assert_status_route(result: dict[str, object], contract: WorktreeContract) -> None:
@@ -289,9 +285,7 @@ def test_public_abandon_refuses_ambiguous_mutation_with_executable_status_route(
     (contract.code_worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
     store = _start_closeout_record(contract)
     store.update(with_mutation_intent)
-    store.update(
-        lambda record: record.model_copy(update={"status": "failed", "phase": "failed"})
-    )
+    store.update(lambda record: record.model_copy(update={"status": "failed", "phase": "failed"}))
     (contract.code_worktree / "candidate.txt").unlink()
 
     refused = _call_terminal_operation(config, contract, "worktree_abandon")

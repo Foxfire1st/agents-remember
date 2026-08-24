@@ -23,11 +23,11 @@ export function daggerTestEnvironmentError(
   return null;
 }
 
-export function requireDaggerTestEnvironment() {
+export function requireDaggerTestEnvironment(subject = "browser/integration test execution") {
   const error = daggerTestEnvironmentError();
   if (error !== null) {
     throw new Error(
-      `Agents Remember tests are Dagger-only; refusing host execution: ${error}. ` +
+      `Agents Remember ${subject} is Dagger-only; refusing host execution: ${error}. ` +
         "Run the pinned `dagger call quality ...` graph.",
     );
   }

@@ -170,7 +170,7 @@ Two MCP tools, both scoped to THIS leaf by passing your enclosure contract path 
 
 | Tool | What it tells you | Call |
 | --- | --- | --- |
-| `memory_quality_check` | atomically replaces the one enclosure-local checklist with full quality, missing-onboarding, drift, and route-index preview results | `memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` |
+| `memory_quality_check` | atomically replaces the one enclosure-local checklist with full quality, missing-onboarding, drift, and route-index preview results | `memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>"})` |
 | `route_index_refresh` | applies stale `overview.index.json` files named by that checklist | `route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` |
 
 `contract_path` is what points them at your memory worktree. **Without it they resolve the OFFICIAL

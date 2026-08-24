@@ -192,6 +192,59 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
             [("Title atomic-f", "the atomic block gates the late segment")],
         )
 
+    def test_duplicate_local_leaf_numbers_keep_master_qualified_titles(self) -> None:
+        write_task_doc(
+            self.coord / "tasks" / REPO / "sprint",
+            _doc(
+                id="SPRINT",
+                kind="master",
+                title="Sprint",
+                orchestrates=["master-a", "master-b"],
+                executionGraph={
+                    "nodes": [
+                        {
+                            "kind": "segment",
+                            "ref": {"repository": REPO, "path": "master-a/task.json"},
+                            "leafIds": ["L1"],
+                        },
+                        {"ref": {"repository": REPO, "path": "master-b/task.json"}},
+                    ],
+                    "edges": [
+                        {
+                            "predecessor": {
+                                "ref": {"repository": REPO, "path": "master-a/task.json"},
+                                "leafId": "L1",
+                            },
+                            "successor": {
+                                "repository": REPO,
+                                "path": "master-b/task.json",
+                            },
+                            "reason": "A leaf gates B",
+                        }
+                    ],
+                },
+            ),
+        )
+        self._master(
+            "master-a",
+            status="inProgress",
+            nature="organizational",
+            rows=[{"number": "L1", "name": "Title from A", "status": "inProgress"}],
+        )
+        self._master(
+            "master-b",
+            status="planning",
+            nature="atomic",
+            rows=[{"number": "L1", "name": "Title from B", "status": "planning"}],
+        )
+
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        sprint = next(node for node in nodes if node.id == "SPRINT")
+        view = sprint.executionGraphView
+        assert view is not None
+        segment = next(node for node in view.nodes if node.kind == "segment")
+        self.assertEqual(segment.leafTitles, ["Title from A"])
+
     def test_master_docs_by_ref_skips_invalid_master_payloads(self) -> None:
         # The invalid-master skip branch: a kind=master payload that fails validation is
         # dropped from the join table (a corrupted master must not break the projection).

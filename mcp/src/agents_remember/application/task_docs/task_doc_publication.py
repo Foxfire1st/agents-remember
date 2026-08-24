@@ -10,7 +10,6 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout_projection import TaskDocProjectionEffect
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
-    SprintGraphTitles,
     TaskDocSourceReadError,
     TaskDocSourceSnapshot,
     TaskDocument,
@@ -28,6 +27,7 @@ from agents_remember.worktrees.task_fact_publication import (
     validate_task_fact_mutation,
 )
 
+from .task_doc_graph_titles import require_single_graph_document
 from .task_doc_queue_scope import TaskDocScopeChange, resolve_projection_scope_union
 from .task_doc_route_review import TaskDocError
 
@@ -138,6 +138,8 @@ def task_doc_publication_transaction(
 ) -> TaskDocPublicationTransaction:
     """Build the sole exact transaction for one ordinary/remove task-doc candidate."""
 
+    graph_document = require_single_graph_document(context.documents)
+    graph = graph_document.executionGraph if graph_document is not None else None
     overrides = _task_doc_publication_overrides(context)
     return TaskDocPublicationTransaction(
         coordination_root=context.config.coordination_root,
@@ -154,7 +156,11 @@ def task_doc_publication_transaction(
             lambda: write_task_docs(
                 context.task_root,
                 context.documents,
-                graph_titles=_batch_graph_titles(context.task_root, context.documents),
+                graph_titles=(
+                    read_graph_titles(context.task_root.parents[1], graph)
+                    if graph is not None
+                    else None
+                ),
             )
         ),
     )
@@ -188,8 +194,7 @@ def task_doc_scope_changes(
             ) from exc
         if candidate.repo != repo_id:
             raise TaskDocError(
-                f"task document {ref.key} declares repo {candidate.repo!r}, "
-                f"expected {repo_id!r}"
+                f"task document {ref.key} declares repo {candidate.repo!r}, expected {repo_id!r}"
             )
         if original is not None and original.repo != repo_id:
             raise TaskDocError(
@@ -247,13 +252,3 @@ def _task_doc_publication_overrides(
         )
         overrides[ref] = document
     return overrides
-
-
-def _batch_graph_titles(
-    task_root: Path,
-    documents: list[TaskDocument],
-) -> SprintGraphTitles | None:
-    for document in documents:
-        if document.executionGraph is not None:
-            return read_graph_titles(task_root.parents[1], document.executionGraph)
-    return None

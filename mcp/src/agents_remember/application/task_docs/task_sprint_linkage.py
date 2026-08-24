@@ -42,11 +42,9 @@ from agents_remember.tasks import (
     SprintExecutionEndpoint,
     SprintExecutionGraph,
     SprintExecutionNode,
-    SprintGraphTitles,
     SubTaskRef,
     TaskDocSourceSnapshot,
     TaskDocument,
-    build_graph_titles,
     completion_blockers,
     json_path_for,
     markdown_path_for,
@@ -71,6 +69,7 @@ from agents_remember.tasks.serving_preflight import (
     require_serving_topology_schema,
 )
 
+from .task_doc_graph_titles import build_publication_batch_graph_titles
 from .task_doc_publication import (
     TaskDocPublicationTransaction,
     preview_task_doc_transaction_projection_effects,
@@ -243,6 +242,7 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "executionNatureAsserted": candidate_master is not None,
     }
     if request.dry_run:
+        build_publication_batch_graph_titles(documents)
         transaction = _publication_transaction(
             request,
             overrides,
@@ -315,6 +315,7 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
         "masterResolved": master is not None,
     }
     if request.dry_run:
+        build_publication_batch_graph_titles(documents)
         transaction = _publication_transaction(
             request,
             overrides,
@@ -700,22 +701,11 @@ def _validate_candidate(
         raise SprintLinkageError(f"{exc.status}: {exc}") from exc
 
 
-def _batch_graph_titles(
-    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]],
-) -> SprintGraphTitles | None:
-    """Join titles for the sprint in a linkage batch from its in-memory masters."""
-
-    masters = {ref: document for ref, _root, document in documents}
-    for _ref, _root, document in documents:
-        if document.executionGraph is not None:
-            return build_graph_titles(document.executionGraph, masters)
-    return None
-
-
 def _publish(
     request: SprintLinkageRequest,
     batch: _LinkagePublication,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    graph_titles = build_publication_batch_graph_titles(batch.documents)
     publication = publish_task_doc_transaction_and_refresh(
         _publication_transaction(
             request,
@@ -723,7 +713,7 @@ def _publish(
             batch.source_snapshots,
             lambda: write_task_doc_batch(
                 [(root, document) for _ref, root, document in batch.documents],
-                graph_titles=_batch_graph_titles(batch.documents),
+                graph_titles=graph_titles,
             ),
         )
     )

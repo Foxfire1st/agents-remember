@@ -62,10 +62,12 @@ def direct_landing_tool(
         return _direct_error_payload(exc, recovery={})
     configured = admit_configured_contract(config, request.contract_path)
     if isinstance(configured, ConfiguredContractRefused):
-        return project_configured_contract_refusal(
-            configured,
-            operation="direct_landing",
-            address=LifecycleOperationPublicAddress("direct_landing", "direct-landing"),
+        return _direct_landing_refusal(
+            project_configured_contract_refusal(
+                configured,
+                operation="direct_landing",
+                address=LifecycleOperationPublicAddress("direct_landing", "direct-landing"),
+            )
         )
     try:
         execution = execute_configured_contract_operation(
@@ -89,14 +91,28 @@ def direct_landing_tool(
             recovery=_direct_recovery_action(config, request),
         )
     return (
-        project_configured_contract_refusal(
-            execution,
-            operation="direct_landing",
-            address=LifecycleOperationPublicAddress("direct_landing", "direct-landing"),
+        _direct_landing_refusal(
+            project_configured_contract_refusal(
+                execution,
+                operation="direct_landing",
+                address=LifecycleOperationPublicAddress("direct_landing", "direct-landing"),
+            )
         )
         if isinstance(execution, ConfiguredContractRefused)
         else execution
     )
+
+
+def _direct_landing_refusal(payload: dict[str, object]) -> dict[str, object]:
+    """Keep generic refusal detail outside the closed landing-outcome field."""
+
+    result = dict(payload)
+    projected_state = result.get("state")
+    if projected_state != "refused":
+        if not isinstance(result.get("status"), str) and isinstance(projected_state, str):
+            result["status"] = projected_state
+        result["state"] = "refused"
+    return result
 
 
 def _direct_error_payload(
@@ -104,6 +120,11 @@ def _direct_error_payload(
     *,
     recovery: dict[str, object],
 ) -> dict[str, object]:
+    recovery_fields = {
+        key: value
+        for key, value in recovery.items()
+        if key not in {"ok", "operation", "state", "status", "detail"}
+    }
     return {
         "ok": False,
         "operation": "direct_landing",
@@ -112,7 +133,7 @@ def _direct_error_payload(
         "detail": error.detail,
         "expected": error.expected,
         "observed": error.observed,
-        **recovery,
+        **recovery_fields,
     }
 
 
@@ -128,7 +149,11 @@ def _direct_recovery_action(
     try:
         record = direct_landing_store(contract).read()
     except LifecycleOperationReadError as error:
-        return lifecycle_journal_read_decision("direct-landing", error).payload()
+        decision = lifecycle_journal_read_decision("direct-landing", error)
+        return {
+            **{key: value for key, value in decision.payload().items() if key != "state"},
+            "lifecycleOperation": decision.projection().model_dump(mode="json", exclude_none=True),
+        }
     if record is None:
         return {}
     controls = legal_operation_controls(contract, record)

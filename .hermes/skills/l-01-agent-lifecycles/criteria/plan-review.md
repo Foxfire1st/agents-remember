@@ -39,19 +39,32 @@ A register entry whose derivation cannot be reproduced, or whose classification 
 propagation / migration / user-visible unions, is a finding; the register parameterizes every
 downstream loop tier, so an understated radius under-reviews a leaf. A priority row without a
 win/urgency rationale, affected dependents, evidence, author, and confidence is also a finding.
+For every schedulable candidate, re-derive exactly one effective priority row: use its
+candidate-specific row when one exists, otherwise use the owning master's row as the inherited
+default. A candidate row overrides rather than combines with the master default, and duplicate
+current rows for the same subject are invalid. Portfolio-wide comparison remains an orchestrator
+judgment; graph order and stable task order are only equal-grade tie-breaks.
 
 ### PR-4 — Order-respects-edges
 
-**Validate the canonical graph and derive its waves mechanically.** Its node set must equal the
-sprint's `orchestrates` membership and the classified master set, and every sprint subTasks row's
-`masterRef` must resolve to a commanded master — typed rows, `orchestrates`, and graph nodes
-agree exactly (`task_doc.linkage_report` / `linkageFacts` on `task_doc.get` re-derives the drift
-mechanically; a finding it already reports is still a plan finding, not an excuse). Every
-predecessor edge must be
-supported by the relation evidence, no cycle may exist, and the displayed waves must equal the
-stable topological derivation rather than a persisted/manual position. An atomic blocker must wait
-for every predecessor, expose no intermediate state, and release successors only after its one
-landing. Stable node order may break an equal-priority tie but must never masquerade as priority.
+**Validate the adopted topology choice and derive its execution mechanically.** In both modes,
+every commanded master has an explicit `executionNature`, the typed subTasks `masterRef` rows agree
+exactly with `orchestrates`, and the plan carries evidence-backed dependency, priority, and
+coherence judgments (`task_doc.linkage_report` / `linkageFacts` on `task_doc.get` re-derives the
+linkage facts; a finding it already reports is still a plan finding, not an excuse).
+
+When an `executionGraph` exists, its node set must also equal `orchestrates` and the classified
+master set. Every predecessor edge must be supported by relation evidence, no cycle may exist, and
+the displayed waves must equal the stable topological derivation rather than a persisted/manual
+position. An atomic blocker must wait for every predecessor, expose no intermediate state, and
+release successors only after its one landing. Stable node order may break an equal-priority tie
+but must never masquerade as priority.
+
+When no `executionGraph` exists, require an explicit, evidence-backed choice of the graph-less
+atomic-sequential default: the canonical commanded-master order runs one master through full
+integration before the next starts. Graph absence does not excuse missing classifications or
+planning judgments, and the author must not fabricate an edge merely to prove that planning
+occurred.
 
 ### PR-5 — Honesty of the findings section
 

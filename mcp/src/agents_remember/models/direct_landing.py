@@ -13,6 +13,7 @@ from agents_remember.models.closeout_input import (
     EffectiveCloseoutInput,
     ResolvedCloseoutPlan,
 )
+from agents_remember.models.closeout_projection import TaskDocProjectionEffect
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 
 
@@ -25,11 +26,16 @@ class DirectLandingResponse(ToolResponse):
     """
 
     operation: Literal["direct_landing"] = "direct_landing"
-    state: str
+    state: Literal["landed", "would-land", "refused"]
     summary: str = Field(default="", max_length=8192)
     status: str | None = None
     detail: str | None = Field(default=None, max_length=8192)
     contractPath: str | None = None
+    doorGenerationId: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    projectionEffects: list[TaskDocProjectionEffect] | None = Field(
+        default=None,
+        max_length=8,
+    )
     codeCommit: str | None = None
     memoryContentCommit: str | None = None
     ledgerCommit: str | None = None

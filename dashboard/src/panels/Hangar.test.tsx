@@ -151,6 +151,7 @@ describe("Hangar renders worktree truth (L11)", () => {
             kind: "closeout",
             legalControls: [],
             phase: "quality",
+            projectionEffects: [],
             reportPath: "reports/closeout-operation.log",
             status: "running",
           },

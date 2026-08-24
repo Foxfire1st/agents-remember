@@ -18,8 +18,8 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.models.lifecycles.operation import (
-    IntegrationPublicationIntent,
     IntegrationOperationAuthority,
+    IntegrationPublicationIntent,
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef

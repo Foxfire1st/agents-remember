@@ -76,6 +76,7 @@ from agents_remember.mcp.tools import memory as memory_payload_tools
 from agents_remember.mcp.tools.base import _tool_payload
 from agents_remember.models.base import FlexibleResponseModel
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
+from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.models.structural.agent import (
     DispatchAgentRequest,
     RenameChildRequest,
@@ -381,7 +382,10 @@ def _simple_payloads(config) -> dict[str, dict]:
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, TaskRef(repo_id=REPO)),
         "drift_check": tools.drift_check_payload(config, REPO),
-        "memory_quality_check": tools.memory_quality_check_payload(config, REPO),
+        "memory_quality_check": tools.memory_quality_check_payload(
+            config,
+            MemoryQualitySyncRequest(mode="sync", repo_id=REPO),
+        ),
         "citation_fix": citation_fix,
         "route_index_refresh": tools.route_index_refresh_payload(config, REPO, dry_run=True),
         "memory_init": tools.memory_init_payload(config, REPO),

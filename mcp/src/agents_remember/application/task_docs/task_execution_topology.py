@@ -25,10 +25,8 @@ from agents_remember.tasks import (
     SprintExecutionEndpoint,
     SprintExecutionGraph,
     SprintExecutionNode,
-    SprintGraphTitles,
     TaskDocSourceSnapshot,
     TaskDocument,
-    build_graph_titles,
     completion_blockers,
     json_path_for,
     leaf_placement_facts,
@@ -55,6 +53,8 @@ from agents_remember.worktrees.queue.closeout_queue_evidence import (
     JUDGMENT_REGISTER_SECTION,
     planning_authorities,
 )
+
+from .task_doc_graph_titles import build_publication_batch_graph_titles
 
 
 class ExecutionTopologyError(AgentsRememberError):
@@ -265,6 +265,7 @@ def author_execution_graph(request: ExecutionTopologyAuthoringRequest) -> dict[s
             validate_task_doc_transaction,
         )
 
+        build_publication_batch_graph_titles(prepared.documents)
         transaction = _authoring_transaction(request, prepared, lambda: [])
         validate_task_doc_transaction(transaction)
         result["projectionEffects"] = [
@@ -346,18 +347,6 @@ def _prepare_authoring(
     )
 
 
-def _authoring_batch_titles(
-    documents: list[tuple[TaskDocumentRef, Path, TaskDocument]],
-) -> SprintGraphTitles | None:
-    """Join titles for the sprint in an authoring batch from its in-memory masters."""
-
-    masters = {ref: document for ref, _root, document in documents}
-    for _ref, _root, document in documents:
-        if document.executionGraph is not None:
-            return build_graph_titles(document.executionGraph, masters)
-    return None
-
-
 def _publish_authoring(
     request: ExecutionTopologyAuthoringRequest,
     prepared: _AuthoringCandidate,
@@ -366,13 +355,14 @@ def _publish_authoring(
         publish_task_doc_transaction_and_refresh,
     )
 
+    graph_titles = build_publication_batch_graph_titles(prepared.documents)
     publication = publish_task_doc_transaction_and_refresh(
         _authoring_transaction(
             request,
             prepared,
             lambda: write_task_doc_batch(
                 [(root, document) for _ref, root, document in prepared.documents],
-                graph_titles=_authoring_batch_titles(prepared.documents),
+                graph_titles=graph_titles,
             ),
         )
     )

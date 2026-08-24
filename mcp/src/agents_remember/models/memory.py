@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
 from agents_remember.models.drift import DriftStatus
@@ -31,9 +31,19 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     operation: Literal["memory_quality_check"] = "memory_quality_check"
     repoId: str | None = None
     onboardingRoot: str | None = None
-    # Async run envelope (L15-R7): wait=false starts a background run and the
-    # caller polls with runId; the completed envelope carries the full result.
-    status: Literal["started", "running", "completed", "failed", "run-not-found"] | None = None
+    # Async run envelope: start admits background work and poll reads it by runId;
+    # the completed envelope carries the full result.
+    status: (
+        Literal[
+            "started",
+            "running",
+            "completed",
+            "failed",
+            "run-not-found",
+            "capacity-reached",
+        ]
+        | None
+    ) = None
     runId: str | None = None
     checks: dict[str, Any] | list[dict[str, Any]] | None = None
     reportPath: str | None = Field(
@@ -47,6 +57,7 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
         default=None,
         description="Structured readiness attestation paired to the rendered curator checklist.",
     )
+    guidance: str | None = Field(default=None, max_length=8192)
     checklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
     curatorActionableCount: int | None = Field(default=None, ge=0)
     memoryRepairCount: int | None = Field(default=None, ge=0)
@@ -55,6 +66,45 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
     closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
     noteworthyFindingCount: int | None = Field(default=None, ge=0)
+
+
+class _MemoryQualityExecutionRequest(BaseModel):
+    """Fields shared by synchronous and asynchronous quality execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repo_id: str
+    checks: list[str] | None = None
+    detail_limit: int = 50
+    contract_path: str | None = None
+
+
+class MemoryQualitySyncRequest(_MemoryQualityExecutionRequest):
+    """Run one memory-quality request synchronously."""
+
+    mode: Literal["sync"]
+
+
+class MemoryQualityStartRequest(_MemoryQualityExecutionRequest):
+    """Start one bounded asynchronous memory-quality request."""
+
+    mode: Literal["start"]
+
+
+class MemoryQualityPollRequest(BaseModel):
+    """Poll one repository-owned asynchronous memory-quality request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["poll"]
+    repo_id: str
+    run_id: str
+
+
+MemoryQualityCheckRequest: TypeAlias = Annotated[
+    MemoryQualitySyncRequest | MemoryQualityStartRequest | MemoryQualityPollRequest,
+    Field(discriminator="mode"),
+]
 
 
 class CitationFixResponse(FlexibleToolResponse):

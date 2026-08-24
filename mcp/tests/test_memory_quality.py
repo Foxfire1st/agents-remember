@@ -27,6 +27,11 @@ from agents_remember.memory_quality.style.update_history import history_order_fi
 from agents_remember.memory_quality.style.update_history.history_order import (
     check_onboarding_root,
 )
+from agents_remember.models.memory import (
+    MemoryQualityPollRequest,
+    MemoryQualityStartRequest,
+    MemoryQualitySyncRequest,
+)
 from test_config import settings_payload
 
 
@@ -331,8 +336,11 @@ class MemoryQualityTests(unittest.TestCase):
 
             payload = memory_quality_check_payload(
                 config,
-                "agents-remember",
-                checks=["style.update_history.history_order"],
+                MemoryQualitySyncRequest(
+                    mode="sync",
+                    repo_id="agents-remember",
+                    checks=["style.update_history.history_order"],
+                ),
             )
 
             self.assertFalse(payload["ok"])
@@ -346,7 +354,7 @@ class MemoryQualityTests(unittest.TestCase):
 
     def test_start_and_poll_payload_builders_wrap_the_async_envelopes(self) -> None:
         with mock.patch(
-            "agents_remember.mcp.tools.memory.start_memory_quality_check_run",
+            "agents_remember.mcp.tools.memory.start_memory_quality_request",
             return_value={
                 "ok": True,
                 "operation": "memory_quality_check",
@@ -355,11 +363,14 @@ class MemoryQualityTests(unittest.TestCase):
                 "runId": "abc",
             },
         ):
-            payload = mcp_tools.memory_quality_check_start_payload(mock.Mock(), "agents-remember")
+            payload = mcp_tools.memory_quality_check_start_payload(
+                mock.Mock(),
+                MemoryQualityStartRequest(mode="start", repo_id="agents-remember"),
+            )
             self.assertEqual(payload["status"], "started")
             self.assertEqual(payload["runId"], "abc")
         with mock.patch(
-            "agents_remember.mcp.tools.memory.poll_memory_quality_check_run",
+            "agents_remember.mcp.tools.memory.poll_memory_quality_request",
             return_value={
                 "ok": False,
                 "operation": "memory_quality_check",
@@ -368,7 +379,14 @@ class MemoryQualityTests(unittest.TestCase):
                 "runId": "abc",
             },
         ):
-            payload = mcp_tools.memory_quality_check_poll_payload("agents-remember", "abc")
+            payload = mcp_tools.memory_quality_check_poll_payload(
+                mock.Mock(),
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="agents-remember",
+                    run_id="abc",
+                ),
+            )
             self.assertEqual(payload["status"], "run-not-found")
             self.assertEqual(payload["runId"], "abc")
 
@@ -380,7 +398,10 @@ class MemoryQualityTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = memory_quality_check_payload(config, "agents-remember")
+            payload = memory_quality_check_payload(
+                config,
+                MemoryQualitySyncRequest(mode="sync", repo_id="agents-remember"),
+            )
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["findingCount"], 0)

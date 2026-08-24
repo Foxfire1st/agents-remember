@@ -145,11 +145,29 @@ class ProjectionSchemaGenerationTests(unittest.TestCase):
         self.assertIn('mode: "strict";', rendered)
         self.assertNotIn("mode: string;", rendered)
 
-    def test_unsupported_constraints_report_every_nested_property_and_remediation(self) -> None:
+    def test_runtime_refinements_are_preserved_beside_the_typescript_shape(self) -> None:
         schema = json.loads(projection_types.schema_json())
         gate = schema["$defs"]["GateNode"]["properties"]
         gate["state"]["pattern"] = "^strict$"
         gate["decisions"]["items"]["minLength"] = 1
+
+        rendered = projection_types.render_typescript(
+            schema,
+            json.loads(projection_types.schema_json(projection_types.served_projection_schema())),
+        )
+
+        self.assertIn(
+            '/** JSON Schema refinements: {"pattern":"^strict$"} */\n  state:',
+            rendered,
+        )
+        self.assertIn(
+            '/** JSON Schema refinements: {"items":{"minLength":1}} */\n  decisions:',
+            rendered,
+        )
+
+    def test_unknown_constraints_still_report_the_exact_path_and_remediation(self) -> None:
+        schema = json.loads(projection_types.schema_json())
+        schema["$defs"]["GateNode"]["properties"]["state"]["format"] = "custom"
 
         with self.assertRaises(projection_types.ProjectionTypeGenerationError) as raised:
             projection_types.render_typescript(
@@ -158,12 +176,10 @@ class ProjectionSchemaGenerationTests(unittest.TestCase):
                     projection_types.schema_json(projection_types.served_projection_schema())
                 ),
             )
-
         message = str(raised.exception)
-        self.assertIn("GateNode.state: unsupported keyword 'pattern'", message)
-        self.assertIn("GateNode.decisions[]: unsupported keyword 'minLength'", message)
-        self.assertIn("render every listed constraint exactly", message)
-        self.assertIn("never widen the TypeScript type", message)
+        self.assertIn("GateNode.state: unsupported keyword 'format'", message)
+        self.assertIn("preserve and render every listed keyword exactly", message)
+        self.assertIn("never silently drop schema truth", message)
 
 
 class ProjectionSchemaDriftTests(unittest.TestCase):

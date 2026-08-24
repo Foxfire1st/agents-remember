@@ -6,10 +6,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, render_markdown, write_task_doc
-from agents_remember.tasks.execution_graph_titles import SprintGraphTitles, read_graph_titles
+from agents_remember.tasks.execution_graph_titles import (
+    SprintGraphTitles,
+    build_graph_titles,
+    read_graph_titles,
+)
 
 REPO = "repo-a"
+MASTER_A = TaskDocumentRef(repository=REPO, path="master-a/task.json")
+MASTER_B = TaskDocumentRef(repository=REPO, path="master-b/task.json")
 
 
 def _sprint(
@@ -87,22 +94,26 @@ class ExecutionGraphMermaidRenderTests(unittest.TestCase):
                 "repo-a/master-a/task.json": "Master A",
                 "repo-a/atomic-f/task.json": "Atomic F",
             },
-            leaf_titles={"A-L1": "Leaf one", "A-L2": "Leaf two", "A-L3": "Leaf three"},
+            leaf_titles={
+                (MASTER_A, "A-L1"): "Leaf one",
+                (MASTER_A, "A-L2"): "Leaf two",
+                (MASTER_A, "A-L3"): "Leaf three",
+            },
         )
         section = _graph_section(render_markdown(doc, graph_titles=titles))
         self.assertIn("```mermaid", section)
         self.assertIn("flowchart TD", section)
         # one subgraph per master box, labeled with the master title; one node per leaf
         self.assertIn('subgraph sg0["Master A"]', section)
-        self.assertIn('leaf_A-L1["A-L1 — Leaf one"]', section)
-        self.assertIn('leaf_A-L2["A-L2 — Leaf two"]', section)
-        self.assertIn('leaf_A-L3["A-L3 — Leaf three"]', section)
+        self.assertIn('n0_l0["A-L1 — Leaf one"]', section)
+        self.assertIn('n0_l1["A-L2 — Leaf two"]', section)
+        self.assertIn('n2_l0["A-L3 — Leaf three"]', section)
         self.assertIn("end", section)
         # the atomic master is a single lump node labeled with its title
         self.assertIn('n1["Atomic F"]', section)
         # labeled edges
-        self.assertIn("leaf_A-L1 -->|early segment lands before the atomic block| n1", section)
-        self.assertIn("n1 -->|the atomic block gates the late segment| leaf_A-L3", section)
+        self.assertIn("n0_l0 -->|early segment lands before the atomic block| n1", section)
+        self.assertIn("n1 -->|the atomic block gates the late segment| n2_l0", section)
         # the compact machine-readable list form stays alongside the diagram
         self.assertIn("### Nodes", section)
         self.assertIn("### Dependencies", section)
@@ -121,7 +132,7 @@ class ExecutionGraphMermaidRenderTests(unittest.TestCase):
         )
         section = _graph_section(render_markdown(doc))
         self.assertIn('subgraph sg0["repo-a/master-a/task.json"]', section)
-        self.assertIn('leaf_A-L1["A-L1 — A-L1"]', section)
+        self.assertIn('n0_l0["A-L1 — A-L1"]', section)
 
     def test_render_is_deterministic_and_wave_ordered(self) -> None:
         doc = _sprint(
@@ -149,6 +160,63 @@ class ExecutionGraphMermaidRenderTests(unittest.TestCase):
         # the subgraph (wave-1 master) is emitted before the wave-2 lump node
         section = _graph_section(first)
         self.assertLess(section.index("subgraph sg0"), section.index('n1["'))
+
+    def test_private_leaf_ids_do_not_collapse_sanitizer_equivalent_labels(self) -> None:
+        doc = _sprint(
+            nodes=[
+                {
+                    "kind": "segment",
+                    "ref": MASTER_A.model_dump(),
+                    "leafIds": ["a/b"],
+                },
+                {"ref": {"repository": REPO, "path": "atomic-f/task.json"}},
+                {
+                    "kind": "segment",
+                    "ref": MASTER_A.model_dump(),
+                    "leafIds": ["a?b"],
+                },
+            ],
+            edges=[
+                {
+                    "predecessor": {"ref": MASTER_A.model_dump(), "leafId": "a/b"},
+                    "successor": {"ref": {"repository": REPO, "path": "atomic-f/task.json"}},
+                    "reason": "first leaf gates the lump",
+                },
+                {
+                    "predecessor": {"ref": {"repository": REPO, "path": "atomic-f/task.json"}},
+                    "successor": {"ref": MASTER_A.model_dump(), "leafId": "a?b"},
+                    "reason": "lump gates the second leaf",
+                },
+            ],
+        )
+        titles = SprintGraphTitles(
+            leaf_titles={
+                (MASTER_A, "a/b"): "Slash leaf",
+                (MASTER_A, "a?b"): "Question leaf",
+            }
+        )
+        section = _graph_section(render_markdown(doc, graph_titles=titles))
+        mermaid = _mermaid_block(section)
+        self.assertIn('n0_l0["a/b — Slash leaf"]', mermaid)
+        self.assertIn('n2_l0["a?b — Question leaf"]', mermaid)
+        self.assertIn("n0_l0 -->|first leaf gates the lump| n1", mermaid)
+        self.assertIn("n1 -->|lump gates the second leaf| n2_l0", mermaid)
+        self.assertNotIn("leaf_a_b", mermaid)
+        self.assertEqual(
+            mermaid,
+            _mermaid_block(_graph_section(render_markdown(doc, graph_titles=titles))),
+        )
+        renamed = SprintGraphTitles(
+            leaf_titles={
+                (MASTER_A, "a/b"): "Renamed slash leaf",
+                (MASTER_A, "a?b"): "Renamed question leaf",
+            }
+        )
+        renamed_mermaid = _mermaid_block(_graph_section(render_markdown(doc, graph_titles=renamed)))
+        self.assertIn('n0_l0["a/b — Renamed slash leaf"]', renamed_mermaid)
+        self.assertIn('n2_l0["a?b — Renamed question leaf"]', renamed_mermaid)
+        self.assertEqual(renamed_mermaid.count("n0_l0["), 1)
+        self.assertEqual(renamed_mermaid.count("n2_l0["), 1)
 
     def test_escapes_pipes_and_quotes_in_edge_reasons(self) -> None:
         doc = _sprint(
@@ -226,6 +294,53 @@ class ExecutionGraphMermaidRenderTests(unittest.TestCase):
 class ExecutionGraphTitlesReadTests(unittest.TestCase):
     """Disk-backed ``read_graph_titles`` join (L12-R1 application writers)."""
 
+    def test_same_numbered_rows_retain_their_owning_master_identity(self) -> None:
+        sprint = _sprint(
+            nodes=[
+                {"kind": "segment", "ref": MASTER_A.model_dump(), "leafIds": ["L1"]},
+                {"ref": MASTER_B.model_dump()},
+            ],
+            orchestrates=["master-a", "master-b"],
+        )
+        master_a = TaskDocument.model_validate(
+            {
+                "id": "MASTER-A",
+                "slug": "task",
+                "kind": "master",
+                "title": "Master A",
+                "repo": REPO,
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "subTasks": [{"number": "L1", "name": "A title", "status": "planning"}],
+            }
+        )
+        master_b = master_a.model_copy(
+            update={"id": "MASTER-B", "title": "Master B", "subTasks": []}
+        )
+        master_b = TaskDocument.model_validate(
+            {
+                **master_b.model_dump(by_alias=True),
+                "subTasks": [{"number": "L1", "name": "B title", "status": "planning"}],
+            }
+        )
+        graph = sprint.executionGraph
+        assert graph is not None
+        titles = build_graph_titles(graph, {MASTER_A: master_a, MASTER_B: master_b})
+        reversed_titles = build_graph_titles(graph, {MASTER_B: master_b, MASTER_A: master_a})
+        self.assertEqual(titles, reversed_titles)
+        self.assertEqual(
+            titles.leaf_titles,
+            {(MASTER_A, "L1"): "A title", (MASTER_B, "L1"): "B title"},
+        )
+        section = _graph_section(render_markdown(sprint, graph_titles=titles))
+        self.assertIn('n0_l0["L1 — A title"]', section)
+        self.assertNotIn("L1 — B title", section)
+        missing_owner_titles = build_graph_titles(graph, {MASTER_B: master_b})
+        missing_owner_section = _graph_section(
+            render_markdown(sprint, graph_titles=missing_owner_titles)
+        )
+        self.assertIn('n0_l0["L1 — L1"]', missing_owner_section)
+        self.assertNotIn("L1 — B title", missing_owner_section)
+
     def test_reads_master_documents_and_joins_titles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tasks_root = Path(tmp) / "tasks"
@@ -256,7 +371,7 @@ class ExecutionGraphTitlesReadTests(unittest.TestCase):
             assert graph is not None
             titles = read_graph_titles(tasks_root, graph)
             self.assertEqual(titles.master_titles, {"repo-a/master-a/task.json": "Title master-a"})
-            self.assertEqual(titles.leaf_titles, {"A-L1": "Leaf one"})
+            self.assertEqual(titles.leaf_titles, {(MASTER_A, "A-L1"): "Leaf one"})
 
     def test_tolerates_missing_and_invalid_master_documents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -184,7 +184,7 @@ normal memory refresh.
 The curator begins its pass with one full leaf-scoped call, before it writes onboarding:
 
 ```text
-memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")
+memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>"})
 ```
 
 That full contract-scoped call atomically replaces exactly one operational artifact:
@@ -214,13 +214,13 @@ entity fingerprints to that code commit, run the MCP memory quality tool before
 the memory content commit:
 
 ```text
-memory_quality_check(repo_id="<repo-id>")
+memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>"})
 ```
 
 Inside a leaf, scope it to that leaf's memory worktree:
 
 ```text
-memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")
+memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>"})
 ```
 
 This is the full closeout gate. It combines integrity checks such as drift

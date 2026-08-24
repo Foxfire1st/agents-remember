@@ -238,7 +238,7 @@ class CodeQualityCheckTests(unittest.TestCase):
         )
 
         self.assertNotIn("agents_remember.code_quality.check", hook)
-        self.assertIn("tests are Dagger-only", hook)
+        self.assertIn("acceptance is Dagger-only", hook)
         self.assertNotIn("for step in lint typecheck test", hook)
         self.assertNotIn('npm --prefix dashboard run "test"', hook)
         self.assertNotIn("dagger/dagger-for-github", workflow)

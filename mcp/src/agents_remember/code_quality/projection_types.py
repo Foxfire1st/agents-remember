@@ -11,9 +11,11 @@ omitted and become optional TypeScript properties. AgentNotifier heartbeat delib
 nulls, so its nullable properties remain required ``T | null`` values. Non-null defaults
 are always serialized and therefore remain required on the output contract.
 
-The renderer rejects schema forms it does not understand. Widening an unfamiliar form to
-``unknown`` would let a Python contract change pass the sync gate while weakening the
-generated TypeScript, which is the drift this generator exists to prevent.
+The renderer rejects schema forms it does not understand.  JSON Schema owns runtime
+refinements that TypeScript cannot enforce structurally (for example a numeric minimum or
+string length); those refinements remain exact in the schema artifact and are emitted beside
+the affected TypeScript property as deterministic documentation.  Unknown keywords still
+fail closed instead of disappearing from either generated contract.
 """
 
 from __future__ import annotations
@@ -34,19 +36,24 @@ DEFINITION_RENAMES = {
     "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
 }
 NULL_PRESERVING_MODELS = frozenset({"AgentNotifierHeartbeatPayload"})
-SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "maxItems", "title"})
-SCHEMA_KEYWORDS = SCHEMA_ANNOTATION_KEYWORDS | {
-    "$defs",
-    "$ref",
-    "additionalProperties",
-    "anyOf",
-    "const",
-    "enum",
-    "items",
-    "properties",
-    "required",
-    "type",
-}
+SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
+SCHEMA_REFINEMENT_KEYWORDS = frozenset({"maxItems", "maxLength", "minLength", "minimum", "pattern"})
+SCHEMA_KEYWORDS = (
+    SCHEMA_ANNOTATION_KEYWORDS
+    | SCHEMA_REFINEMENT_KEYWORDS
+    | {
+        "$defs",
+        "$ref",
+        "additionalProperties",
+        "anyOf",
+        "const",
+        "enum",
+        "items",
+        "properties",
+        "required",
+        "type",
+    }
+)
 PROJECT_PYTHON = "PYTHONPATH=mcp/src python"
 REGENERATE_COMMAND = f"{PROJECT_PYTHON} scripts/sync-projection-types.py"
 CHECK_COMMAND = f"{REGENERATE_COMMAND} --check"
@@ -152,7 +159,7 @@ def _schema_allowed_keywords(
     elif "anyOf" in node:
         allowed = allowed | {"anyOf"}
     elif node.get("type") == "array":
-        allowed = allowed | {"items", "type"}
+        allowed = allowed | {"items", "maxItems", "type"}
     elif node.get("type") == "object":
         allowed = allowed | {
             "$defs",
@@ -163,7 +170,47 @@ def _schema_allowed_keywords(
         }
     else:
         allowed = allowed | {"type"}
+    if node.get("type") in {"integer", "number"}:
+        allowed = allowed | {"minimum"}
+    elif node.get("type") == "string":
+        allowed = allowed | {"maxLength", "minLength", "pattern"}
     return allowed
+
+
+def _refinement_schema(node: Mapping[str, object]) -> dict[str, object]:
+    """The exact supported runtime refinements below one TypeScript property."""
+    result = {key: node[key] for key in sorted(SCHEMA_REFINEMENT_KEYWORDS) if key in node}
+    for child_key in ("items", "additionalProperties"):
+        child = node.get(child_key)
+        if isinstance(child, Mapping):
+            nested = _refinement_schema(cast(Mapping[str, object], child))
+            if nested:
+                result[child_key] = nested
+    variants = node.get("anyOf")
+    if isinstance(variants, list):
+        nested_variants = [
+            _refinement_schema(cast(Mapping[str, object], variant))
+            if isinstance(variant, Mapping)
+            else {}
+            for variant in variants
+        ]
+        if any(nested_variants):
+            result["anyOf"] = nested_variants
+    return result
+
+
+def _refinement_comment(node: Mapping[str, object]) -> str | None:
+    refinements = _refinement_schema(node)
+    if not refinements:
+        return None
+    payload = json.dumps(
+        refinements,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).replace("*/", "*\\/")
+    return f"  /** JSON Schema refinements: {payload} */"
 
 
 def _schema_children(
@@ -230,8 +277,8 @@ def _validate_schema(schema: Mapping[str, object], root_name: str) -> None:
     raise ProjectionTypeGenerationError(
         "unsupported JSON Schema constraints:\n"
         f"{details}\n"
-        "Remediation: extend projection_types.py to render every listed constraint exactly, "
-        "or change its owning Pydantic model; never widen the TypeScript type."
+        "Remediation: extend projection_types.py to preserve and render every listed keyword "
+        "exactly, or change its owning Pydantic model; never silently drop schema truth."
     )
 
 
@@ -312,8 +359,11 @@ def _property_line(
 ) -> str:
     preserve_null = owner in NULL_PRESERVING_MODELS
     optional = _is_nullable(node) and not preserve_null
-    rendered = _schema_type(node if preserve_null else _without_null(node), vocabularies)
-    return f"  {name}{'?' if optional else ''}: {rendered};"
+    rendered_node = node if preserve_null else _without_null(node)
+    rendered = _schema_type(rendered_node, vocabularies)
+    property_line = f"  {name}{'?' if optional else ''}: {rendered};"
+    refinement = _refinement_comment(rendered_node)
+    return property_line if refinement is None else f"{refinement}\n{property_line}"
 
 
 def _model_interface(

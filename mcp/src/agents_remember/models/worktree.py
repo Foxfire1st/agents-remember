@@ -14,6 +14,7 @@ from agents_remember.models.closeout_input import (
     ResolvedCloseoutPlan,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+from agents_remember.models.quality import QualityGateResult
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]
@@ -176,6 +177,8 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     invalidFields: list[CloseoutInvalidField] | None = None
     resolvedPlan: ResolvedCloseoutPlan | None = None
     correctedCall: CloseoutCorrectedCall | None = None
+    code_quality_gate: QualityGateResult | None = None
+    quality_gate: QualityGateResult | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):

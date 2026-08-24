@@ -244,9 +244,7 @@ def terminal_cleanup_contract_authority(
                 "allowedStates": ["archive-ready", "cleanup-completed"],
             },
             observed={
-                "contractPath": current_contract.contract_path.resolve(
-                    strict=False
-                ).as_posix(),
+                "contractPath": current_contract.contract_path.resolve(strict=False).as_posix(),
                 "cleanup": current_contract.cleanup,
                 "sameAcceptedAuthority": False,
             },

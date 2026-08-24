@@ -114,7 +114,7 @@ edit. The real code-commit stamp and commit-derived entity fingerprint remain cl
 fabricate them. Expected dirty-source drift or missing real-commit verification may be reported only
 after proving there is no underlying curator-actionable defect.
 
-1. Run `memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")`
+1. Run `memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>"})`
    before editing and use the returned file as the exact worklist.
 2. Create/update every required sidecar and repair every enforced
    content/citation/shape/history/entity finding. Apply

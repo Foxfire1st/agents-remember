@@ -746,7 +746,7 @@ class CallerProvenanceTests(unittest.TestCase):
         gate = (REPOSITORY_ROOT / ".githooks/_gate.sh").read_text(encoding="utf-8")
         self.assertIn("agents_remember.code_quality.scope_reporting", gate)
         self.assertNotIn("agents_remember.code_quality.check", gate)
-        self.assertIn("tests are Dagger-only", gate)
+        self.assertIn("acceptance is Dagger-only", gate)
 
     def test_vacuous_dashboard_project_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

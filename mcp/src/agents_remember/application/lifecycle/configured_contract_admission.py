@@ -89,9 +89,7 @@ class ConfiguredContractRefused:
 
 ConfiguredContractAdmission = ConfiguredContractAccepted | ConfiguredContractRefused
 TerminalConfiguredContractAdmission = (
-    ConfiguredContractAccepted
-    | TerminalConfiguredContractAccepted
-    | ConfiguredContractRefused
+    ConfiguredContractAccepted | TerminalConfiguredContractAccepted | ConfiguredContractRefused
 )
 ConfiguredContractOperationResult = TypeVar("ConfiguredContractOperationResult")
 

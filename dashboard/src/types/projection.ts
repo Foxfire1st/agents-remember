@@ -124,9 +124,10 @@ export interface AttentionItem {
 export interface CloseoutCandidateNode {
   classification: string;
   generationId: string;
-  owningMaster: TaskDocumentRef;
   order: number;
+  owningMaster: TaskDocumentRef;
   priority: string;
+  /** JSON Schema refinements: {"maxItems":256} */
   reasons: string[];
   taskDocumentRef: TaskDocumentRef;
 }
@@ -140,11 +141,13 @@ export interface CloseoutProjectionProblemNode {
 }
 
 export interface CloseoutQueueNode {
+  /** JSON Schema refinements: {"maxItems":256} */
   members: CloseoutCandidateNode[];
   revision: number;
   serviceCondition: string;
   sourceClassification?: string;
   sourceFingerprint?: string;
+  /** JSON Schema refinements: {"maxItems":256} */
   sourceProblems: CloseoutProjectionProblemNode[];
   sprintRef: TaskDocumentRef;
 }
@@ -160,6 +163,8 @@ export interface CommitRefNode {
 }
 
 export interface DiscardUnstartedProofNode {
+  childJson: Record<string, unknown>;
+  childMarkdown: Record<string, unknown>;
   commitState: string;
   doorState: string;
   enclosureState: string;
@@ -335,6 +340,8 @@ export interface LifecycleOperationProjection {
   kind: "closeout" | "integrate" | "direct-landing";
   legalControls: Record<string, unknown>[];
   phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "door-publication" | "termination-required" | "direct-preflight" | "direct-memory-commit" | "direct-ledger-commit" | "direct-terminal-publication" | "completed" | "failed" | "cancelled";
+  /** JSON Schema refinements: {"maxItems":8} */
+  projectionEffects: TaskDocProjectionEffect[];
   reportPath: string;
   result?: Record<string, unknown>;
   startedAt?: string;
@@ -401,6 +408,37 @@ export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics 
   };
 }
 
+export interface ProjectionInvalidationResult {
+  diagnostic?: ProjectionSourceProblem;
+  outcome: "persisted-empty" | "already-empty" | "not-created" | "recovered-malformed" | "would-recover-malformed" | "would-persist-empty" | "failed";
+  /** JSON Schema refinements: {"minimum":0} */
+  revision?: number;
+}
+
+export interface ProjectionRebuildResult {
+  /** JSON Schema refinements: {"minimum":0} */
+  memberCount: number;
+  outcome: "published" | "already-current" | "source-changed" | "source-unreadable" | "would-publish" | "not-attempted";
+  /** JSON Schema refinements: {"minimum":0} */
+  revision?: number;
+  sourceClassification?: "active" | "terminal";
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  sourceFingerprint?: string;
+  /** JSON Schema refinements: {"maxItems":256} */
+  sourceProblems: ProjectionSourceProblem[];
+}
+
+export interface ProjectionSourceProblem {
+  /** JSON Schema refinements: {"maxLength":8192,"minLength":1} */
+  address: string;
+  /** JSON Schema refinements: {"maxLength":256,"minLength":1} */
+  errorType: string;
+  kind: "task" | "door" | "series" | "projection";
+  /** JSON Schema refinements: {"maxLength":8192,"minLength":1} */
+  repairAction: string;
+  state: "missing" | "unreadable" | "invalid";
+}
+
 export interface ProviderBootNode {
   factState: ProcessFactState;
   id: string;
@@ -434,6 +472,7 @@ export interface SeriesNode {
   createdAt: string;
   decisions: TaskDecisionNode[];
   discardedCount: number;
+  /** JSON Schema refinements: {"maxItems":256} */
   discardedSubTasks: DiscardedSubTaskNode[];
   docPath: string;
   doneCount: number;
@@ -547,6 +586,7 @@ export interface TaskDocNode {
   decisions: TaskDecisionNode[];
   design?: string;
   discardedCount?: number;
+  /** JSON Schema refinements: {"maxItems":256} */
   discardedSubTasks?: DiscardedSubTaskNode[];
   docPath: string;
   executionGraph?: TaskExecutionGraphNode;
@@ -571,6 +611,21 @@ export interface TaskDocNode {
   stepsTotal: number;
   subTasks: TaskSubTaskRefNode[];
   title: string;
+}
+
+export interface TaskDocProjectionEffect {
+  invalidation: ProjectionInvalidationResult;
+  /** JSON Schema refinements: {"maxLength":8192} */
+  nextAction?: string;
+  /** JSON Schema refinements: {"minimum":0} */
+  priorRevision?: number;
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  priorSourceFingerprint?: string;
+  queueExisted: boolean;
+  rebuild: ProjectionRebuildResult;
+  /** JSON Schema refinements: {"minimum":0} */
+  rebuiltRevision?: number;
+  sprintTaskDocumentRef: TaskDocumentRef;
 }
 
 export interface TaskDocumentRef {

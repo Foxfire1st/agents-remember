@@ -51,7 +51,7 @@ class GraphTitlesLike(Protocol):
     def master_titles(self) -> dict[str, str]: ...
 
     @property
-    def leaf_titles(self) -> dict[str, str]: ...
+    def leaf_titles(self) -> dict[tuple[TaskDocumentRef, str], str]: ...
 
 
 @dataclass(frozen=True)
@@ -193,7 +193,7 @@ def _node_view(node: GraphNodeLike, context: _GraphViewContext) -> TaskExecution
         else node.ref.key
     )
     leaf_titles = (
-        [context.titles.leaf_titles.get(leaf_id, leaf_id) for leaf_id in node.leafIds]
+        [context.titles.leaf_titles.get((node.ref, leaf_id), leaf_id) for leaf_id in node.leafIds]
         if context.titles is not None
         else list(node.leafIds)
     )
