@@ -31,11 +31,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_read_de
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationReadError,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    unreadable_contract_operation_projections,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_failure_evidence,
+)
+from agents_remember.worktrees.integration.lifecycle.observation.projection import (
+    unreadable_contract_operation_projections,
 )
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 

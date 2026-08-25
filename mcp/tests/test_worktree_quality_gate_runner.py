@@ -9,8 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.models.test_evidence import _certifying_evidence_from_verified_dagger
-from agents_remember.worktrees.modules import code_quality_gate
-from agents_remember.worktrees.modules.clean_quality_executor import CleanQualityOutcome
+from agents_remember.worktrees.modules.quality import gate as code_quality_gate
+from agents_remember.worktrees.modules.quality.clean_executor import CleanQualityOutcome
 from test_worktree_closeout_quality_gate import _checkout_with_wrapper, _quality_target
 
 

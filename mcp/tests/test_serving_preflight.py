@@ -74,8 +74,7 @@ class ServingFloorTests(unittest.TestCase):
             require_serving_topology_schema()  # must not raise
 
     def test_preflight_refuses_a_non_editable_pre_floor_build(self) -> None:
-        dist = mock.Mock()
-        dist.version = "3.0.0rc7"
+        dist = _as_dist(_FakeDist(None, "unused", version="3.0.0rc7"))
         with (
             mock.patch(
                 "agents_remember.tasks.serving_preflight._installed_distribution",

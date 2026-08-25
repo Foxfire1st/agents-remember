@@ -32,7 +32,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.application.memory_quality_controller import run_memory_quality_request
+from agents_remember.application.memory_quality.controller import run_memory_quality_request
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -320,7 +320,7 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
     def test_a_contract_scoped_check_uses_the_leaf_base_for_unstamped_claims(self) -> None:
         with patch(
-            "agents_remember.application.memory_quality_controller.run_memory_quality_check",
+            "agents_remember.application.memory_quality.controller.run_memory_quality_check",
             return_value={"ok": True, "findingCount": 0, "findings": []},
         ) as run_check:
             run_memory_quality_request(
@@ -340,7 +340,7 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
     def test_the_bare_check_does_not_invent_unstamped_claim_provenance(self) -> None:
         with patch(
-            "agents_remember.application.memory_quality_controller.run_memory_quality_check",
+            "agents_remember.application.memory_quality.controller.run_memory_quality_check",
             return_value={"ok": True, "findingCount": 0, "findings": []},
         ) as run_check:
             run_memory_quality_request(

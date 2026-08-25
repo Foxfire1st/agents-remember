@@ -34,6 +34,9 @@ from agents_remember.tasks import (
     read_task_doc,
     write_task_doc,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import terminal_validation
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -51,10 +54,10 @@ from agents_remember.worktrees.modules.guidance import (
     carryover_done,
     lifecycle_guidance,
 )
-from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
+    contract_publication_text,
     load_contract,
     write_contract,
 )
@@ -97,23 +100,6 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
     }
     base.update(over)
     return WorktreeContract(**base)  # type: ignore[arg-type]
-
-
-def _allow_terminal_archive_for_downstream_unit(test: unittest.TestCase) -> None:
-    """Let pre-L5 unit tests exercise owners below the fail-closed archive gate."""
-
-    cleanup_permit = patch(
-        "agents_remember.worktrees.modules.cleanup.terminal_archive_required_result",
-        return_value=WorktreeCommandResult(0, {}),
-    )
-    abandon_permit = patch(
-        "agents_remember.worktrees.modules.abandon.terminal_archive_required_result",
-        return_value=WorktreeCommandResult(0, {}),
-    )
-    cleanup_permit.start()
-    abandon_permit.start()
-    test.addCleanup(cleanup_permit.stop)
-    test.addCleanup(abandon_permit.stop)
 
 
 def _real_external_contract(tmp: Path, name: str) -> WorktreeContract:
@@ -175,6 +161,30 @@ def _real_external_contract(tmp: Path, name: str) -> WorktreeContract:
         integrated_ledger_commit=memory_base,
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
+    return contract
+
+
+def _addressable_contract(tmp: Path, name: str, **over: object) -> WorktreeContract:
+    """Publish the minimum production enclosure authority for terminal-path tests."""
+
+    task_root = tmp / "tasks" / name
+    values: dict[str, object] = {
+        "task_name": name,
+        "task_root": task_root,
+        "contract_path": task_root / "series-contract.md",
+        "worktree_group": tmp / "worktrees" / name,
+    }
+    values.update(over)
+    contract = _contract(tmp, **values)
+    write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
     return contract
 
 
@@ -322,7 +332,6 @@ class CleanupCarryoverGuardTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
-        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -430,7 +439,6 @@ class CleanupChildEdgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
-        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -460,8 +468,9 @@ class CleanupChildEdgeTests(unittest.TestCase):
         carryover.return_value = (True, "2026-06-24T09:00:00+02:00")
         code_repo, code_worktree = self._repo_with_landed_task("code")
         memory_repo, memory_worktree = self._repo_with_landed_task("memory")
-        contract = _contract(
+        contract = _addressable_contract(
             self.tmp,
+            "child-cleanup",
             code_repo_path=code_repo,
             memory_repo_path=memory_repo,
             code_source_branch="feat/dashboard",
@@ -476,7 +485,6 @@ class CleanupChildEdgeTests(unittest.TestCase):
         reports = contract.worktree_group / "reports"
         reports.mkdir()
         (reports / "curator-memory-quality.md").write_text("temporary\n", encoding="utf-8")
-        write_contract(contract.contract_path, contract)
         task_doc_path, _task_markdown = write_task_doc(
             contract.task_root,
             TaskDocument.model_validate(
@@ -560,8 +568,9 @@ class CleanupChildEdgeTests(unittest.TestCase):
         self.assertEqual(git(code_repo, "branch", "--list", "ar/task"), "")
         self.assertIn("refs/heads/ar/task", git(code_repo, "ls-remote", "origin", "ar/task"))
 
-        contract = _contract(
+        contract = _addressable_contract(
             self.tmp,
+            "remote-cleanup",
             code_repo_path=code_repo,
             memory_repo_path=memory_repo,
             code_source_branch="feat/dashboard",
@@ -573,7 +582,6 @@ class CleanupChildEdgeTests(unittest.TestCase):
             memory_worktree=memory_worktree,
             ledger_path=memory_worktree / "memory.md",
         )
-        write_contract(contract.contract_path, contract)
 
         result = cleanup_result(
             WorktreeArgs(
@@ -599,7 +607,6 @@ class CleanupDryRunDirectoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
-        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -639,7 +646,6 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
-        _allow_terminal_archive_for_downstream_unit(self)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -655,8 +661,12 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
         init_repo(memory_repo, "main")
         git(code_repo, "branch", "feat/x")
         git(memory_repo, "branch", "feat/x")
-        contract = _contract(self.tmp, code_repo_path=code_repo, memory_repo_path=memory_repo)
-        write_contract(contract.contract_path, contract)
+        contract = _addressable_contract(
+            self.tmp,
+            "drift-preview",
+            code_repo_path=code_repo,
+            memory_repo_path=memory_repo,
+        )
         snapshot = _write_drift_snapshot(
             contract.coordination_root,
             repository=contract.code_worktree.name,
@@ -679,8 +689,12 @@ class CleanupDriftSnapshotTests(unittest.TestCase):
         init_repo(memory_repo, "main")
         git(code_repo, "branch", "feat/x")
         git(memory_repo, "branch", "feat/x")
-        contract = _contract(self.tmp, code_repo_path=code_repo, memory_repo_path=memory_repo)
-        write_contract(contract.contract_path, contract)
+        contract = _addressable_contract(
+            self.tmp,
+            "drift-apply",
+            code_repo_path=code_repo,
+            memory_repo_path=memory_repo,
+        )
         snapshot = _write_drift_snapshot(
             contract.coordination_root,
             repository=contract.code_worktree.name,
@@ -931,7 +945,6 @@ class CitationCacheLifecycleTests(unittest.TestCase):
         self._td = tempfile.TemporaryDirectory()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
-        _allow_terminal_archive_for_downstream_unit(self)
 
     def contract(self, name: str) -> WorktreeContract:
         return _real_external_contract(self.tmp, name)

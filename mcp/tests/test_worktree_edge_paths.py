@@ -46,8 +46,8 @@ from agents_remember.worktrees.modules import onboarding as onboarding_module
 from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules import sync as sync_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.clean_quality_executor import clean_sandbox_root
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.quality.clean_executor import clean_sandbox_root
 from agents_remember.worktrees.modules.startup import start_contract as start_contract_module
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (

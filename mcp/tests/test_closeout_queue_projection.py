@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.models.closeout_projection import CloseoutQueueState
+from agents_remember.models.closeout.projection import CloseoutQueueState
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.queue.closeout_queue import QueueActor, closeout_queue_tool

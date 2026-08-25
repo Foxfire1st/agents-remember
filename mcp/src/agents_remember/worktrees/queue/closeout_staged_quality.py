@@ -5,20 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.models.test_evidence import EvidenceConsumer
-from agents_remember.worktrees.modules.clean_quality_executor import (
-    require_published_quality_evidence,
-)
-from agents_remember.worktrees.modules.code_quality_gate import (
-    QualityGatePlan,
-    QualityGateTarget,
-    run_strict_code_quality_gate,
-)
 from agents_remember.worktrees.modules.git import (
     require_git,
     run_pre_commit_hook_if_configured,
     worktree_candidate_tree,
 )
 from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT
+from agents_remember.worktrees.modules.quality.clean_executor import (
+    require_published_quality_evidence,
+)
+from agents_remember.worktrees.modules.quality.gate import (
+    QualityGatePlan,
+    QualityGateTarget,
+    run_strict_code_quality_gate,
+)
 
 
 def _refuse_outside_a_linked_worktree(code_worktree: Path) -> None:

@@ -16,7 +16,7 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.integration.closeout_door import successor_waiting_door
+from agents_remember.worktrees.integration.closeout.door import successor_waiting_door
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
 from agents_remember.worktrees.integration.integration_ref_state import (
     require_unchanged_integration_refs,

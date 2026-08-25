@@ -385,7 +385,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
             )
 
         with mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             side_effect=exited,
         ):
@@ -793,7 +793,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
             )
 
         with mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             side_effect=exited,
         ):
@@ -989,7 +989,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
                 ),
             ),
             mock.patch(
-                "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+                "agents_remember.worktrees.integration.lifecycle.worker.state."
                 "observe_worker_termination",
                 side_effect=still_live,
             ),
@@ -1014,7 +1014,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
 
         with (
             mock.patch(
-                "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+                "agents_remember.worktrees.integration.lifecycle.worker.state."
                 "observe_worker_termination",
                 side_effect=still_live,
             ),
@@ -1047,7 +1047,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
                 ),
             ),
             mock.patch(
-                "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+                "agents_remember.worktrees.integration.lifecycle.worker.state."
                 "observe_worker_termination",
                 side_effect=still_live,
             ),
@@ -1072,7 +1072,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
         retained_tree = _byte_tree(Path(self.temp.name))
 
         with mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             side_effect=still_live,
         ):

@@ -7,11 +7,11 @@ import unittest
 from pathlib import Path
 
 from agents_remember.models.lifecycles.door import CloseoutDoorRequest
-from agents_remember.worktrees.integration.closeout_door import (
+from agents_remember.worktrees.integration.closeout.door import (
     _require_door_transition,
     successor_waiting_door,
 )
-from agents_remember.worktrees.integration.closeout_door_control import (
+from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
     closeout_door_tool,
 )
@@ -119,7 +119,11 @@ class CloseoutDoorTransitionTests(unittest.TestCase):
 class CloseoutDoorRetryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.fixture = QueueFixture(Path(self.temporary.name), memory_mode="internal")
+        self.fixture = QueueFixture(
+            Path(self.temporary.name),
+            memory_mode="internal",
+        )
+        self.fixture.enable_direct_execution()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()

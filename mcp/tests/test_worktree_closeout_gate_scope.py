@@ -13,8 +13,9 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_evidence_fixture import publish_passing_quality_gate
 from agents_remember.code_quality import check as quality_check
-from agents_remember.worktrees.modules import code_quality_gate
+from agents_remember.worktrees.modules.quality import gate as code_quality_gate
 from agents_remember.worktrees.queue import closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -125,7 +126,9 @@ class ScopeRecordingGate:
                 "strict code-quality gate failed before code commit with exit code "
                 f"{completed.returncode}.\nQuality output tail:\n{completed.stdout}"
             )
-        return {"required": True, "passed": True, "command": "ruff", "diffBase": diff_base}
+        result = publish_passing_quality_gate(target, diff_base=diff_base)
+        result["command"] = "ruff"
+        return result
 
 
 class CloseoutGateSeesCreatedFilesTests(unittest.TestCase):

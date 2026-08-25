@@ -12,6 +12,7 @@ import tempfile
 import tomllib
 import unittest
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -19,7 +20,13 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check, diff_coverage, scope, scope_reporting
+from agents_remember.code_quality import (
+    check,
+    crap_calculator,
+    diff_coverage,
+    scope,
+    scope_reporting,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ESLINT_EXECUTABLE = REPOSITORY_ROOT / "dashboard/node_modules/.bin/eslint"
@@ -168,16 +175,13 @@ class WrapperScopeOutputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = sample_repository(Path(tmp))
             derived = scope.derive_scope(root)
+            config = replace(
+                config_for(root, derived),
+                causal_failure_report=root / "causal-failures.json",
+            )
+            names = [step.name for step in check.quality_steps(config, root / "coverage.json")]
 
-            for name in (
-                "ruff",
-                "ruff-format",
-                "pyright",
-                "radon-cc",
-                "radon-mi",
-                "pytest",
-                "file-size",
-            ):
+            for name in names:
                 with self.subTest(name=name):
                     line = scope_reporting.fixed_step_scope_line(name, root, derived)
                     self.assertTrue(line.startswith(f"scope: {name} | input="), line)
@@ -216,6 +220,7 @@ class WrapperScopeOutputTests(unittest.TestCase):
                 "radon-mi",
                 "pytest",
                 "file-size",
+                "evidence-lifecycle",
             ):
                 header = next(index for index, line in enumerate(output) if f"## {name}" in line)
                 provenance = next(
@@ -237,7 +242,7 @@ class WrapperScopeOutputTests(unittest.TestCase):
             coverage = root / "coverage.json"
             coverage.write_text("{}", encoding="utf-8")
             output: list[str] = []
-            with mock.patch.object(check.crap_calculator, "calculate_scores", return_value=[]):
+            with mock.patch.object(crap_calculator, "calculate_scores", return_value=[]):
                 result = check.run_crap_calculator(
                     config_for(root, scope.derive_scope(root)),
                     coverage,
@@ -288,8 +293,8 @@ class WrapperScopeOutputTests(unittest.TestCase):
             )
             result = scope_reporting.coverage_result_scope_line(coverage)
 
-        self.assertIn("units=4 on-disk package + test Python files", radon)
-        self.assertIn("4 on-disk package + test Python files offered to Coverage.py", pytest_line)
+        self.assertIn("units=3 on-disk product Python files", radon)
+        self.assertIn("3 on-disk product Python files offered to Coverage.py", pytest_line)
         self.assertIn("units=2 Coverage.py file records", result)
 
     def test_coverage_result_scope_is_printed_before_pytest_result(self) -> None:

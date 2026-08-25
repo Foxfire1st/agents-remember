@@ -15,15 +15,14 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_evidence_fixture import publish_passing_quality_gate
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.worktrees.modules import closeout as closeout_module
-from agents_remember.worktrees.modules import (
-    closeout_external,
-    closeout_memory_quality,
-    code_quality_gate,
-)
+from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import commit_if_dirty, commit_verified_staged
+from agents_remember.worktrees.modules.quality import closeout_memory as closeout_memory_quality
+from agents_remember.worktrees.modules.quality import gate as code_quality_gate
 from agents_remember.worktrees.queue import closeout_recovery, closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -319,6 +318,9 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             args = replace(
                 closeout_worktree_args(
                     series,
+                    code=None,
+                    memory=None,
+                    ledger=None,
                     approved=True,
                     approval_note="approved",
                     operation_progress=MutationEvidenceRecorder(),
@@ -366,6 +368,9 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             args = replace(
                 closeout_worktree_args(
                     series,
+                    code=None,
+                    memory=None,
+                    ledger=None,
                     approved=True,
                     approval_note="approved",
                     operation_progress=MutationEvidenceRecorder(),
@@ -591,7 +596,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(
                     closeout_staged_quality,
                     "run_strict_code_quality_gate",
-                    return_value={"required": True, "passed": True, "command": "x"},
+                    side_effect=publish_passing_quality_gate,
                 ) as gate_run,
                 redirect_stdout(io.StringIO()),
             ):
@@ -644,18 +649,13 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             events: list[str] = []
 
             def run_gate(
-                _worktree: Path,
+                target: code_quality_gate.QualityGateTarget,
                 *,
                 diff_base: str = "",
                 plan: code_quality_gate.QualityGatePlan | None = None,
             ) -> dict[str, object]:
                 events.append("quality")
-                return {
-                    "required": True,
-                    "passed": True,
-                    "command": "python -m agents_remember.code_quality.check --targeted",
-                    "diffBase": diff_base,
-                }
+                return publish_passing_quality_gate(target, diff_base=diff_base, plan=plan)
 
             def run_hook(_repo: Path) -> bool:
                 events.append("pre-commit-hook")
@@ -753,7 +753,7 @@ class CertifiedIndexCommitTests(unittest.TestCase):
             with mock.patch.object(
                 closeout_staged_quality,
                 "run_strict_code_quality_gate",
-                return_value={"required": True, "passed": True},
+                side_effect=publish_passing_quality_gate,
             ):
                 closeout_module._gate_staged_code(
                     worktree,
@@ -812,7 +812,7 @@ class CertifiedIndexCommitTests(unittest.TestCase):
             with mock.patch.object(
                 closeout_staged_quality,
                 "run_strict_code_quality_gate",
-                return_value={"required": True, "passed": True},
+                side_effect=publish_passing_quality_gate,
             ):
                 result = closeout_module._gate_staged_code(
                     worktree, worktree_group=worktree.parent, diff_base="HEAD"
@@ -878,7 +878,7 @@ class CertifiedIndexCommitTests(unittest.TestCase):
             with mock.patch.object(
                 closeout_staged_quality,
                 "run_strict_code_quality_gate",
-                return_value={"required": True, "passed": True},
+                side_effect=publish_passing_quality_gate,
             ) as gate:
                 result = closeout_module._gate_staged_code(
                     worktree,
@@ -995,17 +995,17 @@ class TaskWorktreePreconditionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _repo, worktree = _task_worktree(Path(tmp))
             (worktree / "created.py").write_text("VALUE = 1\n", encoding="utf-8")
-            verdict = {"required": True, "passed": True}
-
             with mock.patch.object(
-                closeout_staged_quality, "run_strict_code_quality_gate", return_value=verdict
+                closeout_staged_quality,
+                "run_strict_code_quality_gate",
+                side_effect=publish_passing_quality_gate,
             ):
                 result = closeout_module._gate_staged_code(
                     worktree, worktree_group=worktree.parent, diff_base="HEAD"
                 )
 
-            self.assertEqual(result["required"], verdict["required"])
-            self.assertEqual(result["passed"], verdict["passed"])
+            self.assertTrue(result["required"])
+            self.assertTrue(result["passed"])
             self.assertEqual(result["preCommitHook"], "not-configured")
             self.assertIn("created.py", git(worktree, "ls-files"))
 
@@ -1122,7 +1122,7 @@ class RetryStagesWhatAFirstRunWouldTests(unittest.TestCase):
         with mock.patch.object(
             closeout_staged_quality,
             "run_strict_code_quality_gate",
-            return_value={"required": True, "passed": True},
+            side_effect=publish_passing_quality_gate,
         ):
             closeout_module._gate_staged_code(
                 worktree, worktree_group=worktree.parent, diff_base="HEAD"

@@ -14,15 +14,15 @@ from agents_remember.models.test_evidence import (
     DiagnosticTestEvidence,
     EvidenceConsumer,
     EvidenceConsumerRefusal,
+    evidence_payload,
     require_certifying_evidence,
-    test_evidence_payload,
 )
 from agents_remember.testing.consumer_inventory import ACCEPTING_CONSUMER_INVENTORY
 from agents_remember.testing.dagger_admission import (
     DaggerAdmission,
     DaggerAdmissionError,
 )
-from agents_remember.worktrees.modules import clean_quality_executor
+from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
 
 
 class PythonTestEvidenceFirewallTests(unittest.TestCase):
@@ -76,7 +76,6 @@ class PythonTestEvidenceFirewallTests(unittest.TestCase):
             diff_floor=100.0,
             coverage_paths=(),
             test_arguments=(Path("mcp/tests/test_plain.py"),),
-            test_roots=(Path("mcp/tests"),),
             untracked_paths=(),
         )
         with self.assertRaises(DaggerAdmissionError):
@@ -89,7 +88,7 @@ class PythonTestEvidenceFirewallTests(unittest.TestCase):
         exported.mkdir()
         reports = self.root / "reports"
         (exported / "clean-quality-results.json").write_text(
-            json.dumps(test_evidence_payload(self.diagnostic)),
+            json.dumps(evidence_payload(self.diagnostic)),
             encoding="utf-8",
         )
         with self.assertRaisesRegex(RuntimeError, "no valid authoritative result"):

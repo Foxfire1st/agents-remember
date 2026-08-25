@@ -96,7 +96,7 @@ class CloseoutClaimTransferTests(unittest.TestCase):
     def test_second_intent_cannot_rewrite_claimed_operation_identity(self) -> None:
         start_closeout_operation(self.operation_input, launcher=lambda *_: None)
         conflicting = self.operation_input.model_copy(update={"approvalNote": "different"})
-        with self.assertRaisesRegex(RuntimeError, "claimed door does not match"):
+        with self.assertRaisesRegex(RuntimeError, "conflicting closeout intent"):
             start_closeout_operation(conflicting, launcher=lambda *_: None)
         record = self._store().read()
         claimed = load_contract(self.contract.contract_path).closeout_door

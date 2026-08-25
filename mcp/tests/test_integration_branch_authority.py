@@ -81,14 +81,10 @@ from integration_branch_authority_test_support import (
     _doc,
     _publish_completed_closeout_fixture,
 )
-from test_cleanup_carryover import _allow_terminal_archive_for_downstream_unit
 from test_source_lineage import _commit_on, _git
 
 
 class IntegrationBranchAuthorityTests(unittest.TestCase):
-    def setUp(self) -> None:
-        _allow_terminal_archive_for_downstream_unit(self)
-
     def test_source_write_and_operation_authority_cover_exact_refusal_edges(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -18,7 +18,13 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import application_boundary, check, scope, single_owner
+from agents_remember.code_quality import (
+    application_boundary,
+    check,
+    crap_calculator,
+    scope,
+    single_owner,
+)
 from agents_remember.code_quality.application_boundary import BoundaryContractError
 from agents_remember.code_quality.scope import ScopeError
 
@@ -263,7 +269,7 @@ class TestCheckRails:
         coverage_json.write_text("{}", encoding="utf-8")
         with (
             mock.patch.object(
-                check.crap_calculator, "calculate_scores", side_effect=RuntimeError("boom")
+                crap_calculator, "calculate_scores", side_effect=RuntimeError("boom")
             ),
             mock.patch.object(check.scope_reporting, "crap_scope_line", return_value="crap"),
         ):
@@ -275,7 +281,7 @@ class TestCheckRails:
             )
 
         with (
-            mock.patch.object(check.crap_calculator, "calculate_scores", return_value=[]),
+            mock.patch.object(crap_calculator, "calculate_scores", return_value=[]),
             mock.patch.object(check.scope_reporting, "crap_scope_line", return_value="crap"),
         ):
             assert (
@@ -294,8 +300,8 @@ class TestCheckRails:
             function="f",
         )
         with (
-            mock.patch.object(check.crap_calculator, "calculate_scores", return_value=[score]),
-            mock.patch.object(check.crap_calculator, "render_table", return_value="table"),
+            mock.patch.object(crap_calculator, "calculate_scores", return_value=[score]),
+            mock.patch.object(crap_calculator, "render_table", return_value="table"),
             mock.patch.object(check.scope_reporting, "crap_scope_line", return_value="crap"),
         ):
             assert (
@@ -314,8 +320,8 @@ class TestCheckRails:
             function="f",
         )
         with (
-            mock.patch.object(check.crap_calculator, "calculate_scores", return_value=[score]),
-            mock.patch.object(check.crap_calculator, "render_table", return_value="table"),
+            mock.patch.object(crap_calculator, "calculate_scores", return_value=[score]),
+            mock.patch.object(crap_calculator, "render_table", return_value="table"),
             mock.patch.object(check.scope_reporting, "crap_scope_line", return_value="crap"),
         ):
             assert (

@@ -6,7 +6,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agents_remember.models.closeout_source import (
+from agents_remember.models.closeout.source import (
     CandidateAdmissionFacts,
     SchedulingGradeInput,
 )

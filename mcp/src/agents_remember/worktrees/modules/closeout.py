@@ -12,7 +12,7 @@ from agents_remember.controlplane.enforcement import (
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.closeout_input import (
     effective_message_arguments,
@@ -30,13 +30,6 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.closeout_external import external_closeout_commits
-from agents_remember.worktrees.modules.closeout_memory_quality import run_memory_quality_phase
-from agents_remember.worktrees.modules.code_quality_gate import (
-    QualityGatePlan,
-    code_quality_gate_preview,
-    requires_integrated_acceptance,
-    requires_strict_code_quality,
-)
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -72,6 +65,13 @@ from agents_remember.worktrees.modules.onboarding import (
     route_overview_metadata_refresh_plan,
     validate_onboarding_refresh_plan,
     validate_route_overview_refresh_plan,
+)
+from agents_remember.worktrees.modules.quality.closeout_memory import run_memory_quality_phase
+from agents_remember.worktrees.modules.quality.gate import (
+    QualityGatePlan,
+    code_quality_gate_preview,
+    requires_integrated_acceptance,
+    requires_strict_code_quality,
 )
 from agents_remember.worktrees.queue.closeout_preview import (
     closeout_order,

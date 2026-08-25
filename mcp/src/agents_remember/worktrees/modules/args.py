@@ -18,7 +18,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
     IntegrationPublicationIntent,
     IntegrationQualityCertification,

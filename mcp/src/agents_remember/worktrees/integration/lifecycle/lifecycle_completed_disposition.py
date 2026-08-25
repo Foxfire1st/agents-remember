@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (

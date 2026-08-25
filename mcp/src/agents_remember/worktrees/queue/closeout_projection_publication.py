@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     ProjectionInvalidationResult,
     ProjectionRebuildResult,
     ProjectionSourceProblem,

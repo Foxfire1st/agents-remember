@@ -16,6 +16,7 @@ from unittest import mock
 
 import httpx
 import uvicorn
+from _adapter_event_scripts import replay_codex_terminal
 from _control_plane import OPERATOR, TINY_PNG, FakeControlAdapter, make_harness
 from agents_remember.models.conversations.evidence import (
     AR_EVIDENCE_KEY,
@@ -110,7 +111,7 @@ class ControlApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(replay.status_code, 202)
         self.assertEqual(replay.json()["revision"], operation["revision"])
-        self.adapter.settle_turn("interrupted")
+        replay_codex_terminal(self.adapter, "interrupted")
         status = await self.client.post(
             f"/api/terminal/{SESSION}/conversation/interrupt-status",
             params=self._params(),

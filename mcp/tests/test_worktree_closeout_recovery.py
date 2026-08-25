@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     EffectiveCloseoutInput,
     EnabledCloseoutLeg,
     NotApplicableCloseoutLeg,
@@ -89,7 +89,6 @@ def _patch_external_refresh(stack: ExitStack, contract: WorktreeContract) -> Non
         mock.patch.object(closeout_external, "combine_memory_quality", return_value={})
     )
     stack.enter_context(mock.patch.object(closeout_external, "worktree_dirty", return_value=False))
-    stack.enter_context(mock.patch.object(closeout_external, "load_ledger"))
 
 
 class CloseoutRecoveryTests(unittest.TestCase):
@@ -109,10 +108,6 @@ class CloseoutRecoveryTests(unittest.TestCase):
                     closeout_module,
                     "_recover_closeout_finalization",
                 ) as recover,
-                mock.patch.object(
-                    closeout_module,
-                    "certify_queue_candidate_closeout",
-                ) as certify,
                 self.assertRaisesRegex(RuntimeError, "contract path does not match"),
             ):
                 closeout_module.closeout_result(
@@ -126,7 +121,6 @@ class CloseoutRecoveryTests(unittest.TestCase):
 
             authority.assert_not_called()
             recover.assert_not_called()
-            certify.assert_not_called()
 
     def test_code_commit_recovery_proves_head_and_candidate_tree(self) -> None:
         contract = SimpleNamespace(kind="leaf", code_worktree=Path("/code"))
@@ -535,7 +529,6 @@ class CloseoutRecoveryTests(unittest.TestCase):
             stack.enter_context(
                 mock.patch.object(closeout_external, "head_commit", return_value="b" * 40)
             )
-            stack.enter_context(mock.patch.object(closeout_external, "prepend_mapping"))
             stack.enter_context(mock.patch.object(closeout_external, "write_ledger"))
             stack.enter_context(mock.patch.object(closeout_external, "require_git"))
             ledger_intent = object()

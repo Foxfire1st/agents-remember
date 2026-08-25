@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     CloseoutMessageInput,
 )
-from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
+from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
@@ -22,24 +21,23 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
-from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
+from agents_remember.models.lifecycles.operation_kinds import LifecycleControlAction
 from agents_remember.worktrees.closeout_input import (
     CloseoutInputError,
     corrected_closeout_arguments,
 )
-from agents_remember.worktrees.integration.closeout_door import (
+from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationClassification,
     classify_door_publication,
     prepare_door_publication,
-    successor_waiting_door,
 )
-from agents_remember.worktrees.integration.closeout_door_source import (
+from agents_remember.worktrees.integration.closeout.door_source import (
     superseding_door_generation,
 )
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     classify_closeout_ledger_recovery,
 )
-from agents_remember.worktrees.integration.closeout_operation_admission import (
+from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
     ValidatedCloseoutAdmission,
     prevalidate_closeout_operation_admission,
@@ -53,10 +51,8 @@ from agents_remember.worktrees.integration.integration_operation_decision import
     raise_integration_decision,
     require_integration_operation_convergent,
 )
-from agents_remember.worktrees.integration.integration_ref_state import (
-    IntegrationRefDecisionError,
-    classify_integration_refs,
-)
+from agents_remember.worktrees.integration.integration_ref_state import classify_integration_refs
+from agents_remember.worktrees.integration.lifecycle.control.cancellation import cancel_operation
 from agents_remember.worktrees.integration.lifecycle.lifecycle_completed_disposition import (
     require_completed_disposition,
 )
@@ -69,9 +65,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candida
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_evidence import (
-    prove_cancellable_git,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_projection import (
     LifecycleControlProjectionContext,
     generation_requires_recovery,
@@ -82,9 +75,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_door_co
     complete_pending_door_locked,
     project_closeout_refresh,
     record_door_intent,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
-    closeout_contract_sha256,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
     contract_lifecycle_lease,
@@ -109,25 +99,12 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     launch_detached_worker,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state import (
+from agents_remember.worktrees.integration.lifecycle.worker.state import (
     project_worker_exit,
     reconcile_worker_exit,
-    release_worker_after_exit,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_termination import (
-    bounded_worker_termination_outcome,
-    public_worker_termination_evidence,
-    signal_worker_and_prove_exit,
-    worker_termination_request,
-)
-from agents_remember.worktrees.integration.organizational_completion_repair import (
-    OrganizationalRepairPublicationError,
-    prepare_organizational_completion_repair,
 )
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-
-LifecycleControlAction = Literal["retry", "recover", "cancel", "revise", "retire", "supersede"]
 
 
 @dataclass(frozen=True)
@@ -223,7 +200,7 @@ def control_operation(
                 # A previously advertised repair payload must still classify an
                 # exact post-crash reset or third byte state even when status no
                 # longer advertises cancellation for the contradiction.
-                return _cancel(
+                return cancel_operation(
                     observed.contract,
                     observed.store,
                     observed.record,
@@ -309,7 +286,7 @@ def _execute_legal_control(
 ) -> LifecycleOperationProjection:
     action = command.action
     if action == "cancel":
-        return _cancel(contract, store, record, dry_run=command.dry_run)
+        return cancel_operation(contract, store, record, dry_run=command.dry_run)
     if action == "retry":
         return _resume(
             contract,
@@ -346,239 +323,6 @@ def _execute_legal_control(
         record,
         command=command,
     )
-
-
-def _cancel(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-) -> LifecycleOperationProjection:
-    if record.status == "cancelled":
-        completed = complete_pending_door(contract, store, record, dry_run=dry_run)
-        observed_contract = contract if dry_run else load_contract(contract.contract_path)
-        current_contract = _complete_organizational_repair(
-            observed_contract,
-            completed,
-            dry_run=dry_run,
-        )
-        projection = operation_projection(completed, contract=current_contract)
-        return project_closeout_refresh(projection, current_contract, completed, dry_run=dry_run)
-    if record.status == "completed":
-        if record.workerPid is not None:
-            terminated = _terminate_worker(
-                store,
-                record,
-                dry_run=dry_run,
-                cancellation_pending=False,
-            )
-            return operation_projection(terminated, contract=contract)
-        raise LifecycleControlError(
-            "lifecycle-cancel-completed",
-            "a completed operation cannot be cancelled; choose retire or supersede",
-            next_action="retire",
-        )
-    record = _terminate_worker(
-        store,
-        record,
-        dry_run=dry_run,
-        cancellation_pending=True,
-    )
-    evidence, record = prove_cancellable_git(store, record, publish=not dry_run)
-    if dry_run:
-        return operation_projection(record, contract=contract)
-    stamp = _stamp()
-
-    def cancelled_record(current: LifecycleOperationRecord) -> LifecycleOperationRecord:
-        return current.model_copy(
-            update={
-                "status": "cancelled",
-                "phase": "cancelled",
-                "finishedAt": stamp,
-                "cancelRequested": True,
-                "currentCommand": "publish cancelled journal outcome",
-                "generationDisposition": "cancelled",
-                "cancellationEvidence": evidence,
-                "terminationReturnStatus": None,
-                "terminationReturnPhase": None,
-                "guidance": _cancelled_guidance(record.operationKind),
-            }
-        )
-
-    if record.operationKind in {"closeout", "direct-landing"}:
-        operation_input = record.input
-        with task_publication_lock(contract.coordination_root, contract.repo_name):
-            contract, _location = reread_configured_contract(
-                contract,
-                operation_input.configPath,
-            )
-            claimed = record.doorPublication
-            if (
-                claimed is None
-                or claimed.state != "proven"
-                or claimed.generation.disposition != "claimed"
-                or claimed.generation.operationKind != record.operationKind
-                or claimed.generation.operationFingerprint != record.fingerprint
-                or claimed.generation.claimedOperationKey != record.operationKey
-                or contract.closeout_door != claimed.generation
-            ):
-                raise LifecycleControlError(
-                    "closeout-cancel-claim-mismatch",
-                    "closeout cancellation requires its exact claimed journal/door owner",
-                    expected={
-                        "operationFingerprint": record.fingerprint,
-                        "doorDisposition": "claimed",
-                    },
-                    observed={
-                        "doorDisposition": (
-                            contract.closeout_door.disposition if contract.closeout_door else ""
-                        ),
-                        "publicationState": claimed.state if claimed is not None else "",
-                    },
-                    next_action="developer-decision",
-                )
-            successor = successor_waiting_door(
-                claimed.generation,
-                declared_by="lifecycle-cancel",
-                declared_at=stamp,
-            )
-            intent = prepare_door_publication(contract, successor)
-            cancelled = store.update(
-                lambda current: record_door_intent(
-                    cancelled_record(current),
-                    intent,
-                    generation_disposition="cancelled",
-                )
-            )
-            cancelled = complete_pending_door_locked(contract, store, cancelled)
-            contract = load_contract(contract.contract_path)
-    else:
-        cancelled = store.update(cancelled_record)
-    contract = _complete_organizational_repair(
-        contract,
-        cancelled,
-        dry_run=False,
-    )
-    projection = operation_projection(cancelled, contract=contract)
-    return project_closeout_refresh(projection, contract, cancelled, dry_run=False)
-
-
-def _complete_organizational_repair(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-) -> WorktreeContract:
-    if record.operationKind != "integrate" or record.organizationalRepair is None or dry_run:
-        return contract
-    try:
-        return prepare_organizational_completion_repair(load_contract(contract.contract_path))
-    except IntegrationRefDecisionError as exc:
-        raise_integration_decision(exc.classification.decision_payload())
-    except OrganizationalRepairPublicationError as exc:
-        raise LifecycleControlError(
-            exc.status,
-            exc.detail,
-            expected=exc.expected,
-            observed=exc.observed,
-            next_action=exc.next_action,
-        ) from exc
-    except CloseoutQueueError as exc:
-        observed = load_contract(contract.contract_path)
-        raise LifecycleControlError(
-            exc.status,
-            "organizational reset evidence contradicts the live contract",
-            expected={
-                "candidateState": record.candidateState,
-                "acceptedContractSha256": (record.organizationalRepair.acceptedContractSha256),
-                "resetContractSha256": record.organizationalRepair.resetContractSha256,
-            },
-            observed={
-                "contractSha256": closeout_contract_sha256(observed),
-                "closeoutStatus": observed.closeout_status,
-                "integrationStatus": observed.integration_status,
-                "doorDisposition": (
-                    observed.closeout_door.disposition if observed.closeout_door else ""
-                ),
-            },
-            next_action="developer-decision",
-        ) from exc
-
-
-def _terminate_worker(
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-    *,
-    dry_run: bool,
-    cancellation_pending: bool,
-) -> LifecycleOperationRecord:
-    if record.workerPid is None:
-        if record.workerTermination is not None and record.workerTermination.state != "exited":
-            raise LifecycleControlError(
-                "worker-termination-ambiguous",
-                "worker termination authority is unproven",
-                observed=public_worker_termination_evidence(record.workerTermination),
-                next_action="cancel",
-            )
-        return record
-    request = record.workerTermination or worker_termination_request(record)
-    if dry_run:
-        return record
-    needs_intent = record.workerTermination is None or (
-        cancellation_pending and not record.cancelRequested
-    )
-    if needs_intent:
-        record = store.update(
-            lambda current: _request_worker_termination(
-                current,
-                request=request,
-                cancellation_pending=cancellation_pending,
-            )
-        )
-    outcome = bounded_worker_termination_outcome(signal_worker_and_prove_exit(request))
-    if outcome.state != "exited":
-        store.update(lambda current: current.model_copy(update={"workerTermination": outcome}))
-        raise LifecycleControlError(
-            "worker-termination-required",
-            outcome.detail,
-            expected={"state": "exited", "workerAuthority": "retained-until-proof"},
-            observed=public_worker_termination_evidence(outcome),
-            next_action="cancel",
-        )
-    return store.update(lambda current: release_worker_after_exit(current, outcome))
-
-
-def _request_worker_termination(
-    current: LifecycleOperationRecord,
-    *,
-    request: WorkerTerminationEvidence,
-    cancellation_pending: bool,
-) -> LifecycleOperationRecord:
-    if current.status == "termination-required":
-        return current
-    return current.model_copy(
-        update={
-            "status": "termination-required",
-            "phase": "termination-required",
-            "cancelRequested": cancellation_pending or current.cancelRequested,
-            "workerTermination": request,
-            "terminationReturnStatus": current.status,
-            "terminationReturnPhase": current.phase,
-            "currentCommand": "terminate exact lifecycle worker process",
-        }
-    )
-
-
-def _cancelled_guidance(kind: LifecycleOperationKind) -> str:
-    if kind == "closeout":
-        return (
-            "A distinct waiting door successor is schedulable; use worktree_closeout_preview "
-            "then worktree_closeout_apply for the next journal generation."
-        )
-    if kind == "direct-landing":
-        return "Use direct_landing with freshly validated input to create one successor."
-    return "Advance the task state, then use worktree_integrate for one fresh successor."
 
 
 def _resume(
@@ -1043,7 +787,7 @@ def _revise_closeout(
         record = complete_pending_door(contract, store, record, dry_run=command.dry_run)
         cancellation_projection = operation_projection(record, contract=contract)
     else:
-        cancellation_projection = _cancel(
+        cancellation_projection = cancel_operation(
             contract,
             store,
             record,
@@ -1186,7 +930,3 @@ def _require_generation(
             next_args=next_row["arguments"] if next_row else None,
         )
     return record
-
-
-def _stamp() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat()

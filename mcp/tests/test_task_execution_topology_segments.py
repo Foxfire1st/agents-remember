@@ -459,7 +459,7 @@ class ExecutionTopologySegmentValidationTests(unittest.TestCase):
         nature_a: str = "organizational",
         leafs_a: list[str] | None = None,
     ) -> None:
-        leafs = leafs_a or ["L1", "L2", "L3"]
+        leafs = ["L1", "L2", "L3"] if leafs_a is None else leafs_a
         write_task_doc(
             self.tasks / "master-a",
             _master(identity="MASTER-A", execution_nature=nature_a).model_copy(
@@ -523,6 +523,7 @@ class ExecutionTopologySegmentValidationTests(unittest.TestCase):
         self.assertEqual(reports[MASTER_B].unplaced_leaf_ids, ())
 
         self._write_segmented_sprint(leafs_a=["L1", "L2"])
+        self.topology = TaskDocumentTopology(self.coord)
         reports = {
             report.master.ref: report.placement
             for report in self.topology.execution_leaf_placement(SPRINT)

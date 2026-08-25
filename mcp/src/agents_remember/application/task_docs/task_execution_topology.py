@@ -43,6 +43,7 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentRefError,
     TaskDocumentTopology,
     refuse_segment_nodes_on_atomic_masters,
+    repository_master_documents,
 )
 from agents_remember.tasks.serving_preflight import (
     TopologyServingBuildError,
@@ -976,7 +977,7 @@ def inventory_execution_topology(
     """
 
     topology = TaskDocumentTopology(request.coordination_root)
-    masters = topology.repository_masters(request.repo_id)
+    masters = repository_master_documents(topology, request.repo_id)
     sprints = sorted((m for m in masters if m.document.orchestrates), key=lambda m: m.ref.key)
     branch_slugs = _branch_slugs(request.code_repository)
 

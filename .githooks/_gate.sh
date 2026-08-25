@@ -194,6 +194,14 @@ run_fast_checks() {
     echo "[$label] result: pyright FAIL" >&2
     return 1
   fi
+  report_fixed_step evidence-lifecycle || return 1
+  echo "[$label] evidence lifecycle catalog..."
+  if "$py" -m agents_remember.testing.evidence_lifecycle --project-root .; then
+    echo "[$label] result: evidence-lifecycle PASS"
+  else
+    echo "[$label] result: evidence-lifecycle FAIL" >&2
+    return 1
+  fi
   dashboard_checks || return 1
   echo "[$label] result: fast-tier PASS; acceptance tests run only in Dagger."
   return 0

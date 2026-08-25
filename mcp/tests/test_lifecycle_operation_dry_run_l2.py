@@ -95,7 +95,7 @@ def test_control_dry_run_projects_dead_sibling_without_publishing_exit(
         )
 
     with mock.patch(
-        "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state.observe_worker_termination",
+        "agents_remember.worktrees.integration.lifecycle.worker.state.observe_worker_termination",
         side_effect=exited,
     ):
         preview = control_operation(
@@ -144,7 +144,7 @@ def test_only_mutating_compatibility_publishes_proven_terminal_worker_exit(
         )
 
     with mock.patch(
-        "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state.observe_worker_termination",
+        "agents_remember.worktrees.integration.lifecycle.worker.state.observe_worker_termination",
         side_effect=exited,
     ):
         require_lifecycle_operation_compatible(

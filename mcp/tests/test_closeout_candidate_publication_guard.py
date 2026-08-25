@@ -53,7 +53,6 @@ def test_closeout_candidate_publication_rechecks_the_contract(tmp_path: Path) ->
         ),
         mock.patch.object(closeout, "_closeout_quality_preflight", return_value=({}, {}, False)),
         mock.patch.object(closeout, "_revalidate_reviewed_candidate"),
-        mock.patch.object(closeout, "claim_queue_candidate_for_closeout"),
         mock.patch.object(closeout, "load_contract", return_value=changed),
         mock.patch.object(
             closeout,

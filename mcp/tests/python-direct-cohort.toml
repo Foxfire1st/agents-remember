@@ -1,0 +1,183 @@
+schema_version = "python-direct-cohort/v2"
+policy_version = "python-direct-eligibility/v2"
+max_selection = 8
+
+[[python_file]]
+path = "mcp/tests/test_python_direct_cohort.py"
+sha256 = "27b28b452e70e67ca0103e4f712264c65aa1fdbcc330148ea7f7c7b7095a1db3"
+symbols = [
+  "provider_id_examples",
+  "_normalized_provider_ids",
+  "test_stable_provider_id_never_returns_empty",
+  "test_known_gate_kind_passes_through",
+  "test_unknown_gate_kind_is_refused",
+  "test_known_decision_role_passes_through",
+  "test_unknown_decision_role_is_refused_by_name",
+  "test_normalize_route_root_forms",
+  "test_normalize_route_strips_slashes_and_backticks",
+]
+local_imports = [
+  "mcp/src/agents_remember/__init__.py",
+  "mcp/src/agents_remember/kernel/__init__.py",
+  "mcp/src/agents_remember/kernel/onboarding_doc.py",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py",
+  "mcp/src/agents_remember/kernel/primitives/identity.py",
+]
+effects_known = true
+effects = []
+purpose = "The exact seven-node pytest cohort plus its one local fixture and helper."
+
+[[python_file]]
+path = "mcp/src/agents_remember/__init__.py"
+sha256 = "f8bbcf65d6909c3ff9c59a99fcd3d1472cd77608dca2d1bb83be3860f93301e1"
+symbols = []
+local_imports = []
+effects_known = true
+effects = []
+purpose = "Import-time package initializer required by every production cohort dependency."
+
+[[python_file]]
+path = "mcp/src/agents_remember/kernel/__init__.py"
+sha256 = "7d36f680478c63f711f415d09ea578d4906462173a72ad30f66a7f016f503e3b"
+symbols = []
+local_imports = []
+effects_known = true
+effects = []
+purpose = "Import-time kernel package initializer required by the selected product modules."
+
+[[python_file]]
+path = "mcp/src/agents_remember/kernel/onboarding_doc.py"
+sha256 = "fb74e4449f6bd3ddb7ba35454cb18c4a0f91ae034342ce83765b3c08402532b5"
+symbols = ["normalize_route"]
+local_imports = [
+  "mcp/src/agents_remember/__init__.py",
+  "mcp/src/agents_remember/kernel/__init__.py",
+  "mcp/src/agents_remember/kernel/filesystem.py",
+]
+effects_known = true
+effects = []
+purpose = "Pure route-label normalization used by two cohort assertions."
+
+[[python_file]]
+path = "mcp/src/agents_remember/kernel/filesystem.py"
+sha256 = "927ca84e1cc5aeeef958936e89076cd4560ac4619eb1765061385b3dd467540c"
+symbols = []
+local_imports = []
+effects_known = true
+effects = []
+purpose = "Import-time dependency of onboarding_doc; no filesystem symbol enters execution closure."
+
+[[python_file]]
+path = "mcp/src/agents_remember/kernel/primitives/gate_policy.py"
+sha256 = "d9d3b2373fafad9e4c38cd21eba75d9b537f8fa099f20ecfcefe90d740d6aa97"
+symbols = ["DecisionRole", "DECISION_ROLES", "coerce_decision_role"]
+local_imports = [
+  "mcp/src/agents_remember/__init__.py",
+  "mcp/src/agents_remember/kernel/__init__.py",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py",
+]
+effects_known = true
+effects = []
+purpose = "Closed decision-role vocabulary and pure coercion used by two cohort assertions."
+
+[[python_file]]
+path = "mcp/src/agents_remember/kernel/primitives/gate_vocab.py"
+sha256 = "161f3a013f27909f6040efee9537fe68c158d8e69c9e5fb5bbaaa9d831648133"
+symbols = ["GateKind", "GATE_KINDS", "coerce_gate_kind"]
+local_imports = [
+  "mcp/src/agents_remember/__init__.py",
+  "mcp/src/agents_remember/kernel/__init__.py",
+]
+effects_known = true
+effects = []
+purpose = "Closed gate-kind vocabulary and pure coercion used by two cohort assertions."
+
+[[python_file]]
+path = "mcp/src/agents_remember/kernel/primitives/identity.py"
+sha256 = "4926457f6553d0262a72b1e9261d2890c451e9b8c8ec2a3c31eca4732855be82"
+symbols = ["stable_slug", "stable_provider_id"]
+local_imports = [
+  "mcp/src/agents_remember/__init__.py",
+  "mcp/src/agents_remember/kernel/__init__.py",
+]
+effects_known = true
+effects = []
+purpose = "Pure provider-id normalization used by the fixture-backed cohort assertion."
+
+[[configuration]]
+path = "pyproject.toml"
+sha256 = "a8c6438b1f4f7ba3ccffce7c5f44ecae99355f444600c789d8d89101a29e6ea3"
+purpose = "Canonical pytest configuration consumed by the direct runner."
+
+[[configuration]]
+path = "mcp/tests/evidence-lifecycle.toml"
+sha256 = "29233596512c3f829cb1cc293f5d5404523c8e064374389c0eed0808bc671d2d"
+purpose = "Evidence-lane and lifecycle policy loaded by the canonical pytest plugin composition."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_stable_provider_id_never_returns_empty"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::provider_id_examples",
+  "mcp/tests/test_python_direct_cohort.py::_normalized_provider_ids",
+  "mcp/tests/test_python_direct_cohort.py::test_stable_provider_id_never_returns_empty",
+  "mcp/src/agents_remember/kernel/primitives/identity.py::stable_slug",
+  "mcp/src/agents_remember/kernel/primitives/identity.py::stable_provider_id",
+]
+rationale = "Pure production transform with one audited local fixture and helper chain."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_known_gate_kind_passes_through"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::test_known_gate_kind_passes_through",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py::GateKind",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py::GATE_KINDS",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py::coerce_gate_kind",
+]
+rationale = "Positive closed gate-vocabulary assertion."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_unknown_gate_kind_is_refused"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::test_unknown_gate_kind_is_refused",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py::GateKind",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py::GATE_KINDS",
+  "mcp/src/agents_remember/kernel/primitives/gate_vocab.py::coerce_gate_kind",
+]
+rationale = "Negative closed gate-vocabulary assertion with no external effect."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_known_decision_role_passes_through"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::test_known_decision_role_passes_through",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py::DecisionRole",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py::DECISION_ROLES",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py::coerce_decision_role",
+]
+rationale = "Positive closed decision-role assertion."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_unknown_decision_role_is_refused_by_name"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::test_unknown_decision_role_is_refused_by_name",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py::DecisionRole",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py::DECISION_ROLES",
+  "mcp/src/agents_remember/kernel/primitives/gate_policy.py::coerce_decision_role",
+]
+rationale = "Negative decision-role assertion with stable error meaning."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_normalize_route_root_forms"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::test_normalize_route_root_forms",
+  "mcp/src/agents_remember/kernel/onboarding_doc.py::normalize_route",
+]
+rationale = "Pure route-label transform across the documented root aliases."
+
+[[node]]
+id = "mcp/tests/test_python_direct_cohort.py::test_normalize_route_strips_slashes_and_backticks"
+closure = [
+  "mcp/tests/test_python_direct_cohort.py::test_normalize_route_strips_slashes_and_backticks",
+  "mcp/src/agents_remember/kernel/onboarding_doc.py::normalize_route",
+]
+rationale = "Pure route-label transform for quoted directory syntax."

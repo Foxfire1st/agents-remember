@@ -10,8 +10,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.worktrees.modules import clean_quality_executor
-from agents_remember.worktrees.modules.clean_quality_executor import (
+from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
+from agents_remember.worktrees.modules.quality.clean_executor import (
     CleanQualityRequest,
     run_clean_quality,
 )
@@ -297,6 +297,14 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 '{"status":"passed","exitCode":0,"attempt":"new"}\n', encoding="utf-8"
             )
             (new / "coverage.json").write_text('{"new":true}\n', encoding="utf-8")
+            (new / "causal-failures.json").write_text(
+                '{"schemaVersion":"python-causal-failures/v1"}\n',
+                encoding="utf-8",
+            )
+            (new / "causal-failures.md").write_text(
+                "# Causal failures\n",
+                encoding="utf-8",
+            )
             real_copy = clean_quality_executor.shutil.copyfile
             for fail_after in (1, 2):
                 copies = 0
@@ -351,6 +359,11 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 reports, "clean-quality-results.json"
             )
             self.assertIn('"attempt":"new"', selected.read_text(encoding="utf-8"))
+            causal = clean_quality_executor.published_report_path(reports, "causal-failures.json")
+            self.assertIn(
+                "python-causal-failures/v1",
+                causal.read_text(encoding="utf-8"),
+            )
 
     def test_competing_report_publisher_reuses_the_complete_generation(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:

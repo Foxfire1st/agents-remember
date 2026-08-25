@@ -16,7 +16,7 @@ from agents_remember.application.worktree_tools import (
     worktree_status_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.worktrees.integration import closeout_door
+from agents_remember.worktrees.integration.closeout import door as closeout_door
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operation_controls as controls_mod,
 )
@@ -39,13 +39,13 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from closeout_input_test_support import closeout_operation_input, start_closeout_operation
+from lifecycle_control_test_support import publish_completed_disposition_task_authority
 from test_closeout_generation_boundary import _publish_mutated_code_generation
 from test_lifecycle_operation_controls_l2 import (
     _byte_tree,
     _command,
     _dirty_closeout,
     _public_control,
-    _standalone_owner,
 )
 from test_lifecycle_operations import _contract
 
@@ -194,7 +194,7 @@ def test_unreadable_pending_door_status_and_stale_handler_share_exact_decision(
     assert store.read() is not None
 
 
-@pytest.mark.parametrize("mode", ["cancel", "successor", "retire", "supersede"])
+@pytest.mark.parametrize("mode", ["cancel", "successor", "supersede"])
 def test_all_pending_door_dispositions_refuse_live_third_state_without_mutation(
     tmp_path: Path,
     mode: str,
@@ -264,7 +264,10 @@ def _pending_disposition_fixture(tmp_path: Path, mode: str):
         record = store.read()
         assert record is not None
         config = load_config(Path(record.input.configPath))
-        caller = _standalone_owner(contract)
+        caller = publish_completed_disposition_task_authority(
+            contract,
+            sprint_owned=True,
+        )
         row = next(
             item
             for item in legal_operation_controls(
@@ -280,15 +283,9 @@ def _pending_disposition_fixture(tmp_path: Path, mode: str):
     return contract, store, config, row, caller
 
 
-def _interrupt_pending_disposition(mode: str):
-    real_write = closeout_door.write_contract
-    writes = 0
-
+def _interrupt_pending_disposition(_mode: str):
     def interrupt_selected_publication(path, updated):
-        nonlocal writes
-        writes += 1
-        if mode == "supersede" and writes == 1:
-            return real_write(path, updated)
+        del path, updated
         raise OSError("forced pending door publication")
 
     return interrupt_selected_publication

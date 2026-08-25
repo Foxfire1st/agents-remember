@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from agents_remember.application.memory_quality_runs import (
+from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
     poll_quality_run,
     start_quality_run,

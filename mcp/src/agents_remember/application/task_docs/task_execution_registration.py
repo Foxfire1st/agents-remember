@@ -17,19 +17,13 @@ from agents_remember.tasks import (
     TaskDocument,
     TaskExecutionRegistration,
     read_task_doc_with_source,
-    write_task_docs,
 )
-from agents_remember.worktrees.task_fact_publication import publish_task_fact_mutation
 
 from .task_doc_publication import (
     TaskDocPublicationConflict,
-    require_task_doc_sources_current,
+    publish_prepared_task_documents,
 )
-from .task_doc_queue_scope import (
-    TaskDocScopeChange,
-    TaskDocScopeError,
-    resolve_projection_scope_union,
-)
+from .task_doc_queue_scope import TaskDocScopeError
 
 TaskExecutionRegistrationStatus = Literal[
     "registered",
@@ -113,20 +107,13 @@ def register_task_execution_evidence(
         }
     )
 
-    def projection_scopes() -> tuple[TaskDocumentRef, ...]:
-        return resolve_projection_scope_union(
-            root,
-            task_document_ref.repository,
-            (TaskDocScopeChange(task_document_ref, document, candidate),),
-        )
-
     try:
-        publish_task_fact_mutation(
+        publish_prepared_task_documents(
             root,
             task_document_ref.repository,
-            validate=lambda: require_task_doc_sources_current((source,)),
-            projection_scopes=projection_scopes,
-            publication=lambda: write_task_docs(path.parent, [candidate]),
+            path.parent,
+            [candidate],
+            (source,),
         )
     except (OSError, ValueError, TaskDocScopeError, TaskDocPublicationConflict) as exc:
         return TaskExecutionRegistrationResult(

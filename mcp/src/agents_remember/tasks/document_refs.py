@@ -459,7 +459,7 @@ class TaskDocumentTopology:
             aliases.update({original.id, original.title})
         return tuple(
             sprint
-            for sprint in self._master_documents(master_ref.repository)
+            for sprint in repository_master_documents(self, master_ref.repository)
             if sprint.ref != master_ref
             and sprint.document.orchestrates
             and aliases.intersection(sprint.document.orchestrates)
@@ -501,17 +501,6 @@ class TaskDocumentTopology:
                 sprints.append(sprint)
         return tuple(sprints)
 
-    def repository_masters(self, repository: str) -> tuple[ResolvedTaskDocument, ...]:
-        """Return every canonical master document in one repository task tree.
-
-        Branch authority is repository-global: an ordinary leaf under one sprint must not be
-        able to claim another sprint's super or atomic integration ref. Callers that census
-        those refs therefore need the complete canonical master set, not only the current
-        leaf's ancestry.
-        """
-
-        return self._master_documents(repository)
-
     def _repo_root(self, repository: str) -> Path:
         return (self.coordination_root / "tasks" / repository).resolve(strict=False)
 
@@ -535,14 +524,6 @@ class TaskDocumentTopology:
                 f"leaf {leaf.ref.key} is not declared by {parent.ref.key}",
             )
         return parent
-
-    def _master_documents(self, repository: str) -> tuple[ResolvedTaskDocument, ...]:
-        documents: list[ResolvedTaskDocument] = []
-        for ref in self._master_document_refs(repository):
-            resolved = self.resolve(ref)
-            if resolved.document.kind == "master":
-                documents.append(resolved)
-        return tuple(documents)
 
     def _master_document_refs(
         self,
@@ -578,7 +559,7 @@ class TaskDocumentTopology:
         }
         return tuple(
             candidate
-            for candidate in self._master_documents(master.ref.repository)
+            for candidate in repository_master_documents(self, master.ref.repository)
             if candidate.ref != master.ref
             and candidate.document.orchestrates
             and any(name in names for name in candidate.document.orchestrates)
@@ -587,7 +568,7 @@ class TaskDocumentTopology:
     def _commanded_masters(self, sprint: ResolvedTaskDocument) -> tuple[ResolvedTaskDocument, ...]:
         commanded = set(sprint.document.orchestrates)
         matches: list[ResolvedTaskDocument] = []
-        for candidate in self._master_documents(sprint.ref.repository):
+        for candidate in repository_master_documents(self, sprint.ref.repository):
             if candidate.ref == sprint.ref:
                 continue
             names = {candidate.path.parent.name, candidate.document.id, candidate.document.title}
@@ -646,3 +627,22 @@ class TaskDocumentTopology:
                 "orchestrates contains multiple aliases for the same commanded master",
             )
         return tuple(resolved)
+
+
+def repository_master_documents(
+    topology: TaskDocumentTopology,
+    repository: str,
+) -> tuple[ResolvedTaskDocument, ...]:
+    """Return every canonical master document in one repository task tree.
+
+    Branch authority is repository-global: a leaf under one sprint must not claim another
+    sprint's super or atomic integration ref. Repository census is a module-level query over
+    topology primitives rather than another responsibility on the topology object itself.
+    """
+
+    documents: list[ResolvedTaskDocument] = []
+    for ref in topology._master_document_refs(repository):
+        resolved = topology.resolve(ref)
+        if resolved.document.kind == "master":
+            documents.append(resolved)
+    return tuple(documents)

@@ -15,12 +15,12 @@ from agents_remember.application.worktree_tools import (
     OperationControlRequest,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
+from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import IntegrateStrategy
-from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
+from agents_remember.models.lifecycles.operation_kinds import (
     LifecycleControlAction,
+    LifecycleOperationKind,
 )
 
 from ..tools import (

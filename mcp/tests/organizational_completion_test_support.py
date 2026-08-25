@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from _quality_evidence_fixture import publish_passing_quality_gate
 from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.tasks import read_task_doc, write_task_doc
@@ -17,7 +19,8 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import
     start_or_observe_operation,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.modules.quality import gate as code_quality_gate
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from closeout_input_test_support import (
     closeout_operation_input,
     publish_closeout_finalization,
@@ -43,8 +46,31 @@ FULL_GATE = {
 }
 
 
-def _full_gate(contract):
-    return {**FULL_GATE, "diffBase": contract.code_base_commit}
+def _full_gate(contract: WorktreeContract) -> Callable[..., dict[str, object]]:
+    """Build a mock side effect that publishes exact passing organizational evidence."""
+
+    def run(
+        target: code_quality_gate.QualityGateTarget,
+        *,
+        diff_base: str = "",
+        plan: code_quality_gate.QualityGatePlan | None = None,
+        invocation: str = "master-integration",
+        attestation: Mapping[str, str] | None = None,
+    ) -> dict[str, object]:
+        published = publish_passing_quality_gate(
+            target,
+            diff_base=diff_base,
+            plan=plan,
+            invocation=invocation,
+            attestation=attestation,
+        )
+        return {
+            **FULL_GATE,
+            **published,
+            "diffBase": diff_base or contract.code_base_commit,
+        }
+
+    return run
 
 
 class OrganizationalCompletionFixture(unittest.TestCase):

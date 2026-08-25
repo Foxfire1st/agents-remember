@@ -49,7 +49,7 @@ class IntegrationOrganizationalDecisionL2Tests(unittest.TestCase):
             mock.patch.object(
                 quality_mod,
                 "run_strict_code_quality_gate",
-                return_value=fixture_mod._full_gate(contract),
+                side_effect=fixture_mod._full_gate(contract),
             ),
             mock.patch.object(
                 integrate_mod,

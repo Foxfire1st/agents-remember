@@ -65,7 +65,7 @@ def test_packaged_agent_doctrine_is_the_canonical_skill_exactly() -> None:
 
 
 def _doctrine(path: str) -> str:
-    return SOURCE_SKILL.joinpath(path).read_text(encoding="utf-8")
+    return " ".join(SOURCE_SKILL.joinpath(path).read_text(encoding="utf-8").split())
 
 
 def _assert_architect_doctrine(text: str) -> None:
@@ -107,7 +107,7 @@ def _assert_orchestrator_doctrine(text: str) -> None:
         term in text
         for term in (
             "Execution loop — recompute after every material event",
-            "graph's stable node order as a deterministic",
+            "stable graph tie-break",
             "Organizational:",
             "Atomic:",
             "integration branches are not workbenches",

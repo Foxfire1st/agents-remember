@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.models.lifecycles.policy import GatePolicyRuleSnapshot
 

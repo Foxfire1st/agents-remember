@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorGeneration,
     DoorAdmissionProvenance,
@@ -28,10 +28,10 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
 )
-from agents_remember.worktrees.integration.closeout_operation_admission import (
+from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
 )
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.lifecycle import (
@@ -93,7 +93,7 @@ def start_closeout_operation(
     """
     fixture_bypass_scheduling = bool(options.pop("fixture_bypass_scheduling", False))
     effective = operation_input.effectiveInput
-    contract, bypass_scheduling_fence = _ensure_fixture_waiting_door(
+    contract, bypass_scheduling_fence = ensure_fixture_waiting_door(
         load_contract(Path(operation_input.contractPath)),
         force_synthetic=fixture_bypass_scheduling,
     )
@@ -127,7 +127,7 @@ def start_closeout_operation(
         )
 
 
-def _ensure_fixture_waiting_door(contract, *, force_synthetic: bool = False):
+def ensure_fixture_waiting_door(contract, *, force_synthetic: bool = False):
     """Publish a typed test-only scheduling input for below-queue lifecycle suites."""
 
     if contract.closeout_door is not None and not (
@@ -261,9 +261,9 @@ def closeout_operation_input(
 def closeout_worktree_args(
     contract,
     *,
-    code: str = "close code candidate",
-    memory: str = "close external memory",
-    ledger: str = "record code-to-memory mapping",
+    code: str | None = "close code candidate",
+    memory: str | None = "close external memory",
+    ledger: str | None = "record code-to-memory mapping",
     **values,
 ) -> WorktreeArgs:
     effective = normalize_closeout_input(

@@ -202,7 +202,6 @@ filterwarnings = [
 # `mcp/tests/test_code_quality_check.py` asserts this list and the suite's actual
 # environment gates stay in step in both directions.
 markers = [
-  "fitness: inherited S1-S4 architecture fitness checks that run in the ordinary pytest suite",
   "ar_run_pi_rpc_smoke: opt in with AR_RUN_PI_RPC_SMOKE=1 -- installs and drives the pinned Pi RPC build (test_pi_rpc_real_smoke.py: 1 class)",
   "ar_run_control_plane_installed: opt in with AR_RUN_CONTROL_PLANE_INSTALLED=1 -- drives installed Codex and Pi runtimes through the control-plane seam (test_harness_control_plane_installed.py: 2 classes)",
   "ar_run_control_installed: opt in with AR_RUN_CONTROL_INSTALLED=1 -- drives installed runtimes through the L3 control routes (test_conversation_control_installed.py: 2 classes)",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.memory_quality_controller import (
+from agents_remember.application.memory_quality.controller import (
     poll_memory_quality_request,
     run_memory_quality_request,
     start_memory_quality_request,

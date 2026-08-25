@@ -437,6 +437,8 @@ class TaskDocumentsReaderTests(unittest.TestCase):
                     "seatState": "absent",
                     "reviewState": "absent",
                     "commitState": "absent",
+                    "childJson": {"state": "missing"},
+                    "childMarkdown": {"state": "missing"},
                     "fingerprint": "a" * 64,
                 },
             }

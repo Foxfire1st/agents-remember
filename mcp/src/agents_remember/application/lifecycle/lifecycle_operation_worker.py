@@ -39,10 +39,10 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
     OrganizationalCompletionRepairEvidence,
 )
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     CloseoutLedgerRecoveryDecision,
 )
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
     derive_closeout_recovery_commits,
 )
@@ -271,61 +271,9 @@ class OperationRuntime:
 
     def finish(self, result: dict[str, object], *, ok: bool) -> None:
         stamp = _stamp()
-
-        def terminal(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
-            if record.cancelRequested or record.status in {"cancelled", "termination-required"}:
-                return record
-            if ok:
-                return record.model_copy(
-                    update={
-                        "status": "completed",
-                        "phase": "completed",
-                        "heartbeatAt": stamp,
-                        "finishedAt": stamp,
-                        "currentCommand": "operation completed",
-                        "result": result,
-                        "guidance": "Observe the task contract for the next lifecycle edge.",
-                        # The process is still executing this final stack frame. Status/control
-                        # reconciliation clears its binding only after observing actual exit.
-                    }
-                )
-            needs_recovery = (
-                closeout_generation_retained(record)
-                if record.operationKind == "closeout"
-                else record.irreversibleBoundaryEntered and not bool(result.get("safeToReplace"))
-            )
-            developer_decision = bool(result.get("developerDecisionRequired"))
-            needs_input = needs_recovery or developer_decision
-            return record.model_copy(
-                update={
-                    "status": "input-required" if needs_input else "failed",
-                    "phase": "contract-finalization" if needs_recovery else "failed",
-                    "heartbeatAt": stamp,
-                    "finishedAt": None if needs_input else stamp,
-                    "currentCommand": "reconcile the same operation"
-                    if needs_recovery
-                    else "operation failed",
-                    "result": result,
-                    "failure": str(result.get("reason") or result.get("summary") or result),
-                    "guidance": (
-                        "Resolve the exact developer-decision evidence without replacing this "
-                        "generation; status will advertise recovery only after the accepted or "
-                        "intended state is restored."
-                        if developer_decision
-                        else (
-                            "Restart this exact task operation; its consumed approval remains "
-                            "bound to the same internal fingerprint and recovery will not replay "
-                            "a different mutation."
-                            if needs_recovery
-                            else "Fix the reported preflight failure, then restart this task operation."
-                        )
-                    ),
-                    # Exit proof and Git proof are independent. Retain this process binding
-                    # until a task-addressed observer proves the process instance exited.
-                }
-            )
-
-        self.store.update(terminal)
+        self.store.update(
+            lambda record: terminal_operation_record(record, result, ok=ok, stamp=stamp)
+        )
 
     def fail(self, error: Exception) -> None:
         current = self.store.read()
@@ -408,6 +356,77 @@ def _organizational_repair_failure(
     ):
         return None
     return dict(record.result)
+
+
+def terminal_operation_record(
+    record: LifecycleOperationRecord,
+    result: dict[str, object],
+    *,
+    ok: bool,
+    stamp: str,
+) -> LifecycleOperationRecord:
+    """Apply the terminal transition while preserving an accepted repair generation.
+
+    Organizational repair is an already-published developer-decision contract. A later
+    lower-level symptom cannot replace that contract with a payload that the durable schema
+    rejects. Keeping this transition pure also gives the quality preflight one exact owner
+    boundary to validate before its consumers execute.
+    """
+
+    if record.cancelRequested or record.status in {"cancelled", "termination-required"}:
+        return record
+    if ok:
+        return record.model_copy(
+            update={
+                "status": "completed",
+                "phase": "completed",
+                "heartbeatAt": stamp,
+                "finishedAt": stamp,
+                "currentCommand": "operation completed",
+                "result": result,
+                "guidance": "Observe the task contract for the next lifecycle edge.",
+                # The process is still executing this final stack frame. Status/control
+                # reconciliation clears its binding only after observing actual exit.
+            }
+        )
+    durable_result = _organizational_repair_failure(record) or result
+    needs_recovery = (
+        closeout_generation_retained(record)
+        if record.operationKind == "closeout"
+        else record.irreversibleBoundaryEntered and not bool(durable_result.get("safeToReplace"))
+    )
+    developer_decision = bool(durable_result.get("developerDecisionRequired"))
+    needs_input = needs_recovery or developer_decision
+    return record.model_copy(
+        update={
+            "status": "input-required" if needs_input else "failed",
+            "phase": "contract-finalization" if needs_recovery else "failed",
+            "heartbeatAt": stamp,
+            "finishedAt": None if needs_input else stamp,
+            "currentCommand": "reconcile the same operation"
+            if needs_recovery
+            else "operation failed",
+            "result": durable_result,
+            "failure": str(
+                durable_result.get("reason") or durable_result.get("summary") or durable_result
+            ),
+            "guidance": (
+                "Resolve the exact developer-decision evidence without replacing this "
+                "generation; status will advertise recovery only after the accepted or "
+                "intended state is restored."
+                if developer_decision
+                else (
+                    "Restart this exact task operation; its consumed approval remains bound "
+                    "to the same internal fingerprint and recovery will not replay a different "
+                    "mutation."
+                    if needs_recovery
+                    else "Fix the reported preflight failure, then restart this task operation."
+                )
+            ),
+            # Exit proof and Git proof are independent. Retain this process binding
+            # until a task-addressed observer proves the process instance exited.
+        }
+    )
 
 
 def integration_completion_payload(

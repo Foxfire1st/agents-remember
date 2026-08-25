@@ -343,7 +343,13 @@ def coverage_json_file_count(coverage_json: Path) -> int:
 
 
 def derive_scope(project_root: Path) -> GateScope:
-    """Derive index paths, configured roots, and report-only untracked exposure."""
+    """Derive authority-aware rail inputs and report-only untracked exposure.
+
+    Every tracked Python file remains linted, formatted, and type-checked. Coverage and
+    CRAP measure importable product packages only: executing tests proves their product
+    assertions, while recursively branch-scoring the helpers that express those
+    assertions creates tests whose only purpose is certifying test machinery.
+    """
     tracked = git_ls_files(project_root, "*.py")
     if not tracked:
         raise ScopeError(f"git tracks no Python files under {project_root}")
@@ -354,12 +360,7 @@ def derive_scope(project_root: Path) -> GateScope:
             f"{project_root}; coverage and CRAP would have nothing to measure"
         )
     test_paths = pytest_testpaths(project_root)
-    # 260731-EFA-L7 R8: the test tree joins the coverage measurement and the CRAP
-    # input. Test modules execute under pytest, so their coverage approaches 1.0
-    # and ``crap_score`` degenerates to raw cyclomatic complexity against the
-    # threshold; that gates over-complex test helpers. File size is not CRAP's job
-    # and stays the file-size rail's.
-    coverage_paths = list(dict.fromkeys([*package_paths, *test_paths]))
+    coverage_paths = package_paths
     roots = derive_scope_roots(project_root, tracked, coverage_paths, test_paths)
     dashboard_ts = git_ls_files(project_root, "dashboard/src/*.ts", "dashboard/src/*.tsx")
     return GateScope(

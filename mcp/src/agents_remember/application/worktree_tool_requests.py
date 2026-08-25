@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
+from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
+from agents_remember.models.lifecycles.operation_kinds import (
     LifecycleControlAction,
 )
 

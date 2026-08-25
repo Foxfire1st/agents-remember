@@ -20,15 +20,14 @@ from agents_remember.application.worktree_tools import (
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
+from agents_remember.models.lifecycles.operation_kinds import LifecycleControlAction
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument, write_task_doc
-from agents_remember.worktrees.integration import closeout_door
+from agents_remember.worktrees.integration.closeout import door as closeout_door
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_projection import (
     LifecycleControlProjectionContext,
     legal_operation_controls,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
-    LifecycleControlAction,
     control_operation,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
@@ -41,6 +40,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import
 from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import load_contract
+from lifecycle_control_test_support import publish_completed_disposition_task_authority
 from test_closeout_generation_boundary import _publish_mutated_code_generation
 from test_lifecycle_operation_controls_l2 import (
     _command,
@@ -52,28 +52,9 @@ from test_lifecycle_operations import _contract
 
 
 def _sprint_owner(contract) -> DeclaredCaller:
-    _standalone_owner(contract)
-    write_task_doc(
-        contract.task_root.parent / "sprint",
-        TaskDocument.model_validate(
-            {
-                "id": "SPRINT",
-                "slug": "sprint",
-                "title": "Sprint",
-                "kind": "master",
-                "status": "inProgress",
-                "repo": contract.repo_name,
-                "createdAt": "2026-08-22T00:00:00+00:00",
-                "orchestrates": [contract.task_name],
-            }
-        ),
-    )
-    return DeclaredCaller(
-        role="orchestrator",
-        task_document_ref=TaskDocumentRef(
-            repository=contract.repo_name,
-            path="sprint/task.json",
-        ),
+    return publish_completed_disposition_task_authority(
+        contract,
+        sprint_owned=True,
     )
 
 
@@ -86,6 +67,7 @@ def _disposition_preserved_artifacts(contract, record) -> dict[str, object]:
         "supersedeDeclarationFingerprint",
         "doorPublication",
         "doorPublicationHistory",
+        "guidance",
     ):
         record_payload.pop(mutable)
     refs = {
@@ -135,7 +117,7 @@ def test_completed_unintegrated_disposition_preserves_artifacts(
     _operation_input, store, finalized = _publish_mutated_code_generation(contract)
     record = store.read()
     assert record is not None
-    owner = _standalone_owner(finalized)
+    owner = _sprint_owner(finalized) if action == "supersede" else _standalone_owner(finalized)
     assert completed_disposition_authorized(finalized, owner)
     config = load_config(Path(record.input.configPath))
     accepted_contract = load_contract(finalized.contract_path)
@@ -166,7 +148,11 @@ def test_completed_unintegrated_disposition_preserves_artifacts(
     assert current.generationDisposition == ("retired" if action == "retire" else "superseded")
     observed_contract = load_contract(finalized.contract_path)
     assert _disposition_preserved_artifacts(observed_contract, current) == preserved
-    assert record.doorPublication in current.doorPublicationHistory
+    if action == "supersede":
+        assert record.doorPublication in current.doorPublicationHistory
+    else:
+        assert current.doorPublication == record.doorPublication
+        assert current.doorPublicationHistory == record.doorPublicationHistory
 
 
 def test_sprint_orchestrator_status_payload_executes_public_disposition(
@@ -250,7 +236,7 @@ def test_status_keeps_completed_closeout_actionable_beside_newer_cancelled_integ
 ) -> None:
     contract = _integration_source_ready_contract(_contract(tmp_path))
     _operation_input, _closeout_store, finalized = _publish_mutated_code_generation(contract)
-    owner = _standalone_owner(finalized)
+    owner = _sprint_owner(finalized)
     start_or_observe_operation(
         IntegrateOperationInput(
             configPath=(tmp_path / "settings.json").as_posix(),
@@ -294,22 +280,16 @@ def test_status_keeps_completed_closeout_actionable_beside_newer_cancelled_integ
             assert row["arguments"]["caller"] == owner.model_dump(mode="json")
 
 
-@pytest.mark.parametrize(
-    ("action", "publication"),
-    (("retire", 1), ("supersede", 1), ("supersede", 2)),
-)
 @pytest.mark.parametrize("after_write", [False, True])
-def test_public_disposition_recovers_before_and_after_contract_publication(
+def test_public_supersede_recovers_before_and_after_contract_publication(
     tmp_path: Path,
-    action: LifecycleControlAction,
-    publication: int,
     after_write: bool,
 ) -> None:
     contract = _contract(tmp_path)
     _operation_input, store, finalized = _publish_mutated_code_generation(contract)
     record = store.read()
     assert record is not None
-    owner = _standalone_owner(finalized)
+    owner = _sprint_owner(finalized)
     config = load_config(Path(record.input.configPath))
     row = next(
         item
@@ -321,7 +301,7 @@ def test_public_disposition_recovers_before_and_after_contract_publication(
                 caller=owner,
             ),
         )
-        if item["action"] == action
+        if item["action"] == "supersede"
     )
     original = closeout_door.write_contract
     calls = 0
@@ -329,8 +309,6 @@ def test_public_disposition_recovers_before_and_after_contract_publication(
     def interrupted(path, updated):
         nonlocal calls
         calls += 1
-        if calls != publication:
-            return original(path, updated)
         if after_write:
             original(path, updated)
         raise RuntimeError("forced disposition publication cut")
@@ -378,11 +356,9 @@ def test_public_disposition_recovers_before_and_after_contract_publication(
     assert completed["ok"] is True
     terminal = store.read()
     assert terminal is not None and terminal.doorPublication is not None
-    assert terminal.generationDisposition == ("retired" if action == "retire" else "superseded")
+    assert terminal.generationDisposition == "superseded"
     assert terminal.doorPublication.state == "proven"
-    assert terminal.doorPublication.generation.disposition == (
-        "claimed" if action == "retire" else "waiting"
-    )
+    assert terminal.doorPublication.generation.disposition == "waiting"
 
 
 def test_supersede_exact_replay_converges_and_competing_declaration_refuses(
@@ -392,7 +368,7 @@ def test_supersede_exact_replay_converges_and_competing_declaration_refuses(
     _operation_input, store, finalized = _publish_mutated_code_generation(contract)
     record = store.read()
     assert record is not None
-    owner = _standalone_owner(finalized)
+    owner = _sprint_owner(finalized)
     config = load_config(Path(record.input.configPath))
     row = next(
         item

@@ -36,7 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.code_quality import (
-    crap_calculator,
+    causal_preflight,
     diff_coverage,
     post_coverage,
     retry_proof,
@@ -44,6 +44,7 @@ from agents_remember.code_quality import (
     targeted,
 )
 from agents_remember.code_quality import scope as quality_scope
+from agents_remember.code_quality.check_cli import build_parser
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.platform_subprocess import native_subprocess_environment
 from agents_remember.kernel.primitives import memory_cap
@@ -53,6 +54,7 @@ from agents_remember.testing.dagger_admission import (
     require_dagger_admission,
     require_dagger_admission_capability,
 )
+from agents_remember.testing.evidence_lanes import EvidenceTrigger, expression_for
 
 crap_failure_line = post_coverage.crap_failure_line
 run_crap_calculator = post_coverage.run_crap_calculator
@@ -105,6 +107,7 @@ class CheckConfig:
     file_size_armed: bool = False
     pytest_report_log: Path | None = None
     pytest_phase_report: Path | None = None
+    causal_failure_report: Path | None = None
     coverage_data: Path | None = None
     progress_report: Path | None = None
     progress: QualityProgress | None = None
@@ -213,9 +216,13 @@ def run_subprocess(
 # --- steps -------------------------------------------------------------------
 
 
-def _fixed_steps(lint_args: list[str], type_args: list[str]) -> list[Step]:
-    """Ruff, ruff-format, and pyright over the rail's path scope."""
-    return [
+def _fixed_steps(
+    config: CheckConfig,
+    lint_args: list[str],
+    type_args: list[str],
+) -> list[Step]:
+    """Static source rails plus durable-evidence lifecycle admission."""
+    steps = [
         # No `--extend-ignore` and no `--select`: this step lints exactly what
         # `pyproject.toml` selects, C901/PLR0911/PLR0912/PLR0915 included. Anything routed
         # off this command line is a rule the gate stops enforcing, which is the whole
@@ -235,7 +242,33 @@ def _fixed_steps(lint_args: list[str], type_args: list[str]) -> list[Step]:
                 *type_args,
             ],
         ),
+        Step(
+            "evidence-lifecycle",
+            [
+                sys.executable,
+                "-m",
+                "agents_remember.testing.evidence_lifecycle",
+                "--project-root",
+                ".",
+            ],
+        ),
     ]
+    if config.causal_failure_report is not None:
+        steps.append(
+            Step(
+                "causal-preflight",
+                [
+                    sys.executable,
+                    "-m",
+                    "agents_remember.code_quality.causal_preflight",
+                    "--project-root",
+                    ".",
+                    "--report",
+                    config.causal_failure_report.as_posix(),
+                ],
+            )
+        )
+    return steps
 
 
 def _radon_report_steps(radon_args: list[str]) -> list[Step]:
@@ -277,6 +310,11 @@ def _pytest_step(
     if getattr(config, "targeted", False) and not config.scope.test_paths:
         return None
     pytest_args = [sys.executable, "-m", "pytest", *test_args]
+    marker_expression = expression_for(
+        EvidenceTrigger.AFFECTED if config.targeted else EvidenceTrigger.RELEASE
+    )
+    if marker_expression is not None:
+        pytest_args += ["-m", marker_expression]
     if config.pytest_report_log is not None:
         pytest_args.append(f"--report-log={config.pytest_report_log.as_posix()}")
     if config.pytest_phase_report is not None:
@@ -285,6 +323,11 @@ def _pytest_step(
             "agents_remember.testing.pytest_phase_reporter",
             "--ar-pytest-phase-report",
             config.pytest_phase_report.as_posix(),
+        ]
+    if config.causal_failure_report is not None:
+        pytest_args += [
+            "--ar-causal-failure-report",
+            config.causal_failure_report.as_posix(),
         ]
     if config.scope.coverage_paths:
         pytest_args += [
@@ -353,7 +396,11 @@ def quality_steps(
     # rails score; the pytest-only package roots above would resolve to nothing
     # at the repo root and make the report rail vacuous.
     radon_args = posix_args(scope.coverage_paths)
-    steps = _fixed_steps(posix_args(scope.lint_paths), posix_args(scope.type_paths))
+    steps = _fixed_steps(
+        config,
+        posix_args(scope.lint_paths),
+        posix_args(scope.type_paths),
+    )
     # Keep the inexpensive structural rail ahead of type analysis, reports, and the broad pytest
     # run. Pytest must remain the final subprocess because CRAP and diff coverage consume the
     # coverage artifact it produces and therefore cannot safely run before it.
@@ -505,6 +552,10 @@ def execute_quality_rails(
     if config.pytest_phase_report is not None:
         config.pytest_phase_report.parent.mkdir(parents=True, exist_ok=True)
         config.pytest_phase_report.unlink(missing_ok=True)
+    if config.causal_failure_report is not None:
+        config.causal_failure_report.parent.mkdir(parents=True, exist_ok=True)
+        config.causal_failure_report.unlink(missing_ok=True)
+        config.causal_failure_report.with_suffix(".md").unlink(missing_ok=True)
     retry_plan = initialized_retry_plan(
         config,
         coverage_json,
@@ -689,6 +740,8 @@ def run_fixed_checks(
         env["COVERAGE_FILE"] = str(retry_plan.active_data_path)
     targeted = getattr(config, "targeted", False)
     failed_steps = 0
+    pytest_blocking_failures = 0
+    causal_failure = False
     for step in quality_steps(config, coverage_json, retry_plan=retry_plan):
         progress.write(status="running", step=step.name, detail="run quality rail")
         printer(step_header(step))
@@ -700,7 +753,7 @@ def run_fixed_checks(
                 targeted=targeted,
             )
         )
-        if step.name == "pytest" and failed_steps:
+        if step.name == "pytest" and pytest_blocking_failures:
             # An exact retry restored cached JSON before the cheap rails ran. If one of
             # those rails now breaks, discard that artifact too: no post-pytest rail may
             # consume earlier-tree evidence after pytest was deliberately skipped.
@@ -708,28 +761,76 @@ def run_fixed_checks(
             printer("result: pytest SKIPPED (an earlier quality rail failed)")
             progress.finish_step(step.name, passed=False)
             continue
-        if step.name == "pytest" and retry_plan is not None and retry_plan.exact:
+        active_step = _causal_continuation_step(
+            step,
+            config,
+            coverage_json,
+            causal_failure=causal_failure,
+        )
+        if active_step is None:
+            failed_steps += 1
+            pytest_blocking_failures += 1
+            printer("result: pytest FAIL (causal continuation derived no pytest rail)")
+            progress.finish_step(step.name, passed=False)
+            continue
+        if (
+            active_step.name == "pytest"
+            and retry_plan is not None
+            and retry_plan.exact
+            and not causal_failure
+        ):
             cached_failures = report_cached_pytest(coverage_json, printer)
             failed_steps += cached_failures
             progress.finish_step(step.name, passed=cached_failures == 0)
             continue
-        result = runner(step.name, step.command, config.project_root, env)
-        if step.name == "pytest" and retry_plan is not None:
+        result = runner(active_step.name, active_step.command, config.project_root, env)
+        if active_step.name == "pytest" and retry_plan is not None:
             retry_plan.record_pytest(result.return_code)
-        if step.name == "pytest":
-            pytest_failures = report_pytest_result(step, result, coverage_json, printer)
+        if active_step.name == "pytest":
+            pytest_failures = report_pytest_result(active_step, result, coverage_json, printer)
             failed_steps += pytest_failures
-            progress.finish_step(step.name, passed=pytest_failures == 0)
+            progress.finish_step(active_step.name, passed=pytest_failures == 0)
             continue
         if result.return_code == 0:
-            printer(step_success(step))
-            progress.finish_step(step.name, passed=True)
+            printer(step_success(active_step))
+            progress.finish_step(active_step.name, passed=True)
             continue
         failed_steps += 1
-        printer(step_failure(step, result.return_code))
-        progress.finish_step(step.name, passed=False)
-        report_memory_cap_failure(step.name, printer)
+        valid_causal_report = (
+            active_step.name == "causal-preflight"
+            and config.causal_failure_report is not None
+            and causal_preflight.failed_report(config.causal_failure_report)
+        )
+        if valid_causal_report:
+            causal_failure = True
+        else:
+            pytest_blocking_failures += 1
+        printer(step_failure(active_step, result.return_code))
+        progress.finish_step(active_step.name, passed=False)
+        report_memory_cap_failure(active_step.name, printer)
     return failed_steps
+
+
+def _causal_continuation_step(
+    step: Step,
+    config: CheckConfig,
+    coverage_json: Path,
+    *,
+    causal_failure: bool,
+) -> Step | None:
+    if step.name != "pytest" or not causal_failure:
+        return step
+    coverage_json.unlink(missing_ok=True)
+    if config.coverage_data is not None:
+        config.coverage_data.unlink(missing_ok=True)
+    return next(
+        (
+            candidate
+            for candidate in quality_steps(config, coverage_json, retry_plan=None)
+            if candidate.name == "pytest"
+        ),
+        None,
+    )
 
 
 def report_cached_pytest(coverage_json: Path, printer: Printer) -> int:
@@ -801,7 +902,6 @@ def prepare_retry_plan(
                 diff_floor=config.diff_floor,
                 coverage_paths=tuple(config.scope.coverage_paths),
                 test_arguments=tuple(config.scope.test_paths),
-                test_roots=tuple(pytest_testpaths(project_root)),
                 untracked_paths=tuple(config.scope.untracked_paths),
             ),
             admission=config.admission,
@@ -860,107 +960,6 @@ def resolve_under_root(path: Path, project_root: Path) -> Path:
     return path.resolve() if path.is_absolute() else (project_root / path).resolve()
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Run the Agents Remember source quality suite over every tracked Python "
-            "file. Enforcing steps: Ruff (lint, complexity rules "
-            "C901/PLR0911/PLR0912/PLR0915 included), Ruff format (--check), Pyright "
-            "(types), pytest coverage, mandatory CRAP threshold enforcement, and the "
-            "changed-lines coverage floor. The File Size Budget rail is wired here "
-            "too; [tool.agents_remember] file_size_armed decides whether a violation "
-            "fails the run (unarmed runs still report every band). Radon "
-            "cyclomatic complexity and maintainability index are printed as a report "
-            "only -- radon exits 0 whatever it finds, so it cannot fail this gate. Scope "
-            "orders cheap deterministic subprocesses before pytest; CRAP and diff coverage "
-            "then consume pytest's branch data. Dagger-owned exact/test-only retry proofs are "
-            "content-addressed and fail closed; AR_QUALITY_NO_RETRY disables reuse. Quality scope "
-            "is derived from the index and configured roots, not from a flag: there is "
-            "no way to narrow what the gate measures. Non-ignored untracked siblings are "
-            "reported as outside that measurement. No baseline, allowlist or exemption "
-            "file anywhere in it can excuse a finding."
-        )
-    )
-    parser.add_argument(
-        "--targeted",
-        action="store_true",
-        help=(
-            "Run the leaf change-set contract instead of the full tree: ruff over the "
-            "changed Python files, pyright over the changed files plus the reverse-import "
-            "closure, pytest over the derived test subset, and coverage/CRAP scoped to the "
-            "changed production modules. The derivation is printed for review."
-        ),
-    )
-    parser.add_argument(
-        "--memory-cap-bytes",
-        type=int,
-        help=(
-            "Apply a POSIX address-space rlimit (RLIMIT_AS) to this process and every rail "
-            "it spawns, so an over-cap run dies inside its own process instead of taking the "
-            f"host down. Policy: {memory_cap.QUALITY_MEMORY_CAP_POLICY}."
-        ),
-    )
-    parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument(
-        "--coverage-json",
-        type=Path,
-        help="Optional path for the generated Coverage.py JSON report.",
-    )
-    parser.add_argument(
-        "--pytest-report-log",
-        type=Path,
-        help=(
-            "Replace this JSONL file with pytest collection and result events. The report "
-            "is flushed per event so a lifecycle operation can project live progress."
-        ),
-    )
-    parser.add_argument(
-        "--pytest-phase-report",
-        type=Path,
-        help=(
-            "Replace this JSON file with route-neutral pytest phase timestamps and node outcomes."
-        ),
-    )
-    parser.add_argument(
-        "--coverage-data",
-        type=Path,
-        help="Keep the Coverage.py data file at this report-local path.",
-    )
-    parser.add_argument(
-        "--progress-report",
-        type=Path,
-        help=(
-            "Atomically replace this JSON file with the currently running rail and terminal "
-            "wrapper result."
-        ),
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=crap_calculator.DEFAULT_CRAP_THRESHOLD,
-        help="Fail when any function has a CRAP score at or above this value.",
-    )
-    parser.add_argument("--top", type=int, default=crap_calculator.DEFAULT_TOP)
-    parser.add_argument(
-        "--diff-base",
-        help=(
-            "Revision the changed-lines coverage floor diffs against. Defaults to the "
-            "merge base with, in order, AR_GATE_DIFF_BASE, the pull request base, the "
-            "branch's upstream, then the default branch. The base actually used is "
-            "printed on every run."
-        ),
-    )
-    parser.add_argument(
-        "--diff-floor",
-        type=float,
-        default=diff_coverage.DEFAULT_DIFF_COVERAGE_FLOOR,
-        help=(
-            "Fail when coverage of the changed statements and branches is below this percentage."
-        ),
-    )
-    return parser
-
-
 def config_from_args(
     args: argparse.Namespace,
     *,
@@ -976,6 +975,9 @@ def config_from_args(
     configured_coverage_data = getattr(args, "coverage_data", None)
     if configured_coverage_data is None and (coverage_env := os.environ.get("COVERAGE_FILE")):
         configured_coverage_data = Path(coverage_env)
+    configured_causal_report = getattr(args, "causal_failure_report", None)
+    if configured_causal_report is None:
+        configured_causal_report = QUALITY_TEMP_ROOT / str(os.getpid()) / "causal-failures.json"
     quality_scope.validate_quality_config(project_root)
     try:
         scope_reporting.validate_invocation_environment()
@@ -1000,6 +1002,7 @@ def config_from_args(
             file_size_armed=quality_scope.file_size_armed(project_root),
             pytest_report_log=getattr(args, "pytest_report_log", None),
             pytest_phase_report=getattr(args, "pytest_phase_report", None),
+            causal_failure_report=configured_causal_report,
             coverage_data=configured_coverage_data,
             progress_report=configured_progress,
         )
@@ -1015,6 +1018,7 @@ def config_from_args(
         file_size_armed=quality_scope.file_size_armed(project_root),
         pytest_report_log=getattr(args, "pytest_report_log", None),
         pytest_phase_report=getattr(args, "pytest_phase_report", None),
+        causal_failure_report=configured_causal_report,
         coverage_data=configured_coverage_data,
         progress_report=configured_progress,
     )

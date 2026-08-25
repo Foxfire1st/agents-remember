@@ -21,16 +21,15 @@ from agents_remember.application.worktree_tools import (
     worktree_status_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.models.closeout_input import CloseoutMessageInput
+from agents_remember.models.closeout.input import CloseoutMessageInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     GatePolicyRuleSnapshot,
     LifecycleOperationRecord,
 )
+from agents_remember.models.lifecycles.operation_kinds import LifecycleControlAction
 from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
-from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operation_controls as controls_module,
 )
@@ -41,7 +40,6 @@ from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operations as operations_module,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
-    LifecycleControlAction,
     LifecycleControlCommand,
     control_operation,
     legal_operation_controls,
@@ -56,15 +54,16 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state import (
+from agents_remember.worktrees.integration.lifecycle.worker.state import (
     reconcile_worker_exit,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_termination import (
+from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     worker_process_fingerprint,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from closeout_input_test_support import closeout_operation_input, start_closeout_operation
+from lifecycle_control_test_support import publish_completed_disposition_task_authority
 from test_closeout_generation_boundary import _publish_mutated_code_generation
 from test_lifecycle_operations import _contract, _publish_integration_branch_authority
 
@@ -122,27 +121,9 @@ def _byte_tree(root: Path) -> dict[str, bytes]:
 
 
 def _standalone_owner(contract) -> DeclaredCaller:
-    write_task_doc(
-        contract.task_root,
-        TaskDocument.model_validate(
-            {
-                "id": "DURABLE-LIFECYCLE",
-                "slug": "durable-lifecycle",
-                "title": "Durable lifecycle",
-                "kind": "master",
-                "status": "inProgress",
-                "repo": contract.repo_name,
-                "createdAt": "2026-08-22T00:00:00+00:00",
-                "executionNature": "atomic",
-            }
-        ),
-    )
-    return DeclaredCaller(
-        role="architect",
-        task_document_ref=TaskDocumentRef(
-            repository=contract.repo_name,
-            path=f"{contract.task_name}/task.json",
-        ),
+    return publish_completed_disposition_task_authority(
+        contract,
+        sprint_owned=False,
     )
 
 
@@ -572,7 +553,7 @@ def test_signal_denial_retains_worker_authority_and_only_advertises_cancel(
     cancel = next(row for row in advertised if row["action"] == "cancel")
     with (
         mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             return_value=None,
         ) as observation,
@@ -794,7 +775,7 @@ def test_completed_worker_exit_reconciliation_preserves_terminal_outcome(
         )
 
     with mock.patch(
-        "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state.observe_worker_termination",
+        "agents_remember.worktrees.integration.lifecycle.worker.state.observe_worker_termination",
         side_effect=exited,
     ):
         reconciled = reconcile_worker_exit(store)
@@ -840,7 +821,7 @@ def test_status_advertised_integrate_persists_natural_closeout_exit_on_execution
 
     with (
         mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             side_effect=exited,
         ),
@@ -909,7 +890,7 @@ def test_replacement_is_blocked_until_exact_worker_exit_proof(
     )
     with (
         mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             return_value=None,
         ) as observation,
@@ -973,7 +954,7 @@ def test_status_projects_natural_worker_exit_without_any_filesystem_write(
 
     with (
         mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             side_effect=exited,
         ),

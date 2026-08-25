@@ -30,7 +30,7 @@ ACCEPTING_CONSUMER_INVENTORY = (
     ),
     EvidenceConsumerContract(
         EvidenceConsumer.QUALITY,
-        "agents_remember.worktrees.modules.clean_quality_executor.run_clean_quality",
+        "agents_remember.worktrees.modules.quality.clean_executor.run_clean_quality",
         "atomic Dagger quality generation and authoritative result JSON",
         "published generation hashes plus lifecycle-supplied attestation where applicable",
         False,
@@ -54,7 +54,7 @@ ACCEPTING_CONSUMER_INVENTORY = (
     ),
     EvidenceConsumerContract(
         EvidenceConsumer.LIFECYCLE,
-        "agents_remember.worktrees.modules.code_quality_gate.run_strict_code_quality_gate",
+        "agents_remember.worktrees.modules.quality.gate.run_strict_code_quality_gate",
         "lifecycle quality-gate result payload",
         "Dagger-only executor and enclosure-owned report generation",
         False,

@@ -59,6 +59,7 @@ from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
     TaskDocumentTopology,
+    repository_master_documents,
 )
 from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
@@ -383,7 +384,7 @@ def collect_linkage_facts(
         sprint = topology.resolve(sprint_ref)
         masters = [
             master
-            for master in topology.repository_masters(sprint_ref.repository)
+            for master in repository_master_documents(topology, sprint_ref.repository)
             if master.ref != sprint_ref and not master.document.orchestrates
         ]
     except (TaskDocumentRefError, OSError, ValueError) as exc:

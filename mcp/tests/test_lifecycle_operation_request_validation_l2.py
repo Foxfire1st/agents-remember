@@ -63,7 +63,7 @@ def test_public_operation_control_payload_refuses_invalid_request_before_authori
         OperationControlRequest(**cast(dict[str, Any], values)),
     )
 
-    assert payload == {
+    expected_payload = {
         "ok": False,
         "operation": "worktree_operation_control",
         "state": "refused",
@@ -73,6 +73,11 @@ def test_public_operation_control_payload_refuses_invalid_request_before_authori
         "observed": observed,
         "nextAction": "correct-request",
     }
+    assert {key: payload[key] for key in expected_payload} == expected_payload
+    assert payload["developerDecisionRequired"] is False
+    assert payload["tokenizer"] == "tiktoken:o200k_base"
+    assert payload["tokenCountExact"] is True
+    assert isinstance(payload["tokens"], int) and payload["tokens"] > 0
     assert not {
         "nextTool",
         "nextArgs",

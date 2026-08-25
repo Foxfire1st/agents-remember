@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     CloseoutCommitLegName,
     CloseoutCorrectedCall,
     CloseoutInputRoute,

@@ -17,6 +17,100 @@ PLAYWRIGHT_IMAGE = (
 CODEX_VERSION = "0.147.0"
 
 
+def _candidate_container(
+    source: dagger.Directory,
+    repository_bundle: dagger.File,
+    *,
+    attempt_nonce: str,
+    reports: str,
+) -> dagger.Container:
+    """Build the one pinned candidate environment shared by acceptance and cadence routes."""
+
+    return (
+        dag.container()
+        .from_(PLAYWRIGHT_IMAGE)
+        .with_mounted_cache("/root/.cache/pip", dag.cache_volume("ar-quality-pip-v1"))
+        .with_mounted_cache("/root/.npm", dag.cache_volume("ar-quality-npm-v1"))
+        .with_env_variable("HOME", "/tmp/ar-home")
+        .with_env_variable("PIP_CACHE_DIR", "/root/.cache/pip")
+        .with_env_variable("TMPDIR", "/tmp/ar-quality")
+        .with_env_variable("TMP", "/tmp/ar-quality")
+        .with_env_variable("TEMP", "/tmp/ar-quality")
+        .with_env_variable("AR_QUALITY_INVOCATION", "ci")
+        .with_env_variable("AR_QUALITY_NO_RETRY", "1")
+        .with_env_variable("AR_DAGGER_TEST_ATTESTATION", attempt_nonce)
+        .with_env_variable("AR_CODEX_PROBE_MODE", "real")
+        .with_env_variable("AR_CODEX_PROBE_REPORT", f"{reports}/codex-probe.json")
+        .with_env_variable("AR_QUALITY_PROGRESS_REPORT", f"{reports}/quality-progress.json")
+        .with_env_variable("COVERAGE_FILE", f"{reports}/coverage.data")
+        .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality", reports])
+        .with_exec(
+            [
+                "sh",
+                "-c",
+                "umask 077; printf '%s' \"$AR_DAGGER_TEST_ATTESTATION\" "
+                "> /tmp/ar-quality/dagger-test-attestation",
+            ]
+        )
+        .with_exec(["apt-get", "update"])
+        .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
+        .with_exec(
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                "git",
+                "python3",
+                "python3-pip",
+                "python3-venv",
+            ]
+        )
+        .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
+        .with_exec(["npm", "install", "--global", f"@openai/codex@{CODEX_VERSION}"])
+        .with_exec(["codex", "--version"])
+        .with_exec(["python3", "-m", "venv", "/opt/ar-venv"])
+        .with_directory("/workspace", source)
+        .with_file("/tmp/ar-candidate.bundle", repository_bundle)
+        .with_workdir("/workspace")
+        .with_exec(["rm", "-rf", ".git"])
+        .with_exec(["git", "init"])
+        .with_exec(["git", "fetch", "--no-tags", "/tmp/ar-candidate.bundle", "HEAD"])
+        .with_exec(["git", "reset", "--mixed", "FETCH_HEAD"])
+        .with_exec(["git", "add", "--all"])
+        .with_exec(["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"])
+        .with_exec(
+            [
+                "git",
+                "config",
+                "--local",
+                "user.email",
+                "clean-room@agents-remember.invalid",
+            ]
+        )
+        .with_exec(
+            [
+                "git",
+                "config",
+                "--local",
+                "user.name",
+                "Agents Remember clean room",
+            ]
+        )
+        .with_exec(
+            [
+                "/opt/ar-venv/bin/python",
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "-e",
+                "mcp[dev]",
+            ]
+        )
+    )
+
+
 async def _run_dashboard_quality(
     container: dagger.Container,
 ) -> tuple[dagger.Container, int, list[str]]:
@@ -101,96 +195,11 @@ class AgentsRememberQuality:
             raise ValueError("memory_cap_bytes cannot be negative")
         reports = "/reports"
         attempt_nonce = secrets.token_hex(16)
-        container = (
-            dag.container()
-            .from_(PLAYWRIGHT_IMAGE)
-            .with_mounted_cache("/root/.cache/pip", dag.cache_volume("ar-quality-pip-v1"))
-            .with_mounted_cache("/root/.npm", dag.cache_volume("ar-quality-npm-v1"))
-            .with_env_variable("HOME", "/tmp/ar-home")
-            .with_env_variable("PIP_CACHE_DIR", "/root/.cache/pip")
-            .with_env_variable("TMPDIR", "/tmp/ar-quality")
-            .with_env_variable("TMP", "/tmp/ar-quality")
-            .with_env_variable("TEMP", "/tmp/ar-quality")
-            .with_env_variable("AR_QUALITY_INVOCATION", "ci")
-            .with_env_variable("AR_QUALITY_NO_RETRY", "1")
-            .with_env_variable("AR_DAGGER_TEST_ATTESTATION", attempt_nonce)
-            .with_env_variable("AR_CODEX_PROBE_MODE", "real")
-            .with_env_variable("AR_CODEX_PROBE_REPORT", f"{reports}/codex-probe.json")
-            .with_env_variable("AR_QUALITY_PROGRESS_REPORT", f"{reports}/quality-progress.json")
-            .with_env_variable("COVERAGE_FILE", f"{reports}/coverage.data")
-            .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality", reports])
-            .with_exec(
-                [
-                    "sh",
-                    "-c",
-                    "umask 077; printf '%s' \"$AR_DAGGER_TEST_ATTESTATION\" "
-                    "> /tmp/ar-quality/dagger-test-attestation",
-                ]
-            )
-            .with_exec(["apt-get", "update"])
-            .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
-            .with_exec(
-                [
-                    "apt-get",
-                    "install",
-                    "-y",
-                    "--no-install-recommends",
-                    "git",
-                    "python3",
-                    "python3-pip",
-                    "python3-venv",
-                ]
-            )
-            .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
-            .with_exec(["npm", "install", "--global", f"@openai/codex@{CODEX_VERSION}"])
-            .with_exec(["codex", "--version"])
-            .with_exec(["python3", "-m", "venv", "/opt/ar-venv"])
-            .with_directory("/workspace", source)
-            .with_file("/tmp/ar-candidate.bundle", repository_bundle)
-            .with_workdir("/workspace")
-            .with_exec(["rm", "-rf", ".git"])
-            .with_exec(["git", "init"])
-            .with_exec(
-                [
-                    "git",
-                    "fetch",
-                    "--no-tags",
-                    "/tmp/ar-candidate.bundle",
-                    "HEAD",
-                ]
-            )
-            .with_exec(["git", "reset", "--mixed", "FETCH_HEAD"])
-            .with_exec(["git", "add", "--all"])
-            .with_exec(["git", "rev-parse", "--verify", "FETCH_HEAD^{commit}"])
-            .with_exec(
-                [
-                    "git",
-                    "config",
-                    "--local",
-                    "user.email",
-                    "clean-room@agents-remember.invalid",
-                ]
-            )
-            .with_exec(
-                [
-                    "git",
-                    "config",
-                    "--local",
-                    "user.name",
-                    "Agents Remember clean room",
-                ]
-            )
-            .with_exec(
-                [
-                    "/opt/ar-venv/bin/python",
-                    "-m",
-                    "pip",
-                    "install",
-                    "--disable-pip-version-check",
-                    "-e",
-                    "mcp[dev]",
-                ]
-            )
+        container = _candidate_container(
+            source,
+            repository_bundle,
+            attempt_nonce=attempt_nonce,
+            reports=reports,
         )
         container = await container.sync()
         container = container.with_env_variable("AR_QUALITY_ATTEMPT_NONCE", attempt_nonce)
@@ -219,6 +228,8 @@ class AgentsRememberQuality:
                 f"{reports}/pytest-events.jsonl",
                 "--pytest-phase-report",
                 f"{reports}/pytest-phases.json",
+                "--causal-failure-report",
+                f"{reports}/causal-failures.json",
                 "--coverage-json",
                 f"{reports}/coverage.json",
                 "--coverage-data",
@@ -250,9 +261,82 @@ class AgentsRememberQuality:
             "completedSteps": completed,
             "exitCode": exit_code,
             "attemptNonce": attempt_nonce,
+            "causalFailureReport": "causal-failures.json",
+            "causalFailureSummary": "causal-failures.md",
         }
         container = container.with_new_file(
             f"{reports}/clean-quality-results.json",
+            contents=json.dumps(result, indent=2, sort_keys=True) + "\n",
+        )
+        return QualityResult(reports=container.directory(reports), exit_code=exit_code)
+
+    @function
+    async def cadence_evidence(
+        self,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree for non-accepting cadence evidence."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the candidate commit and its ancestry."),
+        ],
+        trigger: Annotated[
+            str,
+            Doc("One of 'scheduled', 'provider-bump', or 'migration-window'."),
+        ],
+    ) -> QualityResult:
+        """Run an explicit evidence cadence without minting quality acceptance."""
+
+        allowed = {"scheduled", "provider-bump", "migration-window"}
+        if trigger not in allowed:
+            raise ValueError(f"unknown cadence evidence trigger: {trigger}")
+        started_at = datetime.now(UTC).isoformat()
+        reports = "/reports"
+        attempt_nonce = secrets.token_hex(16)
+        container = await _candidate_container(
+            source,
+            repository_bundle,
+            attempt_nonce=attempt_nonce,
+            reports=reports,
+        ).sync()
+        exit_code = await container.exit_code()
+        completed = ["environment"]
+        if exit_code == 0:
+            container = await container.with_exec(
+                [
+                    "/opt/ar-venv/bin/python",
+                    "-m",
+                    "agents_remember.testing.cadence_runner",
+                    "--project-root",
+                    "/workspace",
+                    "--trigger",
+                    trigger,
+                    "--json-output",
+                    f"{reports}/cadence-evidence.json",
+                    "--pytest-report-log",
+                    f"{reports}/pytest-events.jsonl",
+                    "--pytest-phase-report",
+                    f"{reports}/pytest-phases.json",
+                ],
+                expect=ReturnType.ANY,
+            ).sync()
+            exit_code = await container.exit_code()
+            completed.append("cadence-evidence")
+        result = {
+            "status": "passed" if exit_code == 0 else "failed",
+            "startedAt": started_at,
+            "finishedAt": datetime.now(UTC).isoformat(),
+            "trigger": trigger,
+            "acceptanceEligible": False,
+            "certifying": False,
+            "credentialsMounted": False,
+            "containerSocketMounted": False,
+            "completedSteps": completed,
+            "exitCode": exit_code,
+        }
+        container = container.with_new_file(
+            f"{reports}/cadence-route-results.json",
             contents=json.dumps(result, indent=2, sort_keys=True) + "\n",
         )
         return QualityResult(reports=container.directory(reports), exit_code=exit_code)

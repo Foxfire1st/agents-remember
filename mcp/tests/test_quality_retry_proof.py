@@ -15,6 +15,7 @@ from coverage import CoverageData
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, retry_proof
 from agents_remember.code_quality.scope import GateScope
@@ -54,34 +55,6 @@ def test_changed_test_contexts_and_collection_context_are_removed(tmp_path: Path
     assert filtered.arcs(measured) == [(3, 4)]
 
 
-def test_delta_refuses_support_modules_and_deleted_tests() -> None:
-    previous = {
-        "mcp/tests/test_one.py": "old",
-        "mcp/tests/conftest.py": "old",
-    }
-    selected = (Path("mcp/tests/test_one.py"),)
-    roots = (Path("mcp/tests"),)
-
-    assert retry_proof._eligible_test_delta(  # pyright: ignore[reportPrivateUsage]
-        [Path("mcp/tests/test_one.py")], previous, selected, roots
-    ) == (Path("mcp/tests/test_one.py"),)
-    assert (
-        retry_proof._eligible_test_delta(  # pyright: ignore[reportPrivateUsage]
-            [Path("mcp/tests/conftest.py")], previous, selected, roots
-        )
-        is None
-    )
-    assert (
-        retry_proof._eligible_test_delta(  # pyright: ignore[reportPrivateUsage]
-            [Path("mcp/tests/test_deleted.py")],
-            {**previous, "mcp/tests/test_deleted.py": "old"},
-            selected,
-            roots,
-        )
-        is None
-    )
-
-
 def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
     tmp_path: Path,
 ) -> None:
@@ -92,6 +65,7 @@ def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
     source_path.parent.mkdir(parents=True)
     test_path.write_text("def test_sample():\n    assert True\n", encoding="utf-8")
     source_path.write_text("VALUE = 1\n", encoding="utf-8")
+    _write_retry_contract(root)
     _git(root, "init")
     _git(root, "config", "user.email", "test@example.invalid")
     _git(root, "config", "user.name", "Retry Proof Test")
@@ -142,6 +116,92 @@ def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
     assert invalidated is not None and invalidated.mode == "fresh"
 
 
+def test_retry_reruns_declared_support_and_fixture_consumers_but_not_unaffected_tests(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    source = root / "src/pkg"
+    tests.mkdir(parents=True)
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("", encoding="utf-8")
+    (source / "sample.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tests / "_support.py").write_text("SUPPORT = 1\n", encoding="utf-8")
+    (tests / "test_sample.py").write_text(
+        "from _support import SUPPORT\nfrom pkg.sample import VALUE\n"
+        "def test_sample(): assert VALUE == SUPPORT\n",
+        encoding="utf-8",
+    )
+    (tests / "test_other.py").write_text(
+        "def test_other(): assert True\n",
+        encoding="utf-8",
+    )
+    _write_retry_contract(root, fixture_consumer="tests/test_sample.py")
+    _git(root, "init")
+    _git(root, "config", "user.email", "test@example.invalid")
+    _git(root, "config", "user.name", "Retry Proof Test")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "base")
+    inputs = _inputs(root)
+    coverage_json = root / "coverage.json"
+    output: list[str] = []
+
+    fresh = retry_proof.prepare(inputs, admission=QUALITY_TEST_ADMISSION, printer=output.append)
+    assert fresh is not None
+    _write_contexts(
+        fresh.active_data_path,
+        root,
+        (tests / "test_sample.py", tests / "test_other.py"),
+    )
+    coverage_json.write_text(json.dumps({"meta": {"branch_coverage": True}}), encoding="utf-8")
+    fresh.record_pytest(0)
+    fresh.finish(coverage_json, quality_passed=False)
+
+    (tests / "_support.py").write_text("SUPPORT = 2\n", encoding="utf-8")
+    support_delta = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
+    assert support_delta is not None and support_delta.delta
+    assert support_delta.delta_tests == (Path("tests/test_sample.py"),)
+    assert "import-consumer" in output[-1]
+
+    (tests / "_support.py").write_text("SUPPORT = 1\n", encoding="utf-8")
+    fixture = root / "mcp/tests/fixtures/owned.json"
+    fixture.write_text('{"changed":true}\n', encoding="utf-8")
+    fixture_delta = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
+    assert fixture_delta is not None and fixture_delta.delta
+    assert fixture_delta.delta_tests == (Path("tests/test_sample.py"),)
+    assert "declared-consumer" in output[-1]
+
+    fixture.write_text("{}\n", encoding="utf-8")
+    (source / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+    source_delta = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
+    assert source_delta is not None and source_delta.delta
+    assert source_delta.delta_tests == (Path("tests/test_sample.py"),)
+    assert "import-consumer" in output[-1]
+
+    (source / "sample.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tests / "conftest.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(root, "add", "tests/conftest.py")
+    global_change = retry_proof.prepare(
+        inputs,
+        admission=QUALITY_TEST_ADMISSION,
+        printer=output.append,
+    )
+    assert global_change is not None and global_change.mode == "fresh"
+    assert "global-test-input" in output[-1]
+
+
 def test_wrapper_retry_runs_only_changed_test_module(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     test_path = root / "tests" / "test_sample.py"
@@ -150,9 +210,7 @@ def test_wrapper_retry_runs_only_changed_test_module(tmp_path: Path) -> None:
     source_path.parent.mkdir(parents=True)
     test_path.write_text("def test_sample():\n    assert True\n", encoding="utf-8")
     source_path.write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "pyproject.toml").write_text(
-        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
-    )
+    _write_retry_contract(root)
     _git(root, "init")
     _git(root, "config", "user.email", "test@example.invalid")
     _git(root, "config", "user.name", "Retry Proof Test")
@@ -241,9 +299,7 @@ def test_exact_proof_is_not_scored_when_a_cheap_rail_breaks(tmp_path: Path) -> N
     source_path.parent.mkdir(parents=True)
     test_path.write_text("def test_sample():\n    assert True\n", encoding="utf-8")
     source_path.write_text("VALUE = 1\n", encoding="utf-8")
-    (root / "pyproject.toml").write_text(
-        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
-    )
+    _write_retry_contract(root)
     _git(root, "init")
     _git(root, "config", "user.email", "test@example.invalid")
     _git(root, "config", "user.name", "Retry Proof Test")
@@ -344,13 +400,24 @@ def test_snapshot_and_inventory_fail_closed_with_actionable_errors(tmp_path: Pat
     ):
         retry_proof._cache_dir(root)  # pyright: ignore[reportPrivateUsage]
 
+    with mock.patch.object(
+        retry_proof,
+        "_tracked_paths",
+        return_value=(Path("missing.py"),),
+    ):
+        assert retry_proof._repository_snapshot(  # pyright: ignore[reportPrivateUsage]
+            root
+        ) == {"missing.py": retry_proof.MISSING_PATH_DIGEST}
+
+    (root / "unreadable.py").write_text("VALUE = 1\n", encoding="utf-8")
     with (
         mock.patch.object(
             retry_proof,
             "_tracked_paths",
-            return_value=(Path("missing.py"),),
+            return_value=(Path("unreadable.py"),),
         ),
-        pytest.raises(RuntimeError, match=r"could not fingerprint tracked input missing\.py"),
+        mock.patch.object(Path, "read_bytes", side_effect=OSError("denied")),
+        pytest.raises(RuntimeError, match=r"could not fingerprint tracked input unreadable\.py"),
     ):
         retry_proof._repository_snapshot(root)  # pyright: ignore[reportPrivateUsage]
 
@@ -366,7 +433,6 @@ def test_retry_shape_helpers_cover_direct_new_and_malformed_selections(tmp_path:
         diff_floor=100.0,
         coverage_paths=(Path("src"),),
         test_arguments=(direct,),
-        test_roots=(Path("tests"),),
         untracked_paths=(),
     )
     with mock.patch.object(retry_proof, "_tracked_paths", return_value=()):
@@ -377,15 +443,6 @@ def test_retry_shape_helpers_cover_direct_new_and_malformed_selections(tmp_path:
     assert retry_proof._snapshot_delta(  # pyright: ignore[reportPrivateUsage]
         [], {"tests/test_direct.py": "new"}
     ) == (direct,)
-    assert retry_proof._eligible_test_delta(  # pyright: ignore[reportPrivateUsage]
-        [direct], {}, [direct], [Path("tests")]
-    ) == (direct,)
-    assert (
-        retry_proof._eligible_test_delta(  # pyright: ignore[reportPrivateUsage]
-            [direct], [], [direct], [Path("tests")]
-        )
-        is None
-    )
     assert not retry_proof._selection_is_compatible(  # pyright: ignore[reportPrivateUsage]
         {"selectedTests": "not-a-list"}, [direct], [direct]
     )
@@ -480,22 +537,30 @@ def test_reuse_plan_rejects_changed_selection_and_unusable_context(tmp_path: Pat
         output.append,
     )
     assert result.mode == "fresh"
-    assert "population changed ambiguously" in output[-1]
+    assert "selected-population-changed" in output[-1]
 
     plan = _plan(tmp_path)
     selected = plan.selected_tests[0]
-    plan.snapshot = {selected.as_posix(): "new"}
-    result = retry_proof._reuse_plan(  # pyright: ignore[reportPrivateUsage]
-        plan,
-        {
-            "snapshot": {selected.as_posix(): "old"},
-            "selectedTests": [selected.as_posix()],
-        },
-        inputs,
-        output.append,
+    unaffected = Path("tests/test_unaffected.py")
+    plan.selected_tests = (selected, unaffected)
+    plan.snapshot = {selected.as_posix(): "new", unaffected.as_posix(): "same"}
+    impact = mock.Mock(
+        complete=True,
+        global_invalidation=False,
+        tests=(selected,),
     )
+    with mock.patch.object(retry_proof, "_retry_impact", return_value=impact):
+        result = retry_proof._reuse_plan(  # pyright: ignore[reportPrivateUsage]
+            plan,
+            {
+                "snapshot": {selected.as_posix(): "old", unaffected.as_posix(): "same"},
+                "selectedTests": [selected.as_posix(), unaffected.as_posix()],
+            },
+            inputs,
+            output.append,
+        )
     assert result.mode == "fresh"
-    assert "prior context proof is unusable" in output[-1]
+    assert "unusable-context-proof" in output[-1]
 
 
 def test_cache_dir_accepts_an_absolute_git_common_directory(tmp_path: Path) -> None:
@@ -702,16 +767,32 @@ def _inputs(root: Path) -> retry_proof.RetryInputs:
         diff_floor=100.0,
         coverage_paths=(Path("src"),),
         test_arguments=(Path("tests"),),
-        test_roots=(Path("tests"),),
         untracked_paths=(),
     )
+
+
+def _write_retry_contract(root: Path, *, fixture_consumer: str | None = None) -> None:
+    (root / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+        encoding="utf-8",
+    )
+    support = root / "mcp/tests/_retry_catalog_anchor.py"
+    support.parent.mkdir(parents=True, exist_ok=True)
+    support.write_text("VALUE = 1\n", encoding="utf-8")
+    artifacts = {"mcp/tests/_retry_catalog_anchor.py": ("tests/test_sample.py",)}
+    if fixture_consumer is not None:
+        fixture = support.parent / "fixtures/owned.json"
+        fixture.parent.mkdir()
+        fixture.write_text("{}\n", encoding="utf-8")
+        artifacts["mcp/tests/fixtures/owned.json"] = (fixture_consumer,)
+    write_synthetic_evidence_catalog(root, artifacts)
 
 
 def _plan(tmp_path: Path, *, mode: str = "fresh") -> retry_proof.RetryPlan:
     cache = tmp_path / "cache"
     cache.mkdir(exist_ok=True)
     return retry_proof.RetryPlan(
-        mode=mode,
+        mode=retry_proof.RetryMode(mode),
         cache_dir=cache,
         manifest_path=cache / "manifest.json",
         proof_data_path=cache / "proof.coverage",
@@ -725,9 +806,14 @@ def _plan(tmp_path: Path, *, mode: str = "fresh") -> retry_proof.RetryPlan:
 
 
 def _write_context_coverage(path: Path, root: Path, test_path: Path) -> None:
+    _write_contexts(path, root, (test_path,))
+
+
+def _write_contexts(path: Path, root: Path, test_paths: tuple[Path, ...]) -> None:
     data = CoverageData(basename=str(path))
-    data.set_context(f"{test_path.relative_to(root).as_posix()}::test_sample|run")
-    data.add_arcs({str(root / "src" / "sample.py"): [(-1, 1), (1, -1)]})
+    for index, test_path in enumerate(test_paths, start=1):
+        data.set_context(f"{test_path.relative_to(root).as_posix()}::test_case|run")
+        data.add_arcs({str(root / "src" / "sample.py"): [(-index, index), (index, -index)]})
     data.write()
 
 

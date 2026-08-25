@@ -207,7 +207,10 @@ def test_task_document_topology_children_and_refusals(tmp_path: Path) -> None:
         topology.canonical_ref("repo", tmp_path / "elsewhere.json")
     with pytest.raises(refs.TaskDocumentRefError, match="outside"):
         topology.ref_for_id("repo", tmp_path / "elsewhere", "leaf")
-    assert refs.TaskDocumentTopology(tmp_path / "absent")._master_documents("repo") == ()
+    assert (
+        refs.repository_master_documents(refs.TaskDocumentTopology(tmp_path / "absent"), "repo")
+        == ()
+    )
 
 
 def test_task_document_topology_parent_fail_closed_paths(tmp_path: Path) -> None:

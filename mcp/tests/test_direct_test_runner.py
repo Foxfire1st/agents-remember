@@ -9,7 +9,10 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
+from unittest import mock
 
+from _direct_cohort_candidate import write_synthetic_direct_cohort
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from agents_remember.testing import pytest_phase_reporter
 from agents_remember.testing.direct_runner import (
     DiagnosticExecutionError,
@@ -43,15 +46,30 @@ class DirectTestRunnerTests(unittest.TestCase):
             "import subprocess\n\ndef test_unsafe():\n    subprocess.run(['true'], check=False)\n",
             encoding="utf-8",
         )
+        (tests / "_catalog_anchor.py").write_text("VALUE = 1\n", encoding="utf-8")
+        write_synthetic_evidence_catalog(
+            self.root,
+            {"mcp/tests/_catalog_anchor.py": ("mcp/tests/test_plain.py",)},
+        )
         (self.root / "pyproject.toml").write_text(
             '[tool.pytest.ini_options]\ntestpaths = ["mcp/tests"]\n'
             'addopts = ["-n=auto", "--strict-markers", "--strict-config"]\n',
             encoding="utf-8",
         )
+        self._write_manifest()
         self.calls: list[tuple[list[str], Path, Mapping[str, str]]] = []
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _write_manifest(self) -> None:
+        python_path = "mcp/tests/test_plain.py"
+        nodes = tuple(f"{python_path}::{name}" for name in ("test_second", "test_first"))
+        write_synthetic_direct_cohort(
+            self.root,
+            nodes,
+            {python_path: ("test_second", "test_first")},
+        )
 
     def executor(
         self,
@@ -181,6 +199,34 @@ class DirectTestRunnerTests(unittest.TestCase):
         self.assertIsNone(payload["phaseSeconds"]["bootstrap"])
         self.assertIsNone(payload["phaseSeconds"]["collection"])
         self.assertIsNone(payload["phaseSeconds"]["execution"])
+
+    def test_phase_report_closes_collection_after_every_xdist_worker(self) -> None:
+        first = object()
+        second = object()
+        previous = pytest_phase_reporter._STATE
+        pytest_phase_reporter._STATE = pytest_phase_reporter._PhaseState(
+            session_started_monotonic=1.0,
+            session_started_at="2026-08-24T12:00:00+00:00",
+        )
+        try:
+            pytest_phase_reporter.pytest_xdist_setupnodes(
+                object(),  # pyright: ignore[reportArgumentType]
+                (object(), object()),
+            )
+            with mock.patch.object(
+                pytest_phase_reporter.time,
+                "monotonic",
+                side_effect=(2.0,),
+            ):
+                pytest_phase_reporter.pytest_xdist_node_collection_finished(first, ("a",))
+                self.assertIsNone(pytest_phase_reporter._STATE.collection_finished_monotonic)
+                pytest_phase_reporter.pytest_xdist_node_collection_finished(second, ("a",))
+            self.assertEqual(
+                pytest_phase_reporter._STATE.collection_finished_monotonic,
+                2.0,
+            )
+        finally:
+            pytest_phase_reporter._STATE = previous
 
     def test_candidate_change_during_execution_discards_the_result(self) -> None:
         target = ("mcp/tests/test_plain.py::test_first",)

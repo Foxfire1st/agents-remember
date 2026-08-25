@@ -35,6 +35,7 @@ class DirectRefusalCode(StrEnum):
     TARGET_MISSING = "target-missing"
     TARGET_AMBIGUOUS = "target-ambiguous"
     PARAMETRIZED_TARGET = "parametrized-target"
+    NOT_IN_COHORT = "not-in-cohort"
     UNRESOLVED_DEPENDENCY = "unresolved-dependency"
     DYNAMIC_DEPENDENCY = "dynamic-dependency"
     UNSUPPORTED_COLLECTION = "unsupported-collection"
@@ -85,23 +86,3 @@ class RefusedDirectSelection:
 
 
 DirectSelectionDecision: TypeAlias = EligibleDirectSelection | RefusedDirectSelection
-
-
-@dataclass(frozen=True)
-class ResolvedTestTarget:
-    """One exact statically resolved pytest node."""
-
-    node_id: str
-    path: Path
-    class_name: str | None
-    function_name: str
-    line: int
-
-
-@dataclass(frozen=True)
-class ClosureRefusal:
-    """Internal total-result form translated once by the public classifier."""
-
-    code: DirectRefusalCode
-    message: str
-    observation: DependencyObservation

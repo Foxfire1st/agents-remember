@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from agents_remember.controlplane.closeout_queue_records import CloseoutProjectionBuild
 from agents_remember.controlplane.closeout_queue_store import ProjectionSourceIdentity
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
     CloseoutProjectionMember,
@@ -28,7 +28,7 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentRefError,
     TaskDocumentTopology,
 )
-from agents_remember.worktrees.integration.closeout_door_evidence import (
+from agents_remember.worktrees.integration.closeout.door_evidence import (
     capture_door_candidate_evidence,
     door_candidate_evidence_blockers,
 )

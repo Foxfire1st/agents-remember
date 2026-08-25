@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
-from agents_remember.models.closeout_source import EvidenceFact
+from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorGeneration,
     DoorEvidenceFact,

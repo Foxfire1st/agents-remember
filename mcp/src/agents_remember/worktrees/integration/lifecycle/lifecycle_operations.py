@@ -18,7 +18,7 @@ from agents_remember.kernel.platform_subprocess import (
     native_command,
     native_subprocess_environment,
 )
-from agents_remember.models.declared_caller import DeclaredCaller
+from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
@@ -32,20 +32,19 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.closeout_input import require_effective_closeout_plan
-from agents_remember.worktrees.integration.closeout_door import (
-    DoorContractReadFailure,
+from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
     classify_door_publication,
     door_generation_for_operation,
     prepare_door_publication,
     publish_door_intent,
 )
-from agents_remember.worktrees.integration.closeout_operation_admission import (
+from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
     prevalidate_closeout_operation_admission,
     resolve_closeout_operation_admission,
 )
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
     derive_closeout_recovery_commits,
 )
@@ -56,7 +55,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import i
 from agents_remember.worktrees.integration.integration_publication_fence import (
     classify_integration_door_authority,
 )
-from agents_remember.worktrees.integration.lifecycle import lifecycle_worker_launch
 from agents_remember.worktrees.integration.lifecycle.lifecycle_closeout_claim_evidence import (
     claimed_predecessor_for_waiting_successor,
     closeout_preview_args,
@@ -82,29 +80,19 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease i
     require_lifecycle_operation_compatible,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
-    LifecycleOperationLocation,
-    LifecycleOperationLocationError,
     located_lifecycle_operation_report_path,
     located_lifecycle_operation_store,
-    require_contract_matches_lifecycle_operation_location,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_projection import (
     OperationProjectionContext,
     operation_projection,
     parse_operation_stamp,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_read_decision import (
-    lifecycle_journal_read_decision,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationReadError,
     LifecycleOperationStore,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
-    public_failure_evidence,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_termination import (
+from agents_remember.worktrees.integration.lifecycle.worker import launch as lifecycle_worker_launch
+from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     worker_process_fingerprint,
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
@@ -130,6 +118,16 @@ OperationLauncher = Callable[[WorktreeContract, LifecycleOperationRecord], None]
 class _OperationExecution:
     timestamp: datetime
     launcher: OperationLauncher
+
+
+@dataclass(frozen=True)
+class _CloseoutClaimContext:
+    contract: WorktreeContract
+    store: LifecycleOperationStore
+    operation_input: CloseoutOperationInput
+    candidate: LifecycleOperationCandidate
+    queued: LifecycleOperationRecord
+    door: CloseoutDoorGeneration
 
 
 class _CloseoutResumeNoLongerRequired(Exception):
@@ -281,24 +279,30 @@ def _start_or_observe_operation(
     if operation_input.kind == "closeout":
         _reconcile_closeout_store(store, now=timestamp, fresh_dead_worker=False)
         assert isinstance(operation_input, CloseoutOperationInput)
-        current, contract, created, sprint_ref = _claim_closeout_operation(
+        current, contract, created, sprint_ref, refresh_required = _claim_closeout_operation(
             contract,
             store,
             operation_input,
             candidate=candidate,
             timestamp=timestamp,
         )
-        try:
-            projection_effect = refresh_closeout_projection(
-                contract.coordination_root,
-                sprint_ref,
-            )
-        except Exception as exc:
-            projection_effect = projection_refresh_failure_effect(
-                contract.coordination_root,
-                sprint_ref,
-                exc,
-            )
+        projection_effects = []
+        if refresh_required:
+            try:
+                projection_effects.append(
+                    refresh_closeout_projection(
+                        contract.coordination_root,
+                        sprint_ref,
+                    )
+                )
+            except Exception as exc:
+                projection_effects.append(
+                    projection_refresh_failure_effect(
+                        contract.coordination_root,
+                        sprint_ref,
+                        exc,
+                    )
+                )
         projection = _recover_launch_and_project(
             contract,
             store,
@@ -306,7 +310,7 @@ def _start_or_observe_operation(
             created=created,
             execution=execution,
         )
-        return projection.model_copy(update={"projectionEffects": [projection_effect]})
+        return projection.model_copy(update={"projectionEffects": projection_effects})
     queued = queued_operation_record(
         contract,
         operation_input,
@@ -337,7 +341,7 @@ def _claim_closeout_operation(
     *,
     candidate: LifecycleOperationCandidate,
     timestamp: datetime,
-) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef]:
+) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef, bool]:
     """Transfer one first-ready waiting generation into root-journal authority."""
 
     with task_publication_lock(admitted_contract.coordination_root, admitted_contract.repo_name):
@@ -363,70 +367,16 @@ def _claim_closeout_operation(
                 next_action="developer-decision",
             )
         sprint_ref = door.sprintTaskDocumentRef
-        if door.disposition == "waiting":
-            if candidate.state != closeout_contract_sha256(contract):
-                raise LifecycleControlError(
-                    "closeout-candidate-state-moved",
-                    "closeout contract bytes changed after operation admission",
-                    expected={"candidateState": candidate.state},
-                    observed={"candidateState": closeout_contract_sha256(contract)},
-                    next_action="retry-closeout-preview",
-                    next_tool="worktree_closeout_preview",
-                    next_args=closeout_preview_args(operation_input),
-                )
-            if candidate.tree != door.candidateTree:
-                raise LifecycleControlError(
-                    "closeout-door-candidate-moved",
-                    "the admitted Git candidate no longer equals the waiting door candidate",
-                    expected={"candidateTree": door.candidateTree},
-                    observed={"candidateTree": candidate.tree or ""},
-                    next_action="retry-closeout-preview",
-                    next_tool="worktree_closeout_preview",
-                    next_args=closeout_preview_args(operation_input),
-                )
-            require_first_ready_generation(
-                contract.coordination_root,
-                sprint_ref=sprint_ref,
-                generation_id=door.generationId,
+        queued = _prepare_closeout_claim(
+            _CloseoutClaimContext(
+                contract=contract,
+                store=store,
+                operation_input=operation_input,
+                candidate=candidate,
+                queued=queued,
+                door=door,
             )
-            claimed = door_generation_for_operation(contract, queued, "claimed")
-            queued = queued.model_copy(
-                update={"doorPublication": prepare_door_publication(contract, claimed)}
-            )
-        elif door.disposition == "claimed":
-            existing = store.read()
-            if (
-                existing is None
-                or existing.operationKind != "closeout"
-                or existing.fingerprint != door.operationFingerprint
-                or existing.operationKey != door.claimedOperationKey
-                or existing.fingerprint != candidate.fingerprint
-            ):
-                raise LifecycleControlError(
-                    "closeout-door-claim-owner-conflict",
-                    "the claimed door does not match the exact retained root-journal owner",
-                    expected={
-                        "operationKind": door.operationKind,
-                        "operationFingerprint": door.operationFingerprint,
-                        "operationKey": door.claimedOperationKey,
-                    },
-                    observed={
-                        "operationKind": existing.operationKind if existing is not None else "",
-                        "operationFingerprint": existing.fingerprint
-                        if existing is not None
-                        else "",
-                        "operationKey": existing.operationKey if existing is not None else "",
-                    },
-                    next_action="developer-decision",
-                )
-        else:
-            raise LifecycleControlError(
-                "closeout-door-not-waiting",
-                "closeout claim requires a waiting door generation",
-                expected={"disposition": "waiting"},
-                observed={"disposition": door.disposition},
-                next_action="developer-decision",
-            )
+        )
 
         current, created = _create_or_replace_generation(
             store,
@@ -443,9 +393,106 @@ def _claim_closeout_operation(
                 candidate=candidate,
             )
         if current.status not in {"queued", "running"}:
-            return current, contract, created, sprint_ref
+            return current, contract, created, sprint_ref, False
+        publication = current.doorPublication
+        refresh_required = publication is not None and publication.state == "intent"
         current, contract = _publish_initial_closeout_door(contract, store, current)
-        return current, contract, created, sprint_ref
+        return current, contract, created, sprint_ref, refresh_required
+
+
+def _prepare_closeout_claim(
+    context: _CloseoutClaimContext,
+) -> LifecycleOperationRecord:
+    """Validate the door owner and add the waiting-to-claimed publication intent."""
+
+    contract = context.contract
+    door = context.door
+    if door.disposition == "waiting":
+        _require_waiting_closeout_candidate(
+            contract,
+            context.operation_input,
+            context.candidate,
+            door,
+        )
+        require_first_ready_generation(
+            contract.coordination_root,
+            sprint_ref=door.sprintTaskDocumentRef,
+            generation_id=door.generationId,
+        )
+        claimed = door_generation_for_operation(contract, context.queued, "claimed")
+        return context.queued.model_copy(
+            update={"doorPublication": prepare_door_publication(contract, claimed)}
+        )
+    if door.disposition == "claimed":
+        _require_retained_closeout_owner(context.store, door, context.candidate)
+        return context.queued
+    raise LifecycleControlError(
+        "closeout-door-not-waiting",
+        "closeout claim requires a waiting door generation",
+        expected={"disposition": "waiting"},
+        observed={"disposition": door.disposition},
+        next_action="developer-decision",
+    )
+
+
+def _require_waiting_closeout_candidate(
+    contract: WorktreeContract,
+    operation_input: CloseoutOperationInput,
+    candidate: LifecycleOperationCandidate,
+    door: CloseoutDoorGeneration,
+) -> None:
+    observed_state = closeout_contract_sha256(contract)
+    if candidate.state != observed_state:
+        raise LifecycleControlError(
+            "closeout-candidate-state-moved",
+            "closeout contract bytes changed after operation admission",
+            expected={"candidateState": candidate.state},
+            observed={"candidateState": observed_state},
+            next_action="retry-closeout-preview",
+            next_tool="worktree_closeout_preview",
+            next_args=closeout_preview_args(operation_input),
+        )
+    if candidate.tree != door.candidateTree:
+        raise LifecycleControlError(
+            "closeout-door-candidate-moved",
+            "the admitted Git candidate no longer equals the waiting door candidate",
+            expected={"candidateTree": door.candidateTree},
+            observed={"candidateTree": candidate.tree or ""},
+            next_action="retry-closeout-preview",
+            next_tool="worktree_closeout_preview",
+            next_args=closeout_preview_args(operation_input),
+        )
+
+
+def _require_retained_closeout_owner(
+    store: LifecycleOperationStore,
+    door: CloseoutDoorGeneration,
+    candidate: LifecycleOperationCandidate,
+) -> None:
+    existing = store.read()
+    if (
+        existing is not None
+        and existing.operationKind == "closeout"
+        and existing.fingerprint == door.operationFingerprint
+        and existing.operationKey == door.claimedOperationKey
+        and existing.fingerprint == candidate.fingerprint
+    ):
+        return
+    raise LifecycleControlError(
+        "closeout-door-claim-owner-conflict",
+        "the claimed door does not match the exact retained root-journal owner",
+        expected={
+            "operationKind": door.operationKind,
+            "operationFingerprint": door.operationFingerprint,
+            "operationKey": door.claimedOperationKey,
+        },
+        observed={
+            "operationKind": existing.operationKind if existing is not None else "",
+            "operationFingerprint": existing.fingerprint if existing is not None else "",
+            "operationKey": existing.operationKey if existing is not None else "",
+        },
+        next_action="developer-decision",
+    )
 
 
 def _publish_initial_closeout_door(
@@ -687,229 +734,6 @@ def _retained_integration_recovery_record(
     if current.status in {"queued", "running", "input-required", "completed"}:
         return current
     return None
-
-
-def observe_operation(
-    contract_path: Path, kind: LifecycleOperationKind
-) -> LifecycleOperationProjection | None:
-    contract = load_contract(contract_path)
-    try:
-        current = _project_observed_record(_store(contract, kind).read())
-    except LifecycleOperationReadError as error:
-        return lifecycle_journal_read_decision(kind, error).projection()
-    return None if current is None else operation_projection(current, contract=contract)
-
-
-def latest_operation_projection(contract_path: Path) -> LifecycleOperationProjection | None:
-    contract = load_contract(contract_path)
-    records: list[LifecycleOperationRecord] = []
-    for kind in ("closeout", "integrate", "direct-landing"):
-        try:
-            record = _project_observed_record(_store(contract, kind).read())
-        except LifecycleOperationLocationError:
-            # Structural enclosure projection must remain total across pre-locator
-            # contracts and damaged locator state.  The task-addressed operation
-            # surfaces still return the exact adoption/repair refusal; this aggregate
-            # reader can only state that no operation is safely projectable.
-            return None
-        except LifecycleOperationReadError as error:
-            return lifecycle_journal_read_decision(kind, error).projection()
-        if record is not None:
-            records.append(record)
-    if not records:
-        return None
-    active = [
-        record
-        for record in records
-        if record.status in {"queued", "running", "input-required", "termination-required"}
-    ]
-    selected = max(active or records, key=_record_sort_stamp)
-    return operation_projection(selected, contract=contract)
-
-
-def current_operation_projections(
-    contract_path: Path,
-    *,
-    allow_completed_disposition: bool = False,
-    caller: DeclaredCaller | None = None,
-    contract: WorktreeContract | None = None,
-    location: LifecycleOperationLocation | None = None,
-) -> list[LifecycleOperationProjection]:
-    """Return every current operation kind; task status must not hide actionable siblings."""
-
-    contract = contract or load_contract(contract_path)
-    try:
-        location = location or resolve_lifecycle_operation_location(
-            contract.coordination_root,
-            contract.contract_path,
-        )
-    except LifecycleOperationLocationError:
-        return []
-    records: list[LifecycleOperationRecord] = []
-    decisions: list[LifecycleOperationProjection] = []
-    for kind in ("closeout", "integrate", "direct-landing"):
-        try:
-            record = _project_observed_record(
-                LifecycleOperationStore(location.journal_path(kind)).read()
-            )
-        except LifecycleOperationReadError as error:
-            decisions.append(lifecycle_journal_read_decision(kind, error).projection())
-            continue
-        if record is not None:
-            records.append(record)
-    try:
-        require_contract_matches_lifecycle_operation_location(contract, location)
-    except LifecycleOperationLocationError as exc:
-        return [
-            *[_operation_location_decision(record, exc) for record in records],
-            *decisions,
-        ]
-    projected = [
-        operation_projection(
-            record,
-            contract=contract,
-            context=OperationProjectionContext(
-                allow_completed_disposition=allow_completed_disposition,
-                caller=caller,
-            ),
-        )
-        for record in sorted(records, key=lambda item: item.operationKind)
-    ]
-    return sorted([*projected, *decisions], key=lambda item: item.kind)
-
-
-def _operation_location_decision(
-    record: LifecycleOperationRecord,
-    error: LifecycleOperationLocationError,
-) -> LifecycleOperationProjection:
-    result = {
-        "state": error.status,
-        "developerDecisionRequired": True,
-        "decisionSurface": error.detail,
-        "nextAction": "developer-decision",
-        "expected": error.expected,
-        "observed": error.observed,
-    }
-    return operation_projection(record).model_copy(
-        update={
-            "result": result,
-            "failure": error.detail,
-            "guidance": error.detail,
-            "cancellable": False,
-            "legalControls": [],
-        }
-    )
-
-
-def unreadable_contract_operation_projections(
-    location: LifecycleOperationLocation,
-    *,
-    error_type: str,
-    name: str,
-) -> list[LifecycleOperationProjection]:
-    """Project every retained exact-path generation while contract authority is unreadable."""
-
-    projections: list[LifecycleOperationProjection] = []
-    contract_path = location.contract_path.resolve(strict=False)
-    for kind in ("closeout", "integrate", "direct-landing"):
-        store = LifecycleOperationStore(location.journal_path(kind))
-        try:
-            # Contract-invalid status cannot safely run Git reconciliation: that
-            # reconciliation deliberately revalidates repository authority by
-            # reading the contract.  Retain only the read-only worker-exit
-            # projection here, then expose zero controls below.
-            record = _project_worker_observed_record(store.read())
-        except LifecycleOperationReadError as error:
-            projections.append(lifecycle_journal_read_decision(kind, error).projection())
-            continue
-        if (
-            record is None
-            or record.operationKind != kind
-            or Path(record.contractPath).resolve(strict=False) != contract_path
-        ):
-            continue
-        publication = record.doorPublication
-        if kind == "closeout" and publication is not None and publication.state == "intent":
-            observation = classify_door_publication(
-                publication,
-                DoorContractReadFailure(error_type, ""),
-            )
-            projections.append(
-                operation_projection(
-                    record,
-                    context=OperationProjectionContext(door=observation),
-                )
-            )
-            continue
-        surface = "the canonical task contract is unreadable for this retained operation"
-        result = {
-            "state": f"{kind}-contract-invalid",
-            "developerDecisionRequired": True,
-            "decisionSurface": surface,
-            "nextAction": "developer-decision",
-            "expected": {
-                "contractPath": contract_path.as_posix(),
-                "worktreeGroup": location.worktree_group.as_posix(),
-                "operationKind": kind,
-                "generation": record.generation,
-            },
-            "observed": public_failure_evidence(
-                stage="contract-read",
-                side="contract",
-                name=name,
-                error_type=error_type,
-                observed={"state": "unreadable"},
-            ),
-        }
-        projected = operation_projection(record)
-        projections.append(
-            projected.model_copy(
-                update={
-                    "result": result,
-                    "failure": surface,
-                    "guidance": surface,
-                    "cancellable": False,
-                    "legalControls": [],
-                }
-            )
-        )
-    return projections
-
-
-def _project_observed_record(
-    record: LifecycleOperationRecord | None,
-) -> LifecycleOperationRecord | None:
-    projected = _project_worker_observed_record(record)
-    if projected is None:
-        return None
-    if projected.operationKind not in {"closeout", "direct-landing"}:
-        return projected
-    reconciled = reconcile_closeout_mutations(projected, temporary_indices=True)
-    recovery_commits = derive_closeout_recovery_commits(projected, mutations=reconciled)
-    if reconciled == projected.mutationEvidence and recovery_commits == projected.recoveryCommits:
-        return projected
-    return projected.model_copy(
-        update={
-            "mutationEvidence": reconciled,
-            "recoveryCommits": recovery_commits,
-            "irreversibleBoundaryEntered": (
-                projected.irreversibleBoundaryEntered
-                or any(item.state == "commit-proven" for item in reconciled.values())
-            ),
-        }
-    )
-
-
-def _project_worker_observed_record(
-    record: LifecycleOperationRecord | None,
-) -> LifecycleOperationRecord | None:
-    if record is None:
-        return None
-    from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state import (  # noqa: PLC0415
-        project_worker_exit,
-    )
-
-    return project_worker_exit(record)
 
 
 def _reconcile_closeout_store(
@@ -1192,7 +1016,3 @@ def _validate_input_identity(
 
 def _store(contract: WorktreeContract, kind: LifecycleOperationKind) -> LifecycleOperationStore:
     return located_lifecycle_operation_store(contract, kind)
-
-
-def _record_sort_stamp(record: LifecycleOperationRecord) -> str:
-    return record.finishedAt or record.heartbeatAt or record.startedAt or record.queuedAt

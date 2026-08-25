@@ -16,18 +16,18 @@ from agents_remember.models.quality import QualityGateResult
 from agents_remember.models.test_evidence import (
     CertifyingTestEvidence,
     EvidenceConsumer,
+    evidence_payload,
     require_certifying_evidence,
-    test_evidence_payload,
 )
-from agents_remember.worktrees.modules.clean_quality_executor import (
+from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.quality.clean_executor import (
     CleanQualityOutcome,
     CleanQualityRequest,
     certifying_evidence_from_published_manifest,
     published_report_path_from_manifest,
     run_clean_quality,
 )
-from agents_remember.worktrees.modules.git import require_git
-from agents_remember.worktrees.modules.published_quality_manifest import (
+from agents_remember.worktrees.modules.quality.published_manifest import (
     load_published_quality_manifest,
 )
 
@@ -362,7 +362,7 @@ def _strict_quality_success_payload(
         "diffBase": diff_base,
         "mode": plan.mode,
         "executor": plan.executor,
-        "certifyingTestEvidence": test_evidence_payload(evidence),
+        "certifyingTestEvidence": evidence_payload(evidence),
         "reportPath": test_results_report_path(target.worktree_group).as_posix(),
         **(
             {"publishedResultPath": published_result_path.as_posix()}

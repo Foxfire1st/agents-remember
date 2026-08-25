@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from agents_remember.controlplane.durable_store import DurableRecord
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     CloseoutProjectionMember,
     ProjectionSourceClassification,
 )

@@ -38,7 +38,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.modules import integrate as integrate_mod
 from agents_remember.worktrees.modules import integration_recovery
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.code_quality_gate import (
+from agents_remember.worktrees.modules.quality.gate import (
     GATE_FULL,
     GATE_TARGETED,
     QualityGatePlan,

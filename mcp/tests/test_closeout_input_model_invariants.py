@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     EffectiveCloseoutInput,
     EnabledCloseoutLeg,
@@ -22,6 +22,7 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.worktrees import closeout_input
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationReadError,
     LifecycleOperationStore,
     operation_record_path,
 )
@@ -249,10 +250,21 @@ def test_public_closeout_admission_refuses_a_non_closeout_journal(tmp_path: Path
     closeout_store = LifecycleOperationStore(
         operation_record_path(contract.worktree_group, "closeout")
     )
-    closeout_store.create(integrate)
+    with pytest.raises(LifecycleOperationReadError):
+        closeout_store.create(integrate)
+    closeout_store.path.parent.mkdir(parents=True, exist_ok=True)
+    closeout_store.path.write_text(
+        integrate.model_dump_json(indent=2, exclude_none=True) + "\n",
+        encoding="utf-8",
+    )
 
-    with pytest.raises(RuntimeError, match="non-closeout durable input"):
+    with pytest.raises(LifecycleOperationReadError) as raised:
         start_closeout_operation(
             closeout_operation_input(contract),
             launcher=lambda *_: None,
         )
+    assert raised.value.expected["operationKind"] == "closeout"
+    assert raised.value.observed == {
+        "state": "operation-kind-mismatch",
+        "operationKind": "integrate",
+    }

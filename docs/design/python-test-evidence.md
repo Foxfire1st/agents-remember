@@ -19,18 +19,21 @@ acceptance authority.
 ## Eligibility contract
 
 `agents_remember.testing.classify_direct_selection` is the one policy owner. It accepts only a
-non-empty, serially bounded list of exact pytest node IDs. Before pytest can start it statically
-resolves every requested node, candidate-owned import, selected helper, local fixture, module
-autouse fixture, and collection-time expression that the first cohort supports.
+non-empty, serially bounded list of exact pytest node IDs from
+`mcp/tests/python-direct-cohort.toml`. Before pytest can start it validates the whole sealed audit:
+exact file and configuration fingerprints, declared local-import closure, audited symbols, known
+effect disposition, exact top-level nodes, and fixture/autouse membership.
 
-The entire request admits or refuses as one unit. It refuses missing, ambiguous, parameterized,
-duplicate, oversized, mixed, dynamically resolved, unknown, or unsupported closure. The eligible
-decision contains the exact nodes, source-backed closure observations, and a digest over every
-closure/configuration file. A changed candidate or pytest configuration invalidates that decision.
+The entire request admits or refuses as one unit. It refuses non-member, missing, ambiguous,
+parameterized, duplicate, oversized, mixed, dynamically unresolved, unsafe, or unsupported
+closure. The eligible decision contains the exact nodes, audited closure observations, and a
+digest over the manifest and every closure/configuration file. A changed candidate, manifest, or
+pytest configuration invalidates that decision.
 
-Names, paths, and markers are not admission authority. They identify the exact requested node; they
-do not make it safe. Moving an unsafe test or adding a `pure` marker does not change its effect
-classification.
+Names, paths, and markers are not admission authority. A node name identifies a manifest member;
+admission additionally requires exact audited content and known-safe dependency/effect facts.
+There is deliberately no generic repository analyzer or refresh switch: changed audited content
+refuses until the manifest closure is reviewed and deliberately updated in the same change.
 
 ## Closed unsafe families
 
@@ -56,10 +59,10 @@ The executable inventory lives in
 | Consumer | Current owner | Required evidence |
 | --- | --- | --- |
 | Coverage | `code_quality.check._pytest_step` | certifying only |
-| Quality | `worktrees.modules.clean_quality_executor.run_clean_quality` | certifying only |
+| Quality | `worktrees.modules.quality.clean_executor.run_clean_quality` | certifying only |
 | Retry | `code_quality.retry_proof.prepare` | certifying only |
 | Route review | `worktrees.route_review.require_current_route_review` | independent candidate-bound verdict; no test substitution |
-| Lifecycle | `worktrees.modules.code_quality_gate.run_strict_code_quality_gate` | certifying only |
+| Lifecycle | `worktrees.modules.quality.gate.run_strict_code_quality_gate` | certifying only |
 | Closeout | `worktrees.queue.closeout_staged_quality.gate_staged_code` | certifying only |
 | Integration | `worktrees.integration.integration_quality.run_integration_quality_gate` | certifying only |
 
@@ -76,18 +79,18 @@ Route review remains an independent plane-stamped verdict and exposes no test-ev
 all. A caller-provided label, copied diagnostic JSON, renamed file, zero exit code, failed Dagger
 result, or manifest for another candidate has no authority.
 
-## Intervention boundary
+## Master boundary
 
-Candidate A—safe direct Python diagnostics—is the sole implemented mechanism. The following remain
-deferred and are not hidden inside this change: model-baseline retirement, support-code quality or
-coverage policy, fake-process replacement, stress cadence, retry redesign, richer lifecycle
-evidence schemas, failure-localization work, mass sibling-import migration, fixture-builder
-redesign, and broad test deletion or reclassification.
+Candidate A is only the bounded diagnostic route. The same master separately owns evidence
+retirement, recursive-certification repair, fixture authority, lane/cadence separation,
+dependency-owned selection and retry, evidence-lifecycle metadata, and causal failure
+localization. None of those Candidates B-H is deferred into this route or claimed by a direct
+diagnostic result.
 
 | Changed surface | Requirement ownership |
 | --- | --- |
 | `models/test_evidence.py`, `testing/consumer_inventory.py` | typed altitudes and accepting consumers |
 | `testing/selection_contract.py`, `testing/eligibility.py` | one total atomic classifier API |
-| `testing/python_source.py`, `testing/collection_closure.py`, `testing/dependency_closure.py` | structural collection/import/helper/fixture closure |
-| `testing/unsafe_effects.py` | closed unsafe-family taxonomy and positive effect model |
+| `testing/cohort_manifest.py`, `mcp/tests/python-direct-cohort.toml` | strict sealed-audit schema and the only admitted cohort |
+| `testing/unsafe_effects.py` | closed unsafe-family vocabulary and stable refusal reasons |
 | `test_direct_test_eligibility.py` | forcing proof for eligibility, refusal, drift, and evidence altitude |

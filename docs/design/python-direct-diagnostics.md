@@ -13,7 +13,7 @@ one serial worker, and emits structured JSON whose altitude is always `diagnosti
 
 ```mermaid
 flowchart LR
-    C[Exact command targets] --> P[One structural classifier]
+    C[Exact command targets] --> P[One sealed-cohort classifier]
     P -->|eligible as a whole| B[Diagnostic hermetic bootstrap]
     B --> T[Canonical pytest config and original nodes]
     T --> J[Non-certifying JSON result]
@@ -26,16 +26,20 @@ flowchart LR
 
 ## Invocation contract
 
-Each argument must be one canonical repository-relative pytest node:
+Each argument must be one exact node already declared in
+`mcp/tests/python-direct-cohort.toml`, currently in the form
+`mcp/tests/test_python_direct_cohort.py::test_function`.
 
-- `mcp/tests/test_file.py::test_function`
-- `mcp/tests/test_file.py::ClassName::test_method`
+Empty requests, non-members, duplicate nodes, parameterized manifest nodes, more than eight nodes,
+pytest flags, and every worker or distribution flag refuse before execution. The classifier also
+refuses the complete request when any sealed dependency/effect fact is unsafe or unknown, a local
+import/symbol reference is unresolved, or an audited file/configuration fingerprint changed. A
+refusal never runs an eligible subset and never falls back to Dagger.
 
-Empty requests, file- or directory-level selectors, duplicate nodes, parameterized selectors,
-more than eight nodes, pytest flags, and every worker or distribution flag refuse before
-execution. The classifier also refuses the complete request when any target has an unsafe,
-unresolved, dynamic, mixed, or unsupported collection/execution closure. A refusal never runs an
-eligible subset and never falls back to Dagger.
+The manifest is not a name/path allowlist: it records exact content hashes, audited symbols,
+candidate-local imports, complete effect disposition, and per-node symbol closure. There is no
+auto-refresh option. A source or configuration edit invalidates admission until that exact audit is
+deliberately reviewed and updated.
 
 The wrapper pins Python 3.12 to match the Ubuntu Noble certifying environment. Pytest reads the
 repository's canonical `pyproject.toml`, loads the shared capability-minimal bootstrap, disables
@@ -51,7 +55,7 @@ Successful and ordinary failing tests produce `python-direct-diagnostic/v1` with
 - `altitude: diagnostic`
 - `certifying: false`
 - the exact ordered node outcomes
-- a content binding over the selected dependency closure and canonical configuration
+- a content binding over the sealed manifest, selected nodes, audited closure, and configuration
 - the pytest exit code and elapsed diagnostic duration
 - reproducible route and pytest phase timestamps for admission, bootstrap, collection,
   first-node start, execution, and reporting

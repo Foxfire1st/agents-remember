@@ -12,7 +12,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 )
 from agents_remember.worktrees.reopen import reopen_task
 from agents_remember.worktrees.worktree_contract import write_contract
-from test_task_reopen import _completed_leaf_contract, _leaf_doc, _master_doc
+from task_reopen_test_support import _completed_leaf_contract, _leaf_doc, _master_doc
 from test_worktree_support import git
 
 

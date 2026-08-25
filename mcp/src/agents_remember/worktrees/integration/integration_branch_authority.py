@@ -11,6 +11,7 @@ from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
     TaskDocumentTopology,
+    repository_master_documents,
 )
 from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
 from agents_remember.worktrees.integration.integration_branch_repository import (
@@ -598,7 +599,7 @@ def _repository_masters_with_overrides(
     repo_name: str,
     overrides: Mapping[TaskDocumentRef, TaskDocument] | None,
 ) -> tuple[ResolvedTaskDocument, ...]:
-    masters = {master.ref: master for master in topology.repository_masters(repo_name)}
+    masters = {master.ref: master for master in repository_master_documents(topology, repo_name)}
     root = topology.coordination_root / "tasks" / repo_name
     for ref, document in (overrides or {}).items():
         if ref.repository != repo_name:

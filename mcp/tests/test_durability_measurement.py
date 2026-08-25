@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
 from _durability_measurement import (
     MIN_SUCCESSFUL_RECLAIMS,
     VacuousRunError,
@@ -30,6 +31,7 @@ def _result(**overrides: object) -> dict[str, object]:
     return result
 
 
+@pytest.mark.evidence_stress
 class DurabilityMeasurementTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()

@@ -14,7 +14,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     EffectiveCloseoutInput,
     EnabledCloseoutLeg,
     NotApplicableCloseoutLeg,

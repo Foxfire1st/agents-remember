@@ -174,6 +174,10 @@ node or transitive closure is unsafe or unresolved, never accepts pytest flags, 
 back to Dagger. Its JSON result records exact node outcomes and phase timings but never provides
 acceptance, changed-lines coverage, retry, lifecycle, closeout, or integration evidence. There is
 no host compatibility path for the guarded acceptance and integration harnesses.
+Use `docs/design/python-evidence-system.md` before changing test evidence, fixtures, support,
+selection, retry, cadence, or causal reporting. Durable evidence must enter the enforced lifecycle
+catalog; internal truth comes from canonical product owners, external conformance stays
+independent, and stress cadence must not erase deterministic durability regressions.
 The graph runs the wrapper inside clean Ubuntu. Four steps enforce — ruff (lint),
 `ruff format --check`, Pyright, and the full pytest suite — followed by mandatory CRAP
 threshold enforcement. Take no path arguments to it: there are none, because its scope is

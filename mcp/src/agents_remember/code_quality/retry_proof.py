@@ -1,16 +1,18 @@
 """Content-addressed pytest proof reuse inside nonce-attested Dagger retries.
 
 A full pytest pass can still be followed by a CRAP or changed-lines coverage
-failure.  When the only subsequent repository changes are selected pytest test
-modules, rerunning the entire already-passing suite is wasteful.  This module
-keeps the successful test/coverage proof in the worktree's common Git directory
-and prepares either:
+failure. When subsequent repository changes have complete consumer ownership,
+rerunning every already-passing test is wasteful. This module keeps the
+successful test/coverage proof in the worktree's common Git directory and
+prepares either:
 
 * an exact-tree retry, which reuses the report without starting pytest; or
-* a test-delta retry, which removes changed-test and collection contexts from
-  the old Coverage.py data before the changed test modules append fresh data.
+* a dependency-owned delta retry, which removes every affected test context and
+  the old collection context before the affected consumers append fresh data.
 
-Every other change refuses reuse.  The manifest fingerprints the repository
+Ordinary tests, shared support, plugins, and governed fixtures use the same
+consumer graph. Incomplete, ambiguous, global, or otherwise unsupported
+ownership refuses reuse and runs the ordinary safe population. The manifest fingerprints the repository
 bytes, selected tests, resolved diff base, Python/tool versions, invocation
 environment, and measurement settings. The production wrapper refuses before
 this module is reached unless Dagger's environment nonce matches its attestation
@@ -30,10 +32,17 @@ import shutil
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from coverage import CoverageData
 
+from agents_remember.code_quality.dependency_ownership import (
+    DependencyOwnershipGraph,
+    TestImpact,
+    is_test_module,
+)
+from agents_remember.code_quality.scope import ScopeError
 from agents_remember.kernel import git_command
 from agents_remember.kernel.atomic_write import atomic_replace
 from agents_remember.testing.dagger_admission import (
@@ -41,13 +50,20 @@ from agents_remember.testing.dagger_admission import (
     require_dagger_admission_capability,
 )
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CACHE_DIRECTORY = "agents-remember-quality-retry"
 CACHED_CONTEXT = "agents-remember:unchanged-test-proof"
+MISSING_PATH_DIGEST = hashlib.sha256(b"missing\0").hexdigest()
 DISABLE_ENV = "AR_QUALITY_NO_RETRY"
 CI_INVOCATION = "ci"
 
 Printer = Callable[[str], None]
+
+
+class RetryMode(StrEnum):
+    FRESH = "fresh"
+    EXACT = "exact"
+    DELTA = "delta"
 
 
 @dataclass(frozen=True)
@@ -62,7 +78,6 @@ class RetryInputs:
     diff_floor: float
     coverage_paths: tuple[Path, ...]
     test_arguments: tuple[Path, ...]
-    test_roots: tuple[Path, ...]
     untracked_paths: tuple[Path, ...]
 
 
@@ -70,7 +85,7 @@ class RetryInputs:
 class RetryPlan:
     """One prepared run; mutable result fields are filled by the wrapper."""
 
-    mode: str
+    mode: RetryMode
     cache_dir: Path
     manifest_path: Path
     proof_data_path: Path
@@ -86,11 +101,11 @@ class RetryPlan:
 
     @property
     def exact(self) -> bool:
-        return self.mode == "exact"
+        return self.mode is RetryMode.EXACT
 
     @property
     def delta(self) -> bool:
-        return self.mode == "delta"
+        return self.mode is RetryMode.DELTA
 
     @property
     def pytest_test_paths(self) -> tuple[Path, ...] | None:
@@ -123,7 +138,7 @@ class RetryPlan:
         """Discard conservative delta data before a conclusive full rerun."""
         self.active_data_path.unlink(missing_ok=True)
         coverage_json.unlink(missing_ok=True)
-        self.mode = "fresh"
+        self.mode = RetryMode.FRESH
         self.delta_tests = ()
         self.pytest_passed = False
         self.pytest_ran = False
@@ -133,7 +148,7 @@ class RetryPlan:
         try:
             if quality_passed:
                 _remove_proof(self)
-            elif self.mode == "fresh" and self.pytest_passed:
+            elif self.mode is RetryMode.FRESH and self.pytest_passed:
                 _publish_proof(self, coverage_json)
         finally:
             self.active_data_path.unlink(missing_ok=True)
@@ -172,7 +187,7 @@ def _fresh_plan(inputs: RetryInputs) -> RetryPlan | None:
     if not selected:
         return None
     return RetryPlan(
-        mode="fresh",
+        mode=RetryMode.FRESH,
         cache_dir=cache_dir,
         manifest_path=cache_dir / "manifest.json",
         proof_data_path=cache_dir / "proof.coverage",
@@ -193,28 +208,68 @@ def _reuse_plan(
     previous_snapshot = manifest["snapshot"]
     changed = _snapshot_delta(previous_snapshot, plan.snapshot)
     if not changed:
-        plan.mode = "exact"
-        printer("retry-proof: exact repository proof restored; pytest will not restart")
+        plan.mode = RetryMode.EXACT
+        printer("retry-proof: cache-hit exact-candidate; pytest will not restart")
         return plan
     if not _selection_is_compatible(manifest, plan.selected_tests, changed):
-        printer("retry-proof: selected pytest population changed ambiguously; running fresh")
+        printer("retry-proof: cache-miss selected-population-changed; running fresh")
         return plan
-    delta_tests = _eligible_test_delta(
-        changed, previous_snapshot, plan.selected_tests, inputs.test_roots
-    )
-    if delta_tests is None:
-        printer("retry-proof: repository/config delta is not test-only; running fresh")
+    impact = _retry_impact(inputs.project_root, changed, printer)
+    return _reuse_affected_plan(plan, impact, printer)
+
+
+def _reuse_affected_plan(
+    plan: RetryPlan,
+    impact: TestImpact | None,
+    printer: Printer,
+) -> RetryPlan:
+    if impact is None or not impact.complete:
+        return plan
+    if impact.global_invalidation:
+        printer("retry-proof: cache-miss global-test-input; running fresh")
+        return plan
+    selected = set(plan.selected_tests)
+    outside = sorted(set(impact.tests) - selected, key=Path.as_posix)
+    if outside:
+        rendered = ", ".join(path.as_posix() for path in outside)
+        printer(f"retry-proof: cache-miss affected-consumers-outside-selection={rendered}")
+        return plan
+    delta_tests = tuple(path for path in impact.tests if path in selected)
+    if not delta_tests:
+        plan.mode = RetryMode.EXACT
+        printer(
+            "retry-proof: cache-hit dependency-complete-unaffected-delta; pytest will not restart"
+        )
         return plan
     try:
         _validate_context_proof(plan.proof_data_path)
     except (OSError, RuntimeError) as error:
-        printer(f"retry-proof: prior context proof is unusable ({error}); running fresh")
+        printer(f"retry-proof: cache-miss unusable-context-proof ({error}); running fresh")
         return plan
-    plan.mode = "delta"
+    plan.mode = RetryMode.DELTA
     plan.delta_tests = delta_tests
     rendered = ", ".join(path.as_posix() for path in delta_tests)
-    printer(f"retry-proof: test-only delta accepted; pytest input={rendered}")
+    causes = sorted(
+        {reason.render() for path in delta_tests for reason in impact.reasons_for(path)}
+    )
+    printer(f"retry-proof: cache-hit affected-consumers={rendered}; causes={';'.join(causes)}")
     return plan
+
+
+def _retry_impact(
+    project_root: Path,
+    changed: Sequence[Path],
+    printer: Printer,
+) -> TestImpact | None:
+    try:
+        impact = DependencyOwnershipGraph(project_root).resolve(changed)
+    except (OSError, ScopeError) as error:
+        printer(f"retry-proof: cache-miss ownership-graph-unavailable ({error}); running fresh")
+        return None
+    if not impact.complete:
+        reason = impact.fallback.render() if impact.fallback is not None else "unknown"
+        printer(f"retry-proof: cache-miss ownership-incomplete ({reason}); running fresh")
+    return impact
 
 
 def _selection_is_compatible(
@@ -262,11 +317,11 @@ def _selected_test_modules(inputs: RetryInputs) -> tuple[Path, ...]:
     tracked = _tracked_paths(inputs.project_root)
     selected: set[Path] = set()
     for argument in inputs.test_arguments:
-        if _is_test_module(argument):
+        if is_test_module(argument):
             selected.add(argument)
             continue
         selected.update(
-            path for path in tracked if path.is_relative_to(argument) and _is_test_module(path)
+            path for path in tracked if path.is_relative_to(argument) and is_test_module(path)
         )
     return tuple(sorted(selected, key=lambda path: path.as_posix()))
 
@@ -287,11 +342,13 @@ def _repository_snapshot(project_root: Path) -> dict[str, str]:
             # Following a tracked directory symlink (dashboard/node_modules in this repo)
             # either fingerprints an external tree or raises IsADirectoryError, disabling
             # proof reuse exactly where local installs commonly expose that link.
-            payload = (
-                b"symlink\0" + os.fsencode(os.readlink(path))
-                if path.is_symlink()
-                else path.read_bytes()
-            )
+            if path.is_symlink():
+                payload = b"symlink\0" + os.fsencode(os.readlink(path))
+            elif not path.exists():
+                snapshot[relative.as_posix()] = MISSING_PATH_DIGEST
+                continue
+            else:
+                payload = path.read_bytes()
         except OSError as error:
             raise RuntimeError(
                 f"could not fingerprint tracked input {relative}: {error}"
@@ -368,38 +425,6 @@ def _snapshot_delta(previous: object, current: Mapping[str, str]) -> tuple[Path,
         return tuple(Path(path) for path in sorted(current))
     keys = set(previous) | set(current)
     return tuple(Path(path) for path in sorted(keys) if previous.get(path) != current.get(path))
-
-
-def _eligible_test_delta(
-    changed: Sequence[Path],
-    previous_snapshot: object,
-    selected_tests: Sequence[Path],
-    test_roots: Sequence[Path],
-) -> tuple[Path, ...] | None:
-    if not isinstance(previous_snapshot, dict):
-        return None
-    selected = set(selected_tests)
-    eligible: list[Path] = []
-    for path in changed:
-        # Deleted tests cannot be rerun, and support modules/conftest can affect
-        # every test without owning a pytest context of their own.
-        if path.as_posix() not in previous_snapshot and path in selected:
-            eligible.append(path)
-            continue
-        if path not in selected or not _within_roots(path, test_roots) or not _is_test_module(path):
-            return None
-        eligible.append(path)
-    return tuple(sorted(eligible, key=lambda path: path.as_posix()))
-
-
-def _within_roots(path: Path, roots: Sequence[Path]) -> bool:
-    return any(path.is_relative_to(root) for root in roots)
-
-
-def _is_test_module(path: Path) -> bool:
-    return path.suffix == ".py" and (
-        path.name.startswith("test_") or path.name.endswith("_test.py")
-    )
 
 
 def _validate_context_proof(path: Path) -> None:

@@ -29,12 +29,14 @@ from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
 )
 from agents_remember.worktrees.closeout_input import capture_closeout_candidate
-from agents_remember.worktrees.integration import closeout_ledger_recovery
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
-    CloseoutLedgerRecoveryDecision,
+from agents_remember.worktrees.integration.closeout import (
+    ledger_recovery as closeout_ledger_recovery,
 )
-from agents_remember.worktrees.integration.initial_closeout_door_recovery import (
+from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
     classify_initial_closeout_door_recovery,
+)
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
+    CloseoutLedgerRecoveryDecision,
 )
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (

@@ -799,12 +799,16 @@ def test_task_topology_resolve_enumeration_and_id_ambiguity(tmp_path: Path) -> N
     leaf_path.write_text("{}", encoding="utf-8")
     leaf = _task_ref("master/leaf.json")
     with (
-        patch.object(refs, "read_task_doc", side_effect=OSError("broken")),
+        patch.object(refs, "read_task_doc_with_source", side_effect=OSError("broken")),
         pytest.raises(refs.TaskDocumentRefError, match="cannot read"),
     ):
         topology.resolve(leaf)
     with (
-        patch.object(refs, "read_task_doc", return_value=SimpleNamespace(repo="other")),
+        patch.object(
+            refs,
+            "read_task_doc_with_source",
+            return_value=(SimpleNamespace(repo="other"), object()),
+        ),
         pytest.raises(refs.TaskDocumentRefError, match="declares repo"),
     ):
         topology.resolve(leaf)
@@ -843,7 +847,7 @@ def test_task_topology_master_census_and_command_edges(tmp_path: Path) -> None:
         return SimpleNamespace(ref=ref, document=SimpleNamespace(kind=kind))
 
     topology.resolve = Mock(side_effect=resolve)
-    documents = topology._master_documents("repo")
+    documents = refs.repository_master_documents(topology, "repo")
     assert [document.ref.path for document in documents] == ["master-a/task.json"]
 
     sprint_ref = _task_ref("sprint/task.json")

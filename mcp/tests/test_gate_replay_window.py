@@ -41,6 +41,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+import pytest
 from _store_durability import parked_rewrite
 from agents_remember.controlplane.enforcement import CLOSEOUT_GATE_KIND
 from agents_remember.controlplane.gate_decisions import _reclaim_gate_log
@@ -262,6 +263,7 @@ class GateReplayWindowTests(unittest.TestCase):
             "it justifies has to be re-derived",
         )
 
+    @pytest.mark.evidence_integration
     def test_the_applied_record_survives_a_concurrent_gate_log_compaction(self) -> None:
         """The regression: the consume races a compaction of the same log, in real processes.
 
@@ -465,6 +467,7 @@ class ApprovalClaimAtomicityTests(unittest.TestCase):
         self.coordination_root = Path(tmp.name)
         self.store = GateStore(observer_logs_root(self.coordination_root))
 
+    @pytest.mark.evidence_integration
     def test_two_real_closeouts_racing_the_claim_spend_the_approval_once(self) -> None:
         """Two processes, both told the gate is approved, both trying to consume it.
 

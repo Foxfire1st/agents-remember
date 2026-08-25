@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.models.closeout_projection import TaskDocProjectionEffect
+from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorAction,
     CloseoutDoorGeneration,

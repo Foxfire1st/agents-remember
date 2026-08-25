@@ -18,7 +18,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationStatus,
 )
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
     require_closeout_finalization_evidence,
     require_closeout_recovery_projection,
@@ -384,6 +384,36 @@ class LifecycleOperationSchemaError(LifecycleOperationReadError):
         )
 
 
+_CANONICAL_RECORD_KINDS: dict[str, LifecycleOperationKind] = {
+    "closeout-operation.json": "closeout",
+    "integrate-operation.json": "integrate",
+    "direct-landing-operation.json": "direct-landing",
+}
+
+
+def _require_record_matches_canonical_path(
+    path: Path,
+    record: LifecycleOperationRecord,
+) -> None:
+    expected_kind = _CANONICAL_RECORD_KINDS.get(path.name)
+    if expected_kind is None or record.operationKind == expected_kind:
+        return
+    raise LifecycleOperationReadError(
+        path,
+        side="current-record",
+        error_type="LifecycleOperationKindMismatch",
+        expected={
+            "state": "readable",
+            "schemaVersion": "3.0",
+            "operationKind": expected_kind,
+        },
+        observed={
+            "state": "operation-kind-mismatch",
+            "operationKind": record.operationKind,
+        },
+    )
+
+
 @contextmanager
 def lifecycle_operation_record_access(path: Path):
     """Serialize an isolated raw-record migration with the canonical store owner."""
@@ -426,7 +456,7 @@ class LifecycleOperationStore:
                 payload.get("schemaVersion"),
             )
         try:
-            return LifecycleOperationRecord.model_validate(payload)
+            record = LifecycleOperationRecord.model_validate(payload)
         except ValidationError as error:
             raise LifecycleOperationReadError(
                 self.path,
@@ -435,6 +465,8 @@ class LifecycleOperationStore:
                 expected={"state": "readable", "schemaVersion": "3.0"},
                 observed={"state": "invalid-schema-3", "sizeBytes": len(raw.encode("utf-8"))},
             ) from error
+        _require_record_matches_canonical_path(self.path, record)
+        return record
 
     def observe_current(self) -> LifecycleOperationRecord | None:
         """Read the current generation under the record's sole authority lock."""
@@ -578,6 +610,7 @@ class LifecycleOperationStore:
     def _write(self, record: LifecycleOperationRecord) -> None:
         _OWNERSHIP.check_declared_writer()
         validated = LifecycleOperationRecord.model_validate(record.model_dump(mode="json"))
+        _require_record_matches_canonical_path(self.path, validated)
         require_closeout_recovery_projection(validated)
         require_closeout_finalization_evidence(validated)
         atomic_write_text(

@@ -12,7 +12,7 @@ from unittest import mock
 import pytest
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     classify_closeout_ledger_recovery,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
@@ -288,7 +288,7 @@ def _assert_ledger_cut_state(contract, repository, accepted, intent, cut: str) -
     if cut == "before-stage":
         assert git(repository, "write-tree") == accepted["index"]
         assert _git_object_bytes(repository) == accepted["objects"]
-        assert git(repository, "status", "--porcelain=v1").startswith(" M memory.md")
+        assert git(repository, "status", "--porcelain=v1").startswith("M memory.md")
         assert contract.ledger_path.read_bytes() != accepted["ledger"]
         return
     assert git(repository, "write-tree") == intent.expectedOutputTree

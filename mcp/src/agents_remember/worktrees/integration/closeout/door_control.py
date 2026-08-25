@@ -9,12 +9,12 @@ from agents_remember.controlplane.task_publication_lock import task_publication_
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration, CloseoutDoorRequest
-from agents_remember.worktrees.integration.closeout_door import (
+from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
     prepare_door_publication,
     publish_door_intent,
 )
-from agents_remember.worktrees.integration.closeout_door_source import (
+from agents_remember.worktrees.integration.closeout.door_source import (
     authorize_door_actor,
     door_task_context,
     updated_door_generation,

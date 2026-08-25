@@ -30,7 +30,7 @@ from agents_remember.models.test_evidence import (
     _certifying_evidence_from_verified_dagger,
     require_certifying_evidence,
 )
-from agents_remember.worktrees.modules.published_quality_manifest import (
+from agents_remember.worktrees.modules.quality.published_manifest import (
     QUALITY_MANIFEST_SCHEMA_VERSION,
     REPORT_SET_MANIFEST,
     PublishedQualityManifest,
@@ -51,6 +51,8 @@ DAGGER_PROGRESS_TRUNCATION = "[older Dagger output truncated]\n"
 REPORT_GENERATIONS_DIRECTORY = ".quality-report-generations"
 EXPORTED_REPORT_NAMES = frozenset(
     {
+        "causal-failures.json",
+        "causal-failures.md",
         "clean-quality-results.json",
         "codex-probe.json",
         "coverage.data",

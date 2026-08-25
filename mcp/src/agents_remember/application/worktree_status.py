@@ -31,11 +31,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
     LifecycleOperationLocationError,
     require_contract_matches_lifecycle_operation_location,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    current_operation_projections,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_failure_evidence,
+)
+from agents_remember.worktrees.integration.lifecycle.observation.projection import (
+    current_operation_projections,
 )
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract

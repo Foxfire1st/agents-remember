@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _direct_cohort_candidate import write_synthetic_direct_cohort
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from agents_remember.kernel.primitives.checkout_coordination import declared_execution_mode
 from agents_remember.models.test_evidence import (
     DiagnosticTestEvidence,
@@ -60,9 +62,20 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
             "def test_plain():\n    assert 2 + 2 == 4\n",
             encoding="utf-8",
         )
+        (tests / "_catalog_anchor.py").write_text("VALUE = 1\n", encoding="utf-8")
+        write_synthetic_evidence_catalog(
+            self.root,
+            {"mcp/tests/_catalog_anchor.py": ("mcp/tests/test_plain.py",)},
+        )
         (self.root / "pyproject.toml").write_text(
             '[tool.pytest.ini_options]\ntestpaths = ["mcp/tests"]\n',
             encoding="utf-8",
+        )
+        node = "mcp/tests/test_plain.py::test_plain"
+        write_synthetic_direct_cohort(
+            self.root,
+            (node,),
+            {"mcp/tests/test_plain.py": ("test_plain",)},
         )
 
     def tearDown(self) -> None:
@@ -179,10 +192,11 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
     def test_test_process_declaration_and_global_state_are_restored(self) -> None:
         before = snapshot_owned_mutable_state()
         try:
-            begin_pytest_process()
-            self.assertEqual(declared_execution_mode(), "test")
-        finally:
             end_pytest_process()
+            self.assertIsNone(declared_execution_mode())
+        finally:
+            begin_pytest_process()
+        self.assertEqual(declared_execution_mode(), "test")
         self.assertEqual(snapshot_owned_mutable_state(), before)
         restore_owned_mutable_state(before)
 

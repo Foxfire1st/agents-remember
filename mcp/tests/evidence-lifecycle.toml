@@ -1,0 +1,495 @@
+schema_version = "ar-test-evidence-lifecycle/v1"
+large_fixture_bytes = 25000
+
+[[artifact]]
+path = "mcp/tests/_control_plane.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "conversation-control-route-contract"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "canonical conversation models plus caller-scripted adapter events"
+introduced_by = "260718-CHATS-L3"
+lifetime = "permanent"
+permanence_rationale = "The shared port composes real bridge, IPC, catalog, and route boundaries."
+replacement_contract = "contract:conversation-control-public-route-contract"
+consumers = [
+  "mcp/tests/test_conversation_control_api.py",
+  "mcp/tests/test_conversation_control_attachments.py",
+  "mcp/tests/test_conversation_control_operations.py",
+  "mcp/tests/test_conversation_control_projector_edges.py",
+  "mcp/tests/test_conversation_control_queue.py",
+  "mcp/tests/test_serving_app_routes.py",
+  "mcp/tests/test_serving_response_conformance_live.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_store_durability.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "durable-store-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "bounded process-interleaving harness over production stores"
+introduced_by = "260731-EFA-L7"
+lifetime = "permanent"
+permanence_rationale = "It reproduces process-scale lost-update and unlink races not expressible as unit assertions."
+replacement_contract = "contract:ar-durable-store/1.0-process-race-evidence"
+consumers = [
+  "mcp/tests/test_controlplane_store_durability.py",
+  "mcp/tests/test_gate_replay_window.py",
+  "mcp/tests/test_provider_store_durability.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_adapter_event_scripts.py"
+kind = "shared-support"
+authority = "external-spec-derived"
+owner = "conversation-provider-event-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "caller-owned Codex, Pi, and Claude terminal frame scripts"
+introduced_by = "260824-PDLS-L7"
+lifetime = "permanent"
+permanence_rationale = "Provider frames remain independent from the production reducers that consume them."
+replacement_contract = "contract:provider-specific-recorded-frame-contracts"
+consumers = [
+  "mcp/tests/test_conversation_control_api.py",
+  "mcp/tests/test_conversation_control_operations.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_agent_wire_fixtures.py"
+kind = "shared-support"
+authority = "external-spec-derived"
+owner = "codex-agent-wire-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "independent minimal frames derived from the vendored Codex app-server protocol"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "The synthetic frames independently pin provider field names and event ordering."
+replacement_contract = "contract:codex-agent-wire-version-matrix"
+consumers = [
+  "mcp/tests/test_codex_adapter_thread_demux.py",
+  "mcp/tests/test_codex_adapter_thread_routing_and_registry.py",
+  "mcp/tests/test_codex_app_server_adapter_reconnect.py",
+  "mcp/tests/test_codex_history_production_path.py",
+  "mcp/tests/test_conversation_projector_codex_agents.py",
+  "mcp/tests/test_conversation_projector_codex_agents_engine_1.py",
+  "mcp/tests/test_conversation_projector_codex_agents_engine_2.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_evidence_catalog_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "synthetic-evidence-candidate-contract"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "typed synthetic lifecycle-catalog builder"
+introduced_by = "260824-PDLS-L7"
+lifetime = "permanent"
+permanence_rationale = "Selection, retry, and direct-runner tests need one lifecycle-valid candidate builder."
+replacement_contract = "contract:synthetic-test-evidence-candidate"
+consumers = [
+  "mcp/tests/test_code_quality_targeted.py",
+  "mcp/tests/test_direct_test_eligibility.py",
+  "mcp/tests/test_direct_test_runner.py",
+  "mcp/tests/test_quality_retry_proof.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_direct_cohort_candidate.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "sealed-direct-cohort-forcing-proof"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "explicit content-addressed synthetic cohort manifest writer"
+introduced_by = "260824-PDLS-L4"
+lifetime = "permanent"
+permanence_rationale = "The three boundary suites need one strict writer for the same sealed manifest schema."
+replacement_contract = "contract:python-direct-cohort-v2-forcing-candidate"
+consumers = [
+  "mcp/tests/test_direct_test_eligibility.py",
+  "mcp/tests/test_direct_test_runner.py",
+  "mcp/tests/test_pytest_bootstrap_boundaries.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_durability_measurement.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "durability-measurement-validity"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "bounded non-vacuity rules for process durability measurements"
+introduced_by = "260731-EFA-L7"
+lifetime = "permanent"
+permanence_rationale = "The stress instrument must reject runs that did not execute enough work to support a claim."
+replacement_contract = "contract:durability-stress-non-vacuity"
+consumers = [
+  "mcp/tests/_store_durability.py",
+  "mcp/tests/test_durability_measurement.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_quality_admission.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "quality-test-admission"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "the certifying pytest composition root"
+introduced_by = "260731-EFA-L7"
+lifetime = "permanent"
+permanence_rationale = "Focused quality tests share the opaque Dagger admission minted by the root composition."
+replacement_contract = "contract:dagger-admission-capability"
+consumers = [
+  "mcp/tests/test_code_quality_check.py",
+  "mcp/tests/test_code_quality_check_scope.py",
+  "mcp/tests/test_code_quality_targeted.py",
+  "mcp/tests/test_diff_coverage.py",
+  "mcp/tests/test_file_size_detector.py",
+  "mcp/tests/test_gate_scope.py",
+  "mcp/tests/test_l6_diff_coverage_code_quality.py",
+  "mcp/tests/test_layering.py",
+  "mcp/tests/test_quality_retry_proof.py",
+  "mcp/tests/test_quality_scope_reporting.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_quality_evidence_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "immutable-quality-generation-consumer-contract"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "production quality-report publisher bound to the exact Git candidate tree"
+introduced_by = "260824-PDLS-L7"
+lifetime = "permanent"
+permanence_rationale = "Closeout consumer tests need one canonical successful evidence generation instead of hand-authored result dictionaries."
+replacement_contract = "contract:immutable-clean-quality-generation-consumer"
+consumers = [
+  "mcp/tests/test_worktree_closeout_gate_scope.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_scaling.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "scaling-architecture-fitness"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "deterministic growth and bounded-store assertion helpers"
+introduced_by = "260707-HFX2-L12"
+lifetime = "permanent"
+permanence_rationale = "Shared growth ceilings keep scaling assertions comparable across durable stores and projections."
+replacement_contract = "contract:cs6-scaling-fitness"
+consumers = [
+  "mcp/tests/test_agent_notifier_ladder.py",
+  "mcp/tests/test_projection_scaling_cs6.py",
+  "mcp/tests/test_store_scaling_cs6.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_store_durability_source.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "durability-historical-sensitivity"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "git archive of durability base commit e52edaf5 with an explicit module-rename adapter"
+introduced_by = "260731-EFA-L7"
+lifetime = "permanent"
+permanence_rationale = "Release evidence retains a reproducible known-bad control proving the process harness remains sensitive."
+replacement_contract = "contract:durability-historical-sensitivity"
+consumers = ["mcp/tests/_store_durability.py"]
+
+[[artifact]]
+path = "mcp/tests/_pi_rpc_capabilities.py"
+kind = "recording-generator"
+authority = "external-spec-derived"
+owner = "pi-rpc-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "independent installed Pi RPC probe"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while a committed Pi capability recording is supported."
+replacement_contract = "contract:next-supported-pi-rpc-capability-recording"
+consumers = ["mcp/tests/test_pi_rpc_real_smoke.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex_app_server_0_144_3.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "codex-app-server-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Codex app-server 0.144.3 observed wire frames"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while the 0.144.3 protocol shape remains a supported compatibility input."
+replacement_contract = "contract:recorded-frame-for-next-supported-codex-app-server-version"
+consumers = [
+  "mcp/tests/test_codex_app_server_adapter.py",
+  "mcp/tests/test_harness_control_evidence.py",
+  "mcp/tests/test_harness_control_plane.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/conversation_runtime/codex-0.144.5.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "conversation-runtime-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "installed Codex 0.144.5 runtime observation"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while Codex 0.144.5 remains in the supported runtime matrix."
+replacement_contract = "contract:next-supported-codex-runtime-fixture"
+consumers = [
+  "mcp/tests/test_conversation_foundation.py",
+  "mcp/tests/test_harness_control_evidence_installed.py",
+  "mcp/tests/test_harness_control_plane_installed.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/conversation_runtime/pi-0.80.7.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "conversation-runtime-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "installed Pi 0.80.7 runtime observation"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while Pi 0.80.7 remains in the supported runtime matrix."
+replacement_contract = "contract:next-supported-pi-runtime-fixture"
+consumers = [
+  "mcp/tests/test_conversation_foundation.py",
+  "mcp/tests/test_harness_control_evidence_installed.py",
+  "mcp/tests/test_harness_control_plane_installed.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/conversation_runtime/claude-2.1.211.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "conversation-runtime-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "installed Claude 2.1.211 runtime observation"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while Claude 2.1.211 remains in the supported runtime matrix."
+replacement_contract = "contract:next-supported-claude-runtime-fixture"
+consumers = [
+  "mcp/tests/test_conversation_control_installed.py",
+  "mcp/tests/test_conversation_foundation.py",
+  "mcp/tests/test_harness_control_evidence_installed.py",
+  "mcp/tests/test_harness_control_plane_installed.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/pi_rpc/0.80.7-capabilities.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "pi-rpc-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "independent installed Pi RPC 0.80.7 capability probe"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while Pi RPC 0.80.7 is pinned and supported."
+replacement_contract = "contract:next-supported-pi-rpc-capability-recording"
+consumers = [
+  "mcp/tests/test_pi_rpc_adapter.py",
+  "mcp/tests/test_pi_rpc_real_smoke.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/pi_rpc/activity.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "pi-rpc-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Pi RPC 0.80.7 activity event stream"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while the recorded Pi activity frames are supported parser inputs."
+replacement_contract = "contract:next-supported-pi-rpc-activity-recording"
+consumers = ["mcp/tests/test_pi_rpc_adapter_ops_2.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/sim/logs/observer/lifecycles/sim-replay-lifecycle/events.jsonl"
+kind = "fixture"
+authority = "internal-hand-authored"
+owner = "dashboard-sim-projection"
+category = "integration"
+fidelity = "local-composition"
+cadence = "demo-smoke"
+source_version_or_generator = "minimal hand-authored observer event replay"
+introduced_by = "dashboard-sim"
+lifetime = "demo-only"
+permanence_rationale = "The file is the minimal checked-in event replay used by the simulator."
+replacement_contract = "contract:serving-sim-replay-contract"
+consumers = ["mcp/tests/test_serving.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.207/initialization.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.207 stream-json initialization"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as a supported older Claude initialization shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = [
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_claude_stream_1.py",
+  "mcp/tests/test_harness_control_claude_stream_2.py",
+  "mcp/tests/test_harness_control_evidence.py",
+  "mcp/tests/test_harness_control_plane_assets.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.207/interactions.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.207 stream-json interaction"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as a supported older Claude interaction shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = ["mcp/tests/test_harness_control_claude_stream_1.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.207/turn.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.207 stream-json turn"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as a supported older Claude turn shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = ["mcp/tests/test_harness_control_claude_stream_1.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/initialization.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 stream-json initialization"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as the primary Claude initialization conformance shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = [
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_claude_stream_1.py",
+  "mcp/tests/test_harness_control_claude_stream_2.py",
+  "mcp/tests/test_harness_control_evidence.py",
+  "mcp/tests/test_harness_control_plane_assets.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/interactions.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 stream-json interaction"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as the primary Claude interaction conformance shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = ["mcp/tests/test_harness_control_claude_stream_1.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/interactions-multi.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 multi-interaction stream"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained to prove ordered multiple-interaction projection."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = ["mcp/tests/test_harness_control_claude_stream_1.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/turn.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 stream-json turn"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as the primary Claude turn conformance shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = ["mcp/tests/test_harness_control_claude_stream_1.py"]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.217/interrupt.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.217 interrupted stream-json turn"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained to prove native interrupt settlement for the supported Claude shape."
+replacement_contract = "contract:supported-claude-stream-version-matrix"
+consumers = [
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_plane_assets.py",
+]

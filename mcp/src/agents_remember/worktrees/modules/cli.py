@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import LedgerError
-from agents_remember.models.closeout_input import CloseoutCorrectedCall
+from agents_remember.models.closeout.input import CloseoutCorrectedCall
 from agents_remember.worktrees.closeout_input import (
     corrected_closeout_arguments,
     normalize_closeout_input,

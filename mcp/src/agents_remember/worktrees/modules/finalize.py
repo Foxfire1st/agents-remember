@@ -129,30 +129,49 @@ def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
             blockers=[str(exc)],
             summary=f"Task finalization did not publish task truth: {exc}",
         )
-    if updated_contract.kind == "series":
+    return _finalized_result(
+        updated_contract,
+        args,
+        cleanup=cleanup.payload,
+        updates=updates,
+        projection_effects=projection_effects,
+    )
+
+
+def _finalized_result(
+    contract: WorktreeContract,
+    args: FinalizeArgs,
+    *,
+    cleanup: dict[str, object],
+    updates: dict[str, Any],
+    projection_effects: list[dict[str, object]],
+) -> WorktreeCommandResult:
+    """Build the terminal response after cleanup and task truth have converged."""
+
+    if contract.kind == "series":
         archive = archive_completed_root_task(
-            updated_contract.coordination_root,
-            updated_contract.repo_name,
-            updated_contract.task_root,
+            contract.coordination_root,
+            contract.repo_name,
+            contract.task_root,
             dry_run=args.dry_run,
         )
     else:
         archive = {
             "state": "skipped",
             "reason": "leaf-contract",
-            "taskRoot": updated_contract.task_root.as_posix(),
+            "taskRoot": contract.task_root.as_posix(),
         }
     return WorktreeCommandResult(
         0,
         {
-            **_identity_payload(updated_contract),
+            **_identity_payload(contract),
             "state": "finalized" if not args.dry_run else "would-finalize",
             "dryRun": args.dry_run,
-            "contractPath": updated_contract.contract_path.as_posix(),
-            "enclosurePath": updated_contract.contract_path.as_posix(),
-            "landedCommit": _landed_commit(updated_contract),
-            "targetBranch": updated_contract.code_source_branch,
-            "cleanup": cleanup.payload,
+            "contractPath": contract.contract_path.as_posix(),
+            "enclosurePath": contract.contract_path.as_posix(),
+            "landedCommit": _landed_commit(contract),
+            "targetBranch": contract.code_source_branch,
+            "cleanup": cleanup,
             "taskUpdates": updates,
             "projectionEffects": projection_effects,
             "taskArchive": archive,

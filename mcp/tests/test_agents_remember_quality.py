@@ -90,27 +90,20 @@ class FakeDag:
 
 def test_agents_remember_quality_module_is_pinned_and_parseable() -> None:
     manifest = json.loads(DAGGER_MANIFEST.read_text(encoding="utf-8"))
-    source = DAGGER_MODULE.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=DAGGER_MODULE.as_posix())
+    tree = ast.parse(DAGGER_MODULE.read_text(encoding="utf-8"), filename=DAGGER_MODULE.as_posix())
 
     assert manifest["engineVersion"] == "v0.21.8"
-    assert any(
-        isinstance(node, ast.ClassDef) and node.name == "AgentsRememberQuality"
+    quality_class = next(
+        node
         for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "AgentsRememberQuality"
     )
+    public_functions = {
+        node.name for node in quality_class.body if isinstance(node, ast.AsyncFunctionDef)
+    }
+    assert public_functions == {"quality", "cadence_evidence"}
     assert DAGGER_MODULE_ID.endswith(".main")
-    assert "@openai/codex@{CODEX_VERSION}" in source
-    assert "repository_bundle: Annotated[" in source
-    assert "dagger.File" in source
-    assert "candidate_head" not in source
-    assert '"/tmp/ar-candidate.bundle",\n                    "HEAD"' in source
-    assert 'with_exec(["git", "add", "--all"])' in source
-    assert "from typing import Annotated" in source
-    assert "from dagger import Doc" in source
-    assert "Required Git commit used for changed-line coverage" in source
-    assert "'targeted' derives the changed leaf subset" in source
-    dagger_config = json.loads(DAGGER_MANIFEST.read_text(encoding="utf-8"))
-    assert dagger_config["disableDefaultFunctionCaching"] is True
+    assert manifest["disableDefaultFunctionCaching"] is True
 
 
 def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path: Path) -> None:
@@ -210,16 +203,22 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
     assert result.exit_code == 0
     assert result.reports == "/reports"
     assert any(command[-1] == "mcp/tests/test_codex_clean_room_probe.py" for command in commands)
+    assert ["git", "fetch", "--no-tags", "/tmp/ar-candidate.bundle", "HEAD"] in commands
+    assert ["git", "add", "--all"] in commands
     wrapper = next(
         command for command in commands if "agents_remember.code_quality.check" in command
     )
     assert "--targeted" in wrapper
     assert wrapper[wrapper.index("--pytest-phase-report") + 1] == "/reports/pytest-phases.json"
+    assert wrapper[wrapper.index("--causal-failure-report") + 1] == (
+        "/reports/causal-failures.json"
+    )
     assert wrapper[-4:] == ["--diff-base", "a" * 40, "--memory-cap-bytes", "1024"]
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
     assert payload["status"] == "passed"
     assert payload["startedAt"] <= payload["finishedAt"]
     assert payload["attemptNonce"] == VALID_DAGGER_NONCE
+    assert payload["causalFailureReport"] == "causal-failures.json"
     assert (
         "AR_DAGGER_TEST_ATTESTATION",
         VALID_DAGGER_NONCE,
@@ -237,6 +236,51 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
         "codex-read-only-probe",
         "quality-wrapper",
     ]
+
+
+def test_dagger_cadence_evidence_is_a_separate_non_accepting_graph() -> None:
+    module = load_dagger_module()
+    fake_dag = FakeDag([0, 0])
+
+    with (
+        patch.object(module, "dag", fake_dag),
+        patch.object(module.secrets, "token_hex", return_value=VALID_DAGGER_NONCE),
+    ):
+        result = asyncio.run(
+            module.AgentsRememberQuality().cadence_evidence(
+                object(),
+                object(),
+                trigger="scheduled",
+            )
+        )
+
+    command = next(
+        item
+        for item in fake_dag.container_value.commands
+        if "agents_remember.testing.cadence_runner" in item
+    )
+    assert command[command.index("--trigger") + 1] == "scheduled"
+    assert not any(
+        "agents_remember.code_quality.check" in item for item in fake_dag.container_value.commands
+    )
+    payload = json.loads(fake_dag.container_value.files["/reports/cadence-route-results.json"])
+    assert result.exit_code == 0
+    assert payload["acceptanceEligible"] is False
+    assert payload["certifying"] is False
+    assert payload["completedSteps"] == ["environment", "cadence-evidence"]
+
+
+def test_dagger_cadence_evidence_refuses_unknown_trigger() -> None:
+    module = load_dagger_module()
+
+    with pytest.raises(ValueError, match="unknown cadence evidence trigger"):
+        asyncio.run(
+            module.AgentsRememberQuality().cadence_evidence(
+                object(),
+                object(),
+                trigger="full",
+            )
+        )
 
 
 def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() -> None:

@@ -12,7 +12,7 @@ from agents_remember.worktrees.modules.abandon import abandon_result
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
-from test_cleanup_carryover import _allow_terminal_archive_for_downstream_unit, _contract
+from test_cleanup_carryover import _contract
 from test_worktree_support import git, init_repo
 
 
@@ -21,7 +21,6 @@ class TerminalPreflightFailureTests(unittest.TestCase):
         self._td = tempfile.TemporaryDirectory()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
-        _allow_terminal_archive_for_downstream_unit(self)
 
     def contract(self, name: str, *, missing_source: bool = False) -> WorktreeContract:
         code = self.tmp / f"{name}-code"

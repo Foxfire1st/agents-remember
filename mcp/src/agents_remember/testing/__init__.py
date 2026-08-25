@@ -6,9 +6,9 @@ from agents_remember.models.test_evidence import (
     EvidenceConsumer,
     EvidenceConsumerRefusal,
     EvidencePayloadError,
+    evidence_payload,
     load_diagnostic_test_evidence,
     require_certifying_evidence,
-    test_evidence_payload,
 )
 from agents_remember.testing.eligibility import classify_direct_selection
 from agents_remember.testing.selection_contract import (
@@ -27,7 +27,7 @@ __all__ = [
     "EvidencePayloadError",
     "RefusedDirectSelection",
     "classify_direct_selection",
+    "evidence_payload",
     "load_diagnostic_test_evidence",
     "require_certifying_evidence",
-    "test_evidence_payload",
 ]

@@ -950,7 +950,7 @@ class StructuralAgentToolTests(unittest.TestCase):
         ]
         leaf = TaskDocument.model_validate(payload)
         write_task_doc(current.path.parent, leaf)
-        resolved = topology.resolve(self.leaf)
+        resolved = TaskDocumentTopology(self.root).resolve(self.leaf)
 
         invalid = _curator_route_review_refusal(self.config, resolved)
         assert invalid is not None

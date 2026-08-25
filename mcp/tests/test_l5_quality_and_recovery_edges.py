@@ -19,7 +19,8 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.modules import clean_quality_executor, code_quality_gate
+from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
+from agents_remember.worktrees.modules.quality import gate as code_quality_gate
 from agents_remember.worktrees.series_closeout import atomic_series_ledger_prefix
 
 
@@ -190,7 +191,7 @@ class L5QualityAndRecoveryEdgeTests(unittest.TestCase):
         with mock.patch.object(
             quality,
             "run_strict_code_quality_gate",
-            return_value=fixture_mod._full_gate(contract),
+            side_effect=fixture_mod._full_gate(contract),
         ) as gate:
             outcome = quality.run_integration_quality_gate(contract, completion=plan)
         gate.assert_called_once()

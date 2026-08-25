@@ -26,7 +26,7 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
-from agents_remember.models.closeout_input import CloseoutCorrectedCall
+from agents_remember.models.closeout.input import CloseoutCorrectedCall
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,

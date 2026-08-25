@@ -15,6 +15,13 @@ from typing import cast
 from unittest import mock
 
 import agents_remember.serving.harness_control_client as client_module
+from _adapter_event_scripts import (
+    replay_claude_terminal,
+    replay_codex_terminal,
+    replay_pi_message_end,
+    replay_pi_release,
+    replay_pi_terminal,
+)
 from _control_plane import OPERATOR, FakeControlAdapter, make_harness
 from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
@@ -119,7 +126,7 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_settlement_correlates_interrupted_terminal_event(self) -> None:
         await self._submit("req-1")
         await self._interrupt()
-        self.adapter.settle_turn("interrupted")
+        replay_codex_terminal(self.adapter, "interrupted")
         status = await self._status()
         self.assertEqual(status.acknowledgement, "accepted")
         self.assertEqual(status.settlement, "interrupted")
@@ -130,7 +137,7 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_settlement_already_settled_on_natural_completion(self) -> None:
         await self._submit("req-1")
         await self._interrupt()
-        self.adapter.settle_turn("completed")
+        replay_codex_terminal(self.adapter, "completed")
         status = await self._status()
         self.assertEqual(status.settlement, "already-settled")
         self.assertEqual(operations.interrupt_http_status(status), 200)
@@ -138,7 +145,7 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_settlement_failed_maps_503(self) -> None:
         await self._submit("req-1")
         await self._interrupt()
-        self.adapter.settle_turn("failed")
+        replay_codex_terminal(self.adapter, "failed")
         status = await self._status()
         self.assertEqual(status.settlement, "failed")
         self.assertEqual(operations.interrupt_http_status(status), 503)
@@ -226,7 +233,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operation.settlement, "pending")
         self.assertEqual(self.adapter.interrupt_calls[0]["expected_operation_id"], "req-pi-1")
         self.assertIsNone(self.adapter.interrupt_calls[0]["turn_id"])
-        self.adapter.pi_settle("aborted")
+        replay_pi_terminal(self.adapter, "aborted")
         status = await operations.interrupt_status(
             ControlRequest(
                 service=self.service,
@@ -268,7 +275,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
             turn_id="req-pi-1",
             request_id="int-pi-3",
         )
-        self.adapter.pi_settle("stop")
+        replay_pi_terminal(self.adapter, "stop")
         status = await operations.interrupt_status(
             ControlRequest(
                 service=self.service,
@@ -298,7 +305,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
             turn_id="req-pi-1",
             request_id="int-pi-4",
         )
-        self.adapter.pi_settle_with_content("stop")
+        replay_pi_terminal(self.adapter, "stop", text="final answer")
         status = await operations.interrupt_status(
             ControlRequest(
                 service=self.service,
@@ -328,7 +335,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(operation.acknowledgement, "accepted")
         self.assertEqual(operation.settlement, "pending")
-        self.adapter.pi_settle_with_content("aborted")
+        replay_pi_terminal(self.adapter, "aborted", text="final answer")
         status = await operations.interrupt_status(
             ControlRequest(
                 service=self.service,
@@ -360,8 +367,8 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
             turn_id="req-pi-1",
             request_id="int-pi-big",
         )
-        self.adapter.pi_emit_message_end(text="x" * 40_000, stop_reason="stop")
-        self.adapter.pi_release()
+        replay_pi_message_end(self.adapter, text="x" * 40_000, stop_reason="stop")
+        replay_pi_release(self.adapter)
         status = await operations.interrupt_status(
             ControlRequest(
                 service=self.service,
@@ -395,9 +402,9 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
             request_id="int-pi-mix",
         )
         self.assertEqual(operation.acknowledgement, "accepted")
-        self.adapter.pi_emit_message_end(text="let me check that file", stop_reason="toolUse")
-        self.adapter.pi_emit_message_end(text="y" * 40_000, stop_reason="aborted")
-        self.adapter.pi_release()
+        replay_pi_message_end(self.adapter, text="let me check that file", stop_reason="toolUse")
+        replay_pi_message_end(self.adapter, text="y" * 40_000, stop_reason="aborted")
+        replay_pi_release(self.adapter)
         status = await operations.interrupt_status(
             ControlRequest(
                 service=self.service,
@@ -482,7 +489,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operation.settlement, "pending")
         self.assertEqual(self.adapter.interrupt_calls[0]["expected_operation_id"], "req-cl-1")
         self.assertIsNone(self.adapter.interrupt_calls[0]["turn_id"])
-        self.adapter.claude_settle("cancelled")
+        replay_claude_terminal(self.adapter, "cancelled")
         status = await self._status()
         self.assertEqual(status.settlement, "interrupted")
         self.assertIsNotNone(status.settled_at)
@@ -491,7 +498,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_natural_completion_settles_already_settled(self) -> None:
         await self._submit("req-cl-1")
         await self._interrupt()
-        self.adapter.claude_settle("completed")
+        replay_claude_terminal(self.adapter, "completed")
         status = await self._status()
         self.assertEqual(status.settlement, "already-settled")
         self.assertEqual(operations.interrupt_http_status(status), 200)
@@ -499,7 +506,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_unprovoked_error_result_settles_failed(self) -> None:
         await self._submit("req-cl-1")
         await self._interrupt()
-        self.adapter.claude_settle("failed")
+        replay_claude_terminal(self.adapter, "failed")
         status = await self._status()
         self.assertEqual(status.settlement, "failed")
         self.assertEqual(operations.interrupt_http_status(status), 503)

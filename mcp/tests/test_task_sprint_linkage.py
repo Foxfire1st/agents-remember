@@ -1097,6 +1097,7 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             masterRef=TaskDocumentRef(repository="other-repo", path="master-a/task.json"),
         )
         self._write_sprint(orchestrates=["master-a"], rows=[other_repo_row])
+        self.topology = TaskDocumentTopology(self.coord)
         with self.assertRaisesRegex(TaskDocumentRefError, "outside the sprint repository"):
             self.topology.validate_sprint_linkage(SPRINT)
         write_task_doc(
@@ -1109,6 +1110,7 @@ class SprintLinkageEdgeTests(unittest.TestCase):
             masterRef=TaskDocumentRef(repository=REPOSITORY, path="other-sprint/task.json"),
         )
         self._write_sprint(orchestrates=["master-a"], rows=[sprint_row])
+        self.topology = TaskDocumentTopology(self.coord)
         with self.assertRaisesRegex(TaskDocumentRefError, "must name a commanded master document"):
             self.topology.validate_sprint_linkage(SPRINT)
         self._write_sprint(
@@ -1118,12 +1120,14 @@ class SprintLinkageEdgeTests(unittest.TestCase):
                 SubTaskRef(number="M2", name="a again", masterRef=MASTER_A),
             ],
         )
+        self.topology = TaskDocumentTopology(self.coord)
         with self.assertRaisesRegex(TaskDocumentRefError, "multiple rows link"):
             self.topology.validate_sprint_linkage(SPRINT)
         self._write_sprint(
             orchestrates=["master-a"],
             rows=[SubTaskRef(number="M1", name="b", masterRef=MASTER_B)],
         )
+        self.topology = TaskDocumentTopology(self.coord)
         with self.assertRaisesRegex(TaskDocumentRefError, "orchestrates does not command"):
             self.topology.validate_sprint_linkage(SPRINT)
 

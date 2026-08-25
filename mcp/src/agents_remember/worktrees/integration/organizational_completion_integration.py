@@ -14,7 +14,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (

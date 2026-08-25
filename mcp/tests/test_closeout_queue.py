@@ -20,7 +20,7 @@ from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.door import CloseoutDoorAction, CloseoutDoorRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
-from agents_remember.worktrees.integration.closeout_door_control import (
+from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
     closeout_door_tool,
 )
@@ -239,6 +239,7 @@ class QueueFixture:
                     "version": 1,
                     "coordinationRoot": self.coord.as_posix(),
                     "workspaceRoot": root.as_posix(),
+                    "directExecutionEnabled": False,
                     "repositories": {REPO: {}},
                 }
             ),
@@ -270,6 +271,7 @@ class QueueFixture:
                 "atomic" if atomic_b else "organizational",
             ),
         }
+
         for ref, document in self.master_docs.items():
             write_task_doc(self.tasks / Path(ref.path).parent, document)
         graph = {
@@ -324,6 +326,14 @@ class QueueFixture:
             ),
         )
         (self.tasks / "sprint" / "grade.md").write_text("# Grade\n", encoding="utf-8")
+        self.cfg = load_config(self.config_path)
+
+    def enable_direct_execution(self) -> None:
+        """Opt this fixture into the explicit direct-series policy boundary."""
+
+        settings = json.loads(self.config_path.read_text(encoding="utf-8"))
+        settings["directExecutionEnabled"] = True
+        self.config_path.write_text(json.dumps(settings), encoding="utf-8")
         self.cfg = load_config(self.config_path)
 
     def _contract(

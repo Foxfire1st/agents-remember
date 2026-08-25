@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_SHORT_TEXT,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,

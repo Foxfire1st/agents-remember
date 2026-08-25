@@ -7,7 +7,7 @@ from agents_remember.models.lifecycles.mutation_evidence import (
     GitMutationEvidence,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (

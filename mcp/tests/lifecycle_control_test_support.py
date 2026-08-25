@@ -2,12 +2,15 @@
 
 from pathlib import Path
 
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
+from agents_remember.models.lifecycles.operation_kinds import LifecycleControlAction
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import Section, TaskDocument, write_task_doc
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
-    LifecycleControlAction,
     LifecycleControlCommand,
     control_operation,
 )
@@ -18,7 +21,169 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.queue.closeout_queue_evidence import (
+    JUDGMENT_REGISTER_HEADER,
+    JUDGMENT_REGISTER_HEADING,
+    PRIORITY_REGISTER_HEADER,
+    PRIORITY_REGISTER_HEADING,
+)
+from agents_remember.worktrees.route_review import code_candidate_tree
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+
+FIXTURE_GRADE_JUDGMENT = "TEST-FIXTURE-BELOW-SCHEDULING"
+
+
+def publish_completed_disposition_task_authority(
+    contract: WorktreeContract,
+    *,
+    sprint_owned: bool,
+) -> DeclaredCaller:
+    """Publish real task, review, and planning authority for disposition tests."""
+
+    leaf_slug = contract.leaf_id.lower()
+    review_ref = "notes/reports/lifecycle-disposition-review.md"
+    review = contract.task_root / review_ref
+    review.parent.mkdir(parents=True, exist_ok=True)
+    review.write_text("# Lifecycle disposition review\n\nPass.\n", encoding="utf-8")
+    candidate_ref = TaskDocumentRef(
+        repository=contract.repo_name,
+        path=f"{contract.task_name}/{leaf_slug}.json",
+    )
+    master_ref = TaskDocumentRef(
+        repository=contract.repo_name,
+        path=f"{contract.task_name}/task.json",
+    )
+    write_task_doc(
+        contract.task_root,
+        TaskDocument.model_validate(
+            {
+                "id": contract.leaf_id,
+                "slug": leaf_slug,
+                "title": "Lifecycle disposition leaf",
+                "kind": "subTask",
+                "status": "Completed",
+                "repo": contract.repo_name,
+                "createdAt": "2026-08-22T00:00:00+00:00",
+                "enclosures": [
+                    {
+                        "leafId": contract.leaf_id,
+                        "enclosurePath": contract.contract_path.as_posix(),
+                    }
+                ],
+                "steps": [{"id": "S1", "title": "Ready", "status": "done"}],
+                "routeReview": {
+                    "candidateTree": code_candidate_tree(contract),
+                    "verdict": "pass",
+                    "verdictRef": review_ref,
+                    "reviewedAt": "2026-08-22T00:00:00+00:00",
+                    "routes": [
+                        {
+                            "route": "lifecycle-disposition",
+                            "verdict": "pass",
+                            "evidenceRef": review_ref,
+                        }
+                    ],
+                },
+            }
+        ),
+    )
+    write_task_doc(
+        contract.task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "DURABLE-LIFECYCLE",
+                "slug": "durable-lifecycle",
+                "title": "Durable lifecycle",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": contract.repo_name,
+                "createdAt": "2026-08-22T00:00:00+00:00",
+                "executionNature": "organizational",
+                "subTasks": [
+                    {
+                        "number": contract.leaf_id,
+                        "name": "Lifecycle disposition leaf",
+                        "file": f"{leaf_slug}.md",
+                        "status": "Completed",
+                    }
+                ],
+            }
+        ),
+    )
+    if not sprint_owned:
+        return DeclaredCaller(role="architect", task_document_ref=master_ref)
+
+    sprint_ref = TaskDocumentRef(
+        repository=contract.repo_name,
+        path="lifecycle-fixture-sprint/task.json",
+    )
+    planning_ref = "planning.md"
+    sprint_root = contract.task_root.parent / "lifecycle-fixture-sprint"
+    sprint_root.mkdir(parents=True, exist_ok=True)
+    (sprint_root / planning_ref).write_text(
+        "# Lifecycle fixture planning evidence\n",
+        encoding="utf-8",
+    )
+    subject = candidate_ref.key
+    write_task_doc(
+        sprint_root,
+        TaskDocument.model_validate(
+            {
+                "id": "LIFECYCLE-FIXTURE-SPRINT",
+                "slug": "lifecycle-fixture-sprint",
+                "title": "Lifecycle fixture sprint",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": contract.repo_name,
+                "createdAt": "2026-08-22T00:00:00+00:00",
+                "orchestrates": [contract.task_name],
+                "integrationBranch": "super",
+                "executionGraph": {
+                    "nodes": [master_ref.model_dump(mode="json")],
+                    "edges": [],
+                },
+                "sections": [
+                    Section(
+                        kind="freeform",
+                        heading=JUDGMENT_REGISTER_HEADING,
+                        body=_register_body(
+                            JUDGMENT_REGISTER_HEADER,
+                            (
+                                FIXTURE_GRADE_JUDGMENT,
+                                "priority",
+                                subject,
+                                "priority=normal",
+                                "Fixture scheduling authority.",
+                                planning_ref,
+                                "strategist",
+                                "high",
+                                "",
+                            ),
+                        ),
+                    ),
+                    Section(
+                        kind="freeform",
+                        heading=PRIORITY_REGISTER_HEADING,
+                        body=_register_body(
+                            PRIORITY_REGISTER_HEADER,
+                            (subject, "normal", "", FIXTURE_GRADE_JUDGMENT),
+                        ),
+                    ),
+                ],
+            }
+        ),
+    )
+    return DeclaredCaller(role="orchestrator", task_document_ref=sprint_ref)
+
+
+def _register_body(header: tuple[str, ...], row: tuple[str, ...]) -> str:
+    return "\n".join(
+        (
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join("---" for _ in header) + " |",
+            "| " + " | ".join(row) + " |",
+        )
+    )
 
 
 def control_current_generation(

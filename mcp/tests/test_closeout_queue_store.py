@@ -13,7 +13,7 @@ from agents_remember.controlplane.closeout_queue_store import (
     ProjectionSourceIdentity,
     queue_store_paths,
 )
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
     CloseoutProjectionMember,

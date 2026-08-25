@@ -17,7 +17,7 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )
-from test_task_reopen import _completed_leaf_contract, _leaf_doc, _master_doc
+from task_reopen_test_support import _completed_leaf_contract, _leaf_doc, _master_doc
 from test_worktree_support import git, init_repo
 
 
@@ -113,9 +113,10 @@ class ReopenPublicationAuthorityTests(unittest.TestCase):
                 before = {path: path.read_bytes() for path in paths}
 
                 def race_then_publish(
-                    _contract,
-                    publication,
+                    _coordination_root,
+                    _repo_id,
                     *,
+                    validate,
                     _contract_snapshot=contract,
                     _side=side,
                     **_kwargs,
@@ -130,11 +131,11 @@ class ReopenPublicationAuthorityTests(unittest.TestCase):
                     (repo / f"{_side}-race.txt").write_text("raced\n", encoding="utf-8")
                     git(repo, "add", f"{_side}-race.txt")
                     git(repo, "commit", "-m", f"advance {_side} source")
-                    return publication()
+                    return validate()
 
                 with mock.patch.object(
                     reopen_module,
-                    "publish_queue_bound_task_facts",
+                    "publish_task_fact_mutation",
                     side_effect=race_then_publish,
                 ):
                     result = reopen_task(contract.contract_path)
@@ -154,9 +155,10 @@ class ReopenPublicationAuthorityTests(unittest.TestCase):
                 raced: dict[Path, bytes] = {}
 
                 def race_then_publish(
-                    _contract,
-                    publication,
+                    _coordination_root,
+                    _repo_id,
                     *,
+                    validate,
                     _changed_doc=changed_doc,
                     _leaf_path=leaf_path,
                     _master_path=master_path,
@@ -176,11 +178,11 @@ class ReopenPublicationAuthorityTests(unittest.TestCase):
                     )
                     _raced[path] = path.read_bytes()
                     _raced[path.with_suffix(".md")] = path.with_suffix(".md").read_bytes()
-                    return publication()
+                    return validate()
 
                 with mock.patch.object(
                     reopen_module,
-                    "publish_queue_bound_task_facts",
+                    "publish_task_fact_mutation",
                     side_effect=race_then_publish,
                 ):
                     result = reopen_task(contract.contract_path)
@@ -209,17 +211,23 @@ class ReopenPublicationAuthorityTests(unittest.TestCase):
             before_noncontract = {path: path.read_bytes() for path in paths[1:]}
             raced: dict[str, bytes] = {}
 
-            def race_then_publish(_contract, publication, **_kwargs):
+            def race_then_publish(
+                _coordination_root,
+                _repo_id,
+                *,
+                validate,
+                **_kwargs,
+            ):
                 write_contract(
                     contract.contract_path,
                     replace(contract, lifecycle_id="LC-RACED"),
                 )
                 raced["contract"] = contract.contract_path.read_bytes()
-                return publication()
+                return validate()
 
             with mock.patch.object(
                 reopen_module,
-                "publish_queue_bound_task_facts",
+                "publish_task_fact_mutation",
                 side_effect=race_then_publish,
             ):
                 result = reopen_task(contract.contract_path)

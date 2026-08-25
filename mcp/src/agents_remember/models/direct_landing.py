@@ -7,13 +7,13 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     CloseoutInvalidField,
     EffectiveCloseoutInput,
     ResolvedCloseoutPlan,
 )
-from agents_remember.models.closeout_projection import TaskDocProjectionEffect
+from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 
 

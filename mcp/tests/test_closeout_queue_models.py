@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_REASONS,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
@@ -12,7 +12,7 @@ from agents_remember.models.closeout_projection import (
     CloseoutQueueState,
     ProjectionSourceProblem,
 )
-from agents_remember.models.closeout_source import CandidateAdmissionFacts, SchedulingGradeInput
+from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorGeneration,
     CloseoutDoorRequest,

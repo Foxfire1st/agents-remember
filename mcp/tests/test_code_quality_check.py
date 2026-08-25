@@ -172,6 +172,7 @@ class CodeQualityCheckTests(unittest.TestCase):
                     "agents_remember.code_quality.file_size",
                     "agents_remember.code_quality.layering",
                     "pyright",
+                    "agents_remember.testing.evidence_lifecycle",
                     "radon",
                     "radon",
                     "pytest",
@@ -181,7 +182,7 @@ class CodeQualityCheckTests(unittest.TestCase):
             self.assertIn("--pythonpath", pyright_command)
             self.assertIn(sys.executable, pyright_command)
             self.assertIn(source.as_posix(), pyright_command)
-            self.assertIn((root / "tests").as_posix(), commands[7])
+            self.assertIn((root / "tests").as_posix(), commands[8])
             self.assertTrue(any("CRAP-Calculator" in line for line in output))
             # Both post-pytest rails score the one coverage report the run produced.
             self.assertTrue(any("## diff-coverage" in line for line in output))
@@ -362,7 +363,15 @@ class RadonIsAReportNotAGateTests(unittest.TestCase):
             self.assertEqual(reporting, {"radon-cc", "radon-mi"})
             self.assertEqual(
                 enforcing,
-                {"ruff", "ruff-format", "pyright", "pytest", "file-size", "layering"},
+                {
+                    "ruff",
+                    "ruff-format",
+                    "pyright",
+                    "pytest",
+                    "file-size",
+                    "layering",
+                    "evidence-lifecycle",
+                },
             )
 
     def test_report_section_header_says_it_cannot_fail(self) -> None:

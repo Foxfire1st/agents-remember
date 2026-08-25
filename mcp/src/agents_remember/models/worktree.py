@@ -8,7 +8,7 @@ from pydantic import Field
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     CloseoutInvalidField,
     ResolvedCloseoutPlan,

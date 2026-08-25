@@ -12,7 +12,7 @@ import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.models.closeout_input import CloseoutCorrectedCall
+from agents_remember.models.closeout.input import CloseoutCorrectedCall
 from agents_remember.models.lifecycles.mutation_evidence import CloseoutMutationLeg
 from agents_remember.models.lifecycles.operation import CloseoutOperationInput
 from agents_remember.worktrees.closeout_input import (
@@ -21,8 +21,8 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
 )
-from agents_remember.worktrees.integration import (
-    closeout_operation_admission,
+from agents_remember.worktrees.integration.closeout import (
+    operation_admission as closeout_operation_admission,
 )
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
@@ -191,7 +191,7 @@ def test_preview_apply_and_duplicate_fingerprints_share_one_normalized_input(
     launcher = mock.Mock()
 
     def admit(admission, admitted_contract):
-        assert admitted_contract == contract
+        assert admitted_contract.contract_path == contract.contract_path
         return lifecycle_operations.start_or_observe_closeout_operation(
             admission,
             admitted_contract,
@@ -424,11 +424,12 @@ def test_valid_crash_cuts_before_and_after_record_publication(tmp_path: Path) ->
     assert not record_path.exists()
     launcher.assert_not_called()
 
-    with pytest.raises(RuntimeError, match="cut after record publication"):
+    with pytest.raises(RuntimeError, match="lifecycle-worker-launch-failed") as raised:
         start_closeout_operation(
             operation_input,
             launcher=lambda *_: (_ for _ in ()).throw(RuntimeError("cut after record publication")),
         )
+    assert "cut after record publication" not in str(raised.value)
     store = LifecycleOperationStore(record_path)
     published = store.read()
     assert published is not None

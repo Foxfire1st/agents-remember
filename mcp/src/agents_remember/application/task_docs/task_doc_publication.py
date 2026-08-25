@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.closeout_projection import TaskDocProjectionEffect
+from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     TaskDocSourceReadError,
@@ -83,6 +83,48 @@ def publish_task_doc_set(context: TaskDocPublication) -> TaskDocPublicationResul
     """Publish task truth first, then independently refresh every affected scope."""
 
     transaction = task_doc_publication_transaction(context)
+    return publish_task_doc_transaction_and_refresh(transaction)
+
+
+def publish_prepared_task_documents(
+    coordination_root: Path,
+    target_repo_id: str,
+    task_root: Path,
+    documents: list[TaskDocument],
+    source_snapshots: tuple[TaskDocSourceSnapshot, ...],
+) -> TaskDocPublicationResult:
+    """Publish an already-prepared document set through the one task-truth transaction.
+
+    Callers own candidate construction, but never reconstruct source CAS, projection scope,
+    invalidation, rebuild, or the underlying JSON/Markdown writer vocabulary.
+    """
+
+    graph_document = require_single_graph_document(documents)
+    graph = graph_document.executionGraph if graph_document is not None else None
+    overrides = _prepared_task_doc_overrides(
+        coordination_root,
+        target_repo_id,
+        task_root,
+        documents,
+    )
+    transaction = TaskDocPublicationTransaction(
+        coordination_root=coordination_root,
+        target_repo_id=target_repo_id,
+        source_snapshots=source_snapshots,
+        scope_changes=task_doc_scope_changes(
+            coordination_root,
+            target_repo_id,
+            overrides,
+            source_snapshots,
+        ),
+        publisher=lambda: write_task_docs(
+            task_root,
+            documents,
+            graph_titles=(
+                read_graph_titles(task_root.parents[1], graph) if graph is not None else None
+            ),
+        ),
+    )
     return publish_task_doc_transaction_and_refresh(transaction)
 
 
@@ -238,16 +280,28 @@ def require_task_doc_sources_current(
 def _task_doc_publication_overrides(
     context: TaskDocPublication,
 ) -> dict[TaskDocumentRef, TaskDocument]:
-    root = (context.config.coordination_root / "tasks" / context.target_repo_id).resolve(
-        strict=False
+    return _prepared_task_doc_overrides(
+        context.config.coordination_root,
+        context.target_repo_id,
+        context.task_root,
+        context.documents,
     )
+
+
+def _prepared_task_doc_overrides(
+    coordination_root: Path,
+    target_repo_id: str,
+    task_root: Path,
+    documents: list[TaskDocument],
+) -> dict[TaskDocumentRef, TaskDocument]:
+    root = (coordination_root / "tasks" / target_repo_id).resolve(strict=False)
     overrides: dict[TaskDocumentRef, TaskDocument] = {}
-    for document in context.documents:
-        path = json_path_for(context.task_root, document).resolve(strict=False)
+    for document in documents:
+        path = json_path_for(task_root, document).resolve(strict=False)
         if not path.is_relative_to(root):
             raise TaskDocError(f"task document publication escapes tasks root: {path}")
         ref = TaskDocumentRef(
-            repository=context.target_repo_id,
+            repository=target_repo_id,
             path=path.relative_to(root).as_posix(),
         )
         overrides[ref] = document

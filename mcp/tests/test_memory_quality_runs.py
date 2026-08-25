@@ -9,8 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.application import memory_quality_controller as controller
-from agents_remember.application import memory_quality_runs as runs
+from agents_remember.application.memory_quality import controller, runs
 from agents_remember.application.memory_scope import MemoryScope, MemoryScopeIdentity
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS
 from agents_remember.models.memory import (

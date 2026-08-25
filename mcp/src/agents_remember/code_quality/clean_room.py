@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from agents_remember.worktrees.modules.clean_quality_executor import (
+from agents_remember.worktrees.modules.quality.clean_executor import (
     CleanQualityRequest,
     run_clean_quality,
 )

@@ -35,7 +35,7 @@ from agents_remember.worktrees.direct_landing import (
 from agents_remember.worktrees.direct_landing import (
     direct_landing as _production_direct_landing,
 )
-from agents_remember.worktrees.integration.closeout_door_source import door_task_context
+from agents_remember.worktrees.integration.closeout.door_source import door_task_context
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
@@ -54,7 +54,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-from closeout_input_test_support import _ensure_fixture_waiting_door
+from closeout_input_test_support import ensure_fixture_waiting_door
 from test_worktree_support import git, init_repo
 
 
@@ -155,7 +155,7 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
         ),
     )
     write_contract(contract.contract_path, contract)
-    contract, _fixture_bypass = _ensure_fixture_waiting_door(contract)
+    contract, _fixture_bypass = ensure_fixture_waiting_door(contract)
     publish_new_lifecycle_operation_location(
         contract,
         contract_text=contract.contract_path.read_text(encoding="utf-8"),

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.closeout_source import (
+from agents_remember.models.closeout.source import (
     CandidateAdmissionFacts,
     SchedulingGradeInput,
 )
@@ -28,7 +28,7 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
 )
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
-from agents_remember.worktrees.integration.closeout_door_evidence import (
+from agents_remember.worktrees.integration.closeout.door_evidence import (
     capture_door_candidate_evidence,
 )
 from agents_remember.worktrees.queue.closeout_projection import now_iso

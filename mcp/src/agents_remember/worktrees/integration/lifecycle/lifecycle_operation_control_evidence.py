@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.lifecycles.termination import LifecycleCancellationEvidence
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
 from agents_remember.worktrees.integration.integration_ref_state import (

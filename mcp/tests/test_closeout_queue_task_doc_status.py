@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest import mock
 
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     CloseoutQueueState,
     ProjectionInvalidationResult,
     ProjectionRebuildResult,

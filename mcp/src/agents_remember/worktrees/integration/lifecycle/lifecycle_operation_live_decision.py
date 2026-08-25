@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
+    classify_initial_closeout_door_recovery,
+)
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     classify_closeout_ledger_recovery,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
     classify_direct_landing_recovery,
-)
-from agents_remember.worktrees.integration.initial_closeout_door_recovery import (
-    classify_initial_closeout_door_recovery,
 )
 from agents_remember.worktrees.integration.integration_operation_decision import (
     IntegrationOperationObservation,
@@ -26,7 +26,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_recovery import (
     direct_recovery_refusal,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_termination import (
+from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     worker_exit_unproven,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract

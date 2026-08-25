@@ -14,12 +14,12 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     CloseoutLedgerRecoveryDecision,
     classify_closeout_ledger_recovery,
 )

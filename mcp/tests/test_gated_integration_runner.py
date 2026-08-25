@@ -30,6 +30,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MCP_SRC = REPO_ROOT / "mcp" / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.testing.evidence_lanes import LANE_BY_MARKER
+
 MARKER_NAME = re.compile(r"^([a-z_][a-z0-9_]*):")
 ENVIRONMENT_NAME = re.compile(r"\b(?:AR|AGENTS_REMEMBER)_[A-Z0-9_]+\b")
 
@@ -105,10 +107,11 @@ class GatedPathInventoryTests(unittest.TestCase):
             set(registered_gated_markers()),
         )
 
-    def test_fitness_is_registered_as_an_ordinary_non_gated_marker(self) -> None:
-        [fitness] = [entry for entry in marker_entries() if entry.startswith("fitness:")]
+    def test_fitness_is_owned_by_the_evidence_lane_not_the_gated_marker_table(self) -> None:
+        fitness = LANE_BY_MARKER["fitness"]
 
-        self.assertIsNone(ENVIRONMENT_NAME.search(fitness))
+        self.assertTrue(fitness.authority)
+        self.assertFalse(any(entry.startswith("fitness:") for entry in marker_entries()))
         self.assertNotIn("fitness", registered_gated_markers())
         self.assertNotIn("fitness", {path.marker for path in self.runner.PATHS})
 

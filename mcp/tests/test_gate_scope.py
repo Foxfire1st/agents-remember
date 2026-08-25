@@ -38,7 +38,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check
+from agents_remember.code_quality import check, crap_calculator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,8 +62,8 @@ def wrapper_steps() -> dict[str, check.Step]:
         scope=scope,
         admission=QUALITY_TEST_ADMISSION,
         coverage_json=None,
-        threshold=check.crap_calculator.DEFAULT_CRAP_THRESHOLD,
-        top=check.crap_calculator.DEFAULT_TOP,
+        threshold=crap_calculator.DEFAULT_CRAP_THRESHOLD,
+        top=crap_calculator.DEFAULT_TOP,
     )
     return {step.name: step for step in check.quality_steps(config, REPO_ROOT / "coverage.json")}
 
@@ -177,13 +177,13 @@ class PythonGateScopeTests(unittest.TestCase):
             "is no allowlist to record it in.",
         )
 
-    def test_python_coverage_and_test_rails_reach_their_trees(self) -> None:
+    def test_python_product_coverage_and_test_execution_reach_their_owners(self) -> None:
         scope = check.derive_scope(REPO_ROOT)
 
         package_files = [
             path for path in git_ls_files("*.py") if is_under(path, scope.coverage_paths)
         ]
-        expected_coverage = [Path("mcp/src/agents_remember"), Path("mcp/tests")]
+        expected_coverage = [Path("mcp/src/agents_remember")]
         if git_ls_files(".dagger/src/agents_remember_quality/*.py"):
             expected_coverage.insert(0, Path(".dagger/src/agents_remember_quality"))
         self.assertEqual(

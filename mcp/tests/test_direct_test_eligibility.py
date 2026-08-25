@@ -1,11 +1,14 @@
-"""Pure contract tests for direct-test evidence and structural eligibility."""
+"""Pure contract tests for evidence altitude and the sealed direct cohort."""
 
 from __future__ import annotations
 
+import ast
 import tempfile
 import unittest
 from pathlib import Path
 
+from _direct_cohort_candidate import SyntheticCohortOptions, write_synthetic_direct_cohort
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from agents_remember.models.test_evidence import (
     CandidateBinding,
     CertifyingTestEvidence,
@@ -14,13 +17,13 @@ from agents_remember.models.test_evidence import (
     EvidenceConsumerRefusal,
     EvidencePayloadError,
     _certifying_evidence_from_verified_dagger,
+    evidence_payload,
     load_diagnostic_test_evidence,
     require_certifying_evidence,
-    test_evidence_payload,
 )
+from agents_remember.testing.cohort_manifest import MAX_DIRECT_NODES
 from agents_remember.testing.consumer_inventory import ACCEPTING_CONSUMER_INVENTORY
 from agents_remember.testing.eligibility import (
-    MAX_DIRECT_NODES,
     classify_direct_selection,
     direct_selection_is_current,
 )
@@ -41,7 +44,7 @@ class EvidenceAltitudeTests(unittest.TestCase):
             exit_code=0,
         )
 
-        payload = test_evidence_payload(evidence)
+        payload = evidence_payload(evidence)
 
         self.assertEqual(load_diagnostic_test_evidence(payload), evidence)
         payload["altitude"] = "certifying"
@@ -95,82 +98,57 @@ class DirectEligibilityTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self._write("pyproject.toml", "[tool.pytest.ini_options]\ntestpaths = ['mcp/tests']\n")
+        self._write("mcp/tests/_catalog_anchor.py", "VALUE = 1\n")
+        self._write("mcp/tests/test_catalog_consumer.py", "def test_anchor():\n    pass\n")
+        write_synthetic_evidence_catalog(
+            self.root,
+            {"mcp/tests/_catalog_anchor.py": ("mcp/tests/test_catalog_consumer.py",)},
+        )
 
-    def test_plain_computation_and_unittest_method_are_eligible(self) -> None:
+    def test_fixture_and_helper_closure_is_content_sealed(self) -> None:
+        path = "mcp/tests/test_values.py"
         self._write(
-            "mcp/tests/test_values.py",
+            path,
             """\
-import unittest
+import pytest
 
 def plus_one(value):
     return value + 1
 
-def test_function():
-    assert plus_one(1) == 2
-
-class ValueTests(unittest.TestCase):
-    def test_method(self):
-        self.assertEqual(plus_one(2), 3)
-""",
-        )
-
-        decision = self._classify(
-            "mcp/tests/test_values.py::test_function",
-            "mcp/tests/test_values.py::ValueTests::test_method",
-        )
-
-        self.assertIsInstance(decision, EligibleDirectSelection)
-        assert isinstance(decision, EligibleDirectSelection)
-        self.assertEqual(
-            decision.nodes,
-            (
-                "mcp/tests/test_values.py::test_function",
-                "mcp/tests/test_values.py::ValueTests::test_method",
-            ),
-        )
-        self.assertTrue(direct_selection_is_current(decision))
-
-    def test_qualified_safe_call_is_not_confused_with_dynamic_builtin(self) -> None:
-        self._write(
-            "mcp/tests/test_regex.py",
-            """\
-import re
-
-PATTERN = re.compile(r"^[a-z]+$")
-
-def test_pattern():
-    assert PATTERN.pattern == r"^[a-z]+$"
-""",
-        )
-
-        decision = self._classify("mcp/tests/test_regex.py::test_pattern")
-
-        self.assertIsInstance(decision, EligibleDirectSelection)
-
-    def test_allowed_fixture_and_transitive_helper_chain_are_resolved(self) -> None:
-        self._write(
-            "mcp/tests/test_fixture.py",
-            """\
-import pytest
-
-def helper():
-    return 2
-
 @pytest.fixture
 def value():
-    return helper()
+    return plus_one(1)
 
 def test_value(value):
     assert value == 2
 """,
         )
+        node = f"{path}::test_value"
+        self._write_manifest((node,), (path,))
 
-        decision = self._classify("mcp/tests/test_fixture.py::test_value")
+        decision = self._classify(node)
 
         self.assertIsInstance(decision, EligibleDirectSelection)
         assert isinstance(decision, EligibleDirectSelection)
-        symbols = {observation.symbol for observation in decision.closure.observations}
-        self.assertGreaterEqual(symbols, {"helper", "value", "test_value"})
+        self.assertEqual(decision.nodes, (node,))
+        self.assertTrue(direct_selection_is_current(decision))
+        self.assertEqual(decision.closure.paths, (path,))
+
+    def test_only_explicit_manifest_nodes_can_enter(self) -> None:
+        path = "mcp/tests/test_values.py"
+        self._write(
+            path,
+            "def test_admitted():\n    assert True\n\ndef test_outside():\n    assert True\n",
+        )
+        admitted = f"{path}::test_admitted"
+        outside = f"{path}::test_outside"
+        self._write_manifest((admitted,), (path,))
+
+        self.assertRefused(self._classify(outside), DirectRefusalCode.NOT_IN_COHORT)
+        self.assertRefused(
+            self._classify(admitted, outside),
+            DirectRefusalCode.MIXED_SELECTION,
+        )
 
     def test_every_closed_unsafe_family_has_a_stable_refusal(self) -> None:
         imports = {
@@ -184,245 +162,211 @@ def test_value(value):
             UnsafeEffectFamily.DURABILITY_INTEGRATION: "sqlite3",
         }
         self.assertEqual(set(imports), {rule.family for rule in UNSAFE_EFFECT_RULES})
+        path = "mcp/tests/test_unsafe.py"
+        node = f"{path}::test_value"
 
-        for index, (family, imported) in enumerate(imports.items()):
-            relative = f"mcp/tests/test_unsafe_{index}.py"
-            self._write(relative, f"import {imported}\n\ndef test_value():\n    assert True\n")
-            decision = self._classify(f"{relative}::test_value")
+        for family, imported in imports.items():
+            self._write(path, f"import {imported}\n\ndef test_value():\n    assert True\n")
+            self._write_manifest(
+                (node,),
+                (path,),
+                options=SyntheticCohortOptions(effects={path: (family.value,)}),
+            )
             with self.subTest(family=family):
-                self.assertRefused(decision, DirectRefusalCode.UNSAFE_EFFECT, family)
+                self.assertRefused(
+                    self._classify(node),
+                    DirectRefusalCode.UNSAFE_EFFECT,
+                    family,
+                )
 
-    def test_transitive_unsafe_helper_refuses_before_execution(self) -> None:
+    def test_transitive_unsafe_helper_refuses(self) -> None:
+        helper = "mcp/tests/unsafe_helper.py"
+        test = "mcp/tests/test_transitive.py"
+        self._write(helper, "import subprocess\n\ndef compute():\n    return 2\n")
         self._write(
-            "mcp/tests/unsafe_helper.py",
-            """\
-import subprocess
-
-def compute():
-    return 2
-""",
+            test,
+            "from unsafe_helper import compute\n\ndef test_value():\n    assert compute() == 2\n",
         )
-        self._write(
-            "mcp/tests/test_transitive.py",
-            """\
-from unsafe_helper import compute
-
-RAISE_IF_IMPORTED = int("classification must not execute candidate code")
-
-def test_value():
-    assert compute() == 2
-""",
+        node = f"{test}::test_value"
+        self._write_manifest(
+            (node,),
+            (test, helper),
+            options=SyntheticCohortOptions(
+                local_imports={test: (helper,)},
+                effects={helper: (UnsafeEffectFamily.PROCESS_CONTROL.value,)},
+            ),
         )
-
-        decision = self._classify("mcp/tests/test_transitive.py::test_value")
 
         self.assertRefused(
-            decision,
+            self._classify(node),
             DirectRefusalCode.UNSAFE_EFFECT,
             UnsafeEffectFamily.PROCESS_CONTROL,
         )
 
-    def test_same_named_methods_do_not_share_dependency_cache(self) -> None:
+    def test_omitted_candidate_import_is_unresolved(self) -> None:
+        helper = "mcp/tests/value_helper.py"
+        test = "mcp/tests/test_transitive.py"
+        self._write(helper, "def compute():\n    return 2\n")
         self._write(
-            "mcp/tests/test_duplicate_method_names.py",
-            """\
-class SafeValues:
-    def test_value(self):
-        assert 1 + 1 == 2
-
-class UnsafeValues:
-    def test_value(self):
-        import subprocess
-        assert subprocess is not None
-""",
+            test,
+            "from value_helper import compute\n\ndef test_value():\n    assert compute() == 2\n",
+        )
+        node = f"{test}::test_value"
+        self._write_manifest(
+            (node,),
+            (test,),
+            options=SyntheticCohortOptions(local_imports={test: (helper,)}),
         )
 
-        decision = self._classify(
-            "mcp/tests/test_duplicate_method_names.py::SafeValues::test_value",
-            "mcp/tests/test_duplicate_method_names.py::UnsafeValues::test_value",
+        self.assertRefused(self._classify(node), DirectRefusalCode.UNRESOLVED_DEPENDENCY)
+
+    def test_audited_file_unreachable_from_every_node_is_unresolved(self) -> None:
+        test = "mcp/tests/test_value.py"
+        unused = "mcp/tests/unused_safe_helper.py"
+        node = f"{test}::test_value"
+        self._write(test, "def test_value():\n    assert True\n")
+        self._write(unused, "def harmless():\n    return 1\n")
+        self._write_manifest(
+            (node,),
+            (test, unused),
+            options=SyntheticCohortOptions(closures={node: (node,)}),
         )
 
-        self.assertRefused(
-            decision,
-            DirectRefusalCode.MIXED_SELECTION,
-            UnsafeEffectFamily.PROCESS_CONTROL,
-        )
+        self.assertRefused(self._classify(node), DirectRefusalCode.UNRESOLVED_DEPENDENCY)
 
-    def test_from_package_import_submodule_resolves_the_submodule_closure(self) -> None:
-        self._write("mcp/src/agents_remember/helpers/__init__.py", "")
+    def test_dynamic_and_unsafe_calls_refuse(self) -> None:
+        path = "mcp/tests/test_calls.py"
+        node = f"{path}::test_value"
+        cases = (
+            (
+                "def test_value():\n    assert getattr('value', 'upper')() == 'VALUE'\n",
+                DirectRefusalCode.DYNAMIC_DEPENDENCY,
+                None,
+                False,
+            ),
+            (
+                "import os\n\ndef test_value():\n    os.system('true')\n",
+                DirectRefusalCode.UNSAFE_EFFECT,
+                UnsafeEffectFamily.PROCESS_CONTROL,
+                True,
+            ),
+        )
+        for source, code, family, known in cases:
+            self._write(path, source)
+            self._write_manifest(
+                (node,),
+                (path,),
+                options=SyntheticCohortOptions(
+                    effects={} if family is None else {path: (family.value,)},
+                    effects_known={path: known},
+                ),
+            )
+            with self.subTest(code=code):
+                self.assertRefused(self._classify(node), code, family)
+
+    def test_unknown_external_and_unaudited_autouse_dependencies_refuse(self) -> None:
+        path = "mcp/tests/test_dependencies.py"
+        node = f"{path}::test_value"
+        self._write(path, "import mystery_runtime\n\ndef test_value():\n    assert True\n")
+        self._write_manifest(
+            (node,),
+            (path,),
+            options=SyntheticCohortOptions(effects_known={path: False}),
+        )
+        self.assertRefused(self._classify(node), DirectRefusalCode.DYNAMIC_DEPENDENCY)
+
         self._write(
-            "mcp/src/agents_remember/helpers/unsafe_child.py",
-            "import subprocess\n",
-        )
-        self._write(
-            "mcp/tests/test_imported_submodule.py",
-            """\
-from agents_remember.helpers import unsafe_child
-
-def test_value():
-    assert unsafe_child is not None
-""",
-        )
-
-        decision = self._classify("mcp/tests/test_imported_submodule.py::test_value")
-
-        self.assertRefused(
-            decision,
-            DirectRefusalCode.UNSAFE_EFFECT,
-            UnsafeEffectFamily.PROCESS_CONTROL,
-        )
-
-    def test_unsafe_autouse_fixture_refuses_even_when_the_body_is_pure(self) -> None:
-        self._write(
-            "mcp/tests/test_autouse.py",
+            path,
             """\
 import pytest
 
 @pytest.fixture(autouse=True)
-def unsafe_guard():
-    import subprocess
+def hidden_fixture():
     yield
 
 def test_value():
-    assert 1 + 1 == 2
-""",
-        )
-
-        decision = self._classify("mcp/tests/test_autouse.py::test_value")
-
-        self.assertRefused(
-            decision,
-            DirectRefusalCode.UNSAFE_EFFECT,
-            UnsafeEffectFamily.PROCESS_CONTROL,
-        )
-
-    def test_marker_and_safe_name_cannot_override_transitive_unsafety(self) -> None:
-        self._write(
-            "mcp/tests/test_unit_pure.py",
-            """\
-import pytest
-import subprocess
-
-@pytest.mark.pure
-def test_pure():
     assert True
 """,
         )
+        self._write_manifest((node,), (path,), symbols={path: ("test_value",)})
+        self.assertRefused(self._classify(node), DirectRefusalCode.UNSUPPORTED_FIXTURE)
 
-        decision = self._classify("mcp/tests/test_unit_pure.py::test_pure")
+    def test_request_and_node_shape_refusals_are_total(self) -> None:
+        path = "mcp/tests/test_value.py"
+        node = f"{path}::test_value"
+        self._write(path, "def test_value():\n    assert True\n")
+        self._write_manifest((node,), (path,))
 
+        self.assertRefused(self._classify(), DirectRefusalCode.EMPTY_SELECTION)
+        self.assertRefused(self._classify(node, node), DirectRefusalCode.DUPLICATE_TARGET)
         self.assertRefused(
-            decision,
-            DirectRefusalCode.UNSAFE_EFFECT,
-            UnsafeEffectFamily.PROCESS_CONTROL,
+            self._classify(*(node for _ in range(MAX_DIRECT_NODES + 1))),
+            DirectRefusalCode.OVERSIZED_SELECTION,
         )
 
-    def test_unknown_dynamic_dependency_refuses(self) -> None:
         self._write(
-            "mcp/tests/test_dynamic.py",
-            """\
-def test_value():
-    assert getattr('value', 'upper')() == 'VALUE'
-""",
+            path,
+            "import pytest\n\n@pytest.mark.parametrize('value', [1, 2])\ndef test_value(value):\n    assert value\n",
         )
+        self._write_manifest((node,), (path,))
+        self.assertRefused(self._classify(node), DirectRefusalCode.PARAMETRIZED_TARGET)
 
-        decision = self._classify("mcp/tests/test_dynamic.py::test_value")
+        self._write(path, "def test_value():\n    pass\n\ndef test_value():\n    pass\n")
+        self._write_manifest((node,), (path,), symbols={path: ("test_value",)})
+        self.assertRefused(self._classify(node), DirectRefusalCode.TARGET_AMBIGUOUS)
 
-        self.assertRefused(decision, DirectRefusalCode.DYNAMIC_DEPENDENCY)
-
-    def test_request_shape_refusals_are_total(self) -> None:
-        self._write("mcp/tests/test_value.py", "def test_value():\n    assert True\n")
-        exact = "mcp/tests/test_value.py::test_value"
-
-        cases = (
-            ((), DirectRefusalCode.EMPTY_SELECTION),
-            ((exact, exact), DirectRefusalCode.DUPLICATE_TARGET),
-            (("mcp/tests/test_value.py",), DirectRefusalCode.UNSUPPORTED_TARGET),
-            (("mcp/tests/missing.py::test_value",), DirectRefusalCode.TARGET_MISSING),
-            (
-                tuple(
-                    f"mcp/tests/test_value.py::test_{index}"
-                    for index in range(MAX_DIRECT_NODES + 1)
-                ),
-                DirectRefusalCode.OVERSIZED_SELECTION,
-            ),
-        )
-        for targets, code in cases:
-            with self.subTest(code=code):
-                self.assertRefused(self._classify(*targets), code)
-
-    def test_parameterized_and_ambiguous_nodes_refuse(self) -> None:
-        self._write(
-            "mcp/tests/test_param.py",
-            """\
-import pytest
-
-@pytest.mark.parametrize('value', [1, 2])
-def test_value(value):
-    assert value
-""",
-        )
-        self._write(
-            "mcp/tests/test_ambiguous.py",
-            """\
-def test_value():
-    assert True
-
-def test_value():
-    assert False
-""",
-        )
-
-        self.assertRefused(
-            self._classify("mcp/tests/test_param.py::test_value"),
-            DirectRefusalCode.PARAMETRIZED_TARGET,
-        )
-        self.assertRefused(
-            self._classify("mcp/tests/test_ambiguous.py::test_value"),
-            DirectRefusalCode.TARGET_AMBIGUOUS,
-        )
-
-    def test_mixed_selection_refuses_as_one_unit(self) -> None:
-        self._write("mcp/tests/test_safe.py", "def test_safe():\n    assert True\n")
-        self._write(
-            "mcp/tests/test_unsafe.py",
-            "import socket\n\ndef test_unsafe():\n    assert True\n",
-        )
-
-        decision = self._classify(
-            "mcp/tests/test_safe.py::test_safe",
-            "mcp/tests/test_unsafe.py::test_unsafe",
-        )
-
-        self.assertRefused(
-            decision,
-            DirectRefusalCode.MIXED_SELECTION,
-            UnsafeEffectFamily.SOCKET_SERVICE,
-        )
-        assert isinstance(decision, RefusedDirectSelection)
-        self.assertEqual(len(decision.refused_nodes), 2)
-
-    def test_candidate_or_configuration_drift_invalidates_decision(self) -> None:
-        self._write(
-            "mcp/tests/test_value.py",
-            """\
-def helper():
-    return 2
-
-def test_value():
-    assert helper() == 2
-""",
-        )
-        decision = self._classify("mcp/tests/test_value.py::test_value")
+    def test_source_or_configuration_drift_never_silently_rebaselines(self) -> None:
+        path = "mcp/tests/test_value.py"
+        node = f"{path}::test_value"
+        self._write(path, "def test_value():\n    assert True\n")
+        self._write_manifest((node,), (path,))
+        decision = self._classify(node)
         self.assertIsInstance(decision, EligibleDirectSelection)
         assert isinstance(decision, EligibleDirectSelection)
 
         self._write("pyproject.toml", "[tool.pytest.ini_options]\nstrict = true\n")
 
         self.assertFalse(direct_selection_is_current(decision))
+        self.assertRefused(self._classify(node), DirectRefusalCode.CANDIDATE_CHANGED)
 
     def _classify(self, *targets: str):
         return classify_direct_selection(self.root, targets)
+
+    def _write_manifest(
+        self,
+        nodes: tuple[str, ...],
+        python_paths: tuple[str, ...],
+        *,
+        symbols: dict[str, tuple[str, ...]] | None = None,
+        options: SyntheticCohortOptions | None = None,
+    ) -> None:
+        python_symbols: dict[str, tuple[str, ...]] = {}
+        for relative in python_paths:
+            source = (self.root / relative).read_text(encoding="utf-8")
+            python_symbols[relative] = (
+                self._symbol_names(source)
+                if symbols is None or relative not in symbols
+                else symbols[relative]
+            )
+        write_synthetic_direct_cohort(
+            self.root,
+            nodes,
+            python_symbols,
+            options,
+        )
+
+    @staticmethod
+    def _symbol_names(source: str) -> tuple[str, ...]:
+        tree = ast.parse(source)
+        names: list[str] = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                names.append(node.name)
+            elif isinstance(node, ast.Assign):
+                names.extend(target.id for target in node.targets if isinstance(target, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                names.append(node.target.id)
+        return tuple(dict.fromkeys(names))
 
     def _write(self, relative: str, content: str) -> None:
         path = self.root / relative
@@ -431,7 +375,7 @@ def test_value():
 
     def assertRefused(
         self,
-        decision,
+        decision: object,
         code: DirectRefusalCode,
         family: UnsafeEffectFamily | None = None,
     ) -> None:

@@ -13,7 +13,7 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.base import ToolResponse
-from agents_remember.models.closeout_projection import TaskDocProjectionEffect
+from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import WorktreeCommandResponse
 

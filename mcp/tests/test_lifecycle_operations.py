@@ -46,11 +46,13 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     operation_record_path,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    latest_operation_projection,
-    observe_operation,
     operation_fingerprint,
     operation_key,
     start_or_observe_operation,
+)
+from agents_remember.worktrees.integration.lifecycle.observation.projection import (
+    latest_operation_projection,
+    observe_operation,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
@@ -210,12 +212,12 @@ def _publish_integration_branch_authority(contract) -> str:
         ),
     )
     write_task_doc(
-        contract.task_root.parent / "sprint",
+        contract.task_root.parent / "lifecycle-fixture-sprint",
         TaskDocument.model_validate(
             {
-                "id": "SPRINT",
-                "slug": "sprint",
-                "title": "Sprint",
+                "id": "LIFECYCLE-FIXTURE-SPRINT",
+                "slug": "lifecycle-fixture-sprint",
+                "title": "Lifecycle fixture sprint",
                 "kind": "master",
                 "status": "inProgress",
                 "repo": "repo",
@@ -545,7 +547,7 @@ def test_cancel_before_boundary_proves_exit_before_releasing_worker_authority(
 
     with (
         patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state."
+            "agents_remember.worktrees.integration.lifecycle.worker.state."
             "observe_worker_termination",
             return_value=None,
         ),

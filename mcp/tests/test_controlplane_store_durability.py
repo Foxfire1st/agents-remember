@@ -25,9 +25,9 @@ R8   the per-store torn-line policy, which is deliberately NOT uniform: three lo
      ``read_for_projection`` beside each only renders, and must degrade PER ROW rather than
      crash a 1s tick or cost the reader the rest of the file.
 R14  the harness is sensitive enough to detect the defect -- proven against a ``git archive`` of
-     the leaf's base commit, so the proof does not depend on when the fix lands -- AND it refuses
-     to report a run in which the compactor never ran, which is the way R10 above was once green
-     over almost nothing (see :class:`HarnessVacuityGuardTests`).
+     the leaf's base commit, so the proof does not depend on when the fix lands. The harness also
+     refuses to report a run in which the compactor never ran; that runtime guard is part of the
+     instrument rather than another recursive test of the test harness.
 """
 
 from __future__ import annotations
@@ -42,13 +42,12 @@ from types import SimpleNamespace
 from unittest import mock
 
 import _store_durability as store_durability
+import pytest
 from _store_durability import (
     ADAPTERS,
     APPEND_CASES,
     CASES,
-    MIN_SUCCESSFUL_RECLAIMS,
     STRESS_PROFILE,
-    VacuousRunError,
     extract_base_commit_tree,
     run_against_source,
     run_case,
@@ -126,6 +125,7 @@ class _TempRootTest(unittest.TestCase):
 class MultiProcessDurabilityTests(_TempRootTest):
     """R10: N processes appending while one compacts, over all six record types."""
 
+    @pytest.mark.evidence_integration
     def test_no_record_is_lost_when_an_append_races_a_compaction(self) -> None:
         """The lost-update window: an append lands between the reclaim's read and its commit.
 
@@ -140,6 +140,7 @@ class MultiProcessDurabilityTests(_TempRootTest):
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["stragglers"], [], _describe(result))
 
+    @pytest.mark.evidence_integration
     def test_no_record_is_lost_when_a_compaction_empties_and_unlinks_the_log(self) -> None:
         """The unlink window: the rewrite drops the file while an appender holds its handle.
 
@@ -155,6 +156,7 @@ class MultiProcessDurabilityTests(_TempRootTest):
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["stragglers"], [], _describe(result))
 
+    @pytest.mark.evidence_stress
     def test_no_record_is_lost_under_sustained_multi_process_write_and_compaction(self) -> None:
         """The unforced version: real concurrent processes, no interposition anywhere.
 
@@ -174,6 +176,7 @@ class MultiProcessDurabilityTests(_TempRootTest):
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["torn_lines"], 0, _describe(result))
 
+    @pytest.mark.evidence_stress
     def test_concurrent_operation_never_raises_out_of_a_store_call(self) -> None:
         """Losing no records is half of it; the caller must also not be handed an exception.
 
@@ -339,56 +342,7 @@ class TornLinePolicyTests(_TempRootTest):
         )
 
 
-class HarnessVacuityGuardTests(_TempRootTest):
-    """R14, the other half: the instrument must refuse to report a run that measured nothing.
-
-    Every loss figure above is a figure about a window -- the one between a reclaim's read and its
-    commit. Open that window twice instead of two hundred times and "0 records lost" costs the
-    store nothing to earn, which is precisely how the defect this class guards against went
-    unseen: ``run_stress`` used to key its stop flag off ``root.parent``, all six cases here pass
-    sibling roots under one ``self.tmp``, and so every case after the first found the previous
-    case's flag already set and left the tick loop after ONE tick. All six were green. Driving that
-    layout across all eight stores this instrument covers, on this tree: 25 reclaim ticks for the
-    first and exactly 1 for each of the seven after it, 0.00% loss reported by every one.
-
-    The guard is in the instrument (``_store_durability.MIN_SUCCESSFUL_RECLAIMS``) rather than
-    here, so
-    that the provider suite and the base-commit script entry point are covered by the same floor
-    and not by a copy of it. This is the test that proves the refusal is real and reachable, using
-    the shipped code path rather than a hand-built result dict.
-    """
-
-    def test_a_stress_run_whose_reclaimer_barely_ticked_is_refused(self) -> None:
-        """A one-tick run raises out of the harness instead of returning a green result."""
-        with self.assertRaises(VacuousRunError) as refusal:
-            run_case("stress", "gate", self.tmp / "vacuous", max_ticks=1)
-
-        message = str(refusal.exception)
-        self.assertIn("completed 1 successful compaction", message)
-        self.assertIn(str(MIN_SUCCESSFUL_RECLAIMS), message)
-
-    def test_the_floor_is_far_enough_below_what_a_real_run_produces(self) -> None:
-        """The floor separates a vacuous run from a real one, with room on both sides.
-
-        Asserted rather than left in a comment because both halves are load-bearing and neither is
-        obvious from the constant. Too low and it re-admits the run that measured nothing; too
-        high and it turns a slow machine red for a durability defect that is not there. Measured
-        over all eight stores, four runs each: 22-39 reclaim ticks idle, 34-49 under 24 CPU hogs
-        on a 20-core box -- contention RAISES the count, because the appenders' 2ms pacing
-        stretches in wall clock while the reclaimer keeps polling.
-        """
-        self.assertGreater(
-            MIN_SUCCESSFUL_RECLAIMS,
-            2,
-            "one or two successful compactions is the vacuous run itself",
-        )
-        self.assertLess(
-            MIN_SUCCESSFUL_RECLAIMS,
-            22,
-            "the floor must sit below the lowest tick count ever measured on this profile",
-        )
-
-
+@pytest.mark.evidence_stress
 class HarnessSensitivityTests(_TempRootTest):
     """R14: the contract above must be able to fail. Proven against the leaf's base commit.
 

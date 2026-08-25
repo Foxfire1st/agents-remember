@@ -13,10 +13,10 @@ from agents_remember.models.lifecycles.door import CloseoutDoorRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.ambient_seat import AmbientSeatError, resolve_ambient_seat
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
-from agents_remember.worktrees.integration.closeout_door_control import (
+from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
 )
-from agents_remember.worktrees.integration.closeout_door_control import (
+from agents_remember.worktrees.integration.closeout.door_control import (
     closeout_door_tool as apply_closeout_door,
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError

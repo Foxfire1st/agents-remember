@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,8 @@ class _PhaseState:
     collection_finished_at: str | None = None
     first_node_started_monotonic: float | None = None
     first_node_started_at: str | None = None
+    xdist_expected_workers: int = 0
+    xdist_collected_workers: set[int] = field(default_factory=set)
     node_outcomes: dict[str, str] = field(default_factory=dict)
 
 
@@ -56,13 +59,35 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     _STATE.collection_finished_at = None
     _STATE.first_node_started_monotonic = None
     _STATE.first_node_started_at = None
+    _STATE.xdist_expected_workers = 0
+    _STATE.xdist_collected_workers.clear()
     _STATE.node_outcomes.clear()
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
     del session
-    _STATE.collection_finished_monotonic = time.monotonic()
-    _STATE.collection_finished_at = datetime.now(UTC).isoformat()
+    _record_collection_finished()
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_setupnodes(config: pytest.Config, specs: Sequence[object]) -> None:
+    """Record the actual worker population chosen for ``-n=auto`` or an exact count."""
+
+    del config
+    _STATE.xdist_expected_workers = len(specs)
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_node_collection_finished(node: object, ids: Sequence[str]) -> None:
+    """Close controller-side collection after every worker reports the same population."""
+
+    del ids
+    _STATE.xdist_collected_workers.add(id(node))
+    if (
+        _STATE.xdist_expected_workers > 0
+        and len(_STATE.xdist_collected_workers) >= _STATE.xdist_expected_workers
+    ):
+        _record_collection_finished()
 
 
 def pytest_runtest_logstart(nodeid: str, location: tuple[str, int | None, str]) -> None:
@@ -70,6 +95,13 @@ def pytest_runtest_logstart(nodeid: str, location: tuple[str, int | None, str]) 
     if _STATE.first_node_started_monotonic is None:
         _STATE.first_node_started_monotonic = time.monotonic()
         _STATE.first_node_started_at = datetime.now(UTC).isoformat()
+
+
+def _record_collection_finished() -> None:
+    if _STATE.collection_finished_monotonic is not None:
+        return
+    _STATE.collection_finished_monotonic = time.monotonic()
+    _STATE.collection_finished_at = datetime.now(UTC).isoformat()
 
 
 def pytest_runtest_logreport(report: _Report) -> None:

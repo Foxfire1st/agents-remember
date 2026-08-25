@@ -138,7 +138,7 @@ def require_certifying_evidence(
     return evidence
 
 
-def test_evidence_payload(evidence: TestEvidence) -> dict[str, object]:
+def evidence_payload(evidence: TestEvidence) -> dict[str, object]:
     """Serialize an altitude-discriminated result without granting new authority."""
 
     if isinstance(evidence, DiagnosticTestEvidence):

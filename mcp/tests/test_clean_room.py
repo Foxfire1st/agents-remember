@@ -64,7 +64,7 @@ def test_clean_room_script_entry_exits_with_the_canonical_result(tmp_path: Path)
     with (
         patch.object(sys, "argv", argv),
         patch(
-            "agents_remember.worktrees.modules.clean_quality_executor.run_clean_quality",
+            "agents_remember.worktrees.modules.quality.clean_executor.run_clean_quality",
             return_value=completed,
         ),
         pytest.raises(SystemExit) as exited,

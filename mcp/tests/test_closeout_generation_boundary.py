@@ -14,10 +14,9 @@ from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
-from agents_remember.worktrees.integration.lifecycle import lifecycle_worker_launch
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
     operation_state_fingerprint,
@@ -32,6 +31,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_operation,
 )
+from agents_remember.worktrees.integration.lifecycle.worker import launch as lifecycle_worker_launch
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_git_mutation,
     prove_git_commit,

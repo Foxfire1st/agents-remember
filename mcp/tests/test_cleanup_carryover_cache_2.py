@@ -19,17 +19,10 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-from test_cleanup_carryover import (
-    CitationCacheLifecycleTests,
-    _allow_terminal_archive_for_downstream_unit,
-)
+from test_cleanup_carryover import CitationCacheLifecycleTests
 
 
 class CitationCacheLifecycleTests2(CitationCacheLifecycleTests):
-    def setUp(self) -> None:
-        super().setUp()
-        _allow_terminal_archive_for_downstream_unit(self)
-
     def test_terminal_tombstone_reserves_capacity_until_failed_publication_restores(self) -> None:
         contracts = [self.contract(f"capacity-{index}") for index in range(4)]
         target = contracts[0]

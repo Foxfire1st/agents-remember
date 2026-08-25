@@ -31,7 +31,6 @@ from agents_remember.models.conversations.control_wire import (
 )
 from agents_remember.models.conversations.evidence import (
     AR_EVIDENCE_KEY,
-    AR_TERMINAL_OUTCOME_KEY,
 )
 from agents_remember.models.conversations.identity import (
     AuthorizationBinding,
@@ -68,7 +67,6 @@ from agents_remember.serving.harness_control_models import (
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    TranscriptEntry,
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -306,136 +304,6 @@ class FakeControlAdapter:
                 raw=dict(raw),
                 operation=operation,
             )
-        )
-
-    def settle_turn(self, outcome: str = "interrupted") -> None:
-        """Emit the codex turn/completed settlement for the active turn."""
-
-        turn = self.active_turn or "turn-unknown"
-        self.active_turn = None
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "completed",
-            {
-                "codexMethod": "turn/completed",
-                AR_EVIDENCE_KEY: {
-                    "threadId": self.vendor_id,
-                    "turn": {"id": turn, "status": outcome, "items": []},
-                },
-            },
-            snapshot=replace(self.current, activity="idle", raw={}) if self.current else None,
-            operation=operation,
-        )
-
-    def pi_settle(self, stop_reason: str = "aborted") -> None:
-        """Emit the pi message_end settlement evidence + completion release."""
-
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "pi:message_end",
-            {
-                "piEvent": {"type": "message_end"},
-                AR_EVIDENCE_KEY: {
-                    "type": "message_end",
-                    "message": {"role": "assistant", "content": [], "stopReason": stop_reason},
-                },
-            },
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-        )
-        self.emit(
-            "completed",
-            {"piEvent": {"type": "agent_end"}},
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-            operation=operation,
-        )
-
-    def pi_emit_message_end(self, *, text: str, stop_reason: str) -> None:
-        """Emit ONE production content-FUL pi message_end, with no completion release.
-
-        Mirrors ``pi_rpc_events._message_event`` line 241 exactly: a message_end that
-        finishes with text content crosses as kind ``transcript`` (NOT ``pi:message_end``),
-        with a transcript entry minted and the *full* frame — ``stopReason`` included —
-        riding the reserved evidence key. Compose several of these plus one ``pi_release``
-        to drive a multi-message turn; pass an oversized ``text`` (> 32 KiB serialized) to
-        exercise the REAL bridge's evidence clip — the frame crosses ``AR_EVIDENCE_KEY`` and
-        is clipped by ``clip_evidence_payload`` exactly as in production, so the L3E
-        identity-preservation path is what is under test.
-        """
-
-        self.transcript_sequence += 1
-        frame = {
-            "type": "message_end",
-            "message": {
-                "role": "assistant",
-                "content": [{"type": "text", "text": text}],
-                "stopReason": stop_reason,
-            },
-        }
-        entry = TranscriptEntry(
-            sequence=self.transcript_sequence,
-            role="assistant",
-            text=text,
-            created_at=NOW,
-            raw=dict(frame),
-        )
-        self.emit(
-            "transcript",
-            {
-                "piEvent": {"type": "message_end"},
-                AR_EVIDENCE_KEY: dict(frame),
-            },
-            transcript=(entry,),
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-        )
-
-    def pi_release(self) -> None:
-        """Emit the pi completion release (``agent_end``) for the active operation."""
-
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "completed",
-            {"piEvent": {"type": "agent_end"}},
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-            operation=operation,
-        )
-
-    def pi_settle_with_content(self, stop_reason: str = "stop") -> None:
-        """Emit the ordinary content-FUL message_end settlement + completion release.
-
-        The content-less ``pi_settle`` above is only reachable on an interrupted-before-text
-        turn; this is the ordinary pi turn completion (one finished message, then release).
-        """
-
-        self.pi_emit_message_end(text="final answer", stop_reason=stop_reason)
-        self.pi_release()
-
-    def claude_settle(self, outcome: str = "cancelled") -> None:
-        """Emit the claude result settlement evidence with the adapter-correlated stamp.
-
-        Mirrors ``claude_stream_state._handle_result``: the completed event carries the native
-        result frame plus the adapter-attributed ``arTerminalOutcome`` classification — the
-        accepted-interrupt correlation the settlement ledger reads. ``cancelled`` reproduces
-        the probe-locked interrupted shape (error_during_execution/is_error +
-        aborted_streaming), ``failed`` the unprovoked error, ``completed`` natural completion.
-        """
-
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "completed",
-            {
-                "terminalOutcome": outcome,
-                AR_EVIDENCE_KEY: {
-                    "type": "result",
-                    "subtype": "success" if outcome == "completed" else "error_during_execution",
-                    "is_error": outcome != "completed",
-                    "terminal_reason": "aborted_streaming" if outcome == "cancelled" else None,
-                    "session_id": self.vendor_id,
-                    "uuid": f"claude-result-{outcome}",
-                    AR_TERMINAL_OUTCOME_KEY: outcome,
-                },
-            },
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-            operation=operation,
         )
 
 

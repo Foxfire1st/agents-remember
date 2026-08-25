@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_REASONS,
     CloseoutProjectionMember,
 )

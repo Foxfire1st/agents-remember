@@ -1,15 +1,17 @@
 # Python Direct Diagnostic Cohort Manifest
 
-**Manifest:** `python-direct-cohort/v1`
-**Policy:** `python-direct-eligibility/v1`
+**Manifest:** `python-direct-cohort/v2`
+**Policy:** `python-direct-eligibility/v2`
 **Cohort size:** 7 exact nodes
-**Classifier binding:** `46333612594ed382abedebf8922aa569e70497f9cd12e6a8b7cd115177447f36`
+**Classifier binding:** `7c8643c943ef126b1eeac33cc12fba1dbf061fffced0895cce806fa147d95c4c`
 **Expansion status:** closed; any expansion requires a separate decision
 
-This is the first bounded production cohort for `./scripts/test-python`. It isolates existing
-pure assertions from integration-heavy test modules; it does not copy production behavior,
-introduce diagnostic-only assertions, or mark a directory as safe. The structural classifier is
-still the sole admission authority.
+This is the bounded production cohort for `./scripts/test-python`. It isolates existing pure
+assertions from integration-heavy test modules; it does not copy production behavior, introduce
+diagnostic-only assertions, or mark a directory as safe. The strict manifest plus the canonical
+classifier are the sole admission authority. There is no generic whole-repository dependency
+analyzer: this cohort is a reviewed, content-addressed audit whose exact dependency/effect facts
+fail closed on drift.
 
 ## Exact nodes and rationale
 
@@ -25,42 +27,44 @@ still the sole admission authority.
 
 ## Resolved dependency closure
 
-The complete seven-node request resolves these candidate-owned files plus the canonical root
-`pyproject.toml` configuration binding:
+The complete seven-node audit seals these candidate-owned files plus the canonical root
+`pyproject.toml` and `mcp/tests/evidence-lifecycle.toml` configuration bindings:
 
 - `mcp/tests/test_python_direct_cohort.py`
+- `mcp/src/agents_remember/__init__.py`
+- `mcp/src/agents_remember/kernel/__init__.py`
 - `mcp/src/agents_remember/kernel/onboarding_doc.py`
 - `mcp/src/agents_remember/kernel/filesystem.py`
 - `mcp/src/agents_remember/kernel/primitives/gate_policy.py`
 - `mcp/src/agents_remember/kernel/primitives/gate_vocab.py`
 - `mcp/src/agents_remember/kernel/primitives/identity.py`
-- package `__init__.py` files encountered while resolving those imports
 
-The manifest's candidate identity is not a mutable label. Every invocation emits the classifier's
-content digest over these exact nodes, resolved closure files, policy version, and canonical
+For each file the manifest records the exact SHA-256, audited symbols, candidate-local imports,
+whether its relevant effects are fully known, and any protected effect families. Each node records
+its exact symbol closure. The classifier verifies those declarations, fingerprints, node shapes,
+and fixture/autouse membership before execution. Updating a hash is a policy change that requires
+review of the same closure facts; no command can auto-refresh or bypass it.
+
+The manifest's candidate identity is therefore not a mutable label. Every invocation emits a
+content digest over the manifest, requested nodes, audited files, policy version, and canonical
 configuration. The final acceptance record separately binds the immutable Git candidate tree and
 Dagger report generation, avoiding a self-referential Git hash inside this checked-in file.
 
 ## Repository population
 
-The reproducible static population pass enumerates every top-level pytest function and class
-method below `mcp/tests/test_*.py`, then calls `classify_direct_selection(candidate, (node,))` for
-each exact selector. Parameterized selectors count once at their static selector boundary because
-the direct policy refuses them before pytest expansion.
+The final policy is explicit rather than inferred. Exactly seven manifest nodes are admitted. Any
+other selector is `not-in-cohort` (or `mixed-selection` when combined with a member) before pytest
+or repository-wide analysis starts.
 
 | Classification | Exact selectors |
 | --- | ---: |
-| Eligible | 7 |
-| Refused: unsafe effect | 3,656 |
-| Refused: unresolved dependency | 2,864 |
-| Refused: parameterized target | 73 |
-| Refused: unsupported collection | 15 |
-| **Total** | **6,615** |
+| Manifest members | 7 |
+| Non-members | all other selectors, refused without speculative analysis |
 
-Unsafe-family observations in the same pass were: machine state 2,566; process control 804;
-durability/integration 140; browser/external 112; provider/container 27; socket/service 6; and
-Git/worktree 1. Mutable-global-state has a dedicated forcing sentinel even though it was not the
-first refusal encountered for a current production selector.
+The retired Candidate-A prototype had statically enumerated 6,615 selectors and admitted the same
+seven while building a generic analyzer for the rest. Those counts remain historical rollout
+evidence, not a reason to retain that analyzer. The final policy's safety boundary is the small
+sealed cohort; expansion requires an explicit audit and decision.
 
 This very small admitted population is intentional. It demonstrates useful fast feedback and the
 closed eligibility model without weakening classification to inflate an adoption percentage.
@@ -87,8 +91,9 @@ an exact-only Dagger run.
 
 ## Unsafe sentinels
 
-`mcp/tests/test_direct_test_eligibility.py` contains one structural refusal for every closed unsafe
-family. It also proves unsafe transitive helpers, unsafe imported submodules, autouse fixtures,
-dynamic dependencies, and collection-time effects refuse. `mcp/tests/test_direct_test_runner.py`
-proves mixed and representative unsafe requests execute zero nodes and never fall back. Those
-sentinels remain ordinary Dagger-suite tests; they are not admitted cohort members.
+`mcp/tests/test_direct_test_eligibility.py` contains one manifest-level refusal for every closed
+unsafe family. It also proves transitive unsafe closure, unresolved local-import declarations,
+unknown effects, unaudited autouse fixtures, non-members, mixed requests, and content/configuration
+drift refuse. `mcp/tests/test_direct_test_runner.py` proves every refused request executes zero
+nodes and never falls back. Those sentinels remain ordinary Dagger-suite tests; they are not
+admitted cohort members.

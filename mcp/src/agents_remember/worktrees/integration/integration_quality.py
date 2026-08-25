@@ -22,10 +22,11 @@ from agents_remember.worktrees.integration.organizational_completion import (
 from agents_remember.worktrees.integration.organizational_completion_integration import (
     preview_organizational_completion,
 )
-from agents_remember.worktrees.modules.clean_quality_executor import (
+from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.quality.clean_executor import (
     require_published_quality_evidence,
 )
-from agents_remember.worktrees.modules.code_quality_gate import (
+from agents_remember.worktrees.modules.quality.gate import (
     GATE_FULL,
     QualityGatePlan,
     QualityGateTarget,
@@ -35,7 +36,6 @@ from agents_remember.worktrees.modules.code_quality_gate import (
     requires_strict_code_quality,
     run_strict_code_quality_gate,
 )
-from agents_remember.worktrees.modules.git import require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 INTEGRATION_QUALITY_DECISION_SURFACE = (
@@ -84,6 +84,13 @@ def integration_quality_failure(
 class IntegrationQualityOutcome:
     result: dict[str, object]
     certification: IntegrationQualityCertification | None = None
+
+
+@dataclass(frozen=True)
+class _IntegrationGateExecution:
+    result: dict[str, object]
+    recovered: bool
+    attestation: dict[str, str] | None
 
 
 def quality_gate_mode(contract: WorktreeContract) -> str:
@@ -162,64 +169,84 @@ def run_integration_quality_gate(
         contract.repo_name
     )
     try:
-        with integration_quality_checkout(contract, commit=contract.code_commit) as checkout:
-            if not requires_strict_code_quality(
-                checkout,
-                code_would_commit=True,
-                required_when_missing=required_when_missing,
-            ):
-                preview = code_quality_gate_preview(
-                    checkout,
-                    code_would_commit=True,
-                    diff_base=contract.code_base_commit,
-                    plan=plan,
-                    required_when_missing=required_when_missing,
-                )
-                return IntegrationQualityOutcome(preview)
-            target = QualityGateTarget(
-                code_worktree=checkout,
-                worktree_group=contract.worktree_group,
-            )
-            attestation = (
-                _quality_attestation(completion, contract, plan) if completion is not None else None
-            )
-            recovered = (
-                recover_strict_code_quality_gate(
-                    target,
-                    diff_base=contract.code_base_commit,
-                    plan=plan,
-                    attestation=attestation,
-                )
-                if attestation is not None
-                else None
-            )
-            gate = recovered or run_strict_code_quality_gate(
-                target,
-                diff_base=contract.code_base_commit,
-                plan=plan,
-                invocation="master-integration",
-                attestation=attestation,
-            )
-            require_published_quality_evidence(
-                contract.worktree_group / "reports",
-                candidate_tree=require_git(checkout, ["write-tree"]),
-                consumer=EvidenceConsumer.INTEGRATION,
-            )
+        execution = _execute_integration_gate(
+            contract,
+            completion=completion,
+            plan=plan,
+            required_when_missing=required_when_missing,
+        )
     except RuntimeError as error:
         raise integration_quality_failure(
             error,
             stage="integration-quality-execution",
             organizational_completion=completion is not None,
         ) from error
-    if completion is None:
-        return IntegrationQualityOutcome(gate)
-    if recovered is not None:
+    if completion is None or execution.attestation is None:
+        return IntegrationQualityOutcome(execution.result)
+    gate = execution.result
+    if execution.recovered:
         gate = {**gate, "recoveredPublishedReport": True}
-    assert attestation is not None
-    certificate = _certification(completion, gate, attestation=attestation)
+    certificate = _certification(completion, gate, attestation=execution.attestation)
     if certification_sink is not None:
         certification_sink(certificate)
     return IntegrationQualityOutcome(gate, certificate)
+
+
+def _execute_integration_gate(
+    contract: WorktreeContract,
+    *,
+    completion: OrganizationalCompletionPlan | None,
+    plan: QualityGatePlan,
+    required_when_missing: bool,
+) -> _IntegrationGateExecution:
+    """Run or recover the gate against one detached exact-candidate checkout."""
+
+    with integration_quality_checkout(contract, commit=contract.code_commit) as checkout:
+        if not requires_strict_code_quality(
+            checkout,
+            code_would_commit=True,
+            required_when_missing=required_when_missing,
+        ):
+            preview = code_quality_gate_preview(
+                checkout,
+                code_would_commit=True,
+                diff_base=contract.code_base_commit,
+                plan=plan,
+                required_when_missing=required_when_missing,
+            )
+            return _IntegrationGateExecution(preview, False, None)
+        target = QualityGateTarget(
+            code_worktree=checkout,
+            worktree_group=contract.worktree_group,
+        )
+        attestation = (
+            _quality_attestation(completion, contract, plan) if completion is not None else None
+        )
+        recovered = (
+            recover_strict_code_quality_gate(
+                target,
+                diff_base=contract.code_base_commit,
+                plan=plan,
+                attestation=attestation,
+            )
+            if attestation is not None
+            else None
+        )
+        gate = recovered
+        if gate is None:
+            gate = run_strict_code_quality_gate(
+                target,
+                diff_base=contract.code_base_commit,
+                plan=plan,
+                invocation="master-integration",
+                attestation=attestation,
+            )
+        require_published_quality_evidence(
+            contract.worktree_group / "reports",
+            candidate_tree=require_git(checkout, ["write-tree"]),
+            consumer=EvidenceConsumer.INTEGRATION,
+        )
+    return _IntegrationGateExecution(gate, recovered is not None, attestation)
 
 
 def _leaf_closeout_certification() -> dict[str, object]:

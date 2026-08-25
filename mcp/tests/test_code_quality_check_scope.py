@@ -29,9 +29,9 @@ class GateScopeDerivationTests(unittest.TestCase):
         self.assertNotIn("DEFAULT_SOURCE_PATHS", source)
         self.assertNotIn("DEFAULT_TEST_PATHS", source)
 
-    def test_scope_derived_from_this_checkout_reaches_the_whole_tree(self) -> None:
+    def test_scope_derived_from_this_checkout_applies_each_rail_to_its_owner(self) -> None:
         scope = check.derive_scope(REPOSITORY_ROOT)
-        expected_coverage = [Path("mcp/src/agents_remember"), Path("mcp/tests")]
+        expected_coverage = [Path("mcp/src/agents_remember")]
         dagger_package = Path(".dagger/src/agents_remember_quality")
         if any(path.is_relative_to(dagger_package) for path in scope.lint_paths):
             expected_coverage.insert(0, dagger_package)
@@ -68,9 +68,9 @@ class GateScopeDerivationTests(unittest.TestCase):
             self.assertIn(Path("scripts/sync.py"), scope.lint_paths)
             self.assertIn("scripts/sync.py", steps["ruff"].command)
             self.assertIn("scripts/sync.py", steps["pyright"].command)
-            self.assertEqual(scope.coverage_paths, [Path("pkg"), Path("tests")])
+            self.assertEqual(scope.coverage_paths, [Path("pkg")])
             self.assertIn("--cov=pkg", steps["pytest"].command)
-            self.assertIn("--cov=tests", steps["pytest"].command)
+            self.assertNotIn("--cov=tests", steps["pytest"].command)
 
     def test_scope_is_the_index_so_an_unadded_file_is_not_yet_part_of_the_tree(self) -> None:
         # `git ls-files` reads the index, so `git add`-ing a file puts it in scope
@@ -210,7 +210,7 @@ class GateScopeDerivationTests(unittest.TestCase):
         self.assertEqual(config.project_root, root.resolve())
         self.assertEqual(config.threshold, 12.5)
         self.assertEqual(config.diff_base, "HEAD~1")
-        self.assertEqual(config.scope.coverage_paths, [Path("pkg"), Path("tests")])
+        self.assertEqual(config.scope.coverage_paths, [Path("pkg")])
         self.assertEqual(config.scope.test_paths, [Path("tests")])
         self.assertIn(Path("scripts/sync.py"), config.scope.lint_paths)
 

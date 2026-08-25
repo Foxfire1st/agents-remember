@@ -7,7 +7,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
-from agents_remember.worktrees.integration.closeout_door import (
+from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
     publish_door_intent,
 )

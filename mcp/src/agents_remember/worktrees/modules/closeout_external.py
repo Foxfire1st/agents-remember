@@ -12,17 +12,13 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_exact_file_git_mutation,
     begin_git_mutation,
     prove_git_commit,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
-from agents_remember.worktrees.modules.closeout_memory_quality import (
-    combine_memory_quality,
-    run_memory_quality_phase,
-)
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     commit_if_dirty,
@@ -38,6 +34,10 @@ from agents_remember.worktrees.modules.onboarding import (
     refresh_onboarding_metadata,
     refresh_route_indexes_for_context,
     refresh_route_overview_metadata_for_context,
+)
+from agents_remember.worktrees.modules.quality.closeout_memory import (
+    combine_memory_quality,
+    run_memory_quality_phase,
 )
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,

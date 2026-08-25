@@ -387,15 +387,6 @@ def test_contract_reader_branches(tmp_path: Path) -> None:
     assert reader.find_worktree_contract(coordination, "repo-a", "worktree-x") is None
 
 
-def test_serialization_baseline_test_lines() -> None:
-    from test_model_split_baseline import (  # noqa: PLC0415
-        SHARED_CONTROL,
-        SHARED_EVIDENCE,
-    )
-
-    assert SHARED_EVIDENCE and SHARED_CONTROL
-
-
 def test_layering_branch_units(tmp_path: Path) -> None:
 
     root = tmp_path / "repo"

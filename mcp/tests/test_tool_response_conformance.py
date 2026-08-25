@@ -110,6 +110,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from closeout_input_test_support import ensure_fixture_waiting_door
 from test_config import settings_payload
 from test_worktree_support import (
     commit_file,
@@ -513,6 +514,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     )
     assert payloads["worktree_start"].get("contract_path"), payloads["worktree_start"]
     contract_path = payloads["worktree_start"]["contract_path"]
+    ensure_fixture_waiting_door(load_contract(Path(contract_path)))
     payloads["worktree_status"] = tools.worktree_status_payload(
         config, TaskRef(repo_id=REPO, contract_path=contract_path)
     )

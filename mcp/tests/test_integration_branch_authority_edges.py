@@ -71,14 +71,10 @@ from integration_branch_authority_test_support import (
     _land_two_external_atomic_leaves,
     _record_atomic_leaf_landing,
 )
-from test_cleanup_carryover import _allow_terminal_archive_for_downstream_unit
 from test_source_lineage import _commit_on, _git, _repo
 
 
 class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        _allow_terminal_archive_for_downstream_unit(self)
-
     def test_carryover_authority_refuses_each_configured_repository_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

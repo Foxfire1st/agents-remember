@@ -7,7 +7,7 @@ from agents_remember.models.lifecycles.termination import WorkerTerminationEvide
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_termination import (
+from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     observe_worker_termination,
     worker_termination_request,
 )

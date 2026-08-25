@@ -209,6 +209,11 @@ def test_every_public_consumer_exhaustively_refuses_each_semantic_category(
         "admit_configured_contract",
         return_value=refusal,
     )
+    terminal_admission = mock.patch.object(
+        worktree_tools,
+        "admit_configured_terminal_contract",
+        return_value=refusal,
+    )
     direct_admission = mock.patch.object(
         direct_app,
         "admit_configured_contract",
@@ -221,6 +226,7 @@ def test_every_public_consumer_exhaustively_refuses_each_semantic_category(
     )
     with (
         worktree_admission,
+        terminal_admission,
         direct_admission,
         mock.patch.object(
             worktree_tools.git_worktree_manager,
@@ -482,7 +488,9 @@ def test_real_post_admission_lower_failures_share_the_public_projector(
     after = _byte_tree(tmp_path)
     added = set(after) - set(before)
     lifecycle_locks = {
-        path for path in added if "/.lifecycle/lifecycle-" in path and path.endswith(".lock")
+        path
+        for path in added
+        if "/controlplane/lifecycle-enclosures/locks/" in path and path.endswith(".lock")
     }
     integration_locks = {
         path

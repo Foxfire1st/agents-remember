@@ -14,7 +14,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
     reload_provider_authority,
 )
-from agents_remember.models.closeout_input import CloseoutCorrectedCall, EffectiveCloseoutInput
+from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
@@ -38,7 +38,7 @@ from agents_remember.worktrees.closeout_input import (
     raw_closeout_messages,
     resolve_closeout_plan,
 )
-from agents_remember.worktrees.integration.closeout_operation_admission import (
+from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
@@ -62,12 +62,14 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationReadError,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    current_operation_projections,
     start_or_observe_closeout_operation,
     start_or_observe_operation,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_failure_evidence,
+)
+from agents_remember.worktrees.integration.lifecycle.observation.projection import (
+    current_operation_projections,
 )
 from agents_remember.worktrees.worktree_contract import (
     ContractError,

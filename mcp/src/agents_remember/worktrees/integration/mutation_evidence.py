@@ -13,7 +13,7 @@ from agents_remember.kernel.git_command import (
     run_git,
     run_git_with_isolated_index_and_objects,
 )
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationEvidence,

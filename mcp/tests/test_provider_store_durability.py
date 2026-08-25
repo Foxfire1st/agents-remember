@@ -68,6 +68,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import pytest
 from _store_durability import (
     ADAPTERS,
     PROVIDER_CASES,
@@ -284,6 +285,7 @@ class _TempRootTest(unittest.TestCase):
 class ProviderStoreDurabilityTests(_TempRootTest):
     """R10: real processes appending while one compacts, over both provider record types."""
 
+    @pytest.mark.evidence_integration
     def test_no_record_is_lost_when_an_append_races_a_compaction(self) -> None:
         """The lost-update window: an append lands between the reclaim's read and its commit.
 
@@ -297,6 +299,7 @@ class ProviderStoreDurabilityTests(_TempRootTest):
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["stragglers"], [], _describe(result))
 
+    @pytest.mark.evidence_stress
     def test_no_record_is_lost_under_sustained_multi_process_write_and_compaction(self) -> None:
         """The unforced version: concurrent processes, no interposition anywhere.
 
@@ -322,6 +325,7 @@ class ProviderStoreDurabilityTests(_TempRootTest):
                 self.assertEqual(result["lost"], 0, _describe(result))
                 self.assertEqual(result["torn_lines"], 0, _describe(result))
 
+    @pytest.mark.evidence_stress
     def test_concurrent_operation_never_raises_out_of_a_store_call(self) -> None:
         """Losing no records is half of it; the caller must also not be handed an exception.
 
@@ -355,6 +359,7 @@ class ProviderStoreDurabilityTests(_TempRootTest):
                 )
 
 
+@pytest.mark.evidence_stress
 class ProviderHarnessSensitivityTests(_TempRootTest):
     """R14: the contract above must be able to fail, and here is the tree on which it does.
 

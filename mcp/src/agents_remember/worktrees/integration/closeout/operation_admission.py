@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.models.closeout_input import (
+from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     CloseoutMessageInput,
     EffectiveCloseoutInput,
@@ -24,7 +24,7 @@ from agents_remember.worktrees.closeout_input import (
     resolve_closeout_plan,
     resolved_plan_from_effective_input,
 )
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
@@ -110,11 +110,22 @@ def resolve_closeout_operation_admission(
     validated: ValidatedCloseoutAdmission,
 ) -> tuple[CloseoutOperationInput, LifecycleOperationCandidate]:
     """Resolve one new or duplicate request against a stable accepted generation."""
-    if current is None or _completed_generation_was_advanced(
-        contract,
-        current,
-        validated.snapshot.candidate,
+    if current is not None and not isinstance(current.input, CloseoutOperationInput):
+        raise RuntimeError("closeout journal contains a non-closeout durable input")
+    if (
+        current is None
+        or current.status == "cancelled"
+        or _completed_generation_was_advanced(
+            contract,
+            current,
+            validated.snapshot.candidate,
+        )
     ):
+        # Cancellation terminally preserves the old generation and publishes a distinct
+        # waiting door successor.  Its fresh input/candidate must reach the replacement
+        # transaction, where the claimed-predecessor edge, cancellation evidence, and
+        # worker-exit proof are checked together; treating it as an old-generation retry
+        # makes every valid successor impossible by construction.
         return validated.operation_input, validated.candidate
     return _validate_existing_closeout_request(contract, current, admission, validated)
 
@@ -135,8 +146,7 @@ def _validate_existing_closeout_request(
     validated: ValidatedCloseoutAdmission,
 ) -> tuple[CloseoutOperationInput, LifecycleOperationCandidate]:
     accepted = current.input
-    if not isinstance(accepted, CloseoutOperationInput):
-        raise RuntimeError("closeout journal contains a non-closeout durable input")
+    assert isinstance(accepted, CloseoutOperationInput)
     plan = resolved_plan_from_effective_input(accepted.effectiveInput)
     retained = closeout_generation_retained(current)
     effective = normalize_closeout_input(

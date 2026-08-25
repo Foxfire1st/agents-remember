@@ -76,13 +76,19 @@ diagnostic command is:
 ./scripts/test-python mcp/tests/test_file.py::test_name [EXACT_NODE ...]
 ```
 
-Pass one to eight exact pytest function or class-method node IDs. The command runs serially,
-classifies the complete transitive collection/execution closure before pytest starts, and refuses
-the whole request if any node is unsafe, unresolved, parameterized, duplicated, or otherwise
-outside the closed policy. It accepts no pytest flags, never runs an eligible subset, never falls
-back to Dagger, and marks every JSON result `altitude=diagnostic`, `certifying=false`. The timing
-record separates admission, bootstrap, collection, first-node delay, execution, and reporting;
-none of those measurements or outcomes is acceptance evidence.
+Pass one to eight exact node IDs already present in `mcp/tests/python-direct-cohort.toml`. The
+command runs serially and validates the complete content-sealed cohort policy before pytest starts:
+reviewed file/symbol closure, local-import facts, effect disposition, and configuration hashes.
+It refuses the whole request if any node is outside the manifest, any dependency/effect fact is
+unknown or unsafe, or any audited content changed. It accepts no pytest flags, never runs an
+eligible subset, never falls back to Dagger, and marks every JSON result `altitude=diagnostic`,
+`certifying=false`. The timing record separates admission, bootstrap, collection, first-node
+delay, execution, and reporting; none of those measurements or outcomes is acceptance evidence.
+Before adding a durable fixture, recording, migration proof, or shared-support world, follow the
+authority, lifecycle, cadence, and replacement rules in
+[`docs/design/python-evidence-system.md`](docs/design/python-evidence-system.md). The executable
+inventory is `mcp/tests/evidence-lifecycle.toml`; an uncataloged or expired governed artifact fails
+the static quality tier and Dagger quality route.
 The lifecycle tools own the two accepted invocations:
 
 - `mode=targeted` for focused leaf acceptance (changed files, reverse-import closure,

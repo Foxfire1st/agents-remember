@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.models.test_evidence import DiagnosticTestEvidence, test_evidence_payload
+from agents_remember.models.test_evidence import DiagnosticTestEvidence, evidence_payload
 from agents_remember.testing.diagnostic_bootstrap import (
     DiagnosticBootstrapError,
     diagnostic_pytest_environment,
@@ -116,7 +116,7 @@ class DirectDiagnosticCompleted:
             "nodes": [
                 {"nodeId": outcome.node_id, "outcome": outcome.outcome} for outcome in self.outcomes
             ],
-            "evidence": test_evidence_payload(self.evidence),
+            "evidence": evidence_payload(self.evidence),
         }
 
 
@@ -282,6 +282,8 @@ def _pytest_command(
         "-p",
         "agents_remember.testing.pytest_bootstrap",
         "-p",
+        "agents_remember.testing.evidence_lanes",
+        "-p",
         "agents_remember.testing.pytest_phase_reporter",
         PYTEST_PHASE_REPORT_OPTION,
         (runtime_root / "pytest-phases.json").as_posix(),
@@ -415,6 +417,7 @@ def _execute(
         text=True,
         capture_output=True,
         check=False,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -433,10 +436,11 @@ def _bounded_output(value: str | None) -> str:
 def help_text() -> str:
     return (
         "usage: ./scripts/test-python EXACT_NODE [EXACT_NODE ...]\n\n"
-        "Run at most eight structurally eligible pytest nodes serially as NON-CERTIFYING "
-        "local diagnostics. Exact form: mcp/tests/test_file.py::test_name or "
-        "mcp/tests/test_file.py::Class::test_method. Refusals run zero tests and never "
-        "fall back to Dagger. Final acceptance still requires the documented Dagger gate."
+        "Run at most eight exact nodes from the content-sealed cohort manifest serially as "
+        "NON-CERTIFYING local diagnostics. Current exact form: "
+        "mcp/tests/test_file.py::test_name. Non-members, changed audited content, and all "
+        "other refusals run zero tests and never fall back to Dagger. Final acceptance still "
+        "requires the documented Dagger gate."
     )
 
 

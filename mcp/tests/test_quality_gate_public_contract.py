@@ -10,7 +10,8 @@ from unittest import mock
 
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.models.worktree import WorktreeIntegrateResponse
-from agents_remember.worktrees.modules import clean_quality_executor, code_quality_gate
+from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
+from agents_remember.worktrees.modules.quality import gate as code_quality_gate
 from pydantic import ValidationError
 
 

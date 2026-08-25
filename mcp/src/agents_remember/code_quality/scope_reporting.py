@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agents_remember.code_quality.causal_preflight import preflight_scope_units
 from agents_remember.code_quality.scope import (
     GateScope,
     ScopeError,
@@ -31,6 +32,18 @@ if TYPE_CHECKING:
 INVOCATION_ENV = "AR_QUALITY_INVOCATION"
 PUSH_UPDATES_ENV = "AR_QUALITY_PUSH_UPDATES"
 UNTRACKED_SAMPLE_LIMIT = 12
+FIXED_STEP_SCOPE_NAMES = (
+    "ruff",
+    "ruff-format",
+    "file-size",
+    "layering",
+    "pyright",
+    "evidence-lifecycle",
+    "causal-preflight",
+    "radon-cc",
+    "radon-mi",
+    "pytest",
+)
 
 
 class ScopeReportingError(RuntimeError):
@@ -197,12 +210,14 @@ def fixed_step_scope_line(
             if targeted
             else f"{len(scope.type_paths)} index-known Python files",
         )
+    if name in {"evidence-lifecycle", "causal-preflight"}:
+        return _evidence_scope_line(name)
     if name in {"radon-cc", "radon-mi"}:
         return scope_line(
             name,
-            "on-disk Python files recursively consumed from package and test roots",
+            "on-disk Python files recursively consumed from product package roots",
             "pyproject.toml [tool.radon] plus explicit report thresholds",
-            f"{len(production)} on-disk package + test Python files",
+            f"{len(production)} on-disk product Python files",
         )
     if name == "pytest":
         return scope_line(
@@ -218,9 +233,31 @@ def fixed_step_scope_line(
                 f"{len(scope.coverage_paths)} changed production modules offered to Coverage.py"
                 if targeted
                 else f"{len(tests)} Python files present under test roots; "
-                f"{len(production)} on-disk package + test Python files offered to Coverage.py"
+                f"{len(production)} on-disk product Python files offered to Coverage.py"
             ),
         )
+    if name in {"file-size", "layering"}:
+        return _structural_scope_line(name, scope)
+    raise ScopeReportingError(f"no scope contract is registered for wrapper step {name!r}")
+
+
+def _evidence_scope_line(name: str) -> str:
+    if name == "evidence-lifecycle":
+        return scope_line(
+            name,
+            "repository-owned durable fixture and shared-support catalog",
+            "mcp/tests/evidence-lifecycle.toml ar-test-evidence-lifecycle/v1",
+            "1 complete catalog plus every governed fixture-data path",
+        )
+    return scope_line(
+        name,
+        "canonical high-fanout prerequisite owners plus graph-proven consumers",
+        "code_quality.causal_preflight PREFLIGHTS + DependencyOwnershipGraph",
+        preflight_scope_units(),
+    )
+
+
+def _structural_scope_line(name: str, scope: GateScope) -> str:
     if name == "file-size":
         return scope_line(
             name,
@@ -229,15 +266,13 @@ def fixed_step_scope_line(
             "architectural failure); [tool.agents_remember] file_size_armed",
             f"{len(scope.size_paths)} size-scoped files",
         )
-    if name == "layering":
-        return scope_line(
-            name,
-            "every Python module under mcp/src/agents_remember",
-            "layers.toml strict package order (rank(imported) < rank(importer), no "
-            "package-pair cycles, no stale present=false flags); armed with no baseline",
-            "full tree",
-        )
-    raise ScopeReportingError(f"no scope contract is registered for wrapper step {name!r}")
+    return scope_line(
+        name,
+        "every Python module under mcp/src/agents_remember",
+        "layers.toml strict package order (rank(imported) < rank(importer), no "
+        "package-pair cycles, no stale present=false flags); armed with no baseline",
+        "full tree",
+    )
 
 
 def targeted_scope_lines(
@@ -248,12 +283,15 @@ def targeted_scope_lines(
     changed = [path.as_posix() for path in result.changed_paths]
     closure = [path.as_posix() for path in result.reverse_import_closure]
     tests = [path.as_posix() for path in result.test_paths]
+    ownership_reasons = sorted(
+        {reason.render() for owned in result.test_impact.ownership for reason in owned.reasons}
+    )
     lines = [
         scope_line(
             "targeted",
-            "git diff --diff-filter=ACMR against the leaf base, base-to-working-tree",
+            "git diff --diff-filter=ACMRD against the leaf base plus non-ignored untracked paths",
             f"base: {base.revision} ({base.origin})",
-            f"{len(changed)} changed Python files",
+            f"{len(changed)} changed repository paths",
         ),
         f"targeted changed files ({len(changed)}):",
         *(f"  {path}" for path in changed),
@@ -265,6 +303,13 @@ def targeted_scope_lines(
         *(f"  {path}" for path in closure),
         f"targeted test subset ({len(tests)} file(s)):",
         *(f"  {path}" for path in tests),
+        (
+            "targeted ownership: complete"
+            if result.test_impact.complete
+            else "targeted ownership: incomplete; safe full Python population selected"
+        ),
+        f"targeted selection reasons ({len(ownership_reasons)}):",
+        *(f"  {reason}" for reason in ownership_reasons),
     ]
     return lines
 
@@ -641,7 +686,7 @@ def build_parser() -> argparse.ArgumentParser:
     fixed = subparsers.add_parser("fixed-step")
     fixed.add_argument(
         "--name",
-        choices=("ruff", "ruff-format", "pyright", "radon-cc", "radon-mi", "pytest"),
+        choices=FIXED_STEP_SCOPE_NAMES,
         required=True,
     )
     generated = subparsers.add_parser("generated")

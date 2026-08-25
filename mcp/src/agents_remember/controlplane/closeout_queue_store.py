@@ -14,7 +14,7 @@ from agents_remember.controlplane.closeout_queue_records import CloseoutProjecti
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
     CloseoutProjectionMember,
     CloseoutQueueState,
@@ -83,17 +83,24 @@ class CloseoutQueueStore:
         return True
 
     def read_raw(self, *, timestamp: str) -> CloseoutQueueState:
-        with exclusive_access(self.state_path, PROJECTION_OWNERSHIP):
-            try:
-                return self._read_state(timestamp)
-            except CloseoutQueueStoreError as exc:
-                return CloseoutQueueState(
-                    sprintTaskDocumentRef=self.sprint_ref,
-                    revision=0,
-                    serviceCondition="invalid-empty",
-                    sourceProblems=[self._artifact_problem(exc)],
-                    updatedAt=timestamp,
-                )
+        """Read one atomic projection snapshot without creating publication authority.
+
+        The queue is disposable and never owns a lifecycle transition. Writers atomically
+        replace its whole state under the exclusive lock, so a reader observes the complete old
+        or new snapshot and does not need to create a sibling lock file. Task-document previews
+        therefore remain byte-for-byte read-only.
+        """
+
+        try:
+            return self._read_state(timestamp)
+        except CloseoutQueueStoreError as exc:
+            return CloseoutQueueState(
+                sprintTaskDocumentRef=self.sprint_ref,
+                revision=0,
+                serviceCondition="invalid-empty",
+                sourceProblems=[self._artifact_problem(exc)],
+                updatedAt=timestamp,
+            )
 
     def read_effective(
         self,

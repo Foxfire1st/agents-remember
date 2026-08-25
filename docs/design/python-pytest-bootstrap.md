@@ -56,9 +56,10 @@ the wrong route.
 | Worktree/provider service composition | yes | no | Candidate A refuses any test whose closure needs these unsafe families |
 | Dagger admission capability | yes | no | diagnostic output cannot certify work |
 
-The diagnostic omission is structural rather than a speed switch: the L1 classifier refuses Git,
-worktree, provider, container, service, durability, and integration closure. Therefore an admitted
-diagnostic test cannot legitimately consume the certifying service bundle.
+The diagnostic omission is structural rather than a speed switch: the L1 classifier accepts only
+the content-sealed cohort whose reviewed effect ledger is known-safe; every protected family,
+unknown effect, non-member, or changed closure/configuration fingerprint refuses before pytest.
+Therefore an admitted diagnostic test cannot legitimately consume the certifying service bundle.
 
 ## Four-state forcing proof
 

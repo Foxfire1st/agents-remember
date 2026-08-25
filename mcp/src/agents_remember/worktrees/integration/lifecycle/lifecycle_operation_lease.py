@@ -59,7 +59,7 @@ def _active_operation_kinds(
     exclude: LifecycleOperationKind | None = None,
     publish_worker_exits: bool,
 ) -> list[LifecycleOperationKind]:
-    from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_state import (  # noqa: PLC0415
+    from agents_remember.worktrees.integration.lifecycle.worker.state import (  # noqa: PLC0415
         project_worker_exit,
         reconcile_worker_exit,
     )

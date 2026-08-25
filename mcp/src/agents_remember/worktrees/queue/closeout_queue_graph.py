@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_CANDIDATES,
     CloseoutProjectionMember,
 )
@@ -67,6 +67,46 @@ def graph_context(
     register degrades the projection instead of failing it.
     """
 
+    sprint, graph, master_map = _validated_graph_documents(topology, sprint_ref, overrides)
+    completed = {ref for ref, master in master_map.items() if master.document.status == "Completed"}
+    leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, completed)
+    try:
+        judgments, priorities = planning_authorities(sprint, strict=strict_registers)
+    except CloseoutQueueError as exc:
+        raise CloseoutQueueError(
+            exc.status,
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-register-planning",
+                side="task-document",
+                name="planning-registers",
+            ),
+        ) from exc
+    return QueueGraphContext(
+        sprint,
+        graph,
+        master_map,
+        _graph_revision(graph, master_map),
+        {node: index for index, node in enumerate(graph.nodes)},
+        _nodes_by_master(graph),
+        leaf_nodes,
+        leaf_facts,
+        incomplete_predecessor_map(graph, completed=completed),
+        GradeAuthority(sprint, judgments, priorities),
+    )
+
+
+def _validated_graph_documents(
+    topology: TaskDocumentTopology,
+    sprint_ref: TaskDocumentRef,
+    overrides: Mapping[TaskDocumentRef, TaskDocument] | None,
+) -> tuple[
+    ResolvedTaskDocument,
+    SprintExecutionGraph,
+    dict[TaskDocumentRef, ResolvedTaskDocument],
+]:
+    """Resolve and capacity-check one sprint and its authoritative master documents."""
+
     try:
         sprint = topology.resolve(sprint_ref, overrides)
     except TaskDocumentRefError as exc:
@@ -118,45 +158,26 @@ def graph_context(
             "closeout-queue-capacity-exceeded",
             f"sprint has more than {MAX_CLOSEOUT_CANDIDATES} leaf candidates; split it before queue admission",
         )
+    return sprint, graph, master_map
+
+
+def _graph_revision(
+    graph: SprintExecutionGraph,
+    masters: Mapping[TaskDocumentRef, ResolvedTaskDocument],
+) -> str:
     payload = {
         "executionGraph": graph.model_dump(mode="json"),
         "executionNatures": [
             {
                 "taskDocumentRef": ref.model_dump(mode="json"),
-                "executionNature": master_map[ref].document.executionNature,
+                "executionNature": masters[ref].document.executionNature,
             }
             for ref in graph.master_refs()
         ],
     }
-    revision = hashlib.sha256(
+    return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    completed = {ref for ref, master in master_map.items() if master.document.status == "Completed"}
-    leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, completed)
-    try:
-        judgments, priorities = planning_authorities(sprint, strict=strict_registers)
-    except CloseoutQueueError as exc:
-        raise CloseoutQueueError(
-            exc.status,
-            bounded_queue_failure_detail(
-                exc,
-                stage="queue-register-planning",
-                side="task-document",
-                name="planning-registers",
-            ),
-        ) from exc
-    return QueueGraphContext(
-        sprint,
-        graph,
-        master_map,
-        revision,
-        {node: index for index, node in enumerate(graph.nodes)},
-        _nodes_by_master(graph),
-        leaf_nodes,
-        leaf_facts,
-        incomplete_predecessor_map(graph, completed=completed),
-        GradeAuthority(sprint, judgments, priorities),
-    )
 
 
 def _nodes_by_master(

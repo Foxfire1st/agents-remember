@@ -12,7 +12,11 @@ from agents_remember.application.worktree_services import (
 )
 from agents_remember.worktrees.services import reset_worktree_services
 
-pytest_plugins = ("agents_remember.testing.pytest_bootstrap",)
+pytest_plugins = (
+    "agents_remember.testing.pytest_bootstrap",
+    "agents_remember.testing.evidence_lanes",
+    "agents_remember.testing.causal_failures",
+)
 
 
 @pytest.fixture(scope="session", autouse=True)

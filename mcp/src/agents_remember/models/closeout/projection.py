@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agents_remember.models.closeout_source import PriorityGrade
+from agents_remember.models.closeout.source import PriorityGrade
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 MAX_CLOSEOUT_CANDIDATES = 256

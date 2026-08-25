@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import subprocess
 import sys
@@ -16,8 +15,10 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from _quality_admission import QUALITY_TEST_ADMISSION
 from agents_remember.code_quality import check, diff_coverage, targeted
+from agents_remember.code_quality.dependency_ownership import SelectionReasonKind
 from agents_remember.code_quality.scope import ScopeError
 
 
@@ -58,6 +59,7 @@ def targeted_repository(root: Path) -> str:
     write_quality_config(root)
     (root / "src/pkg").mkdir(parents=True)
     (root / "tests").mkdir()
+    (root / "mcp/tests").mkdir(parents=True)
     (root / "scripts").mkdir()
     (root / "src/pkg/__init__.py").write_text("", encoding="utf-8")
     (root / "src/pkg/module.py").write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
@@ -76,7 +78,9 @@ def targeted_repository(root: Path) -> str:
         "from pkg.importer import VALUE\nTOP = VALUE\n", encoding="utf-8"
     )
     (root / "tests/test_module.py").write_text(
-        "from pkg.module import value\n\ndef test_value() -> None:\n    assert value() == 1\n",
+        "from _support import SUPPORT\n"
+        "from pkg.module import value\n\n"
+        "def test_value() -> None:\n    assert value() == SUPPORT\n",
         encoding="utf-8",
     )
     (root / "tests/test_extra.py").write_text(
@@ -89,6 +93,18 @@ def targeted_repository(root: Path) -> str:
     )
     (root / "scripts/sync.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "scripts/test_module.py").write_text("NAME_MATCH_DECOY = True\n", encoding="utf-8")
+    (root / "tests/_support.py").write_text("SUPPORT = 1\n", encoding="utf-8")
+    (root / "tests/conftest.py").write_text("\n", encoding="utf-8")
+    (root / "mcp/tests/_catalog_anchor.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "mcp/tests/fixtures").mkdir()
+    (root / "mcp/tests/fixtures/owned.json").write_text("{}\n", encoding="utf-8")
+    write_synthetic_evidence_catalog(
+        root,
+        {
+            "mcp/tests/_catalog_anchor.py": ("tests/test_module.py",),
+            "mcp/tests/fixtures/owned.json": ("tests/test_extra.py",),
+        },
+    )
     run_git(root, "add", "-A")
     run_git(
         root,
@@ -181,6 +197,20 @@ class TargetedScopeDerivationTests(unittest.TestCase):
                 derived.test_paths,
                 (Path("tests/test_extra.py"), Path("tests/test_module.py")),
             )
+            self.assertIn(
+                SelectionReasonKind.NAME_HEURISTIC,
+                {
+                    reason.kind
+                    for reason in derived.test_impact.reasons_for(Path("tests/test_extra.py"))
+                },
+            )
+            self.assertIn(
+                SelectionReasonKind.IMPORT_CONSUMER,
+                {
+                    reason.kind
+                    for reason in derived.test_impact.reasons_for(Path("tests/test_module.py"))
+                },
+            )
 
     def test_internal_module_is_covered_through_its_public_import_home(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -210,7 +240,7 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             # reach it through pkg.module and its importers.
             self.assertTrue(any(path.name == "test_module.py" for path in derived.test_paths))
 
-    def test_changed_production_module_without_tests_is_refused(self) -> None:
+    def test_changed_production_module_without_owner_selects_safe_full_population(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
@@ -219,8 +249,14 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             )
             run_git(root, "add", "-A")
 
-            with self.assertRaisesRegex(ScopeError, "pkg.naked"):
-                targeted.derive_targeted_scope(root, base)
+            derived = targeted.derive_targeted_scope(root, base)
+
+            self.assertFalse(derived.test_impact.complete)
+            self.assertIsNotNone(derived.test_impact.fallback)
+            self.assertEqual(
+                derived.test_paths,
+                (Path("tests/test_extra.py"), Path("tests/test_module.py")),
+            )
 
     def test_string_referenced_module_is_covered_by_wiring_tests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -245,6 +281,69 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             )
             self.assertEqual(derived.test_paths, (Path("tests/test_wiring_registration.py"),))
 
+    def test_shared_support_change_selects_static_import_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = targeted_repository(root)
+            (root / "tests/_support.py").write_text("SUPPORT = 2\n", encoding="utf-8")
+
+            derived = targeted.derive_targeted_scope(root, base)
+
+            self.assertEqual(derived.test_paths, (Path("tests/test_module.py"),))
+            self.assertTrue(derived.test_impact.complete)
+            self.assertEqual(
+                {reason.kind for reason in derived.test_impact.reasons_for(derived.test_paths[0])},
+                {SelectionReasonKind.IMPORT_CONSUMER},
+            )
+
+    def test_consumed_fixture_change_selects_its_declared_consumer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = targeted_repository(root)
+            fixture = Path("mcp/tests/fixtures/owned.json")
+            (root / fixture).write_text('{"changed":true}\n', encoding="utf-8")
+
+            derived = targeted.derive_targeted_scope(root, base)
+
+            self.assertEqual(derived.changed_paths, (fixture,))
+            self.assertEqual(derived.lint_paths, ())
+            self.assertEqual(derived.test_paths, (Path("tests/test_extra.py"),))
+            self.assertEqual(
+                {reason.kind for reason in derived.test_impact.reasons_for(derived.test_paths[0])},
+                {SelectionReasonKind.DECLARED_CONSUMER},
+            )
+
+    def test_conftest_change_invalidates_the_whole_python_test_population(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = targeted_repository(root)
+            (root / "tests/conftest.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+            derived = targeted.derive_targeted_scope(root, base)
+
+            self.assertTrue(derived.test_impact.complete)
+            self.assertTrue(derived.test_impact.global_invalidation)
+            self.assertEqual(
+                derived.test_paths,
+                (Path("tests/test_extra.py"), Path("tests/test_module.py")),
+            )
+
+    def test_unknown_test_support_and_deleted_test_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = targeted_repository(root)
+            (root / "tests/_unknown.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+            unknown = targeted.derive_targeted_scope(root, base)
+            self.assertFalse(unknown.test_impact.complete)
+            self.assertEqual(len(unknown.test_paths), 2)
+
+            (root / "tests/_unknown.py").unlink()
+            (root / "tests/test_extra.py").unlink()
+            deleted = targeted.derive_targeted_scope(root, base)
+            self.assertFalse(deleted.test_impact.complete)
+            self.assertEqual(deleted.test_paths, (Path("tests/test_module.py"),))
+
     def test_tests_only_change_leaves_production_coverage_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -262,7 +361,7 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             self.assertEqual(derived.coverage_paths, ())
             self.assertEqual(derived.test_paths, (Path("tests/test_module.py"),))
 
-    def test_no_python_changes_derives_an_empty_scope(self) -> None:
+    def test_documentation_change_is_visible_but_derives_no_python_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
@@ -270,10 +369,11 @@ class TargetedScopeDerivationTests(unittest.TestCase):
 
             derived = targeted.derive_targeted_scope(root, base)
 
-            self.assertEqual(derived.changed_paths, ())
+            self.assertEqual(derived.changed_paths, (Path("README.md"),))
             self.assertEqual(derived.type_paths, ())
+            self.assertEqual(derived.test_paths, ())
 
-    def test_scripts_only_change_has_no_test_subset_or_coverage(self) -> None:
+    def test_unowned_script_change_fails_closed_to_the_safe_test_population(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
@@ -283,42 +383,11 @@ class TargetedScopeDerivationTests(unittest.TestCase):
 
             self.assertEqual(derived.changed_paths, (Path("scripts/sync.py"),))
             self.assertEqual(derived.coverage_paths, ())
-            self.assertEqual(derived.test_paths, ())
-
-    def test_module_for_path_returns_none_for_the_import_root_itself(self) -> None:
-        self.assertIsNone(targeted.module_for_path(Path("src"), (Path("src"),)))
-        self.assertIsNone(targeted.module_for_path(Path("__init__.py"), (Path("."),)))
-        self.assertEqual(
-            targeted.module_for_path(Path("src/pkg/__init__.py"), (Path("src"),)),
-            "pkg",
-        )
-
-    def test_resolve_relative_import_edges(self) -> None:
-        self.assertIsNone(targeted.resolve_relative_import("a.b", 3, None))
-        self.assertEqual(targeted.resolve_relative_import("a.b", 1, None), "a.b")
-        self.assertEqual(targeted.resolve_relative_import("a.b", 1, "x"), "a.b.x")
-
-    def test_import_from_modules_edges(self) -> None:
-        absolute = ast.parse("from x import y").body[0]
-        assert isinstance(absolute, ast.ImportFrom)
-        self.assertIn("x.y", targeted._import_from_modules(absolute, "pkg"))
-        star = ast.parse("from x import *").body[0]
-        assert isinstance(star, ast.ImportFrom)
-        modules = targeted._import_from_modules(star, "pkg")
-        self.assertNotIn("x.*", modules)
-        relative_without_root = ast.parse("from . import y").body[0]
-        assert isinstance(relative_without_root, ast.ImportFrom)
-        self.assertEqual(targeted._import_from_modules(relative_without_root, None), set())
-        bare = ast.ImportFrom(module=None, names=[], level=0)
-        self.assertEqual(targeted._import_from_modules(bare, "pkg"), set())
-
-    def test_file_imports_refuses_a_syntax_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            broken = Path(tmp) / "broken.py"
-            broken.write_text("def broken(:\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(ScopeError, "could not parse"):
-                targeted.file_imports(broken, None)
+            self.assertEqual(
+                derived.test_paths,
+                (Path("tests/test_extra.py"), Path("tests/test_module.py")),
+            )
+            self.assertFalse(derived.test_impact.complete)
 
     def test_changed_paths_refuses_an_unknown_base(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -337,25 +406,6 @@ class TargetedScopeDerivationTests(unittest.TestCase):
                 self.assertRaisesRegex(ScopeError, "could not run git"),
             ):
                 targeted._git(root, ["diff"])
-
-    def test_string_reference_read_failure_is_a_scope_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            targeted_repository(root)
-            with (
-                mock.patch.object(Path, "read_text", side_effect=OSError("unreadable")),
-                self.assertRaisesRegex(ScopeError, "could not read"),
-            ):
-                targeted._string_reference_tests(
-                    root,
-                    [Path("tests")],
-                    "pkg.module",
-                    [Path("tests/test_module.py")],
-                )
-
-    def test_coverage_root_modules_skips_a_root_package_without_import_root(self) -> None:
-        modules = targeted._coverage_root_modules([Path("__init__.py")], (Path("."),))
-        self.assertEqual(modules, ())
 
 
 class TargetedWrapperRunTests(unittest.TestCase):
@@ -416,11 +466,11 @@ class TargetedWrapperRunTests(unittest.TestCase):
             # Radon report rails consume the changed production module FILES, not
             # the pytest package roots: a module name would resolve to nothing at
             # the repo root and make the report rail vacuous.
-            radon_cc = commands[5]
+            radon_cc = commands[7]
             self.assertEqual(radon_cc[4], "src/pkg/module.py")
-            radon_mi = commands[6]
+            radon_mi = commands[8]
             self.assertEqual(radon_mi[4], "src/pkg/module.py")
-            pytest = commands[7]
+            pytest = commands[9]
             self.assertIn("tests/test_module.py", pytest)
             self.assertIn("--cov=pkg", pytest)
             self.assertNotIn("--cov=src/pkg", pytest)
@@ -566,6 +616,8 @@ class TargetedWrapperRunTests(unittest.TestCase):
                     "agents_remember.code_quality.file_size",
                     "agents_remember.code_quality.layering",
                     "pyright",
+                    "agents_remember.testing.evidence_lifecycle",
+                    "agents_remember.code_quality.causal_preflight",
                     "pytest",
                 ],
             )
@@ -576,7 +628,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertTrue(any("diff-coverage PASS (not applicable)" in line for line in output))
             self.assertFalse(any("## radon-cc" in line for line in output))
 
-    def test_scripts_only_run_skips_pytest_and_the_coverage_rails(self) -> None:
+    def test_scripts_only_run_fails_closed_to_pytest_but_skips_coverage_rails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
@@ -610,12 +662,15 @@ class TargetedWrapperRunTests(unittest.TestCase):
                     "agents_remember.code_quality.file_size",
                     "agents_remember.code_quality.layering",
                     "pyright",
+                    "agents_remember.testing.evidence_lifecycle",
+                    "agents_remember.code_quality.causal_preflight",
+                    "pytest",
                 ],
             )
             self.assertTrue(
                 any("radon report and CRAP rails are not applicable" in line for line in output)
             )
-            self.assertTrue(any("pytest rail is not applicable" in line for line in output))
+            self.assertFalse(any("pytest rail is not applicable" in line for line in output))
 
     def test_source_import_roots_resolves_files_to_the_package_import_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

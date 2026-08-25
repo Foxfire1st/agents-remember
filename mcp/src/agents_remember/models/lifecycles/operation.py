@@ -9,8 +9,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.base import StrictResponseModel
-from agents_remember.models.closeout_input import EffectiveCloseoutInput
-from agents_remember.models.closeout_projection import TaskDocProjectionEffect
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
     DirectLandingOperationInput,

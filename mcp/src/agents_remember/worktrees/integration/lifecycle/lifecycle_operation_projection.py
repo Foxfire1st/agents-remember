@@ -11,21 +11,21 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
-from agents_remember.worktrees.integration.closeout_door import (
+from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationClassification,
     classify_door_publication,
 )
-from agents_remember.worktrees.integration.closeout_ledger_recovery import (
+from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
+    classify_initial_closeout_door_recovery,
+)
+from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     classify_closeout_ledger_recovery,
 )
-from agents_remember.worktrees.integration.closeout_recovery_projection import (
+from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
     classify_direct_landing_recovery,
-)
-from agents_remember.worktrees.integration.initial_closeout_door_recovery import (
-    classify_initial_closeout_door_recovery,
 )
 from agents_remember.worktrees.integration.integration_operation_decision import (
     IntegrationOperationObservation,
@@ -35,7 +35,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence i
     classify_migrated_lifecycle,
     public_lifecycle_evidence,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_worker_termination import (
+from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     worker_termination_required_result,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract

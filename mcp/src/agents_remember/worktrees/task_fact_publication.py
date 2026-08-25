@@ -9,7 +9,7 @@ from typing import Generic, TypeVar
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.task_publication_lock import task_publication_lock
-from agents_remember.models.closeout_projection import (
+from agents_remember.models.closeout.projection import (
     ProjectionInvalidationResult,
     ProjectionRebuildResult,
     ProjectionSourceProblem,
