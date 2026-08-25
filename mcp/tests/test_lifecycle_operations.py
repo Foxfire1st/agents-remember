@@ -552,7 +552,7 @@ def test_cancel_before_boundary_proves_exit_before_releasing_worker_authority(
             return_value=None,
         ),
         patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls."
+            "agents_remember.worktrees.integration.lifecycle.control.cancellation."
             "signal_worker_and_prove_exit",
             side_effect=prove_exit,
         ),
@@ -1024,3 +1024,66 @@ def test_run_worker_refuses_missing_or_non_startable_durable_state(tmp_path: Pat
     )
     with pytest.raises(RuntimeError, match="cannot start from durable state"):
         lifecycle_operation_worker.run_worker(second.contract_path, "closeout", second_lease)
+
+
+def test_run_worker_observes_terminal_generation_while_waiting_for_lease(
+    tmp_path: Path,
+) -> None:
+    contract = _contract(tmp_path)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
+    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
+    queued = store.read()
+    assert queued is not None
+    waiting = queued.model_copy(update={"workerLease": "a" * 64})
+    terminal = waiting.model_copy(update={"status": "completed", "phase": "completed"})
+    observed = SimpleNamespace(read=Mock(side_effect=[waiting, terminal]))
+
+    with patch.object(
+        lifecycle_operation_worker,
+        "located_lifecycle_operation_store",
+        return_value=observed,
+    ):
+        assert (
+            lifecycle_operation_worker.run_worker(
+                contract.contract_path,
+                "closeout",
+                "b" * 64,
+            )
+            == 0
+        )
+
+
+def test_run_worker_observes_matching_lease_after_waiting(tmp_path: Path) -> None:
+    contract = _contract(tmp_path)
+    start_closeout_operation(_input(contract), launcher=lambda *_: None)
+    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
+    queued = store.read()
+    assert queued is not None
+    waiting = queued.model_copy(update={"workerLease": "a" * 64})
+    matching = queued.model_copy(update={"workerLease": "b" * 64})
+    terminal = matching.model_copy(update={"status": "completed", "phase": "completed"})
+    observed = SimpleNamespace(read=Mock(side_effect=[waiting, matching]))
+    runtime = Mock()
+    runtime.start.return_value = terminal
+
+    with (
+        patch.object(
+            lifecycle_operation_worker,
+            "located_lifecycle_operation_store",
+            return_value=observed,
+        ),
+        patch.object(
+            lifecycle_operation_worker,
+            "OperationRuntime",
+            return_value=runtime,
+        ),
+    ):
+        assert (
+            lifecycle_operation_worker.run_worker(
+                contract.contract_path,
+                "closeout",
+                "b" * 64,
+            )
+            == 0
+        )
+    runtime.start.assert_called_once_with()

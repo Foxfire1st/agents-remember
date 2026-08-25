@@ -476,7 +476,10 @@ def _start_or_observe_direct_landing(
             exc,
         )
     if record.status == "completed" and record.result is not None:
-        return _with_projection_effect(dict(record.result), projection_effect)
+        return _with_projection_effect(
+            _with_lifecycle_operation(dict(record.result), claimed_contract, record),
+            projection_effect,
+        )
     if not created and record.status != "running":
         return _with_projection_effect(
             _direct_landing_observation(claimed_contract, record),
@@ -490,7 +493,25 @@ def _start_or_observe_direct_landing(
         _require_direct_claim_owner(live_contract, record)
         runtime = DirectLandingRuntime(live_contract, record)
         result = execute_or_require_direct_landing_recovery(live_contract, runtime)
+        completed = runtime.store.read() or runtime.record
+        result = _with_lifecycle_operation(result, live_contract, completed)
     return _with_projection_effect(result, projection_effect)
+
+
+def _with_lifecycle_operation(
+    result: dict[str, object],
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> dict[str, object]:
+    """Expose the same durable generation on first completion and exact retry."""
+
+    return {
+        **result,
+        "lifecycleOperation": operation_projection(
+            record,
+            contract=load_contract(contract.contract_path),
+        ).model_dump(mode="json", exclude_none=True),
+    }
 
 
 def _prepare_direct_landing_candidate(

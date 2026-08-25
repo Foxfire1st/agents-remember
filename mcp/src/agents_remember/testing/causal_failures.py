@@ -132,10 +132,21 @@ def runtime_failure_record(report: _Report) -> dict[str, object]:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    if hasattr(session.config, "workerinput") or _STATE.report_path is None:
+    if not _should_publish_runtime_evidence(session):
         return
+    assert _STATE.report_path is not None
     payload = load_causal_report(_STATE.report_path)
-    payload["runtimeEvidence"] = {
+    payload["runtimeEvidence"] = _runtime_evidence(exitstatus)
+    payload["acceptanceEligible"] = False
+    write_causal_report(_STATE.report_path, payload)
+
+
+def _should_publish_runtime_evidence(session: pytest.Session) -> bool:
+    return not hasattr(session.config, "workerinput") and _STATE.report_path is not None
+
+
+def _runtime_evidence(exitstatus: int) -> dict[str, object]:
+    return {
         "pytestExitCode": int(exitstatus),
         "blockedNodes": [
             {"nodeId": node_id, "causeId": cause_id}
@@ -143,8 +154,6 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         ],
         "independentFailures": [value for _, value in sorted(_STATE.independent_failures.items())],
     }
-    payload["acceptanceEligible"] = False
-    write_causal_report(_STATE.report_path, payload)
 
 
 def execution_profile(path: Path) -> ExecutionProfile:

@@ -458,10 +458,14 @@ def run_worker(contract_path: Path, kind: LifecycleOperationKind, worker_lease: 
     current = store.read()
     if current is None or current.operationKind != kind:
         raise RuntimeError(f"no {kind} operation is queued for {contract.task_name}")
+    if current.status in {"cancelled", "completed"}:
+        return 0
     deadline = datetime.now(UTC).timestamp() + 5.0
     while current.workerLease != worker_lease and datetime.now(UTC).timestamp() < deadline:
         threading.Event().wait(0.01)
         current = store.read() or current
+        if current.status in {"cancelled", "completed"}:
+            return 0
     runtime = OperationRuntime(store, worker_lease=worker_lease)
     current = runtime.start()
     if current.status in {"cancelled", "completed"}:

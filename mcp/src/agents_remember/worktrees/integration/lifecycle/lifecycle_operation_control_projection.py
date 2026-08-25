@@ -360,27 +360,58 @@ def _completed_direct_controls(
     *,
     allow_completed_disposition: bool,
 ) -> list[dict[str, Any]]:
-    publication = record.doorPublication
-    exact_successor = bool(
-        record.generationDisposition == "superseded"
-        and publication is not None
-        and publication.state == "proven"
-        and publication.generation.disposition == "waiting"
-        and contract.closeout_door == publication.generation
-    )
-    if exact_successor:
+    if _is_exact_direct_successor(contract, record):
         return [_direct_successor_control(contract, record)]
-    exact_owner = bool(
-        record.generationDisposition == "active"
-        and publication is not None
-        and publication.state == "proven"
-        and publication.generation.disposition == "claimed"
-        and publication.generation.operationFingerprint == record.fingerprint
-        and publication.generation.claimedOperationKey == record.operationKey
-        and contract.closeout_door == publication.generation
-    )
-    if not exact_owner or not allow_completed_disposition:
+    if (_is_exact_direct_owner(contract, record), allow_completed_disposition) != (True, True):
         return []
+    return _completed_direct_owner_controls(contract, record, base)
+
+
+def _is_exact_direct_successor(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> bool:
+    publication = record.doorPublication
+    observed = (
+        record.generationDisposition,
+        publication.state if publication is not None else None,
+        publication.generation.disposition if publication is not None else None,
+        contract.closeout_door if publication is None else publication.generation,
+    )
+    return observed == ("superseded", "proven", "waiting", contract.closeout_door)
+
+
+def _is_exact_direct_owner(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> bool:
+    publication = record.doorPublication
+    if publication is None:
+        return False
+    observed = (
+        record.generationDisposition,
+        publication.state,
+        publication.generation.disposition,
+        publication.generation.operationFingerprint,
+        publication.generation.claimedOperationKey,
+        publication.generation,
+    )
+    expected = (
+        "active",
+        "proven",
+        "claimed",
+        record.fingerprint,
+        record.operationKey,
+        contract.closeout_door,
+    )
+    return observed == expected
+
+
+def _completed_direct_owner_controls(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    base: dict[str, object],
+) -> list[dict[str, Any]]:
     controls = [_control("retire", base, "Retire this completed direct generation for audit.")]
     if _direct_code_candidate_advanced(contract, record):
         controls.append(_supersede_control(contract, record, base))

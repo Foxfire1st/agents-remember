@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.models.lifecycles.operation import (
+    IntegrationPublicationIntent,
+    LifecycleOperationRecord,
+)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
@@ -27,18 +30,43 @@ def require_completed_disposition(
 ) -> None:
     """Refuse disposition unless exact unintegrated closeout authority is idle."""
     integration = located_lifecycle_operation_store(contract, "integrate").read()
-    if (
-        integration is not None
-        and integration.integrationPublication is not None
-        and integration.status not in {"cancelled", "failed"}
-    ):
+    _require_idle_integration_claim(contract, integration, action)
+    exact_owner = _completed_closeout_owner(contract, record) or _completed_direct_owner(
+        contract,
+        record,
+    )
+    _require_completed_owner(contract, record, exact_owner)
+    if record.workerPid is not None:
+        raise LifecycleControlError(
+            "lifecycle-worker-still-authoritative",
+            "completed operation worker exit has not been proven",
+            next_action="cancel",
+        )
+
+
+def _require_idle_integration_claim(
+    contract: WorktreeContract,
+    integration: LifecycleOperationRecord | None,
+    action: Literal["retire", "supersede"],
+) -> None:
+    publication = getattr(integration, "integrationPublication", None)
+    active = all(
+        (
+            integration is not None,
+            publication is not None,
+            getattr(integration, "status", None) not in {"cancelled", "failed"},
+        )
+    )
+    if active:
+        integration = cast(LifecycleOperationRecord, integration)
+        publication = cast(IntegrationPublicationIntent, publication)
         raise LifecycleControlError(
             "lifecycle-integration-claim-active",
             "the accepted integration journal claim must finish before closeout disposition",
             expected={
                 "closeoutDoorDisposition": "claimed",
                 "integrationGeneration": integration.generation,
-                "claimState": integration.integrationPublication.claimState,
+                "claimState": publication.claimState,
             },
             observed={
                 "requestedDisposition": action,
@@ -55,30 +83,63 @@ def require_completed_disposition(
                 "dry_run": False,
             },
         )
-    closeout_owner = (
-        record.operationKind == "closeout"
-        and record.generationDisposition == "active"
-        and closeout_generation_retained(record)
-        and record.closeoutFinalizedContractSha256 == closeout_contract_sha256(contract)
+
+
+def _completed_closeout_owner(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> bool:
+    observed = (
+        record.operationKind,
+        record.generationDisposition,
+        closeout_generation_retained(record),
+        record.closeoutFinalizedContractSha256,
     )
+    expected = (
+        "closeout",
+        "active",
+        True,
+        closeout_contract_sha256(contract),
+    )
+    return observed == expected
+
+
+def _completed_direct_owner(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> bool:
     publication = record.doorPublication
-    direct_owner = bool(
-        record.operationKind == "direct-landing"
-        and record.generationDisposition == "active"
-        and publication is not None
-        and publication.state == "proven"
-        and publication.generation.disposition == "claimed"
-        and publication.generation.operationKind == "direct-landing"
-        and publication.generation.operationFingerprint == record.fingerprint
-        and publication.generation.claimedOperationKey == record.operationKey
-        and contract.closeout_door == publication.generation
+    generation = getattr(publication, "generation", None)
+    observed = (
+        record.operationKind,
+        record.generationDisposition,
+        getattr(publication, "state", None),
+        getattr(generation, "disposition", None),
+        getattr(generation, "operationKind", None),
+        getattr(generation, "operationFingerprint", None),
+        getattr(generation, "claimedOperationKey", None),
+        contract.closeout_door,
     )
-    exact_owner = closeout_owner or direct_owner
-    if (
-        record.status != "completed"
-        or contract.integration_status == "completed"
-        or not exact_owner
-    ):
+    expected = (
+        "direct-landing",
+        "active",
+        "proven",
+        "claimed",
+        "direct-landing",
+        record.fingerprint,
+        record.operationKey,
+        generation,
+    )
+    return observed == expected
+
+
+def _require_completed_owner(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    exact_owner: bool,
+) -> None:
+    observed = (record.status, contract.integration_status == "completed", exact_owner)
+    if observed != ("completed", False, True):
         raise LifecycleControlError(
             "lifecycle-disposition-not-allowed",
             "retire/supersede requires an exact completed but unintegrated door owner",
@@ -88,10 +149,4 @@ def require_completed_disposition(
                 "exactGenerationOwner": exact_owner,
             },
             next_action="recover",
-        )
-    if record.workerPid is not None:
-        raise LifecycleControlError(
-            "lifecycle-worker-still-authoritative",
-            "completed operation worker exit has not been proven",
-            next_action="cancel",
         )

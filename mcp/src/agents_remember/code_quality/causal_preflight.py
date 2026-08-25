@@ -256,22 +256,12 @@ def preflight_scope_units() -> str:
 
 
 def candidate_identity(project_root: Path) -> dict[str, object]:
-    completed = run_git(project_root.resolve(), ["write-tree"])
-    tree = completed.stdout.strip()
-    if completed.returncode != 0 or re.fullmatch(r"[0-9a-f]{40,64}", tree) is None:
-        raise RuntimeError("causal preflight could not bind the candidate index tree")
-    attempt = os.environ.get(QUALITY_ATTEMPT_NONCE_ENV, "")
-    if re.fullmatch(r"[0-9a-f]{32}", attempt) is None:
-        raise RuntimeError(f"{QUALITY_ATTEMPT_NONCE_ENV} is absent or invalid")
-    environment = {
-        "python": platform.python_version(),
-        "implementation": platform.python_implementation(),
-        "platform": platform.platform(),
-    }
-    environment_json = json.dumps(environment, sort_keys=True, separators=(",", ":"))
+    tree = _candidate_tree(project_root)
+    attempt = _quality_attempt_nonce()
+    environment, environment_id = _environment_identity()
     return {
         "tree": tree,
-        "environmentId": hashlib.sha256(environment_json.encode()).hexdigest(),
+        "environmentId": environment_id,
         "attemptNonceSha256": hashlib.sha256(attempt.encode()).hexdigest(),
         "environment": environment,
         "rawInputs": {
@@ -279,6 +269,31 @@ def candidate_identity(project_root: Path) -> dict[str, object]:
             "qualityAttemptNoncePresent": True,
         },
     }
+
+
+def _candidate_tree(project_root: Path) -> str:
+    completed = run_git(project_root.resolve(), ["write-tree"])
+    tree = completed.stdout.strip()
+    if completed.returncode != 0 or re.fullmatch(r"[0-9a-f]{40,64}", tree) is None:
+        raise RuntimeError("causal preflight could not bind the candidate index tree")
+    return tree
+
+
+def _quality_attempt_nonce() -> str:
+    attempt = os.environ.get(QUALITY_ATTEMPT_NONCE_ENV, "")
+    if re.fullmatch(r"[0-9a-f]{32}", attempt) is None:
+        raise RuntimeError(f"{QUALITY_ATTEMPT_NONCE_ENV} is absent or invalid")
+    return attempt
+
+
+def _environment_identity() -> tuple[dict[str, str], str]:
+    environment = {
+        "python": platform.python_version(),
+        "implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+    }
+    environment_json = json.dumps(environment, sort_keys=True, separators=(",", ":"))
+    return environment, hashlib.sha256(environment_json.encode()).hexdigest()
 
 
 def failed_report(path: Path) -> bool:

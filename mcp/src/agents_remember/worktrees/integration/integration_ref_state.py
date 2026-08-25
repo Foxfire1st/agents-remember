@@ -184,6 +184,11 @@ def _read_ref(
                 ref,
                 error_type="repository-unreadable",
             )
+        existence = run_git(repository, ["show-ref", "--verify", "--quiet", ref])
+        if existence.returncode == 1:
+            return IntegrationRefObservation(side, ref, error_type="ref-missing")
+        if existence.returncode != 0:
+            return IntegrationRefObservation(side, ref, error_type="ref-unreadable")
         result = run_git(repository, ["show-ref", "--verify", "--hash", ref])
     except OSError:
         return IntegrationRefObservation(
@@ -196,5 +201,5 @@ def _read_ref(
     return IntegrationRefObservation(
         side,
         ref,
-        error_type="ref-missing" if result.returncode == 1 else "ref-unreadable",
+        error_type="ref-unreadable",
     )

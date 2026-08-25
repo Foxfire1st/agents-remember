@@ -188,18 +188,46 @@ def _validate_population(
     configuration: tuple[AuditedConfiguration, ...],
     nodes: tuple[CohortNode, ...],
 ) -> None:
+    _require_population_limits(python_files, nodes)
+    _require_unique_population(python_files, configuration, nodes)
+    _require_configuration_paths(configuration)
+    files = {item.path: item for item in python_files}
+    symbols = {f"{item.path}::{symbol}" for item in python_files for symbol in item.symbols}
+    _require_local_import_closure(python_files, files)
+    _require_node_closure(nodes, files, symbols)
+    _require_reachable_python_files(files, nodes)
+
+
+def _require_population_limits(
+    python_files: tuple[AuditedPythonFile, ...],
+    nodes: tuple[CohortNode, ...],
+) -> None:
     if len(python_files) > MAX_COHORT_FILES:
         raise _invalid(f"cohort may audit at most {MAX_COHORT_FILES} Python files")
     if len(nodes) > MAX_DIRECT_NODES:
         raise _invalid(f"cohort may contain at most {MAX_DIRECT_NODES} exact nodes")
+
+
+def _require_unique_population(
+    python_files: tuple[AuditedPythonFile, ...],
+    configuration: tuple[AuditedConfiguration, ...],
+    nodes: tuple[CohortNode, ...],
+) -> None:
     _unique((item.path for item in python_files), "python_file paths")
     _unique((item.path for item in configuration), "configuration paths")
     _unique((item.node_id for item in nodes), "node ids")
+
+
+def _require_configuration_paths(configuration: tuple[AuditedConfiguration, ...]) -> None:
     config_paths = tuple(item.path for item in configuration)
     if config_paths != REQUIRED_CONFIGURATION_PATHS:
         raise _invalid(f"configuration paths must be {REQUIRED_CONFIGURATION_PATHS!r}")
-    files = {item.path: item for item in python_files}
-    symbols = {f"{item.path}::{symbol}" for item in python_files for symbol in item.symbols}
+
+
+def _require_local_import_closure(
+    python_files: tuple[AuditedPythonFile, ...],
+    files: Mapping[str, AuditedPythonFile],
+) -> None:
     for item in python_files:
         missing = sorted(set(item.local_imports) - set(files))
         if missing:
@@ -208,6 +236,13 @@ def _validate_population(
                 f"{item.path} declares unaudited local imports: {missing}",
                 path=item.path,
             )
+
+
+def _require_node_closure(
+    nodes: tuple[CohortNode, ...],
+    files: Mapping[str, AuditedPythonFile],
+    symbols: set[str],
+) -> None:
     for node in nodes:
         path = node.node_id.split("::", maxsplit=1)[0]
         if path not in files:
@@ -221,7 +256,6 @@ def _validate_population(
             )
         if node.node_id not in node.closure:
             raise _invalid(f"node {node.node_id!r} must include itself in closure")
-    _require_reachable_python_files(files, nodes)
 
 
 def _require_reachable_python_files(

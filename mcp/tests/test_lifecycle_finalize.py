@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import tempfile
 import unittest
 from dataclasses import replace
@@ -11,12 +12,12 @@ from unittest.mock import patch
 import agents_remember.tasks.store as task_store
 from agents_remember.application.worktree_tools import FinalizeTaskDocs
 from agents_remember.mcp.tools.lifecycle_finalize import lifecycle_finalize_task_payload
+from agents_remember.models.lifecycles import finalize as finalize_models
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.tasks import CompletionBlocker, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -196,12 +197,28 @@ class LifecycleFinalizeTests(unittest.TestCase):
         self.assertEqual(read_task_doc(leaf_json).status, "inProgress")
         self.assertEqual(read_task_doc(master_json).subTasks[0].status, "inProgress")
 
-    def test_queue_refusal_after_cleanup_does_not_mutate_task_docs(self) -> None:
+    def test_queue_rebuild_failure_after_cleanup_does_not_block_task_truth(self) -> None:
         contract = self._contract()
         leaf_json, master_json = self._docs(contract)
+        sprint = TaskDocument.model_validate(
+            {
+                "id": "sprint",
+                "slug": "sprint",
+                "title": "Sprint",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "repo-a",
+                "type": "Master",
+                "createdAt": "2026-06-23T20:00",
+                "orchestrates": [contract.task_root.name],
+                "integrationBranch": "ar/super",
+            }
+        )
+        write_task_doc(contract.task_root.parent / "sprint", sprint)
         with patch(
-            "agents_remember.worktrees.modules.finalize._reconcile_task_documents",
-            side_effect=CloseoutQueueError("closeout-queue-blocked", "lane is owned"),
+            "agents_remember.worktrees.task_fact_publication."
+            "rebuild_invalidated_closeout_projection",
+            side_effect=RuntimeError("forced queue rebuild cut"),
         ):
             result = finalize_result(
                 FinalizeArgs(
@@ -212,11 +229,14 @@ class LifecycleFinalizeTests(unittest.TestCase):
                 )
             )
         payload = _payload(result)
-        self.assertEqual(payload["state"], "task-queue-blocked")
-        self.assertIn("closeout-queue-blocked", payload["blockers"][0])
-        self.assertIn("sprint closeout queue", payload["summary"])
-        self.assertEqual(read_task_doc(leaf_json).status, "inProgress")
-        self.assertEqual(read_task_doc(master_json).subTasks[0].status, "inProgress")
+        self.assertEqual(payload["state"], "finalized")
+        self.assertEqual(read_task_doc(leaf_json).status, "Completed")
+        self.assertEqual(read_task_doc(master_json).subTasks[0].status, "Completed")
+        self.assertEqual(len(payload["projectionEffects"]), 1)
+        effect = payload["projectionEffects"][0]
+        self.assertEqual(effect["invalidation"]["outcome"], "persisted-empty")
+        self.assertEqual(effect["rebuild"]["outcome"], "source-unreadable")
+        self.assertIn("closeout_queue(action='rebuild'", effect["nextAction"])
 
     def test_second_document_publish_failure_rolls_back_leaf_and_parent(self) -> None:
         contract = self._contract()
@@ -552,6 +572,18 @@ class LifecycleFinalizeTests(unittest.TestCase):
             PUBLIC_TOOL_RESPONSE_MODELS["lifecycle_finalize_task"],
             LifecycleFinalizeTaskResponse,
         )
+
+    def test_finalize_response_projection_effect_field_loads_under_coverage(self) -> None:
+        response_model = importlib.reload(finalize_models).LifecycleFinalizeTaskResponse
+        validated = response_model.model_validate(
+            {
+                "ok": True,
+                "state": "would-finalize",
+                "contractPath": "/fixture/series-contract.md",
+                "projectionEffects": [],
+            }
+        )
+        self.assertEqual(validated.projectionEffects, [])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agents_remember.application.lifecycle.configured_contract_admission import (
+    ConfiguredContractAccepted,
     ConfiguredContractRefused,
     admit_configured_contract,
     execute_configured_contract_operation,
@@ -31,41 +32,53 @@ def closeout_door_tool(
     configured = admit_configured_contract(config, request.contract_path)
     if isinstance(configured, ConfiguredContractRefused):
         return _door_configured_refusal(request, configured)
+    actor = _resolve_door_actor(config, request)
+    return _execute_closeout_door(config, request, configured, actor)
+
+
+def _resolve_door_actor(config: McpRuntimeConfig, request: CloseoutDoorRequest) -> DoorActor:
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     try:
         caller = resolve_ambient_seat(catalog)
     except AmbientSeatError as exc:
-        if exc.status != "ambient-seat-unavailable":
-            raise CloseoutQueueError(
-                exc.status,
-                "the hosted closeout-door caller identity could not be resolved",
-            ) from exc
-        execution = execute_configured_contract_operation(
-            configured,
-            lambda: apply_closeout_door(
-                config,
-                request,
-                actor=_declared_actor(request),
-                admitted_contract=configured.contract,
-            ),
-        )
-        return (
-            _door_configured_refusal(request, execution)
-            if isinstance(execution, ConfiguredContractRefused)
-            else execution
-        )
-    document = caller.binding_task_document_ref
+        return _unhosted_door_actor(request, exc)
+    return _hosted_door_actor(request, caller.binding_role, caller.binding_task_document_ref)
+
+
+def _unhosted_door_actor(request: CloseoutDoorRequest, error: AmbientSeatError) -> DoorActor:
+    if error.status != "ambient-seat-unavailable":
+        raise CloseoutQueueError(
+            error.status,
+            "the hosted closeout-door caller identity could not be resolved",
+        ) from error
+    return _declared_actor(request)
+
+
+def _hosted_door_actor(
+    request: CloseoutDoorRequest,
+    role: str,
+    document: TaskDocumentRef | None,
+) -> DoorActor:
     if document is None:
         raise CloseoutQueueError(
             "ambient-seat-unbound", "closeout door callers require a canonical task document"
         )
-    _refuse_hosted_declared_conflict(request, caller.binding_role, document)
+    _refuse_hosted_declared_conflict(request, role, document)
+    return DoorActor(role=role, task_document_ref=document)
+
+
+def _execute_closeout_door(
+    config: McpRuntimeConfig,
+    request: CloseoutDoorRequest,
+    configured: ConfiguredContractAccepted,
+    actor: DoorActor,
+) -> dict[str, object]:
     execution = execute_configured_contract_operation(
         configured,
         lambda: apply_closeout_door(
             config,
             request,
-            actor=DoorActor(role=caller.binding_role, task_document_ref=document),
+            actor=actor,
             admitted_contract=configured.contract,
         ),
     )

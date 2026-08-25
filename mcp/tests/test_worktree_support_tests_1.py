@@ -231,6 +231,21 @@ class WorktreeSupport1(WorktreeSupportTests):
                     }
                 ),
             )
+            write_task_doc(
+                task_root,
+                TaskDocument.model_validate(
+                    {
+                        "id": "15",
+                        "slug": "15_leaf",
+                        "title": "Leaf task",
+                        "kind": "subTask",
+                        "status": "inProgress",
+                        "repo": "repo-a",
+                        "createdAt": "2026-06-24T02:01",
+                        "master": "task.md",
+                    }
+                ),
+            )
 
             result = worktree_manager.start_result(
                 worktree_manager.WorktreeArgs(
@@ -660,6 +675,8 @@ class WorktreeSupport1(WorktreeSupportTests):
     def test_start_ignores_legacy_ledger_branch_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            code_repo = root / "repo-a"
+            code_base = init_repo(code_repo, "main")
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_base = init_repo(memory_repo, "main")
             (memory_repo / "memory.md").write_text(
@@ -673,10 +690,10 @@ class WorktreeSupport1(WorktreeSupportTests):
                         '  "repoName": "repo-a",',
                         '  "trackedCodeBranch": "dev",',
                         '  "memoryBranch": "dev",',
-                        '  "baseCodeCommit": "c1",',
-                        '  "baseMemoryCommit": "m1",',
-                        '  "lastVerifiedCodeCommit": "c1",',
-                        '  "lastMemoryContentCommit": "m1",',
+                        f'  "baseCodeCommit": "{code_base}",',
+                        f'  "baseMemoryCommit": "{memory_base}",',
+                        f'  "lastVerifiedCodeCommit": "{code_base}",',
+                        f'  "lastMemoryContentCommit": "{memory_base}",',
                         '  "sortOrder": "newest-first"',
                         "}",
                         "```",
@@ -685,7 +702,7 @@ class WorktreeSupport1(WorktreeSupportTests):
                         "",
                         "| Code commit | Memory commit |",
                         "| ----------- | ------------- |",
-                        "| c1 | m1 |",
+                        f"| {code_base} | {memory_base} |",
                     ]
                 ),
                 encoding="utf-8",
@@ -702,10 +719,10 @@ class WorktreeSupport1(WorktreeSupportTests):
                 ),
                 leaf=LeafIdentity(worktree_name="fix-thing"),
                 code=RepoBranchPlan(
-                    repo_path=root / "repo-a",
+                    repo_path=code_repo,
                     source_branch="main",
                     work_branch="ar/fix-thing",
-                    base_commit="c1",
+                    base_commit=code_base,
                 ),
                 memory=RepoBranchPlan(
                     repo_path=memory_repo,
@@ -724,10 +741,13 @@ class WorktreeSupport1(WorktreeSupportTests):
     def test_start_blocks_dirty_external_memory_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            code_repo = root / "repo-a"
+            code_base = init_repo(code_repo, "main")
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_seed = init_repo(memory_repo, "main")
             write_ledger(
-                memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", memory_seed)
+                memory_repo / "memory.md",
+                create_initial_ledger("repo-a", code_base, memory_seed),
             )
             git(memory_repo, "add", "memory.md")
             git(memory_repo, "commit", "-m", "Add memory ledger")
@@ -743,10 +763,10 @@ class WorktreeSupport1(WorktreeSupportTests):
                 ),
                 leaf=LeafIdentity(worktree_name="fix-thing"),
                 code=RepoBranchPlan(
-                    repo_path=root / "repo-a",
+                    repo_path=code_repo,
                     source_branch="main",
                     work_branch="ar/fix-thing",
-                    base_commit="c1",
+                    base_commit=code_base,
                 ),
                 memory=RepoBranchPlan(
                     repo_path=memory_repo,
@@ -765,11 +785,13 @@ class WorktreeSupport1(WorktreeSupportTests):
     def test_start_reports_compatible_external_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            code_repo = root / "repo-a"
+            code_base = init_repo(code_repo, "main")
             memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
             memory_base = init_repo(memory_repo, "main")
             write_ledger(
                 memory_repo / "memory.md",
-                create_initial_ledger("repo-a", "c1", memory_base),
+                create_initial_ledger("repo-a", code_base, memory_base),
             )
             git(memory_repo, "add", "memory.md")
             git(memory_repo, "commit", "-m", "ledger")
@@ -783,10 +805,10 @@ class WorktreeSupport1(WorktreeSupportTests):
                 ),
                 leaf=LeafIdentity(worktree_name="fix-thing"),
                 code=RepoBranchPlan(
-                    repo_path=root / "repo-a",
+                    repo_path=code_repo,
                     source_branch="main",
                     work_branch="ar/fix-thing",
-                    base_commit="c1",
+                    base_commit=code_base,
                 ),
                 memory=RepoBranchPlan(
                     repo_path=memory_repo,
@@ -1123,8 +1145,7 @@ class WorktreeSupport1(WorktreeSupportTests):
             plan = worktree_manager.onboarding_refresh_plan(contract, ["feature.txt"])
 
             self.assertEqual(plan["required"], [])
-            self.assertEqual(plan["missing"], [])
-            self.assertEqual(plan["unsupported"], [])
+            self.assertEqual((plan["missing"], plan["unsupported"]), ([], []))
 
     def test_changed_worktree_paths_includes_long_files(self) -> None:
         with long_path_tempdir() as root:
@@ -1175,5 +1196,4 @@ class WorktreeSupport1(WorktreeSupportTests):
             plan = worktree_manager.onboarding_refresh_plan_for_context(context, [source_path])
 
             self.assertEqual(plan["required"][0]["source_path"], source_path)
-            self.assertEqual(plan["missing"], [])
-            self.assertEqual(plan["unsupported"], [])
+            self.assertEqual((plan["missing"], plan["unsupported"]), ([], []))

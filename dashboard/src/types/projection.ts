@@ -410,7 +410,7 @@ export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics 
 
 export interface ProjectionInvalidationResult {
   diagnostic?: ProjectionSourceProblem;
-  outcome: "persisted-empty" | "already-empty" | "not-created" | "recovered-malformed" | "would-recover-malformed" | "would-persist-empty" | "failed";
+  outcome: "persisted-empty" | "already-empty" | "recovered-malformed" | "would-recover-malformed" | "would-persist-empty" | "failed";
   /** JSON Schema refinements: {"minimum":0} */
   revision?: number;
 }

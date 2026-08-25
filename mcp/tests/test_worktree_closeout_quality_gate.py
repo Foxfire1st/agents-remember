@@ -351,7 +351,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "accepted_code_commit") as commit,
                 self.assertRaisesRegex(RuntimeError, "candidate changed after quality"),
             ):
-                closeout_module.closeout_result(args, contract)
+                closeout_module.closeout_result(args, series)
 
             claim.assert_not_called()
             commit.assert_not_called()
@@ -397,7 +397,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
                 self.assertRaisesRegex(RuntimeError, "cannot create code, memory, or ledger"),
             ):
-                closeout_module.closeout_result(args, contract)
+                closeout_module.closeout_result(args, series)
 
             claim.assert_not_called()
 

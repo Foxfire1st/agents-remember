@@ -18,6 +18,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationStatus,
 )
+from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
     require_closeout_finalization_evidence,
@@ -179,27 +180,52 @@ def _validate_worker_transition(
 ) -> None:
     before = current.workerTermination
     after = updated.workerTermination
-    archived_exit = (
+    if before is not None and not _worker_exit_was_archived(current, updated):
+        _validate_worker_termination_evidence(before, after)
+    _validate_worker_authority_transition(current, updated)
+    history = current.workerTerminationHistory
+    if updated.workerTerminationHistory[: len(history)] != history:
+        raise RuntimeError("worker termination history is append-only")
+
+
+def _worker_exit_was_archived(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> bool:
+    before = current.workerTermination
+    return (
         before is not None
         and before.state == "exited"
-        and after is None
+        and updated.workerTermination is None
         and updated.workerTerminationHistory == [*current.workerTerminationHistory, before]
     )
-    if before is not None and not archived_exit:
-        allowed = {
-            "requested": {"requested", "termination-required", "exited"},
-            "termination-required": {"termination-required", "exited"},
-            "exited": {"exited"},
-        }
-        if after is None or after.state not in allowed[before.state]:
-            raise RuntimeError("worker termination evidence is monotonic")
-        if (
-            after.pid != before.pid
-            or after.lease != before.lease
-            or after.processFingerprint != before.processFingerprint
-            or after.requestedAt != before.requestedAt
-        ):
-            raise RuntimeError("worker termination identity is immutable")
+
+
+def _validate_worker_termination_evidence(
+    before: WorkerTerminationEvidence,
+    after: WorkerTerminationEvidence | None,
+) -> None:
+    allowed = {
+        "requested": {"requested", "termination-required", "exited"},
+        "termination-required": {"termination-required", "exited"},
+        "exited": {"exited"},
+    }
+    if after is None or after.state not in allowed[before.state]:
+        raise RuntimeError("worker termination evidence is monotonic")
+    if (
+        after.pid != before.pid
+        or after.lease != before.lease
+        or after.processFingerprint != before.processFingerprint
+        or after.requestedAt != before.requestedAt
+    ):
+        raise RuntimeError("worker termination identity is immutable")
+
+
+def _validate_worker_authority_transition(
+    current: LifecycleOperationRecord,
+    updated: LifecycleOperationRecord,
+) -> None:
+    after = updated.workerTermination
     if current.workerLease is not None and updated.workerLease not in {
         current.workerLease,
         None,
@@ -211,9 +237,6 @@ def _validate_worker_transition(
         and (after is None or after.state != "exited")
     ):
         raise RuntimeError("worker authority cannot clear before proven exit")
-    history = current.workerTerminationHistory
-    if updated.workerTerminationHistory[: len(history)] != history:
-        raise RuntimeError("worker termination history is append-only")
 
 
 def _validate_door_publication_transition(
@@ -495,6 +518,10 @@ class LifecycleOperationStore:
             return updated, True
 
     def create(self, record: LifecycleOperationRecord) -> tuple[LifecycleOperationRecord, bool]:
+        # Validate the candidate against this store address even when a current
+        # generation already exists. Otherwise a record for another lifecycle
+        # plane can be mistaken for a convergent duplicate.
+        _require_record_matches_canonical_path(self.path, record)
         with exclusive_access(self.path, _OWNERSHIP):
             current = self.read()
             if current is not None:

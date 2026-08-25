@@ -323,6 +323,7 @@ class WorktreeSupport2(WorktreeSupportTests):
             with (
                 mock.patch.object(integrate_module, "require_ordinary_worktree"),
                 mock.patch.object(integrate_module, "integration_targets", return_value=()),
+                mock.patch.object(integrate_module, "_integration_door_block", return_value=None),
                 redirect_stdout(output),
             ):
                 self.assertEqual(

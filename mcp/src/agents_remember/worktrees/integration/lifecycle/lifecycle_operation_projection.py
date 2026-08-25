@@ -216,7 +216,11 @@ def _operation_specific_projected_result(
                 ledger_recovery.detail,
                 "Resolve the exact ledger byte/tree contradiction.",
             )
-    if contract is not None and record.operationKind == "direct-landing":
+    if (
+        contract is not None
+        and record.operationKind == "direct-landing"
+        and record.status not in {"completed", "cancelled"}
+    ):
         direct_recovery = classify_direct_landing_recovery(contract, record)
         if direct_recovery.state == "developer-decision":
             return (

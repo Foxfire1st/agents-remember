@@ -88,6 +88,11 @@ class TestResolveTaskTargets:
                 return_value=(tmp_path / "leaf.json", leaf),
             ),
             mock.patch.object(
+                finalize,
+                "read_task_doc_with_source",
+                return_value=(leaf, mock.Mock()),
+            ),
+            mock.patch.object(
                 finalize, "_resolve_parent_target", return_value=FinalizeTaskTargets()
             ),
         ):
@@ -139,7 +144,7 @@ class TestResolveParentTarget:
             mock.patch.object(
                 finalize, "_expected_parent_path", return_value=tmp_path / "task.json"
             ),
-            mock.patch.object(finalize, "_read_parent", return_value=parent),
+            mock.patch.object(finalize, "_read_parent", return_value=(parent, mock.Mock())),
             mock.patch.object(finalize, "_exact_parent_row", return_value=row),
             mock.patch.object(finalize, "_check_parent_row_path", return_value=None),
             mock.patch.object(finalize, "_parent_completion_candidate", return_value=parent),

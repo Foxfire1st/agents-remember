@@ -682,7 +682,7 @@ class DirectLandingBranchTests(unittest.TestCase):
             _without_projection_effects(landed),
         )
 
-    def test_reland_with_conflicting_ledger_mapping_is_refused(self) -> None:
+    def test_completed_reland_replays_durable_result_after_unrelated_memory_edit(self) -> None:
         root = Path(self.temp.name)
         fixture = _series_fixture(root / "fx")
         config = fixture["config"]

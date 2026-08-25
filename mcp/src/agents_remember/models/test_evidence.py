@@ -188,19 +188,33 @@ def load_diagnostic_test_evidence(raw: Mapping[str, object]) -> DiagnosticTestEv
 
 
 def _load_candidate_binding(raw: object) -> CandidateBinding:
-    if not isinstance(raw, dict) or set(raw) != {
-        "digest",
-        "policyVersion",
-        "configurationPaths",
-    }:
+    binding = _candidate_binding_mapping(raw)
+    digest = _candidate_digest(binding.get("digest"))
+    policy_version = _candidate_policy_version(binding.get("policyVersion"))
+    paths = _candidate_configuration_paths(binding.get("configurationPaths"))
+    return CandidateBinding(digest, policy_version, paths)
+
+
+def _candidate_binding_mapping(raw: object) -> dict[object, object]:
+    expected = {"digest", "policyVersion", "configurationPaths"}
+    if not isinstance(raw, dict) or set(raw) != expected:
         raise EvidencePayloadError("diagnostic candidate binding is invalid")
-    digest = raw.get("digest")
-    policy_version = raw.get("policyVersion")
-    paths = raw.get("configurationPaths")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+    return raw
+
+
+def _candidate_digest(raw: object) -> str:
+    if not isinstance(raw, str) or re.fullmatch(r"[0-9a-f]{64}", raw) is None:
         raise EvidencePayloadError("diagnostic candidate digest is invalid")
-    if not isinstance(policy_version, str) or not policy_version:
+    return raw
+
+
+def _candidate_policy_version(raw: object) -> str:
+    if not isinstance(raw, str) or not raw:
         raise EvidencePayloadError("diagnostic policy version is invalid")
-    if not isinstance(paths, list) or any(not isinstance(path, str) or not path for path in paths):
+    return raw
+
+
+def _candidate_configuration_paths(raw: object) -> tuple[str, ...]:
+    if not isinstance(raw, list) or any(not isinstance(path, str) or not path for path in raw):
         raise EvidencePayloadError("diagnostic configuration paths are invalid")
-    return CandidateBinding(digest, policy_version, tuple(paths))
+    return tuple(raw)

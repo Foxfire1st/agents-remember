@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 from dataclasses import replace
@@ -14,6 +15,12 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
     prepend_mapping,
     write_ledger,
+)
+from agents_remember.models.lifecycles.door import (
+    CloseoutDoorGeneration,
+    DoorAdmissionProvenance,
+    DoorProvenance,
+    DoorSchedulingProvenance,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
@@ -404,6 +411,10 @@ def _record_atomic_leaf_landing(
         integrated_memory_content_commit=memory_content_commit,
         integrated_ledger_commit=ledger_commit,
     )
+    landed = replace(
+        landed,
+        closeout_door=_claimed_atomic_leaf_door(fixture, landed),
+    )
     write_contract(landed.contract_path, landed)
     fixture.leaf_contract = landed
     return landed
@@ -461,6 +472,10 @@ def _record_additional_atomic_leaf_landing(
         integrated_memory_content_commit=memory_content_commit,
         integrated_ledger_commit=ledger_commit,
     )
+    landed = replace(
+        landed,
+        closeout_door=_claimed_atomic_leaf_door(fixture, landed),
+    )
     first_doc_path = fixture.coordination / "tasks" / "repo" / fixture.leaf_ref.path
     first_doc = read_task_doc(first_doc_path)
     write_task_doc(
@@ -487,6 +502,74 @@ def _record_additional_atomic_leaf_landing(
     )
     write_contract(landed.contract_path, landed)
     return landed
+
+
+def _claimed_atomic_leaf_door(fixture, leaf: WorktreeContract) -> CloseoutDoorGeneration:
+    """Attach exact task ownership to synthetic already-landed atomic leaf facts."""
+
+    leaf_ref = TaskDocumentRef(
+        repository=leaf.repo_name,
+        path=f"{leaf.task_name}/{leaf.leaf_id.lower()}.json",
+    )
+    master_ref = TaskDocumentRef(
+        repository=leaf.repo_name,
+        path=f"{leaf.task_name}/task.json",
+    )
+    sprint_ref = TaskDocumentRef(repository=leaf.repo_name, path="sprint/task.json")
+    identity = json.dumps(
+        {
+            "contractPath": leaf.contract_path.as_posix(),
+            "candidateTree": _git(
+                fixture.code_repo,
+                "rev-parse",
+                f"{leaf.code_commit}^{{tree}}",
+            ),
+            "taskDocumentRef": leaf_ref.model_dump(mode="json"),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    generation = hashlib.sha256(identity).hexdigest()
+    not_applicable = DoorProvenance(
+        state="not-applicable",
+        fingerprint=hashlib.sha256(b"atomic-landed-not-applicable").hexdigest(),
+    )
+    return CloseoutDoorGeneration(
+        generationId=generation,
+        disposition="claimed",
+        taskId=leaf.task_id,
+        taskName=leaf.task_name,
+        taskDocumentRef=leaf_ref,
+        owningMasterTaskDocumentRef=master_ref,
+        sprintTaskDocumentRef=sprint_ref,
+        contractPath=leaf.contract_path.as_posix(),
+        candidateTree=_git(fixture.code_repo, "rev-parse", f"{leaf.code_commit}^{{tree}}"),
+        memoryCandidateTree=(
+            _git(leaf.memory_repo_path, "rev-parse", f"{leaf.ledger_commit}^{{tree}}")
+            if leaf.memory_repo_path is not None and leaf.ledger_commit
+            else ""
+        ),
+        codeBaseCommit=leaf.code_base_commit,
+        memoryBaseCommit=leaf.memory_base_commit,
+        ledgerMemoryCommit=leaf.memory_base_commit,
+        taskTopologyFingerprint=hashlib.sha256(b"atomic-landed-topology").hexdigest(),
+        reviewProvenance=not_applicable,
+        memoryProvenance=not_applicable,
+        ledgerProvenance=not_applicable,
+        admissionProvenance=DoorAdmissionProvenance(
+            fingerprint=hashlib.sha256(b"atomic-landed-admission").hexdigest(),
+        ),
+        schedulingProvenance=DoorSchedulingProvenance(
+            priority="normal",
+            judgmentId="ATOMIC-LANDING-FIXTURE",
+            fingerprint=hashlib.sha256(b"atomic-landed-scheduling").hexdigest(),
+        ),
+        declaredBy="test-fixture:atomic-landing",
+        declaredAt="2026-08-22T00:00:00+00:00",
+        operationKind="direct-landing",
+        operationFingerprint=hashlib.sha256(identity + b"fingerprint").hexdigest(),
+        claimedOperationKey=hashlib.sha256(identity + b"operation").hexdigest(),
+    )
 
 
 def _land_two_external_atomic_leaves(

@@ -130,6 +130,16 @@ class _CloseoutClaimContext:
     door: CloseoutDoorGeneration
 
 
+@dataclass(frozen=True)
+class _GenerationReplacement:
+    store: LifecycleOperationStore
+    queued: LifecycleOperationRecord
+    current: LifecycleOperationRecord
+    contract: WorktreeContract
+    operation_input: LifecycleOperationInput
+    candidate: LifecycleOperationCandidate
+
+
 class _CloseoutResumeNoLongerRequired(Exception):
     """The current record advanced while an exact duplicate was being resumed."""
 
@@ -564,63 +574,159 @@ def _create_or_replace_generation(
     current, created = store.create(queued)
     if current.fingerprint == candidate.fingerprint:
         return current, created
+    _require_terminal_generation(current, operation_input, contract)
+    return _replace_terminal_generation(
+        _GenerationReplacement(
+            store=store,
+            queued=queued,
+            current=current,
+            contract=contract,
+            operation_input=operation_input,
+            candidate=candidate,
+        )
+    )
+
+
+def _require_terminal_generation(
+    current: LifecycleOperationRecord,
+    operation_input: LifecycleOperationInput,
+    contract: WorktreeContract,
+) -> None:
     if current.status not in {"completed", "failed", "cancelled"}:
         raise RuntimeError(
             f"conflicting {operation_input.kind} operation already exists for task "
             f"{contract.task_name}; wait for or resolve that task-bound operation"
         )
-    if current.status == "cancelled" and operation_input.kind == "integrate":
-        if current.candidateState == candidate.state:
-            raise RuntimeError(
-                "cancelled integrate generation requires an advanced task state before "
-                "a fresh integration successor"
-            )
-        return store.replace_terminal(queued), True
-    if current.status == "cancelled" and operation_input.kind == "closeout":
-        successor = contract.closeout_door
-        predecessor = claimed_predecessor_for_waiting_successor(current, successor)
-        eligible = (
-            successor is not None
-            and successor.disposition == "waiting"
-            and predecessor is not None
-            and predecessor.state == "proven"
-            and predecessor.generation.disposition == "claimed"
-            and successor.predecessorGenerationId == predecessor.generation.generationId
-            and current.generationDisposition == "cancelled"
-            and current.cancellationEvidence is not None
-            and current.cancellationEvidence.workerExitProven
-        )
-        if not eligible:
-            raise RuntimeError(
-                "cancelled closeout can advance only through an exact waiting door successor "
-                "after proven worker exit"
-            )
-        return store.replace_terminal(queued), True
-    if current.status != "completed":
+
+
+def _replace_terminal_generation(
+    replacement: _GenerationReplacement,
+) -> tuple[LifecycleOperationRecord, bool]:
+    if replacement.current.status == "cancelled":
+        return _replace_cancelled_generation(replacement)
+    if replacement.current.status == "failed":
         raise RuntimeError(
-            f"terminal {operation_input.kind} generation requires the explicit "
+            f"terminal {replacement.operation_input.kind} generation requires the explicit "
             "task-addressed retry/recover/revise control"
         )
-    if (
-        operation_input.kind == "closeout"
-        and current.generationDisposition == "active"
-        and contract.integration_status != "completed"
-        and closeout_generation_retained(current)
-    ):
+    return _replace_completed_generation(replacement)
+
+
+def _replace_cancelled_generation(
+    replacement: _GenerationReplacement,
+) -> tuple[LifecycleOperationRecord, bool]:
+    if replacement.operation_input.kind == "integrate":
+        return _replace_cancelled_integrate(
+            replacement.store,
+            replacement.queued,
+            replacement.current,
+            replacement.candidate,
+        )
+    if replacement.operation_input.kind == "closeout":
+        return _replace_cancelled_closeout(
+            replacement.store,
+            replacement.queued,
+            replacement.current,
+            replacement.contract,
+        )
+    raise RuntimeError(
+        f"terminal {replacement.operation_input.kind} generation requires the explicit "
+        "task-addressed retry/recover/revise control"
+    )
+
+
+def _replace_cancelled_integrate(
+    store: LifecycleOperationStore,
+    queued: LifecycleOperationRecord,
+    current: LifecycleOperationRecord,
+    candidate: LifecycleOperationCandidate,
+) -> tuple[LifecycleOperationRecord, bool]:
+    if current.candidateState == candidate.state:
+        raise RuntimeError(
+            "cancelled integrate generation requires an advanced task state before "
+            "a fresh integration successor"
+        )
+    return store.replace_terminal(queued), True
+
+
+def _replace_cancelled_closeout(
+    store: LifecycleOperationStore,
+    queued: LifecycleOperationRecord,
+    current: LifecycleOperationRecord,
+    contract: WorktreeContract,
+) -> tuple[LifecycleOperationRecord, bool]:
+    successor = contract.closeout_door
+    predecessor = claimed_predecessor_for_waiting_successor(current, successor)
+    observed = (
+        getattr(successor, "disposition", None),
+        getattr(predecessor, "state", None),
+        getattr(getattr(predecessor, "generation", None), "disposition", None),
+        getattr(successor, "predecessorGenerationId", None),
+        getattr(getattr(predecessor, "generation", None), "generationId", None),
+        current.generationDisposition,
+        getattr(current.cancellationEvidence, "workerExitProven", False),
+    )
+    if observed != ("waiting", "proven", "claimed", observed[4], observed[4], "cancelled", True):
+        raise RuntimeError(
+            "cancelled closeout can advance only through an exact waiting door successor "
+            "after proven worker exit"
+        )
+    return store.replace_terminal(queued), True
+
+
+def _replace_completed_generation(
+    replacement: _GenerationReplacement,
+) -> tuple[LifecycleOperationRecord, bool]:
+    _require_released_closeout_output(
+        replacement.current,
+        replacement.contract,
+        replacement.operation_input,
+    )
+    _require_advanced_integration_state(
+        replacement.current,
+        replacement.contract,
+        replacement.operation_input,
+        replacement.candidate,
+    )
+    return replacement.store.replace_terminal(replacement.queued), True
+
+
+def _require_released_closeout_output(
+    current: LifecycleOperationRecord,
+    contract: WorktreeContract,
+    operation_input: LifecycleOperationInput,
+) -> None:
+    retained = all(
+        (
+            operation_input.kind == "closeout",
+            current.generationDisposition == "active",
+            contract.integration_status != "completed",
+            closeout_generation_retained(current),
+        )
+    )
+    if retained:
         raise RuntimeError(
             "completed closeout generation still owns unintegrated output; choose the "
             "advertised integrate, retire, or supersede disposition before a successor"
         )
-    if (
-        operation_input.kind == "integrate"
-        and current.status == "completed"
-        and current.candidateState == candidate.state
-    ):
+
+
+def _require_advanced_integration_state(
+    current: LifecycleOperationRecord,
+    contract: WorktreeContract,
+    operation_input: LifecycleOperationInput,
+    candidate: LifecycleOperationCandidate,
+) -> None:
+    unchanged = (
+        operation_input.kind,
+        current.status,
+        current.candidateState,
+    ) == ("integrate", "completed", candidate.state)
+    if unchanged:
         raise RuntimeError(
             f"conflicting {operation_input.kind} parameters target an already completed "
             f"task state for {contract.task_name}; the task state has not advanced"
         )
-    return store.replace_terminal(queued), True
 
 
 def _resume_exact_duplicate_closeout(

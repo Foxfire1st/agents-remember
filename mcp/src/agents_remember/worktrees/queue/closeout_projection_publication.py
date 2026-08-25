@@ -150,7 +150,7 @@ def preview_closeout_projection_effect(
             outcome=(
                 "would-recover-malformed"
                 if malformed is not None
-                else "not-created"
+                else "would-persist-empty"
                 if not existed
                 else "already-empty"
                 if prior.serviceCondition == "invalid-empty"

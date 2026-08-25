@@ -17,6 +17,7 @@ from agents_remember.models.lifecycles.operation import (
     IntegrationPublicationIntent,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.models.lifecycles.termination import WorkerTerminationEvidence
 from agents_remember.worktrees.integration.lifecycle.lifecycle_generation_resume import (
     requeued_same_generation,
 )
@@ -174,6 +175,71 @@ def test_store_refuses_immutable_identity_and_status_transitions(
     _contract_value, store = _closeout_store(tmp_path)
     with pytest.raises(RuntimeError, match=message):
         store.update(lambda record: record.model_copy(update={field: value}))
+
+
+def _worker_termination(
+    *,
+    state: str = "requested",
+    requested_at: str = "2026-08-22T00:00:00+00:00",
+) -> WorkerTerminationEvidence:
+    values: dict[str, object] = {
+        "state": state,
+        "pid": 4242,
+        "lease": "a" * 64,
+        "processFingerprint": "b" * 64,
+        "requestedAt": requested_at,
+    }
+    if state == "exited":
+        values.update({"signal": "none", "observedAt": "2026-08-22T00:01:00+00:00"})
+    return WorkerTerminationEvidence.model_validate(values)
+
+
+def test_store_refuses_worker_termination_history_rewrite(tmp_path: Path) -> None:
+    _contract_value, store = _closeout_store(tmp_path)
+    archived = _worker_termination(state="exited")
+    store.update(lambda record: record.model_copy(update={"workerTerminationHistory": [archived]}))
+    replacement = archived.model_copy(update={"pid": 4343})
+    with pytest.raises(RuntimeError, match="worker termination history is append-only"):
+        store.update(
+            lambda record: record.model_copy(update={"workerTerminationHistory": [replacement]})
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("clear", "worker termination evidence is monotonic"),
+        ("identity", "worker termination identity is immutable"),
+    ],
+)
+def test_store_refuses_worker_termination_regression(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    _contract_value, store = _closeout_store(tmp_path)
+    requested = _worker_termination()
+    store.update(
+        lambda record: record.model_copy(
+            update={
+                "workerPid": requested.pid,
+                "workerLease": requested.lease,
+                "workerProcessFingerprint": requested.processFingerprint,
+                "workerTermination": requested,
+            }
+        )
+    )
+
+    def mutate(record):
+        after = (
+            None
+            if mutation == "clear"
+            else requested.model_copy(update={"requestedAt": "2026-08-22T00:02:00+00:00"})
+        )
+        return record.model_copy(update={"workerTermination": after})
+
+    with pytest.raises(RuntimeError, match=message):
+        store.update(mutate)
 
 
 def test_store_refuses_claim_boundary_and_ambiguous_cancellation(tmp_path: Path) -> None:

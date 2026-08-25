@@ -169,36 +169,73 @@ def curator_evidence(contract: WorktreeContract) -> list[EvidenceFact]:
             ),
         ) from exc
     expected_report = path.resolve().as_posix()
-    expected_onboarding = (
-        (contract.memory_worktree / "onboarding").resolve().as_posix()
-        if contract.memory_worktree is not None
-        else ""
+    expected_onboarding = _expected_onboarding_root(contract)
+    status_lines = _curator_status_lines(text)
+    _require_curator_attestation(
+        attestation,
+        expected_report=expected_report,
+        expected_onboarding=expected_onboarding,
+        status_lines=status_lines,
     )
-    status_lines = [line.strip() for line in text.splitlines() if line.startswith("- Status:")]
-    if (
-        attestation.schema_ != "ar-curator-memory-quality/v1"
-        or attestation.checklistStatus != "ready-for-closeout"
-        or attestation.curatorActionableCount != 0
-        or attestation.memoryRepairCount != 0
-        or attestation.missingOnboardingCount != 0
-        or attestation.staleRouteIndexCount != 0
-        or attestation.reportPath != expected_report
-        or attestation.onboardingRoot != expected_onboarding
-        or status_lines != ["- Status: **ready-for-closeout**"]
-    ):
-        raise CloseoutQueueError(
-            "closeout-candidate-memory-not-ready",
-            "structured curator evidence does not prove the exact ready-for-closeout contract",
-        )
-    if hashlib.sha256(text.encode()).hexdigest() != attestation.reportSha256:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-evidence-stale",
-            "curator checklist bytes do not match the structured attestation",
-        )
+    _require_curator_report_digest(text, attestation.reportSha256)
     evidence = [_evidence_fact(path), _evidence_fact(attestation_path)]
     if attestation.sourceChangeCandidates:
         evidence.append(_coherence_evidence(contract, attestation.sourceChangeCandidates))
     return evidence
+
+
+def _expected_onboarding_root(contract: WorktreeContract) -> str:
+    if contract.memory_worktree is None:
+        return ""
+    return (contract.memory_worktree / "onboarding").resolve().as_posix()
+
+
+def _curator_status_lines(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.startswith("- Status:")]
+
+
+def _require_curator_attestation(
+    attestation: _CuratorAttestation,
+    *,
+    expected_report: str,
+    expected_onboarding: str,
+    status_lines: list[str],
+) -> None:
+    observed = (
+        attestation.schema_,
+        attestation.checklistStatus,
+        attestation.curatorActionableCount,
+        attestation.memoryRepairCount,
+        attestation.missingOnboardingCount,
+        attestation.staleRouteIndexCount,
+        attestation.reportPath,
+        attestation.onboardingRoot,
+        status_lines,
+    )
+    expected = (
+        "ar-curator-memory-quality/v1",
+        "ready-for-closeout",
+        0,
+        0,
+        0,
+        0,
+        expected_report,
+        expected_onboarding,
+        ["- Status: **ready-for-closeout**"],
+    )
+    if observed != expected:
+        raise CloseoutQueueError(
+            "closeout-candidate-memory-not-ready",
+            "structured curator evidence does not prove the exact ready-for-closeout contract",
+        )
+
+
+def _require_curator_report_digest(text: str, expected_sha256: str) -> None:
+    if hashlib.sha256(text.encode()).hexdigest() != expected_sha256:
+        raise CloseoutQueueError(
+            "closeout-candidate-curator-evidence-stale",
+            "curator checklist bytes do not match the structured attestation",
+        )
 
 
 def curator_evidence_blockers(
@@ -228,11 +265,8 @@ def _coherence_evidence(
             f"source-change candidates require the canonical coherence report: {path}",
         ) from exc
     dispositions = _coherence_dispositions(coherence)
-    expected = {
-        (candidate.sourceFile, candidate.onboardingFile, candidate.classification)
-        for candidate in candidates
-    }
-    observed = {(row.sourceFile, row.onboardingFile, row.classification) for row in dispositions}
+    expected = set(map(_candidate_identity, candidates))
+    observed = set(map(_disposition_identity, dispositions))
     if len(dispositions) != len(observed) or observed != expected:
         raise CloseoutQueueError(
             "closeout-candidate-curator-disposition-missing",
@@ -241,21 +275,19 @@ def _coherence_evidence(
     return _evidence_fact(path)
 
 
+def _candidate_identity(candidate: _CuratorSourceCandidate) -> tuple[str, str, str]:
+    return candidate.sourceFile, candidate.onboardingFile, candidate.classification
+
+
+def _disposition_identity(row: _CuratorDisposition) -> tuple[str, str, str]:
+    return row.sourceFile, row.onboardingFile, row.classification
+
+
 def _coherence_dispositions(text: str) -> list[_CuratorDisposition]:
     heading = "## Source-change dispositions"
     lines = text.splitlines()
-    starts = [index for index, line in enumerate(lines) if line.strip() == heading]
-    if len(starts) != 1:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            f"coherence report requires exactly one {heading!r} section",
-        )
-    body: list[str] = []
-    for line in lines[starts[0] + 1 :]:
-        if line.strip().startswith("## "):
-            break
-        if line.strip():
-            body.append(line.strip())
+    start = _required_section_start(lines, heading)
+    body = _section_body(lines[start + 1 :])
     expected_header = [
         "Source file",
         "Onboarding file",
@@ -263,48 +295,96 @@ def _coherence_dispositions(text: str) -> list[_CuratorDisposition]:
         "Disposition",
         "Evidence",
     ]
-    if len(body) < 2 or _split_markdown_row(body[0]) != expected_header:
+    _require_disposition_header(body, expected_header)
+    _require_markdown_separator(body[1], width=5)
+    return list(map(_curator_disposition, body[2:]))
+
+
+def _require_disposition_header(body: list[str], expected_header: list[str]) -> None:
+    if len(body) < 2:
         raise CloseoutQueueError(
             "closeout-candidate-curator-disposition-invalid",
             "source-change dispositions require the canonical five-column header",
         )
-    separator = _split_markdown_row(body[1])
-    if len(separator) != 5 or any(re.fullmatch(r":?-{3,}:?", cell) is None for cell in separator):
+    if _split_markdown_row(body[0]) != expected_header:
+        raise CloseoutQueueError(
+            "closeout-candidate-curator-disposition-invalid",
+            "source-change dispositions require the canonical five-column header",
+        )
+
+
+def _required_section_start(lines: list[str], heading: str) -> int:
+    starts = _heading_indices(lines, heading)
+    if len(starts) != 1:
+        raise CloseoutQueueError(
+            "closeout-candidate-curator-disposition-invalid",
+            f"coherence report requires exactly one {heading!r} section",
+        )
+    return starts[0]
+
+
+def _heading_indices(lines: list[str], heading: str) -> list[int]:
+    matches: list[int] = []
+    for index, line in enumerate(lines):
+        if line.strip() == heading:
+            matches.append(index)
+    return matches
+
+
+def _section_body(lines: list[str]) -> list[str]:
+    body: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            return _nonblank_lines(body)
+        body.append(stripped)
+    return _nonblank_lines(body)
+
+
+def _nonblank_lines(lines: list[str]) -> list[str]:
+    return [line for line in lines if line]
+
+
+def _require_markdown_separator(line: str, *, width: int) -> None:
+    separator = _split_markdown_row(line)
+    if (len(separator) == width, _separator_cells_valid(separator)) != (True, True):
         raise CloseoutQueueError(
             "closeout-candidate-curator-disposition-invalid",
             "source-change dispositions require one rectangular Markdown separator row",
         )
-    rows: list[_CuratorDisposition] = []
-    for line in body[2:]:
-        cells = _split_markdown_row(line)
-        if len(cells) != 5:
-            raise CloseoutQueueError(
-                "closeout-candidate-curator-disposition-invalid",
-                "source-change disposition rows must have exactly five cells",
-            )
-        try:
-            rows.append(
-                _CuratorDisposition.model_validate(
-                    {
-                        "sourceFile": cells[0],
-                        "onboardingFile": cells[1],
-                        "classification": cells[2],
-                        "disposition": cells[3],
-                        "evidence": cells[4],
-                    }
-                )
-            )
-        except ValidationError as exc:
-            raise CloseoutQueueError(
-                "closeout-candidate-curator-disposition-invalid",
-                bounded_queue_failure_detail(
-                    exc,
-                    stage="queue-curator-disposition-validation",
-                    side="task-evidence",
-                    name="curator-disposition",
-                ),
-            ) from exc
-    return rows
+
+
+def _separator_cells_valid(cells: list[str]) -> bool:
+    return all(re.fullmatch(r":?-{3,}:?", cell) is not None for cell in cells)
+
+
+def _curator_disposition(line: str) -> _CuratorDisposition:
+    cells = _split_markdown_row(line)
+    if len(cells) != 5:
+        raise CloseoutQueueError(
+            "closeout-candidate-curator-disposition-invalid",
+            "source-change disposition rows must have exactly five cells",
+        )
+    try:
+        return _CuratorDisposition.model_validate(
+            {
+                "sourceFile": cells[0],
+                "onboardingFile": cells[1],
+                "classification": cells[2],
+                "disposition": cells[3],
+                "evidence": cells[4],
+            }
+        )
+    except ValidationError as exc:
+        raise CloseoutQueueError(
+            "closeout-candidate-curator-disposition-invalid",
+            bounded_queue_failure_detail(
+                exc,
+                stage="queue-curator-disposition-validation",
+                side="task-evidence",
+                name="curator-disposition",
+            ),
+        ) from exc
 
 
 def canonical_grade(
@@ -603,45 +683,65 @@ def _table_rows(body: str, width: int) -> list[tuple[str, list[str]]]:
             "closeout-grade-register-shape-invalid",
             f"no canonical scheduling register has {width} columns",
         )
-    lines = [line.strip() for line in body.splitlines() if line.strip()]
-    if (
-        len(lines) < 2
-        or not lines[0].startswith("|")
-        or not lines[0].endswith("|")
-        or tuple(_split_markdown_row(lines[0])) != expected_header
-    ):
+    lines = _nonblank_markdown_lines(body)
+    _require_register_header(lines, expected_header)
+    _require_register_separator(lines[1], width)
+    return _register_rows(lines[2:], width)
+
+
+def _nonblank_markdown_lines(body: str) -> list[str]:
+    return [line.strip() for line in body.splitlines() if line.strip()]
+
+
+def _register_rows(lines: list[str], width: int) -> list[tuple[str, list[str]]]:
+    rows: list[tuple[str, list[str]]] = []
+    for line in lines:
+        rows.append(_register_row(line, width))
+    return rows
+
+
+def _require_register_header(lines: list[str], expected_header: tuple[str, ...]) -> None:
+    if len(lines) < 2:
         raise CloseoutQueueError(
             "closeout-grade-register-shape-invalid",
             "canonical scheduling register requires its exact template header",
         )
-    if not lines[1].startswith("|") or not lines[1].endswith("|"):
+    line = lines[0]
+    observed = (line.startswith("|"), line.endswith("|"), tuple(_split_markdown_row(line)))
+    if observed != (True, True, expected_header):
+        raise CloseoutQueueError(
+            "closeout-grade-register-shape-invalid",
+            "canonical scheduling register requires its exact template header",
+        )
+
+
+def _require_register_separator(line: str, width: int) -> None:
+    if (line.startswith("|"), line.endswith("|")) != (True, True):
         raise CloseoutQueueError(
             "closeout-grade-register-shape-invalid",
             "canonical scheduling register requires one rectangular Markdown separator row",
         )
-    separator = _split_markdown_row(lines[1])
-    if len(separator) != width or any(
-        re.fullmatch(r":?-{3,}:?", cell) is None for cell in separator
-    ):
+    separator = _split_markdown_row(line)
+    if (len(separator) == width, _separator_cells_valid(separator)) != (True, True):
         raise CloseoutQueueError(
             "closeout-grade-register-shape-invalid",
             "canonical scheduling register requires one rectangular Markdown separator row",
         )
-    rows: list[tuple[str, list[str]]] = []
-    for line in lines[2:]:
-        if not line.startswith("|") or not line.endswith("|"):
-            raise CloseoutQueueError(
-                "closeout-grade-register-shape-invalid",
-                "canonical scheduling register rows require outer Markdown pipes",
-            )
-        cells = _split_markdown_row(line)
-        if len(cells) != width:
-            raise CloseoutQueueError(
-                "closeout-grade-register-shape-invalid",
-                f"canonical register row has {len(cells)} cells, expected {width}",
-            )
-        rows.append((line, cells))
-    return rows
+
+
+def _register_row(line: str, width: int) -> tuple[str, list[str]]:
+    if (line.startswith("|"), line.endswith("|")) != (True, True):
+        raise CloseoutQueueError(
+            "closeout-grade-register-shape-invalid",
+            "canonical scheduling register rows require outer Markdown pipes",
+        )
+    cells = _split_markdown_row(line)
+    if len(cells) != width:
+        raise CloseoutQueueError(
+            "closeout-grade-register-shape-invalid",
+            f"canonical register row has {len(cells)} cells, expected {width}",
+        )
+    return line, cells
 
 
 def _split_markdown_row(line: str) -> list[str]:

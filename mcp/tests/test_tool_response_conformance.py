@@ -37,6 +37,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.closeout_door import CloseoutDoorRequest
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
 from agents_remember.application.gate_tools import GateRaise, GateWait
 from agents_remember.application.lifecycle.direct_landing import DirectLandingRequest
@@ -314,6 +315,13 @@ def _simple_payloads(config) -> dict[str, dict]:
     return {
         "ping": tools.ping_payload(),
         "server_info": tools.server_info_payload(config),
+        "closeout_door": tools.closeout_door_payload(
+            config,
+            CloseoutDoorRequest(
+                action="status",
+                contract_path="/missing/series-contract.md",
+            ),
+        ),
         "context_packet": tools.context_packet_payload(config, REPO),
         "read_ar_files": tools.read_ar_files_payload(
             config, REPO, [{"path": "README.md", "source": "full"}]
@@ -430,12 +438,14 @@ def _worktree_lifecycle_fixture(root: Path, *, task_name: str, worktree_name: st
     _run_git(memory_root, ["commit", "-m", "seed memory content"])
     memory_content = git(memory_root, "rev-parse", "HEAD")
     code_head = git(config.workspace_root / REPO, "rev-parse", "main")
+    _run_git(config.workspace_root / REPO, ["branch", "super", code_head])
     write_ledger(
         memory_root / "memory.md",
         create_initial_ledger(REPO, code_head, memory_content),
     )
     _run_git(memory_root, ["add", "memory.md"])
     _run_git(memory_root, ["commit", "-m", "seed memory ledger"])
+    _run_git(memory_root, ["branch", "super", "HEAD"])
     _write_leaf_task(
         config.coordination_root,
         master=task_name,
@@ -463,6 +473,27 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         master="adoption-task",
         doc_id="adoption-wt",
         execution_graph=False,
+    )
+    sprint_root = config.coordination_root / "tasks" / REPO / "lifecycle-fixture-sprint"
+    write_task_doc(
+        sprint_root,
+        TaskDocument.model_validate(
+            {
+                "id": "LIFECYCLE-FIXTURE-SPRINT",
+                "slug": "lifecycle-fixture-sprint",
+                "title": "Lifecycle fixture sprint",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": REPO,
+                "createdAt": "2026-08-22T00:00:00+00:00",
+                "orchestrates": ["demo-task"],
+                "integrationBranch": "super",
+                "executionGraph": {
+                    "nodes": [{"repository": REPO, "path": "demo-task/task.json"}],
+                    "edges": [],
+                },
+            }
+        ),
     )
 
     payloads: dict[str, dict] = {}
@@ -531,8 +562,15 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
             ledger="ledger commit message",
         ),
     )
-    with mock.patch(
-        "agents_remember.worktrees.integration.lifecycle.lifecycle_operations.launch_detached_worker"
+    with (
+        mock.patch(
+            "agents_remember.worktrees.integration.lifecycle.lifecycle_operations."
+            "launch_detached_worker"
+        ),
+        mock.patch(
+            "agents_remember.worktrees.integration.lifecycle.lifecycle_operations."
+            "require_first_ready_generation"
+        ),
     ):
         payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
             config,

@@ -378,12 +378,19 @@ def _require_matching_certification(
         raise RuntimeError(
             "recorded organizational full-gate certification is not an exact Dagger result"
         ) from error
-    if (
-        validated.completionFingerprint != completion.fingerprint
-        or validated.codeCommit != contract.code_commit
-        or validated.candidateTree != completion.code_tree
-        or validated.attestation != expected_attestation
-    ):
+    observed = (
+        validated.completionFingerprint,
+        validated.codeCommit,
+        validated.candidateTree,
+        validated.attestation,
+    )
+    expected = (
+        completion.fingerprint,
+        contract.code_commit,
+        completion.code_tree,
+        expected_attestation,
+    )
+    if observed != expected:
         raise RuntimeError(
             "recorded organizational full-gate certification targets another candidate or "
             "does not match the current Dagger quality plan"

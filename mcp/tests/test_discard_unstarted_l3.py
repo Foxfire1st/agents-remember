@@ -692,7 +692,8 @@ class DiscardUnstartedL3Tests(unittest.TestCase):
         store.append(entry)
 
         with patch(
-            "agents_remember.application.task_docs.task_execution_registration.write_task_docs",
+            "agents_remember.application.task_docs.task_execution_registration."
+            "publish_prepared_task_documents",
             side_effect=OSError("forced task publication refusal"),
         ):
             self._run_operator_inbox_sweep(store, now=old + timedelta(days=3))

@@ -528,14 +528,30 @@ def _require_archivable_operation(
     current: bool,
     name: str,
 ) -> None:
-    terminal = {"completed", "failed", "cancelled"}
-    if record.status not in terminal:
+    _require_terminal_operation(record, name)
+    _require_cleanup_retry_disposition(record, operation, current, name)
+    _require_absent_worker_authority(record, name)
+    _require_resolved_worker_termination(record, name)
+    _require_resolved_mutations(record, name)
+    _require_resolved_publications(record, name)
+
+
+def _require_terminal_operation(record: LifecycleOperationRecord, name: str) -> None:
+    if record.status not in {"completed", "failed", "cancelled"}:
         raise _operation_refusal(
             "terminal-archive-operation-nonterminal",
             f"{name} remains nonterminal at {record.status}",
             name=name,
             observed={"status": record.status},
         )
+
+
+def _require_cleanup_retry_disposition(
+    record: LifecycleOperationRecord,
+    operation: TerminalCleanupOperation,
+    current: bool,
+    name: str,
+) -> None:
     if current and operation == "worktree_cleanup" and record.status == "failed":
         raise _operation_refusal(
             "terminal-archive-operation-retryable",
@@ -543,6 +559,9 @@ def _require_archivable_operation(
             name=name,
             observed={"status": record.status},
         )
+
+
+def _require_absent_worker_authority(record: LifecycleOperationRecord, name: str) -> None:
     if record.workerPid is not None or record.workerLease is not None:
         raise _operation_refusal(
             "terminal-archive-operation-worker-active",
@@ -553,6 +572,9 @@ def _require_archivable_operation(
                 "workerLeasePresent": record.workerLease is not None,
             },
         )
+
+
+def _require_resolved_worker_termination(record: LifecycleOperationRecord, name: str) -> None:
     if record.workerTermination is not None and record.workerTermination.state != "exited":
         raise _operation_refusal(
             "terminal-archive-operation-worker-termination-active",
@@ -560,6 +582,9 @@ def _require_archivable_operation(
             name=name,
             observed={"workerTermination": record.workerTermination.state},
         )
+
+
+def _require_resolved_mutations(record: LifecycleOperationRecord, name: str) -> None:
     if any(item.state == "mutation-intent" for item in record.mutationEvidence.values()):
         raise _operation_refusal(
             "terminal-archive-operation-mutation-ambiguous",
@@ -567,6 +592,15 @@ def _require_archivable_operation(
             name=name,
             observed={"mutationIntent": True},
         )
+
+
+def _require_resolved_publications(record: LifecycleOperationRecord, name: str) -> None:
+    _require_resolved_integration_claim(record, name)
+    _require_terminal_organizational_publication(record, name)
+    _require_resolved_door_publication(record, name)
+
+
+def _require_resolved_integration_claim(record: LifecycleOperationRecord, name: str) -> None:
     publication = record.integrationPublication
     if publication is not None and publication.claimState == "intent":
         raise _operation_refusal(
@@ -575,6 +609,13 @@ def _require_archivable_operation(
             name=name,
             observed={"integrationClaimState": publication.claimState},
         )
+
+
+def _require_terminal_organizational_publication(
+    record: LifecycleOperationRecord,
+    name: str,
+) -> None:
+    publication = record.integrationPublication
     if (
         publication is not None
         and publication.organizationalCompletion is not None
@@ -586,6 +627,9 @@ def _require_archivable_operation(
             name=name,
             observed={"organizationalCompletionPresent": True},
         )
+
+
+def _require_resolved_door_publication(record: LifecycleOperationRecord, name: str) -> None:
     if record.doorPublication is not None and record.doorPublication.state == "intent":
         raise _operation_refusal(
             "terminal-archive-operation-door-ambiguous",

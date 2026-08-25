@@ -18,8 +18,8 @@ acceptance authority.
 
 ## Eligibility contract
 
-`agents_remember.testing.classify_direct_selection` is the one policy owner. It accepts only a
-non-empty, serially bounded list of exact pytest node IDs from
+`agents_remember.testing.eligibility.classify_direct_selection` is the one policy owner. It
+accepts only a non-empty, serially bounded list of exact pytest node IDs from
 `mcp/tests/python-direct-cohort.toml`. Before pytest can start it validates the whole sealed audit:
 exact file and configuration fingerprints, declared local-import closure, audited symbols, known
 effect disposition, exact top-level nodes, and fixture/autouse membership.

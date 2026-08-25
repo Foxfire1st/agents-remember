@@ -98,7 +98,7 @@ def publish_completed_disposition_task_authority(
                 "status": "inProgress",
                 "repo": contract.repo_name,
                 "createdAt": "2026-08-22T00:00:00+00:00",
-                "executionNature": "organizational",
+                "executionNature": "organizational" if sprint_owned else "atomic",
                 "subTasks": [
                     {
                         "number": contract.leaf_id,
@@ -137,7 +137,7 @@ def publish_completed_disposition_task_authority(
                 "repo": contract.repo_name,
                 "createdAt": "2026-08-22T00:00:00+00:00",
                 "orchestrates": [contract.task_name],
-                "integrationBranch": "super",
+                "integrationBranch": contract.code_source_branch,
                 "executionGraph": {
                     "nodes": [master_ref.model_dump(mode="json")],
                     "edges": [],

@@ -35,6 +35,9 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
     prepare_integration_ref_move,
 )
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location_errors import (
+    LifecycleOperationLocationError,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -69,6 +72,7 @@ from integration_branch_authority_test_support import (
     _complete_atomic_master,
     _doc,
     _land_two_external_atomic_leaves,
+    _publish_completed_closeout_fixture,
     _record_atomic_leaf_landing,
 )
 from test_source_lineage import _commit_on, _git, _repo
@@ -577,36 +581,45 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
             closed = _closed_leaf_worktree(fixture, root, candidate_commit=True)
             foreign = root / "foreign-coordination"
             candidates = (
-                replace(closed, coordination_root=foreign),
-                replace(
-                    closed,
-                    task_root=foreign / "tasks" / "repo" / "master",
-                    task_artifact=foreign / "tasks" / "repo" / "master" / "task.md",
+                (
+                    replace(closed, coordination_root=foreign),
+                    LifecycleOperationLocationError,
+                    "operation-location-invalid",
+                ),
+                (
+                    replace(
+                        closed,
+                        task_root=foreign / "tasks" / "repo" / "master",
+                        task_artifact=foreign / "tasks" / "repo" / "master" / "task.md",
+                    ),
+                    ConfiguredContractRereadError,
+                    "task-root",
                 ),
             )
-            for malicious in candidates:
-                write_contract(closed.contract_path, malicious)
-                record_path = operation_record_path(closed.worktree_group, "integrate")
-                with (
-                    self.subTest(task_root=malicious.task_root),
-                    self.assertRaises(ConfiguredContractRereadError) as raised,
-                ):
-                    lifecycle_operations.start_or_observe_operation(
-                        IntegrateOperationInput(
-                            configPath=fixture.config_path.as_posix(),
-                            contractPath=closed.contract_path.as_posix(),
-                        ),
-                        malicious,
-                        launcher=lambda *_: None,
-                    )
-                expected_name = (
-                    "coordination-root" if malicious.coordination_root == foreign else "task-root"
-                )
-                self.assertEqual(
-                    (raised.exception.observed["side"], raised.exception.observed["name"]),
-                    ("task", expected_name),
-                )
-                self.assertFalse(record_path.exists())
+            for malicious, error_type, expected_name in candidates:
+                with self.subTest(task_root=malicious.task_root):
+                    write_contract(closed.contract_path, malicious)
+                    record_path = operation_record_path(closed.worktree_group, "integrate")
+                    with self.assertRaises(error_type) as raised:
+                        lifecycle_operations.start_or_observe_operation(
+                            IntegrateOperationInput(
+                                configPath=fixture.config_path.as_posix(),
+                                contractPath=closed.contract_path.as_posix(),
+                            ),
+                            malicious,
+                            launcher=lambda *_: None,
+                        )
+                    if isinstance(raised.exception, ConfiguredContractRereadError):
+                        self.assertEqual(
+                            (
+                                raised.exception.observed["side"],
+                                raised.exception.observed["name"],
+                            ),
+                            ("task", expected_name),
+                        )
+                    else:
+                        self.assertEqual(raised.exception.status, expected_name)
+                    self.assertFalse(record_path.exists())
 
     def test_lifecycle_authority_requires_the_configured_memory_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -882,6 +895,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 code_commit=candidate,
             )
             write_contract(series.contract_path, series)
+            series = _publish_completed_closeout_fixture(fixture, series)
             lifecycle_operations.start_or_observe_operation(
                 IntegrateOperationInput(
                     configPath=fixture.config_path.as_posix(),
@@ -936,6 +950,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                 ledger_commit=ledger_commit,
             )
             write_contract(series.contract_path, series)
+            series = _publish_completed_closeout_fixture(fixture, series)
             lifecycle_operations.start_or_observe_operation(
                 IntegrateOperationInput(
                     configPath=fixture.config_path.as_posix(),
@@ -991,6 +1006,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     operation_key=running.operationKey,
                     operation_generation=running.generation,
                     recovery_commits=crashed.recoveryCommits,
+                    integration_publication=crashed.integrationPublication,
                     operation_progress=runtime.progress,
                 ),
                 current,
@@ -1008,6 +1024,7 @@ class IntegrationBranchAuthorityEdgeTests(unittest.TestCase):
                     operation_key=running.operationKey,
                     operation_generation=running.generation,
                     recovery_commits=crashed.recoveryCommits,
+                    integration_publication=crashed.integrationPublication,
                     operation_progress=runtime.progress,
                 ),
                 completed,

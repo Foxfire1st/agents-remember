@@ -117,28 +117,40 @@ def _authorize_projection_access(
     sprint_ref: TaskDocumentRef,
     actor: QueueActor,
 ) -> None:
-    if actor.task_document_ref == sprint_ref and actor.role in {
-        "architect",
-        "strategist",
-        "orchestrator",
-    }:
+    if _is_sprint_planning_actor(actor, sprint_ref):
         return
     if actor.role != "manager":
         raise CloseoutQueueError(
             "closeout-projection-caller-refused",
             "projection access requires the sprint planning seat or a commanded manager",
         )
+    manager_refs = _commanded_manager_refs(config, sprint_ref)
+    if actor.task_document_ref not in manager_refs:
+        raise CloseoutQueueError(
+            "closeout-projection-caller-refused",
+            "manager projection access requires one exact commanded master document",
+        )
+
+
+def _is_sprint_planning_actor(actor: QueueActor, sprint_ref: TaskDocumentRef) -> bool:
+    return (actor.task_document_ref, actor.role) in {
+        (sprint_ref, "architect"),
+        (sprint_ref, "strategist"),
+        (sprint_ref, "orchestrator"),
+    }
+
+
+def _commanded_manager_refs(
+    config: McpRuntimeConfig,
+    sprint_ref: TaskDocumentRef,
+) -> set[TaskDocumentRef]:
     topology = TaskDocumentTopology(config.coordination_root)
     try:
         sprint = topology.resolve(sprint_ref)
         masters = commanded_sprint_masters(topology, sprint)
     except TaskDocumentRefError as exc:
         raise CloseoutQueueError(exc.status, str(exc)) from exc
-    if actor.task_document_ref not in {master.ref for master in masters}:
-        raise CloseoutQueueError(
-            "closeout-projection-caller-refused",
-            "manager projection access requires one exact commanded master document",
-        )
+    return {master.ref for master in masters}
 
 
 def _summary(condition: str, members: int, source_readable: bool) -> str:

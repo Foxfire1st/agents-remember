@@ -569,19 +569,22 @@ class LegacyOperationBridgeTests(unittest.TestCase):
         added = set(after) - set(before)
         added_paths = {Path(key) for key in added}
         lifecycle_root = path.parent.relative_to(Path(self.temp.name))
-        self.assertEqual({item.parent for item in added_paths}, {lifecycle_root})
+        locator_lock_root = Path("fixture/coordination/controlplane/lifecycle-enclosures/locks")
+        self.assertEqual(
+            {item.parent for item in added_paths},
+            {lifecycle_root, locator_lock_root},
+        )
+        lifecycle_root_locks = {item.name for item in added_paths if item.parent == lifecycle_root}
+        locator_locks = [item for item in added_paths if item.parent == locator_lock_root]
+        self.assertEqual(len(locator_locks), 1)
+        self.assertEqual(locator_locks[0].suffix, ".lock")
         fixed_locks = {
             "closeout-operation.json.lock",
             "direct-landing-operation.json.lock",
             "integrate-operation.json.lock",
         }
-        added_names = {item.name for item in added_paths}
-        self.assertTrue(fixed_locks <= added_names)
-        lifecycle_locks = {
-            name for name in added_names if name.startswith("lifecycle-") and name.endswith(".lock")
-        }
-        self.assertEqual(len(lifecycle_locks), 1)
-        self.assertEqual(added_names, fixed_locks | lifecycle_locks)
+        self.assertTrue(fixed_locks <= lifecycle_root_locks)
+        self.assertEqual(lifecycle_root_locks, fixed_locks)
         self.assertTrue(all(after[key] == b"" for key in added))
         self.assertEqual({key: value for key, value in after.items() if key not in added}, before)
         self.assertEqual(path.read_bytes(), original)
@@ -1019,7 +1022,7 @@ class LegacyOperationBridgeTests(unittest.TestCase):
                 side_effect=still_live,
             ),
             mock.patch(
-                "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls."
+                "agents_remember.worktrees.integration.lifecycle.control.cancellation."
                 "signal_worker_and_prove_exit",
                 side_effect=denied,
             ),

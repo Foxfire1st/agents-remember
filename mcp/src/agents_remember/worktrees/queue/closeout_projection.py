@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from agents_remember.controlplane.closeout_queue_records import CloseoutProjectionBuild
 from agents_remember.controlplane.closeout_queue_store import ProjectionSourceIdentity
@@ -117,6 +117,14 @@ class _DoorCensus:
 class _TaskCensusBuild:
     task_rows: list[dict[str, object]]
     problems: list[ProjectionSourceProblem]
+    overrides: Mapping[TaskDocumentRef, TaskDocument] | None
+
+
+@dataclass(frozen=True)
+class _SeriesProjectionContext:
+    tasks: _TaskCensus
+    problems: list[ProjectionSourceProblem]
+    door_rows: list[dict[str, object]]
     overrides: Mapping[TaskDocumentRef, TaskDocument] | None
 
 
@@ -352,39 +360,65 @@ def _series_projection_doors(
     overrides: Mapping[TaskDocumentRef, TaskDocument] | None,
 ) -> list[_ProjectionDoor]:
     doors: list[_ProjectionDoor] = []
+    context = _SeriesProjectionContext(tasks, problems, door_rows, overrides)
     for source, master, order in series_doors:
-        door_rows.append(_door_fact(source))
-        door = source.door
-        assert door is not None
-        if not _series_door_identity_matches(source, master, tasks.sprint):
-            problems.append(
-                _problem(
-                    "door",
-                    source.address.as_posix(),
-                    "door-canonical-identity-mismatch",
-                    "publish a successor from the exact series contract owner",
-                )
-            )
-            continue
-        try:
-            candidate = tasks.topology.resolve(door.taskDocumentRef, overrides)
-            if tasks.topology.parent(candidate.ref) != master.ref:
-                raise TaskDocumentRefError(
-                    "task-document-parent-mismatch",
-                    "series door candidate is not owned by its canonical master",
-                )
-        except TaskDocumentRefError as exc:
-            problems.append(
-                _problem(
-                    "door",
-                    source.address.as_posix(),
-                    exc.status,
-                    "repair the series door candidate task reference",
-                )
-            )
-            continue
-        doors.append((source, candidate, master, order))
+        resolved = _series_projection_door(context, source, master, order)
+        if resolved is not None:
+            doors.append(resolved)
     return doors
+
+
+def _series_projection_door(
+    context: _SeriesProjectionContext,
+    source: _DoorSource,
+    master: ResolvedTaskDocument,
+    order: int,
+) -> _ProjectionDoor | None:
+    context.door_rows.append(_door_fact(source))
+    door = cast(CloseoutDoorGeneration, source.door)
+    if not _series_door_identity_matches(source, master, context.tasks.sprint):
+        context.problems.append(
+            _problem(
+                "door",
+                source.address.as_posix(),
+                "door-canonical-identity-mismatch",
+                "publish a successor from the exact series contract owner",
+            )
+        )
+        return None
+    try:
+        candidate = _resolved_series_candidate(
+            context.tasks,
+            door,
+            master,
+            context.overrides,
+        )
+    except TaskDocumentRefError as exc:
+        context.problems.append(
+            _problem(
+                "door",
+                source.address.as_posix(),
+                exc.status,
+                "repair the series door candidate task reference",
+            )
+        )
+        return None
+    return source, candidate, master, order
+
+
+def _resolved_series_candidate(
+    tasks: _TaskCensus,
+    door: CloseoutDoorGeneration,
+    master: ResolvedTaskDocument,
+    overrides: Mapping[TaskDocumentRef, TaskDocument] | None,
+) -> ResolvedTaskDocument:
+    candidate = tasks.topology.resolve(door.taskDocumentRef, overrides)
+    if tasks.topology.parent(candidate.ref) != master.ref:
+        raise TaskDocumentRefError(
+            "task-document-parent-mismatch",
+            "series door candidate is not owned by its canonical master",
+        )
+    return candidate
 
 
 def _series_door_identity_matches(

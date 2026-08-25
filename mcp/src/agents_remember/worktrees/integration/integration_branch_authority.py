@@ -32,6 +32,14 @@ from agents_remember.worktrees.integration.integration_branch_types import (
     _MasterAuthority,
     _RepositorySide,
 )
+from agents_remember.worktrees.integration.integration_topology_collisions import (
+    TopologyCollisionRequest,
+    TopologyCollisionServices,
+    require_no_live_leaf_collisions,
+)
+from agents_remember.worktrees.integration.integration_topology_repair import (
+    current_surfaces_for_publication,
+)
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     current_branch,
@@ -43,7 +51,6 @@ from agents_remember.worktrees.scheduling_mode import (
     effective_execution_nature,
 )
 from agents_remember.worktrees.task_resolver import (
-    iter_leaf_enclosure_contracts,
     series_contract_path,
     slugify,
 )
@@ -391,34 +398,22 @@ def require_topology_publication_authority(
         memory_repository,
     )
     candidate = _integration_surfaces(scope, overrides=overrides)
-    repaired_owners: set[TaskDocumentRef] = set()
-    try:
-        current = _integration_surfaces(scope)
-    except RuntimeError as error:
-        cause = error.__cause__
-        if not (
-            isinstance(cause, TaskDocumentRefError)
-            and cause.status == "task-execution-graph-membership-invalid"
-        ):
-            raise
-        repaired_owners = {
-            ref
-            for ref in overrides
-            if not (coordination_root / "tasks" / ref.repository / ref.path).is_file()
-        }
-        if not repaired_owners or len(repaired_owners) != len(overrides):
-            raise
-        repaired_owner_keys = {ref.key for ref in repaired_owners}
-        current = tuple(
-            surface for surface in candidate if surface.owner not in repaired_owner_keys
-        )
-    _require_stable_surface_owners(current, candidate)
-    _require_no_live_leaf_collisions(
-        scope,
-        current,
+    current, repaired_owners = current_surfaces_for_publication(
         candidate,
+        coordination_root,
         overrides,
-        repaired_owners=repaired_owners,
+        lambda: _integration_surfaces(scope),
+    )
+    _require_stable_surface_owners(current, candidate)
+    require_no_live_leaf_collisions(
+        TopologyCollisionRequest(
+            scope=scope,
+            current=current,
+            candidate=candidate,
+            overrides=overrides,
+            repaired_owners=repaired_owners,
+        ),
+        _topology_collision_services(),
     )
     _require_new_surface_availability(scope, current, candidate, allow_existing_super=False)
 
@@ -439,7 +434,15 @@ def require_topology_migration_authority(
         memory_repository,
     )
     candidate = _integration_surfaces(scope, overrides=overrides)
-    _require_no_live_leaf_collisions(scope, (), candidate, overrides)
+    require_no_live_leaf_collisions(
+        TopologyCollisionRequest(
+            scope=scope,
+            current=(),
+            candidate=candidate,
+            overrides=overrides,
+        ),
+        _topology_collision_services(),
+    )
     _require_new_surface_availability(scope, (), candidate, allow_existing_super=True)
 
 
@@ -472,26 +475,52 @@ def _require_new_surface_availability(
 ) -> None:
     current_keys = {_surface_key(surface) for surface in current}
     for surface in candidate:
-        if surface.kind == "repository-default" or _surface_key(surface) in current_keys:
+        if not _surface_requires_availability(surface, current_keys, allow_existing_super):
             continue
-        if surface.kind == "sprint-super" and allow_existing_super:
-            continue
-        if (
-            surface.kind == "atomic-integration"
-            and branch_exists(surface.repository, surface.branch)
-            and not _atomic_surface_has_series(scope, surface)
-        ):
-            raise RuntimeError(
-                "task topology publication refused: proposed atomic branch already exists "
-                f"without its exact task-owned series contract: {surface.branch!r}"
-            )
-        owners = branch_worktree_owners(surface.repository, surface.branch)
-        if owners and not _atomic_surface_has_series(scope, surface):
-            raise RuntimeError(
-                "task topology publication refused: proposed protected "
-                f"{surface.side} branch {surface.branch!r} is already checked out at "
-                f"{[path.as_posix() for path in owners]!r}"
-            )
+        _require_atomic_surface_available(scope, surface)
+        _require_surface_not_checked_out(scope, surface)
+
+
+def _surface_requires_availability(
+    surface: IntegrationSurface,
+    current_keys: set[tuple[str, Path, str]],
+    allow_existing_super: bool,
+) -> bool:
+    if surface.kind == "repository-default" or _surface_key(surface) in current_keys:
+        return False
+    return not (surface.kind == "sprint-super" and allow_existing_super)
+
+
+def _require_atomic_surface_available(
+    scope: _BranchScope,
+    surface: IntegrationSurface,
+) -> None:
+    collision = all(
+        (
+            surface.kind == "atomic-integration",
+            branch_exists(surface.repository, surface.branch),
+            not _atomic_surface_has_series(scope, surface),
+        )
+    )
+    if collision:
+        raise RuntimeError(
+            "task topology publication refused: proposed atomic branch already exists "
+            f"without its exact task-owned series contract: {surface.branch!r}"
+        )
+
+
+def _require_surface_not_checked_out(
+    scope: _BranchScope,
+    surface: IntegrationSurface,
+) -> None:
+    owners = branch_worktree_owners(surface.repository, surface.branch)
+    collision = (bool(owners), _atomic_surface_has_series(scope, surface)) == (True, False)
+    if collision:
+        raise RuntimeError(
+            "task topology publication refused: proposed protected "
+            f"{surface.side} branch {surface.branch!r} is already checked out at "
+            f"{[path.as_posix() for path in owners]!r}"
+        )
 
 
 def _atomic_surface_has_series(scope: _BranchScope, surface: IntegrationSurface) -> bool:
@@ -602,13 +631,24 @@ def _repository_masters_with_overrides(
     masters = {master.ref: master for master in repository_master_documents(topology, repo_name)}
     root = topology.coordination_root / "tasks" / repo_name
     for ref, document in (overrides or {}).items():
-        if ref.repository != repo_name:
-            continue
-        if document.kind != "master":
-            masters.pop(ref, None)
-            continue
-        masters[ref] = ResolvedTaskDocument(ref, root / ref.path, document)
-    return tuple(masters[ref] for ref in sorted(masters, key=lambda item: item.key))
+        _apply_master_override(masters, root, repo_name, ref, document)
+    ordered = sorted(masters, key=lambda item: item.key)
+    return tuple(map(masters.__getitem__, ordered))
+
+
+def _apply_master_override(
+    masters: dict[TaskDocumentRef, ResolvedTaskDocument],
+    root: Path,
+    repo_name: str,
+    ref: TaskDocumentRef,
+    document: TaskDocument,
+) -> None:
+    if ref.repository != repo_name:
+        return
+    if document.kind != "master":
+        masters.pop(ref, None)
+        return
+    masters[ref] = ResolvedTaskDocument(ref, root / ref.path, document)
 
 
 def _require_stable_surface_owners(
@@ -628,211 +668,13 @@ def _require_stable_surface_owners(
             )
 
 
-def _current_publication_master_authority(
-    topology: TaskDocumentTopology,
-    repo_name: str,
-    current: tuple[IntegrationSurface, ...],
-    candidate_authority: dict[
-        TaskDocumentRef,
-        tuple[ResolvedTaskDocument, TaskDocumentRef | None],
-    ],
-    repaired_owners: set[TaskDocumentRef] | None,
-) -> dict[TaskDocumentRef, tuple[ResolvedTaskDocument, TaskDocumentRef | None]]:
-    if not current:
-        return {}
-    if repaired_owners:
-        return {
-            ref: authority
-            for ref, authority in candidate_authority.items()
-            if ref not in repaired_owners
-        }
-    return _publication_master_authority(topology, repo_name, None)
-
-
-def _require_no_live_leaf_collisions(
-    scope: _BranchScope,
-    current: tuple[IntegrationSurface, ...],
-    candidate: tuple[IntegrationSurface, ...],
-    overrides: Mapping[TaskDocumentRef, TaskDocument],
-    *,
-    repaired_owners: set[TaskDocumentRef] | None = None,
-) -> None:
-    topology = TaskDocumentTopology(scope.coordination_root)
-    candidate_authority = _publication_master_authority(topology, scope.repo_name, overrides)
-    current_authority = _current_publication_master_authority(
-        topology,
-        scope.repo_name,
-        current,
-        candidate_authority,
-        repaired_owners,
+def _topology_collision_services() -> TopologyCollisionServices:
+    return TopologyCollisionServices(
+        repository_masters=_repository_masters_with_overrides,
+        repository_sides=_repository_sides,
+        load_contract=_load_series,
+        branch_key=_branch_key,
     )
-    current_keys = {_surface_key(surface) for surface in current}
-    candidate_keys = {_surface_key(surface) for surface in candidate}
-    for path in iter_leaf_enclosure_contracts(scope.coordination_root / "tasks" / scope.repo_name):
-        contract = _load_series(path)
-        if contract.kind != "leaf":
-            continue
-        master_ref = topology.canonical_ref(
-            scope.repo_name,
-            contract.task_root / "task.json",
-        )
-        authority = candidate_authority.get(master_ref)
-        current_owner = current_authority.get(master_ref)
-        atomic_owner = authority or current_owner
-        if (
-            contract.cleanup == "completed"
-            and atomic_owner is not None
-            and atomic_owner[0].document.executionNature != "atomic"
-        ):
-            continue
-        if contract.cleanup == "completed" and atomic_owner is None:
-            continue
-        if authority is None:
-            raise RuntimeError(
-                "task topology publication refused: live leaf would lose its exact owning "
-                f"master/sprint authority: {contract.contract_path}"
-            )
-        master, sprint_ref = authority
-        _require_live_leaf_task_identity(
-            topology,
-            contract,
-            master,
-            overrides,
-        )
-        if current and (current_owner is None or current_owner[1] != sprint_ref):
-            raise RuntimeError(
-                "task topology publication refused: live leaf owning sprint would change for "
-                f"{contract.contract_path}"
-            )
-        _require_live_leaf_workbench_unprotected(contract, candidate_keys)
-        # The effective nature (L13-R1): under the atomic-sequential default even an
-        # organizational-declared master lands through its atomic series lane.
-        nature = effective_execution_nature(
-            master.document,
-            topology.resolve(sprint_ref).document if sprint_ref is not None else None,
-        )
-        _require_live_leaf_source_authority(contract, master, sprint_ref, candidate, nature)
-        for side in _repository_sides(contract):
-            source_key = _branch_key(side, side.source_branch)
-            if source_key in current_keys and source_key not in candidate_keys:
-                raise RuntimeError(
-                    "task topology publication refused: live leaf source authority would be "
-                    f"removed for {contract.contract_path}"
-                )
-
-
-def _require_live_leaf_workbench_unprotected(
-    contract: WorktreeContract,
-    candidate_keys: set[tuple[str, Path, str]],
-) -> None:
-    for side in _repository_sides(contract):
-        if _branch_key(side, side.work_branch) in candidate_keys:
-            raise RuntimeError(
-                "task topology publication refused: proposed protected branch already "
-                f"belongs to live leaf workbench {contract.contract_path}"
-            )
-
-
-def _publication_master_authority(
-    topology: TaskDocumentTopology,
-    repo_name: str,
-    overrides: Mapping[TaskDocumentRef, TaskDocument] | None,
-) -> dict[TaskDocumentRef, tuple[ResolvedTaskDocument, TaskDocumentRef | None]]:
-    masters = _repository_masters_with_overrides(topology, repo_name, overrides)
-    authority: dict[TaskDocumentRef, tuple[ResolvedTaskDocument, TaskDocumentRef | None]] = {}
-    commanded: set[TaskDocumentRef] = set()
-    for sprint in masters:
-        if not sprint.document.orchestrates:
-            continue
-        for master in commanded_sprint_masters(topology, sprint, overrides=overrides):
-            existing = authority.get(master.ref)
-            if existing is not None and existing[1] != sprint.ref:
-                raise RuntimeError(
-                    f"task topology publication gives {master.ref.key} multiple sprint owners"
-                )
-            authority[master.ref] = (master, sprint.ref)
-            commanded.add(master.ref)
-    for master in masters:
-        if master.ref in commanded or master.document.orchestrates:
-            continue
-        if effective_execution_nature(master.document, None) == "atomic":
-            authority[master.ref] = (master, None)
-    return authority
-
-
-def _require_live_leaf_task_identity(
-    topology: TaskDocumentTopology,
-    contract: WorktreeContract,
-    master: ResolvedTaskDocument,
-    overrides: Mapping[TaskDocumentRef, TaskDocument],
-) -> None:
-    rows = [row for row in master.document.subTasks if row.number == contract.leaf_id]
-    if len(rows) != 1 or not rows[0].file:
-        raise RuntimeError(
-            "task topology publication refused: live leaf is not declared by one exact "
-            f"owning-master row: {contract.contract_path}"
-        )
-    leaf_path = (master.path.parent / rows[0].file).with_suffix(".json")
-    repository_task_root = (topology.coordination_root / "tasks" / contract.repo_name).resolve()
-    resolved_leaf_path = leaf_path.resolve(strict=False)
-    if not resolved_leaf_path.is_relative_to(repository_task_root):
-        raise RuntimeError(
-            "task topology publication refused: live leaf task document escapes its "
-            f"repository task tree: {leaf_path}"
-        )
-    owning_master_root = master.path.parent.resolve(strict=False)
-    if resolved_leaf_path.parent != owning_master_root:
-        raise RuntimeError(
-            "task topology publication refused: live leaf task document leaves its exact "
-            f"owning master task root: {leaf_path}"
-        )
-    leaf_ref = TaskDocumentRef(
-        repository=contract.repo_name,
-        path=resolved_leaf_path.relative_to(repository_task_root).as_posix(),
-    )
-    try:
-        document = topology.resolve(leaf_ref, overrides).document
-    except TaskDocumentRefError as exc:
-        raise RuntimeError(
-            "task topology publication refused: live leaf task document authority is "
-            f"invalid for {contract.contract_path}: {exc}"
-        ) from exc
-    if document.id != contract.leaf_id or document.kind == "master":
-        raise RuntimeError(
-            "task topology publication refused: live leaf task identity changed for "
-            f"{contract.contract_path}"
-        )
-
-
-def _require_live_leaf_source_authority(
-    contract: WorktreeContract,
-    master: ResolvedTaskDocument,
-    sprint_ref: TaskDocumentRef | None,
-    candidate: tuple[IntegrationSurface, ...],
-    nature: MasterExecutionNature,
-) -> None:
-    expected_kind: IntegrationSurfaceKind = (
-        "sprint-super" if nature == "organizational" else "atomic-integration"
-    )
-    expected_owner = (
-        sprint_ref.key
-        if sprint_ref is not None and expected_kind == "sprint-super"
-        else master.ref.key
-    )
-    for side in _repository_sides(contract):
-        source = _branch_key(side, side.source_branch)
-        matches = [
-            surface
-            for surface in candidate
-            if _surface_key(surface) == source
-            and surface.kind == expected_kind
-            and surface.owner == expected_owner
-        ]
-        if len(matches) != 1:
-            raise RuntimeError(
-                "task topology publication refused: live leaf source no longer matches its "
-                f"exact {expected_kind} owner: {contract.contract_path}"
-            )
 
 
 def _branch_key(side: _RepositorySide, branch: str) -> tuple[str, Path, str]:

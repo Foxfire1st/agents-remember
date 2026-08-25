@@ -194,7 +194,9 @@ class TestAbandonWithGuard:
             mock.patch.object(abandon, "_abandon_terminal_outputs", return_value=outputs),
             mock.patch.object(abandon, "terminal_result_blockers", return_value=[]),
             mock.patch.object(
-                abandon, "_publish_abandon", return_value=SimpleNamespace(returncode=0)
+                abandon,
+                "_publish_abandon",
+                return_value=SimpleNamespace(returncode=0, payload={"state": "abandoned"}),
             ) as publish,
         ):
             result = abandon._abandon_with_guard(

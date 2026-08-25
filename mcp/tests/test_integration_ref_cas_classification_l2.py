@@ -22,6 +22,7 @@ from agents_remember.application.worktree_tools import (
     worktree_status_tool,
 )
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
+from agents_remember.kernel.git_command import run_git
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     LifecycleOperationRecord,
@@ -71,18 +72,19 @@ class _RecoveryCasCut:
     unreadable: bool = False
 
     def classify(self, repo: Path, arguments: list[str]) -> CompletedProcess[str]:
+        target_ref = (
+            self.target_branch
+            if self.target_branch.startswith("refs/")
+            else f"refs/heads/{self.target_branch}"
+        )
         if (
             self.unreadable
-            and repo == self.target_repo
-            and arguments[:2]
-            == [
-                "show-ref",
-                "--verify",
-            ]
+            and arguments[:2] == ["show-ref", "--verify"]
+            and arguments[-1] == target_ref
         ):
             return CompletedProcess(
                 arguments,
-                2,
+                128,
                 stdout="",
                 stderr="private backend detail",
             )
@@ -245,7 +247,7 @@ class IntegrationRefCasClassificationL2Tests(unittest.TestCase):
 
         def ref_tip(repository, branch):
             ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
-            result = integration_ref_state.run_git(
+            result = run_git(
                 repository,
                 ["show-ref", "--verify", "--hash", ref],
             )
@@ -288,16 +290,21 @@ class IntegrationRefCasClassificationL2Tests(unittest.TestCase):
         third_ref = ""
         classifier_unreadable = False
         real_run_git = integration_ref_state.run_git
+        code_ref = (
+            authority.codeSourceBranch
+            if authority.codeSourceBranch.startswith("refs/")
+            else f"refs/heads/{authority.codeSourceBranch}"
+        )
 
         def unreadable_classifier(repo, args):
             if (
                 classifier_unreadable
-                and repo == contract.code_repo_path
                 and args[:2] == ["show-ref", "--verify"]
+                and args[-1] == code_ref
             ):
                 return CompletedProcess(
                     args,
-                    2,
+                    128,
                     stdout="",
                     stderr="not public",
                 )
@@ -724,12 +731,17 @@ class IntegrationRefCasClassificationL2Tests(unittest.TestCase):
         authority = current.integrationAuthority
         assert authority is not None
         real_run_git = integration_ref_state.run_git
+        code_ref = (
+            authority.codeSourceBranch
+            if authority.codeSourceBranch.startswith("refs/")
+            else f"refs/heads/{authority.codeSourceBranch}"
+        )
 
         def unreadable_code(repo, args):
-            if repo == contract.code_repo_path and args[:2] == ["show-ref", "--verify"]:
+            if args[:2] == ["show-ref", "--verify"] and args[-1] == code_ref:
                 return CompletedProcess(
                     args,
-                    2,
+                    128,
                     stdout="",
                     stderr="not public",
                 )

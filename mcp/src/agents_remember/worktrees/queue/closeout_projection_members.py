@@ -39,44 +39,12 @@ class ProjectionMemberContext:
 def projection_member(context: ProjectionMemberContext) -> CloseoutProjectionMember:
     """Re-evaluate one waiting generation from exact current task/source facts."""
 
-    source_address = context.source_address
     door = context.door
-    candidate = context.candidate
-    master = context.master
-    sprint = context.sprint
-    graph = context.graph
     order = context.order
-    blockers = list(context.source_blockers)
-    waiting: list[str] = []
-    if (
-        door.taskDocumentRef != candidate.ref
-        or door.owningMasterTaskDocumentRef != master.ref
-        or door.contractPath != source_address.as_posix()
-    ):
-        blockers.append("door-canonical-identity-mismatch")
-    if door.taskTopologyFingerprint != candidate_task_topology_fingerprint(
-        sprint,
-        master,
-        candidate,
-        graph=graph,
-    ):
-        blockers.append("door-task-topology-stale")
-    if completion_blockers(candidate.document):
-        blockers.append("leaf-task-incomplete")
-    admission = door.admissionProvenance
-    if not admission.resourceReady:
-        waiting.append(f"resource-unavailable: {admission.resourceReason}")
-    if not admission.admissionReady:
-        waiting.append(f"admission-blocked: {admission.admissionReason}")
-    if graph is not None:
-        waiting.extend(predecessor_waiting_reasons(graph, master.ref, candidate.ref))
-        node = candidate_node(graph, master.ref, candidate.ref)
-        if node is not None:
-            order = graph.node_order[node] * 1000 + order % 1000
-    else:
-        owner = context.sequential_owner or context.first_master
-        if owner is not None and owner != master.ref:
-            waiting.append(f"atomic-series-lane-owned-by: {owner.key}")
+    blockers = _projection_blockers(context)
+    waiting = _admission_waiting_reasons(door)
+    graph_waiting, order = _dependency_waiting_and_order(context, order)
+    waiting.extend(graph_waiting)
     reasons = _bounded_reasons([*blockers, *waiting])
     classification = "blocked" if blockers else "waiting" if waiting else "ready"
     return CloseoutProjectionMember(
@@ -91,6 +59,75 @@ def projection_member(context: ProjectionMemberContext) -> CloseoutProjectionMem
         priority=door.schedulingProvenance.priority,
         order=order,
     )
+
+
+def _projection_blockers(context: ProjectionMemberContext) -> list[str]:
+    door = context.door
+    identity = (
+        door.taskDocumentRef,
+        door.owningMasterTaskDocumentRef,
+        door.contractPath,
+    ) != (
+        context.candidate.ref,
+        context.master.ref,
+        context.source_address.as_posix(),
+    )
+    stale = door.taskTopologyFingerprint != candidate_task_topology_fingerprint(
+        context.sprint,
+        context.master,
+        context.candidate,
+        graph=context.graph,
+    )
+    incomplete = bool(completion_blockers(context.candidate.document))
+    derived = [
+        reason
+        for reason, applies in (
+            ("door-canonical-identity-mismatch", identity),
+            ("door-task-topology-stale", stale),
+            ("leaf-task-incomplete", incomplete),
+        )
+        if applies
+    ]
+    return [*context.source_blockers, *derived]
+
+
+def _admission_waiting_reasons(door: CloseoutDoorGeneration) -> list[str]:
+    admission = door.admissionProvenance
+    reasons: list[str] = []
+    if not admission.resourceReady:
+        reasons.append(f"resource-unavailable: {admission.resourceReason}")
+    if not admission.admissionReady:
+        reasons.append(f"admission-blocked: {admission.admissionReason}")
+    return reasons
+
+
+def _dependency_waiting_and_order(
+    context: ProjectionMemberContext,
+    order: int,
+) -> tuple[list[str], int]:
+    if context.graph is None:
+        return _sequential_waiting_and_order(context, order)
+    waiting = predecessor_waiting_reasons(
+        context.graph,
+        context.master.ref,
+        context.candidate.ref,
+    )
+    node = candidate_node(context.graph, context.master.ref, context.candidate.ref)
+    if node is not None:
+        order = context.graph.node_order[node] * 1000 + order % 1000
+    return waiting, order
+
+
+def _sequential_waiting_and_order(
+    context: ProjectionMemberContext,
+    order: int,
+) -> tuple[list[str], int]:
+    owner = context.sequential_owner
+    if owner is None:
+        owner = context.first_master
+    if owner is None or owner == context.master.ref:
+        return [], order
+    return [f"atomic-series-lane-owned-by: {owner.key}"], order
 
 
 def scheduling_source_fact(

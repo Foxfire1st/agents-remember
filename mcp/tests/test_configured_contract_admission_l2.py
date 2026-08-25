@@ -499,7 +499,7 @@ def test_real_post_admission_lower_failures_share_the_public_projector(
     }
     assert lifecycle_locks and len(lifecycle_locks) == 1
     assert integration_locks == (added - lifecycle_locks)
-    assert bool(integration_locks) is (operation == "direct_landing")
+    assert integration_locks == set()
     for lock in added:
         assert after.pop(lock) == b""
     assert after == before

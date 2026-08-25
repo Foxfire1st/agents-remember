@@ -59,6 +59,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     contract_publication_text,
+    parse_contract_text,
 )
 
 LIFECYCLE_DIRECTORY = ".lifecycle"
@@ -190,6 +191,7 @@ def prepare_enclosure_publication(
     intent = audit_intent.strip()
     if not intent:
         raise ValueError("enclosure publication requires a nonblank audit intent")
+    contract = _contract_bound_to_publication_text(contract, contract_text)
     root = contract.coordination_root.resolve(strict=False)
     contract_path = _confined_contract_path(root, contract.contract_path)
     worktree_group = contract.worktree_group.resolve(strict=False)
@@ -263,6 +265,43 @@ def prepare_enclosure_publication(
         contract_text=contract_text,
         reserved_locator=locator,
     )
+
+
+def _contract_bound_to_publication_text(
+    requested: WorktreeContract,
+    contract_text: str,
+) -> WorktreeContract:
+    """Make the exact bytes being published the manifest's identity source."""
+
+    try:
+        published = parse_contract_text(contract_text, path=requested.contract_path)
+    except Exception as exc:
+        raise LifecycleOperationLocationError(
+            "operation-location-invalid",
+            "enclosure publication requires a valid exact contract document",
+            expected={"contractPath": requested.contract_path.resolve(strict=False).as_posix()},
+            observed={"errorType": type(exc).__name__},
+        ) from exc
+    expected = {
+        "repository": requested.repo_name,
+        "coordinationRoot": requested.coordination_root.resolve(strict=False).as_posix(),
+        "contractPath": requested.contract_path.resolve(strict=False).as_posix(),
+        "worktreeGroup": requested.worktree_group.resolve(strict=False).as_posix(),
+    }
+    observed = {
+        "repository": published.repo_name,
+        "coordinationRoot": published.coordination_root.resolve(strict=False).as_posix(),
+        "contractPath": published.contract_path.resolve(strict=False).as_posix(),
+        "worktreeGroup": published.worktree_group.resolve(strict=False).as_posix(),
+    }
+    if observed != expected:
+        raise LifecycleOperationLocationError(
+            "operation-location-mismatch",
+            "the exact contract publication contradicts its requested enclosure root",
+            expected=expected,
+            observed=observed,
+        )
+    return published
 
 
 def _prepare_start_generation(

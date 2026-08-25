@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import NoReturn
 
 from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.models.lifecycles.door import DoorPublicationEvidence
@@ -10,6 +11,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
     LifecycleOperationRecord,
+    OrganizationalCompletionRepairEvidence,
 )
 from agents_remember.models.lifecycles.termination import (
     LifecycleCancellationEvidence,
@@ -223,40 +225,73 @@ def _complete_organizational_repair(
     *,
     dry_run: bool,
 ) -> WorktreeContract:
-    if record.operationKind != "integrate" or record.organizationalRepair is None or dry_run:
+    repair = record.organizationalRepair
+    applicable = (record.operationKind, repair is not None, dry_run)
+    if applicable != ("integrate", True, False):
         return contract
+    assert repair is not None
+    return _prepare_completed_organizational_repair(contract, record, repair)
+
+
+def _prepare_completed_organizational_repair(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    repair: OrganizationalCompletionRepairEvidence,
+) -> WorktreeContract:
     try:
         return prepare_organizational_completion_repair(load_contract(contract.contract_path))
-    except IntegrationRefDecisionError as exc:
-        raise_integration_decision(exc.classification.decision_payload())
-    except OrganizationalRepairPublicationError as exc:
+    except (
+        IntegrationRefDecisionError,
+        OrganizationalRepairPublicationError,
+        CloseoutQueueError,
+    ) as exc:
+        _raise_organizational_repair_failure(contract, record, repair, exc)
+
+
+def _raise_organizational_repair_failure(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    repair: OrganizationalCompletionRepairEvidence,
+    error: IntegrationRefDecisionError | OrganizationalRepairPublicationError | CloseoutQueueError,
+) -> NoReturn:
+    if isinstance(error, IntegrationRefDecisionError):
+        raise_integration_decision(error.classification.decision_payload())
+    if isinstance(error, OrganizationalRepairPublicationError):
         raise LifecycleControlError(
-            exc.status,
-            exc.detail,
-            expected=exc.expected,
-            observed=exc.observed,
-            next_action=exc.next_action,
-        ) from exc
-    except CloseoutQueueError as exc:
-        observed = load_contract(contract.contract_path)
-        raise LifecycleControlError(
-            exc.status,
-            "organizational reset evidence contradicts the live contract",
-            expected={
-                "candidateState": record.candidateState,
-                "acceptedContractSha256": record.organizationalRepair.acceptedContractSha256,
-                "resetContractSha256": record.organizationalRepair.resetContractSha256,
-            },
-            observed={
-                "contractSha256": closeout_contract_sha256(observed),
-                "closeoutStatus": observed.closeout_status,
-                "integrationStatus": observed.integration_status,
-                "doorDisposition": (
-                    observed.closeout_door.disposition if observed.closeout_door else ""
-                ),
-            },
-            next_action="developer-decision",
-        ) from exc
+            error.status,
+            error.detail,
+            expected=error.expected,
+            observed=error.observed,
+            next_action=error.next_action,
+        ) from error
+    _raise_queue_repair_failure(contract, record, repair, error)
+
+
+def _raise_queue_repair_failure(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+    repair: OrganizationalCompletionRepairEvidence,
+    error: CloseoutQueueError,
+) -> NoReturn:
+    observed = load_contract(contract.contract_path)
+    raise LifecycleControlError(
+        error.status,
+        "organizational reset evidence contradicts the live contract",
+        expected={
+            "candidateState": record.candidateState,
+            "acceptedContractSha256": repair.acceptedContractSha256,
+            "resetContractSha256": repair.resetContractSha256,
+        },
+        observed={
+            "contractSha256": closeout_contract_sha256(observed),
+            "closeoutStatus": observed.closeout_status,
+            "integrationStatus": observed.integration_status,
+            "doorDisposition": (
+                observed.closeout_door.disposition if observed.closeout_door else ""
+            ),
+        },
+        next_action="developer-decision",
+    ) from error
 
 
 def _terminate_worker(

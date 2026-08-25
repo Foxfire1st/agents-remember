@@ -531,6 +531,7 @@ class SettingsResilienceTests(unittest.IsolatedAsyncioTestCase):
                 heartbeat_store=AgentNotifierHeartbeatStore(root / "logs" / "observer"),
                 observer_root=root / "logs" / "observer",
                 liveness_clock=lambda: NOW,
+                register_inbox_execution_evidence=None,
             )
 
             async def fake_sleep(_seconds: float) -> None:

@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.task_document import CompletionBlocker
 
 
@@ -26,6 +27,7 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     blockers: list[str | CompletionBlocker] = Field(default_factory=list)
     cleanup: dict[str, Any] = Field(default_factory=dict)
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
+    projectionEffects: list[TaskDocProjectionEffect] = Field(default_factory=list, max_length=8)
     taskArchive: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
     # Completion-seat cleanup is additive to finalization truth. Default-on auto-close reports the

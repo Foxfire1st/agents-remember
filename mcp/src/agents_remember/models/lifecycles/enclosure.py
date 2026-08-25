@@ -129,37 +129,37 @@ class LifecycleEnclosureLocator(StrictResponseModel):
 
     @model_validator(mode="after")
     def _publication_evidence_matches_state(self) -> LifecycleEnclosureLocator:
-        is_successor = self.publicationKind == "successor-enclosure"
-        if is_successor != (self.predecessorTerminal is not None):
-            raise ValueError("only a successor enclosure may carry one terminal predecessor")
-        manifest_proven = self.provenManifestSha256 == self.expectedManifestSha256
-        contract_proven = self.provenInitialContractSha256 == self.expectedInitialContractSha256
+        _require_successor_predecessor(self.publicationKind, self.predecessorTerminal)
         terminal_fields = (
             self.terminalArchivePath,
             self.terminalArchiveSha256,
             self.terminalReceiptPath,
         )
-        if self.state == "reserved" and (
-            self.provenManifestSha256 is not None
-            or self.provenInitialContractSha256 is not None
-            or any(terminal_fields)
-        ):
-            raise ValueError("reserved locator cannot carry publication proof")
-        if self.state == "manifest-proven" and (
-            not manifest_proven
-            or self.provenInitialContractSha256 is not None
-            or any(terminal_fields)
-        ):
-            raise ValueError("manifest-proven locator requires only exact manifest proof")
-        if self.state == "addressable" and (
-            not manifest_proven or not contract_proven or any(terminal_fields)
-        ):
-            raise ValueError("addressable locator requires exact live publication proof")
-        if self.state == "terminal-archived" and (
-            not manifest_proven or not contract_proven or not all(terminal_fields)
-        ):
-            raise ValueError("terminal locator requires exact archive and receipt proof")
+        observed = (
+            self.provenManifestSha256 == self.expectedManifestSha256,
+            self.provenInitialContractSha256 == self.expectedInitialContractSha256,
+            self.provenManifestSha256 is None,
+            self.provenInitialContractSha256 is None,
+            any(terminal_fields),
+            all(terminal_fields),
+        )
+        expected = {
+            "reserved": (False, False, True, True, False, False),
+            "manifest-proven": (True, False, False, True, False, False),
+            "addressable": (True, True, False, False, False, False),
+            "terminal-archived": (True, True, False, False, True, True),
+        }[self.state]
+        if observed != expected:
+            raise ValueError(f"{self.state} locator carries inconsistent publication proof")
         return self
+
+
+def _require_successor_predecessor(
+    publication_kind: EnclosurePublicationKind,
+    predecessor: TerminalEnclosurePredecessor | None,
+) -> None:
+    if (publication_kind == "successor-enclosure") != (predecessor is not None):
+        raise ValueError("only a successor enclosure may carry one terminal predecessor")
 
 
 class TerminalEnclosureArchiveEntry(StrictResponseModel):
@@ -245,52 +245,83 @@ class TerminalEnclosureArchive(StrictResponseModel):
         _require_cleanup_arguments(self.cleanupOperation, self.cleanupArguments)
         if self.locator.state != "addressable":
             raise ValueError("terminal archive must preserve the last addressable locator")
-        if (
-            self.locator.publicationRequestId != self.manifest.publicationRequestId
-            or self.locator.bindingFingerprint != self.manifest.bindingFingerprint
-            or self.locator.manifestPath
-            != self.manifest.lifecycleDirectory + "/enclosure-manifest.json"
-            or self.contractPath != self.locator.stableAddress
-            or self.contractPath != self.manifest.contractPath
-        ):
-            raise ValueError("terminal archive locator, manifest, and contract identity disagree")
-        contract_bytes = self.contractText.encode("utf-8")
-        if hashlib.sha256(contract_bytes).hexdigest() != self.contractSha256:
-            raise ValueError("terminal archive contract digest does not match its bytes")
-        request_payload = (
-            f"{self.locator.publicationRequestId}\n"
-            f"{self.cleanupOperation}\n"
-            f"{self.cleanupArguments.model_dump_json()}\n"
-            f"{self.contractSha256}\n"
-        ).encode()
-        if hashlib.sha256(request_payload).hexdigest() != self.cleanupRequestId:
-            raise ValueError("terminal archive cleanup request identity is inconsistent")
-        paths = [entry.relativePath for entry in self.canonicalEntries]
-        if len(paths) != len(set(paths)):
-            raise ValueError("terminal archive canonical entry paths must be unique")
-        manifest_entries = [
-            entry
-            for entry in self.canonicalEntries
-            if entry.relativePath == "enclosure-manifest.json"
-        ]
-        if len(manifest_entries) != 1:
-            raise ValueError("terminal archive requires the exact enclosure manifest entry")
-        manifest_exclude = (
-            {"predecessorTerminal"} if self.manifest.predecessorTerminal is None else None
-        )
-        expected_manifest = (
-            self.manifest.model_dump_json(
-                indent=2,
-                exclude=manifest_exclude,
-            )
-            + "\n"
-        )
-        if manifest_entries[0].content != expected_manifest:
+        _require_archive_identity(self)
+        _require_contract_digest(self.contractText, self.contractSha256)
+        _require_cleanup_request_identity(self)
+        _require_unique_archive_paths(self.canonicalEntries)
+        manifest_entry = _required_manifest_entry(self.canonicalEntries)
+        expected_manifest = _expected_manifest_text(self.manifest)
+        if manifest_entry.content != expected_manifest:
             raise ValueError("terminal archive manifest entry contradicts the typed manifest")
-        manifest_sha256 = hashlib.sha256(expected_manifest.encode("utf-8")).hexdigest()
-        if (
-            self.locator.expectedManifestSha256 != manifest_sha256
-            or self.locator.provenManifestSha256 != manifest_sha256
-        ):
-            raise ValueError("terminal archive manifest bytes contradict locator proof")
+        _require_manifest_proof(self.locator, expected_manifest)
         return self
+
+
+def _require_archive_identity(archive: TerminalEnclosureArchive) -> None:
+    observed = (
+        archive.locator.publicationRequestId,
+        archive.locator.bindingFingerprint,
+        archive.locator.manifestPath,
+        archive.contractPath,
+        archive.contractPath,
+    )
+    expected = (
+        archive.manifest.publicationRequestId,
+        archive.manifest.bindingFingerprint,
+        archive.manifest.lifecycleDirectory + "/enclosure-manifest.json",
+        archive.locator.stableAddress,
+        archive.manifest.contractPath,
+    )
+    if observed != expected:
+        raise ValueError("terminal archive locator, manifest, and contract identity disagree")
+
+
+def _require_contract_digest(contract_text: str, expected_sha256: str) -> None:
+    if hashlib.sha256(contract_text.encode("utf-8")).hexdigest() != expected_sha256:
+        raise ValueError("terminal archive contract digest does not match its bytes")
+
+
+def _require_cleanup_request_identity(archive: TerminalEnclosureArchive) -> None:
+    request_payload = (
+        f"{archive.locator.publicationRequestId}\n"
+        f"{archive.cleanupOperation}\n"
+        f"{archive.cleanupArguments.model_dump_json()}\n"
+        f"{archive.contractSha256}\n"
+    ).encode()
+    if hashlib.sha256(request_payload).hexdigest() != archive.cleanupRequestId:
+        raise ValueError("terminal archive cleanup request identity is inconsistent")
+
+
+def _require_unique_archive_paths(entries: list[TerminalEnclosureArchiveEntry]) -> None:
+    paths = [entry.relativePath for entry in entries]
+    if len(paths) != len(set(paths)):
+        raise ValueError("terminal archive canonical entry paths must be unique")
+
+
+def _manifest_entries(
+    entries: list[TerminalEnclosureArchiveEntry],
+) -> list[TerminalEnclosureArchiveEntry]:
+    return [entry for entry in entries if entry.relativePath == "enclosure-manifest.json"]
+
+
+def _required_manifest_entry(
+    entries: list[TerminalEnclosureArchiveEntry],
+) -> TerminalEnclosureArchiveEntry:
+    manifests = _manifest_entries(entries)
+    if len(manifests) != 1:
+        raise ValueError("terminal archive requires the exact enclosure manifest entry")
+    return manifests[0]
+
+
+def _expected_manifest_text(manifest: LifecycleEnclosureManifest) -> str:
+    exclude = {"predecessorTerminal"} if manifest.predecessorTerminal is None else None
+    return manifest.model_dump_json(indent=2, exclude=exclude) + "\n"
+
+
+def _require_manifest_proof(locator: LifecycleEnclosureLocator, manifest_text: str) -> None:
+    manifest_sha256 = hashlib.sha256(manifest_text.encode("utf-8")).hexdigest()
+    if (locator.expectedManifestSha256, locator.provenManifestSha256) != (
+        manifest_sha256,
+        manifest_sha256,
+    ):
+        raise ValueError("terminal archive manifest bytes contradict locator proof")

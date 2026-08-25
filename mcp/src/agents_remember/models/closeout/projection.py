@@ -92,7 +92,6 @@ class ProjectionInvalidationResult(_StrictModel):
     outcome: Literal[
         "persisted-empty",
         "already-empty",
-        "not-created",
         "recovered-malformed",
         "would-recover-malformed",
         "would-persist-empty",

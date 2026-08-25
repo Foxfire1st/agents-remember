@@ -357,30 +357,61 @@ def _validate_replacement(
 def _replacement_selector_exists(path: Path, selector: str) -> bool:
     """Whether an exact top-level function or class-method selector exists once."""
 
-    parts = selector.split("::")
-    if not parts or any(not part or "[" in part or "]" in part for part in parts):
+    parts = _selector_parts(selector)
+    if parts is None:
         return False
+    body = _selector_body(path)
+    if body is None:
+        return False
+    return _selector_exists(body, parts)
+
+
+def _selector_parts(selector: str) -> tuple[str, ...] | None:
+    parts = tuple(selector.split("::"))
+    invalid = any(_selector_part_invalid(part) for part in parts)
+    return None if invalid else parts
+
+
+def _selector_part_invalid(part: str) -> bool:
+    return (bool(part), "[" in part, "]" in part) != (True, False, False)
+
+
+def _selector_body(path: Path) -> Sequence[ast.stmt] | None:
     try:
-        body = ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body
+        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body
     except (OSError, SyntaxError, UnicodeError):
+        return None
+
+
+def _selector_exists(current: Sequence[ast.stmt], parts: tuple[str, ...]) -> bool:
+    match = _single_selector_declaration(current, parts[0])
+    if match is None:
         return False
-    current: Sequence[ast.stmt] = body
-    for index, name in enumerate(parts):
-        matches = [
-            node
-            for node in current
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name == name
-        ]
-        if len(matches) != 1:
-            return False
-        match = matches[0]
-        if index == len(parts) - 1:
-            return isinstance(match, (ast.FunctionDef, ast.AsyncFunctionDef))
-        if not isinstance(match, ast.ClassDef):
-            return False
-        current = match.body
-    return False
+    return _selector_tail_exists(match, parts)
+
+
+def _single_selector_declaration(
+    current: Sequence[ast.stmt],
+    name: str,
+) -> ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef | None:
+    matches: list[ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in current:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            node.name == name
+        ):
+            matches.append(node)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _selector_tail_exists(
+    match: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+    parts: tuple[str, ...],
+) -> bool:
+    if len(parts) == 1:
+        return isinstance(match, (ast.FunctionDef, ast.AsyncFunctionDef))
+    if not isinstance(match, ast.ClassDef):
+        return False
+    return _selector_exists(match.body, parts[1:])
 
 
 def governed_artifact_paths(root: Path) -> set[str]:

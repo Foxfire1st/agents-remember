@@ -122,7 +122,7 @@ def _real_external_contract(tmp: Path, name: str) -> WorktreeContract:
     memory_work = "ar/x"
     git(code_repo, "branch", code_source, "main")
     git(memory_repo, "branch", memory_source, "main")
-    worktree_group = tmp / f"{name}-group"
+    worktree_group = tmp / "worktrees" / "repo-a" / f"{name}-group"
     code_worktree = worktree_group / "code"
     memory_worktree = worktree_group / "memory"
     git(code_repo, "worktree", "add", "-b", code_work, str(code_worktree), code_source)
@@ -176,7 +176,7 @@ def _addressable_contract(tmp: Path, name: str, **over: object) -> WorktreeContr
         "task_name": name,
         "task_root": task_root,
         "contract_path": task_root / "series-contract.md",
-        "worktree_group": tmp / "worktrees" / name,
+        "worktree_group": tmp / "worktrees" / "repo-a" / name,
     }
     values.update(over)
     contract = _contract(tmp, **values)
@@ -477,7 +477,6 @@ class CleanupChildEdgeTests(unittest.TestCase):
             code_work_branch="ar/task",
             memory_source_branch="feat/dashboard",
             memory_work_branch="ar/task",
-            worktree_group=self.tmp / "grp",
             code_worktree=code_worktree,
             memory_worktree=memory_worktree,
             ledger_path=memory_worktree / "memory.md",
@@ -577,7 +576,6 @@ class CleanupChildEdgeTests(unittest.TestCase):
             code_work_branch="ar/task",
             memory_source_branch="feat/dashboard",
             memory_work_branch="ar/task",
-            worktree_group=self.tmp / "grp",
             code_worktree=code_worktree,
             memory_worktree=memory_worktree,
             ledger_path=memory_worktree / "memory.md",

@@ -54,11 +54,33 @@ def require_atomic_landing_authority(contract: WorktreeContract) -> None:
                 AtomicLandingBlocker(path, owner.task_name, "authority-unreadable"),
                 "live series ref authority is unreadable and blocks landing",
             ) from exc
+        if _is_declared_parent_owner(contract, owner, path, landing_targets, owner_targets):
+            continue
         if landing_targets & owner_targets:
             raise AtomicLandingBlocked(
                 AtomicLandingBlocker(path, owner.task_name, "live-nonterminal"),
                 "a distinct live atomic series contract owns this protected landing target",
             )
+
+
+def _is_declared_parent_owner(
+    contract: WorktreeContract,
+    owner: WorktreeContract,
+    owner_path: Path,
+    landing_targets: set[tuple[str, str, str]],
+    owner_targets: set[tuple[str, str, str]],
+) -> bool:
+    """Recognize only the exact parent whose protected refs this leaf is meant to advance."""
+
+    parent = contract.parent_contract_path
+    return bool(
+        contract.kind == "leaf"
+        and parent is not None
+        and parent.resolve(strict=False) == owner_path.resolve(strict=False)
+        and contract.parent_task_name == owner.task_name
+        and contract.repo_name == owner.repo_name
+        and landing_targets == owner_targets
+    )
 
 
 def _active_atomic_owner(path: Path, current_path: Path) -> WorktreeContract | None:

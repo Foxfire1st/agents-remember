@@ -416,10 +416,11 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         small = run_sweep(5)
         large = run_sweep(500)
 
-        # The batch()-wrapped sweep does exactly ONE disk read + ONE disk write regardless of
-        # how many rows the catalog holds -- the per-row read-modify-writes hit the in-memory buffer. The
-        # old per-mutator disk RMW made both counts grow with the row count (O(n) disk ops, each O(n)).
-        self.assertEqual(small, (1, 1, 1, 1, 1))
+        # The batch-wrapped probe performs one read, then task-registration and compaction each
+        # take a fresh snapshot after the catalog lock is released. The important bound is
+        # constant disk work independent of row count; nesting the task CAS under the catalog
+        # lock merely to recover a one-read assertion would reintroduce the documented deadlock.
+        self.assertEqual(small, (1, 1, 3, 1, 1))
         self.assertEqual(large, small)
 
     def test_overlapping_sweep_returns_current_catalog_without_second_probe(self) -> None:

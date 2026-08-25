@@ -492,6 +492,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 ledger_commit=forged_ledger,
             )
             write_contract(forged.contract_path, forged)
+            forged = _publish_completed_closeout_fixture(fixture, forged)
             lifecycle_operations.start_or_observe_operation(
                 IntegrateOperationInput(
                     configPath=fixture.config_path.as_posix(),
@@ -971,7 +972,8 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 memoryContentCommit=commits.memory_content,
                 ledgerCommit=commits.ledger,
             )
-            running = OperationRuntime(store).progress(
+            runtime = OperationRuntime(store)
+            runtime.progress(
                 "source-merge",
                 {
                     "current_command": "recover exact external integration pair",
@@ -985,6 +987,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                     ).model_dump(mode="json"),
                 },
             )
+            running = store.read()
             assert running is not None
             refresh = integration_ref_transaction.refresh_owned_checkout
 

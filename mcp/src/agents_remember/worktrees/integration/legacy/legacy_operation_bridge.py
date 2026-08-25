@@ -27,6 +27,18 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
+from agents_remember.worktrees.integration.legacy.legacy_operation_archive import (
+    finish_archive_unlink as _finish_archive_unlink,
+)
+from agents_remember.worktrees.integration.legacy.legacy_operation_archive import (
+    publish_archive as _publish_archive,
+)
+from agents_remember.worktrees.integration.legacy.legacy_operation_archive import (
+    read_publication_bytes as _read_publication_bytes,
+)
+from agents_remember.worktrees.integration.legacy.legacy_operation_archive import (
+    terminal_archive_evidence as _terminal_archive_evidence,
+)
 from agents_remember.worktrees.integration.legacy.legacy_operation_authority import (
     legacy_lifecycle_lease,
     legacy_pre_adoption,
@@ -68,10 +80,8 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     initial_closeout_mutation_evidence,
 )
 from agents_remember.worktrees.modules.git import (
-    branch_commit,
     current_branch,
     head_commit,
-    is_ancestor,
     require_git,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -769,107 +779,6 @@ def _require_migratable_closeout(
     return legacy_input, commits, repository, ref, code_tree
 
 
-def _terminal_archive_evidence(
-    contract: WorktreeContract,
-    legacy: LegacySchemaOneRecord,
-) -> dict[str, object]:
-    if legacy.workerPid is not None or legacy.status != "completed" or legacy.phase != "completed":
-        raise LegacyBridgeError(
-            "legacy-archive-terminal-proof-required",
-            "archive requires terminal completed state with no live worker authority",
-        )
-    commits = legacy.recoveryCommits
-    if commits is None:
-        raise LegacyBridgeError(
-            "legacy-archive-output-proof-required",
-            "archive requires exact operation-specific recovery commits",
-        )
-    if legacy.operationKind == "closeout":
-        expected = _closeout_archive_expected(contract)
-        observed = commits.model_dump(mode="json")
-        repository = (
-            contract.code_repo_path if contract.kind == "series" else contract.code_worktree
-        )
-        live_code = (
-            branch_commit(repository, contract.code_work_branch)
-            if contract.kind == "series"
-            else head_commit(repository)
-        )
-        if (
-            contract.closeout_status != "completed"
-            or observed != expected
-            or not is_ancestor(repository, commits.codeCommit, live_code)
-        ):
-            raise LegacyBridgeError(
-                "legacy-closeout-archive-evidence-mismatch",
-                "contract and live Git do not prove this terminal closeout output",
-                expected=expected,
-                observed={**observed, "liveCode": live_code},
-            )
-    elif legacy.operationKind == "integrate":
-        expected = _integrate_archive_expected(contract)
-        observed = commits.model_dump(mode="json")
-        live_code = branch_commit(contract.code_repo_path, contract.code_source_branch)
-        if (
-            contract.integration_status != "completed"
-            or observed != expected
-            or live_code != (contract.integrated_code_commit)
-        ):
-            raise LegacyBridgeError(
-                "legacy-integrate-archive-evidence-mismatch",
-                "contract and protected refs do not prove this terminal integration output",
-                expected=expected,
-                observed={**observed, "liveCode": live_code},
-            )
-        if contract.memory_mode == "external":
-            if contract.memory_repo_path is None:
-                raise LegacyBridgeError(
-                    "legacy-integrate-archive-evidence-mismatch",
-                    "external integration archive has no memory repository authority",
-                )
-            live_memory = branch_commit(contract.memory_repo_path, contract.memory_source_branch)
-            if live_memory != contract.integrated_ledger_commit:
-                raise LegacyBridgeError(
-                    "legacy-integrate-archive-evidence-mismatch",
-                    "protected memory ref does not prove the terminal ledger output",
-                    expected={"memoryRef": contract.integrated_ledger_commit},
-                    observed={"memoryRef": live_memory},
-                )
-    else:
-        raise LegacyBridgeError(
-            "legacy-archive-kind-unsupported",
-            "unknown schema-1 operation kind cannot be archived",
-        )
-    return {
-        "workerAuthority": "absent",
-        "status": legacy.status,
-        "phase": legacy.phase,
-        "contractStatus": (
-            contract.closeout_status
-            if legacy.operationKind == "closeout"
-            else contract.integration_status
-        ),
-        "recoveryCommits": commits.model_dump(mode="json"),
-        "liveCode": live_code,
-    }
-
-
-def _closeout_archive_expected(contract: WorktreeContract) -> dict[str, object]:
-    return {
-        "codeCommit": contract.code_commit,
-        "memoryContentCommit": contract.memory_content_commit,
-        "ledgerCommit": contract.ledger_commit,
-    }
-
-
-def _integrate_archive_expected(contract: WorktreeContract) -> dict[str, object]:
-    return {
-        "codeCommit": contract.integrated_code_commit,
-        "memoryContentCommit": contract.integrated_memory_content_commit,
-        "ledgerCommit": contract.integrated_ledger_commit,
-    }
-
-
 def _require_apply_arguments(expected_digest: str, actual: str, audit_reason: str) -> None:
     if expected_digest != actual:
         raise LegacyBridgeError(
@@ -894,109 +803,6 @@ def _required_fill(field: str, value: str | None) -> str:
             next_action="migrate",
         )
     return normalized
-
-
-def _publish_archive(
-    path: Path,
-    archive_path: Path,
-    archive: LegacyArchive,
-    *,
-    original: bytes,
-) -> None:
-    payload = archive.model_dump_json(indent=2) + "\n"
-    if archive_path.exists():
-        try:
-            existing = archive_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise legacy_io_error(
-                "legacy-archive-invalid",
-                "legacy archive receipt is unreadable",
-                failure=LegacyIoFailure("legacy-archive-read", "archive", archive_path.name, exc),
-            ) from exc
-        if existing != payload:
-            raise LegacyBridgeError(
-                "legacy-archive-conflict",
-                "an archive with different evidence already exists",
-            )
-    else:
-        try:
-            atomic_write_text(archive_path, payload)
-        except OSError as exc:
-            receipt = _read_publication_bytes(archive_path)
-            source = _read_publication_bytes(path)
-            if receipt == payload.encode("utf-8"):
-                pass
-            elif receipt is None and source == original:
-                raise LegacyBridgeError(
-                    "legacy-archive-publication-interrupted",
-                    "archive receipt publication left the exact original bytes unchanged",
-                    expected={"legacyDigest": archive.originalSha256},
-                    observed={"sourcePresent": True, "archivePresent": False},
-                    next_action="archive",
-                ) from exc
-            else:
-                raise LegacyBridgeError(
-                    "legacy-archive-conflict",
-                    "archive receipt publication produced contradictory durable bytes",
-                    expected={"legacyDigest": archive.originalSha256},
-                    observed={
-                        "sourceDigest": hashlib.sha256(source or b"").hexdigest(),
-                        "archivePresent": receipt is not None,
-                    },
-                ) from exc
-    _finish_archive_unlink(path, archive, archive_path)
-
-
-def _finish_archive_unlink(
-    path: Path,
-    archive: LegacyArchive,
-    archive_path: Path,
-) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        source = _read_publication_bytes(path)
-        receipt = _read_publication_bytes(archive_path)
-        expected_receipt = (archive.model_dump_json(indent=2) + "\n").encode("utf-8")
-        if (
-            source is not None
-            and hashlib.sha256(source).hexdigest() == archive.originalSha256
-            and receipt == expected_receipt
-        ):
-            raise LegacyBridgeError(
-                "legacy-archive-publication-pending",
-                "the exact archive receipt is durable but original unlink was interrupted",
-                expected={"legacyDigest": archive.originalSha256},
-                observed={"sourcePresent": True, "archivePresent": True},
-                next_action="archive",
-            ) from exc
-        if source is None and receipt == expected_receipt:
-            return
-        raise LegacyBridgeError(
-            "legacy-archive-conflict",
-            "archive unlink observed contradictory source or receipt bytes",
-            expected={"legacyDigest": archive.originalSha256},
-            observed={
-                "sourceDigest": hashlib.sha256(source or b"").hexdigest(),
-                "sourcePresent": source is not None,
-                "archivePresent": receipt is not None,
-            },
-        ) from exc
-
-
-def _read_publication_bytes(path: Path) -> bytes | None:
-    try:
-        return path.read_bytes()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise legacy_io_error(
-            "legacy-publication-evidence-unreadable",
-            "legacy publication evidence is unreadable",
-            failure=LegacyIoFailure("legacy-publication-read", "publication", path.name, exc),
-        ) from exc
 
 
 def _require_archive_identity(

@@ -844,7 +844,11 @@ def test_task_topology_master_census_and_command_edges(tmp_path: Path) -> None:
 
     def resolve(ref):
         kind = "master" if ref.path == "master-a/task.json" else "subTask"
-        return SimpleNamespace(ref=ref, document=SimpleNamespace(kind=kind))
+        return SimpleNamespace(
+            ref=ref,
+            path=root / ref.path,
+            document=SimpleNamespace(kind=kind),
+        )
 
     topology.resolve = Mock(side_effect=resolve)
     documents = refs.repository_master_documents(topology, "repo")
@@ -867,8 +871,8 @@ def test_task_topology_master_census_and_command_edges(tmp_path: Path) -> None:
             document=SimpleNamespace(id="master-b", title="B"),
         ),
     )
-    topology._master_documents = Mock(return_value=candidates)
-    assert topology._commanded_masters(sprint) == (candidates[1],)
+    with patch.object(refs, "repository_master_documents", return_value=candidates):
+        assert topology._commanded_masters(sprint) == (candidates[1],)
 
 
 def test_dispatch_target_and_library_launch_without_structural_role(tmp_path: Path) -> None:

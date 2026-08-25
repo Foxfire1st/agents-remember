@@ -209,24 +209,39 @@ def _task_facts(census: _EvidenceCensus) -> None:
 
 
 def _leaf_execution_blockers(leaf: TaskDocument) -> list[str]:
-    blockers: list[str] = []
-    if leaf.status != "planning":
-        blockers.append(f"status={leaf.status}")
-    if leaf.lifecycleId is not None:
-        blockers.append("lifecycleId")
-    if leaf.enclosures:
-        blockers.append("enclosures")
-    if leaf.executionRegistrations:
-        blockers.append("executionRegistrations")
-    if leaf.routeReview is not None:
-        blockers.append("routeReview")
-    for step in leaf.steps:
-        if step.status != "pending" or step.disposition is not None:
-            blockers.append(f"step:{step.id}:{step.status}")
-        for substep in step.substeps:
-            if substep.status != "pending" or substep.disposition is not None:
-                blockers.append(f"substep:{step.id}/{substep.id}:{substep.status}")
-    return blockers
+    return [
+        *_leaf_authority_blockers(leaf),
+        *_leaf_step_blockers(leaf),
+        *_leaf_substep_blockers(leaf),
+    ]
+
+
+def _leaf_authority_blockers(leaf: TaskDocument) -> list[str]:
+    candidates = (
+        (leaf.status != "planning", f"status={leaf.status}"),
+        (leaf.lifecycleId is not None, "lifecycleId"),
+        (bool(leaf.enclosures), "enclosures"),
+        (bool(leaf.executionRegistrations), "executionRegistrations"),
+        (leaf.routeReview is not None, "routeReview"),
+    )
+    return [label for present, label in candidates if present]
+
+
+def _leaf_step_blockers(leaf: TaskDocument) -> list[str]:
+    return [
+        f"step:{step.id}:{step.status}"
+        for step in leaf.steps
+        if (step.status, step.disposition) != ("pending", None)
+    ]
+
+
+def _leaf_substep_blockers(leaf: TaskDocument) -> list[str]:
+    return [
+        f"substep:{step.id}/{substep.id}:{substep.status}"
+        for step in leaf.steps
+        for substep in step.substeps
+        if (substep.status, substep.disposition) != ("pending", None)
+    ]
 
 
 def _contract_fact(
@@ -480,30 +495,54 @@ def _terminal_archive_route(evidence: _StartedRouteEvidence) -> RecoveryRoute | 
 
 
 def _projection_recovery_route(evidence: _StartedRouteEvidence) -> RecoveryRoute | None:
-    binding = evidence.binding
     projection = primary_operation_projection(list(evidence.projections))
-    if projection is not None:
-        controls = [control for control in projection.legalControls if isinstance(control, dict)]
-        if controls:
-            control = controls[0]
-            return (
-                str(control.get("action") or f"recover-{projection.kind}"),
-                str(control.get("tool") or "worktree_operation_control"),
-                dict(control.get("arguments") or {}),
-            )
-        if projection.status == "completed" and evidence.contract is not None:
-            contract_args: dict[str, object] = {
-                "contract_path": evidence.contract.contract_path.as_posix()
-            }
-            if projection.kind == "closeout":
-                return "complete-integration", "worktree_integrate", contract_args
-            return "complete-started-task", "task_doc", _task_route_args(binding)
-        return (
-            f"recover-{projection.kind}-authority",
-            "worktree_status",
-            {"contract_path": binding.contract_path.as_posix()},
-        )
-    return None
+    if projection is None:
+        return None
+    control_route = _projection_control_route(projection)
+    if control_route is not None:
+        return control_route
+    return _projection_without_control(evidence, projection)
+
+
+def _projection_control_route(projection: LifecycleOperationProjection) -> RecoveryRoute | None:
+    controls = [control for control in projection.legalControls if isinstance(control, dict)]
+    if not controls:
+        return None
+    control = controls[0]
+    return (
+        _control_route_value(control, "action", f"recover-{projection.kind}"),
+        _control_route_value(control, "tool", "worktree_operation_control"),
+        dict(control.get("arguments") or {}),
+    )
+
+
+def _control_route_value(control: dict[str, object], key: str, default: str) -> str:
+    value = control.get(key)
+    return str(value) if value else default
+
+
+def _projection_without_control(
+    evidence: _StartedRouteEvidence,
+    projection: LifecycleOperationProjection,
+) -> RecoveryRoute:
+    if projection.status == "completed" and evidence.contract is not None:
+        return _completed_projection_route(evidence, projection)
+    return (
+        f"recover-{projection.kind}-authority",
+        "worktree_status",
+        {"contract_path": evidence.binding.contract_path.as_posix()},
+    )
+
+
+def _completed_projection_route(
+    evidence: _StartedRouteEvidence,
+    projection: LifecycleOperationProjection,
+) -> RecoveryRoute:
+    assert evidence.contract is not None
+    contract_args: dict[str, object] = {"contract_path": evidence.contract.contract_path.as_posix()}
+    if projection.kind == "closeout":
+        return "complete-integration", "worktree_integrate", contract_args
+    return "complete-started-task", "task_doc", _task_route_args(evidence.binding)
 
 
 def _contract_recovery_route(evidence: _StartedRouteEvidence) -> RecoveryRoute | None:

@@ -153,20 +153,45 @@ def file_imports(path: Path, root_module: str | None) -> set[str]:
 def _pytest_plugin_imports(tree: ast.AST) -> set[str]:
     plugins: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        if not any(
-            isinstance(target, ast.Name) and target.id == "pytest_plugins" for target in targets
-        ):
-            continue
-        value = node.value
+        value = _pytest_plugins_value(node)
         if value is None:
             continue
-        for candidate in ast.walk(value):
-            if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
-                plugins.update(dotted_ancestors(candidate.value))
+        plugins.update(_declared_pytest_plugins(value))
     return plugins
+
+
+def _pytest_plugins_value(node: ast.AST) -> ast.expr | None:
+    targets = _assignment_targets(node)
+    if not any(_is_pytest_plugins_target(target) for target in targets):
+        return None
+    return node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+
+
+def _assignment_targets(node: ast.AST) -> tuple[ast.expr, ...]:
+    if isinstance(node, ast.Assign):
+        return tuple(node.targets)
+    if isinstance(node, ast.AnnAssign):
+        return (node.target,)
+    return ()
+
+
+def _is_pytest_plugins_target(target: ast.expr) -> bool:
+    return isinstance(target, ast.Name) and target.id == "pytest_plugins"
+
+
+def _declared_pytest_plugins(value: ast.expr) -> set[str]:
+    plugins: set[str] = set()
+    for candidate in ast.walk(value):
+        name = _pytest_plugin_name(candidate)
+        if name is not None:
+            plugins.update(dotted_ancestors(name))
+    return plugins
+
+
+def _pytest_plugin_name(candidate: ast.AST) -> str | None:
+    if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
+        return candidate.value
+    return None
 
 
 def name_match_tests(test_roots: Sequence[Path], module: str, tracked: Sequence[Path]) -> set[Path]:

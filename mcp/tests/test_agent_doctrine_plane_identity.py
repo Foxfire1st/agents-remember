@@ -128,10 +128,10 @@ def _assert_manager_doctrine(text: str) -> None:
     assert all(
         term in text
         for term in (
-            "Declare closeout readiness; do not rank the portfolio",
+            "Publish closeout-door truth; do not rank the portfolio",
             "An `organizational` leaf lands directly",
             "an `atomic` leaf lands only",
-            "routes and seams touched, local blockers",
+            "exact candidate tree, routes/seams, and complete admission evidence",
             "only after the orchestrator released",
         )
     )
@@ -172,7 +172,7 @@ def _assert_manager_brief_doctrine(text: str) -> None:
         term in text
         for term in (
             "Execution nature:",
-            "Closeout-ready report:",
+            "Closeout-door publication:",
             "Build concurrency does not grant",
             "before it lands",
             "exact proposed final super candidate containing the master's prior landed "

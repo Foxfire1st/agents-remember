@@ -213,9 +213,9 @@ def test_third_protected_ref_status_and_public_handler_require_developer_decisio
     ("side", "failure", "returncode"),
     [
         ("code", "ref-missing", 1),
-        ("code", "ref-unreadable", 2),
+        ("code", "ref-unreadable", 128),
         ("memory", "ref-missing", 1),
-        ("memory", "ref-unreadable", 2),
+        ("memory", "ref-unreadable", 128),
     ],
 )
 def test_missing_or_unreadable_protected_ref_is_one_public_decision(
@@ -234,7 +234,7 @@ def test_missing_or_unreadable_protected_ref_is_one_public_decision(
     real_run_git = integration_ref_state.run_git
 
     def unreadable_ref(repo: Path, args: list[str]):
-        if repo == repository and args[:2] == ["show-ref", "--verify"]:
+        if repo == repository and args[:3] == ["show-ref", "--verify", "--quiet"]:
             return CompletedProcess(args, returncode, stdout="", stderr="not public")
         return real_run_git(repo, args)
 

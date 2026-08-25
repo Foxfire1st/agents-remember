@@ -48,7 +48,7 @@ begin_pytest_process()
 # Pytest imports this only after the module-level admission above succeeds. The diagnostic route
 # loads ``agents_remember.testing.pytest_bootstrap`` directly and therefore never imports this
 # certifying service composition.
-pytest_plugins = ("agents_remember.testing.pytest_certifying_bootstrap",)
+pytest_plugins = ("agents_remember.pytest_certifying_bootstrap",)
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:

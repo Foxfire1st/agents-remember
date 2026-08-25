@@ -53,3 +53,21 @@ def transfer_and_publish_integration_claim(
                 integration_publication=proven.model_dump(mode="json"),
             )
         return proven
+
+
+def prove_recovery_publication_authority(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    intent: IntegrationPublicationIntent,
+    *,
+    commits: tuple[str, str, str],
+) -> IntegrationPublicationIntent:
+    """Prove source authority once and retain its durable terminal proof."""
+
+    if contract.integration_status == "completed":
+        if intent.claimState not in {"proven", "not-applicable"}:
+            raise RuntimeError(
+                "completed integration recovery has no proven source publication authority"
+            )
+        return intent
+    return transfer_and_publish_integration_claim(contract, args, intent, commits=commits)

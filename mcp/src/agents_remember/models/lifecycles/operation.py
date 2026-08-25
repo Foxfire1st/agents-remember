@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.base import StrictResponseModel
-from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.closeout.input import EffectiveCloseoutInput, EnabledCloseoutLeg
 from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
@@ -434,29 +434,73 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
 
 
 def _require_closeout_mutation_evidence(record: LifecycleOperationRecord) -> None:
-    closeout_input = record.input
-    if not isinstance(closeout_input, (CloseoutOperationInput, DirectLandingOperationInput)):
+    closeout_input = _required_commit_operation_input(record.input)
+    expected_legs = _expected_commit_legs(closeout_input)
+    _require_mutation_leg_sets(record, expected_legs)
+    _require_mutation_history(record)
+    _require_irreversible_boundary(record)
+    _require_recovery_commit_evidence(record)
+
+
+def _required_commit_operation_input(
+    operation_input: LifecycleOperationInput,
+) -> CloseoutOperationInput | DirectLandingOperationInput:
+    if not isinstance(operation_input, (CloseoutOperationInput, DirectLandingOperationInput)):
         raise ValueError("commit operation requires normalized closeout input")
-    expected_legs = {
-        leg for leg in ("code", "memory", "ledger") if closeout_input.effectiveInput.enabled(leg)
-    }
-    if set(record.mutationEvidence) != expected_legs:
-        raise ValueError("closeout mutation evidence must match every enabled commit leg")
-    if any(leg not in expected_legs for leg in record.mutationHistory):
-        raise ValueError("closeout mutation history must match an enabled commit leg")
-    for leg, attempts in record.mutationHistory.items():
-        if any(item.leg != leg or item.state != "reconciled-unchanged" for item in attempts):
-            raise ValueError(
-                "closeout mutation history may preserve only reconciled-unchanged attempts"
-            )
-    commit_proven = any(
-        evidence.state == "commit-proven" for evidence in record.mutationEvidence.values()
-    )
-    irreversible = commit_proven or record.legacyMigration is not None
+    return operation_input
+
+
+def _require_irreversible_boundary(record: LifecycleOperationRecord) -> None:
+    irreversible = _commit_proven(record) or record.legacyMigration is not None
     if record.irreversibleBoundaryEntered != irreversible:
         raise ValueError(
             "closeout irreversible boundary must be derived from commit proof or legacy output proof"
         )
+
+
+def _expected_commit_legs(
+    closeout_input: CloseoutOperationInput | DirectLandingOperationInput,
+) -> set[str]:
+    return {
+        leg for leg in ("code", "memory", "ledger") if closeout_input.effectiveInput.enabled(leg)
+    }
+
+
+def _require_mutation_leg_sets(record: LifecycleOperationRecord, expected_legs: set[str]) -> None:
+    if set(record.mutationEvidence) != expected_legs:
+        raise ValueError("closeout mutation evidence must match every enabled commit leg")
+    _require_mutation_history_legs(record, expected_legs)
+
+
+def _require_mutation_history_legs(
+    record: LifecycleOperationRecord,
+    expected_legs: set[str],
+) -> None:
+    if any(leg not in expected_legs for leg in record.mutationHistory):
+        raise ValueError("closeout mutation history must match an enabled commit leg")
+
+
+def _require_mutation_history(record: LifecycleOperationRecord) -> None:
+    for leg, attempts in record.mutationHistory.items():
+        _require_mutation_attempts(leg, attempts)
+
+
+def _require_mutation_attempts(
+    leg: str,
+    attempts: list[GitMutationEvidence],
+) -> None:
+    for item in attempts:
+        if (item.leg, item.state) != (leg, "reconciled-unchanged"):
+            raise ValueError(
+                "closeout mutation history may preserve only reconciled-unchanged attempts"
+            )
+
+
+def _commit_proven(record: LifecycleOperationRecord) -> bool:
+    return any(evidence.state == "commit-proven" for evidence in record.mutationEvidence.values())
+
+
+def _require_recovery_commit_evidence(record: LifecycleOperationRecord) -> None:
     if record.recoveryCommits is None:
         return
     recovery_field = {
@@ -465,42 +509,106 @@ def _require_closeout_mutation_evidence(record: LifecycleOperationRecord) -> Non
         "ledger": "ledgerCommit",
     }
     for leg, evidence in record.mutationEvidence.items():
-        recovered = getattr(record.recoveryCommits, recovery_field[leg])
-        if evidence.state == "commit-proven" and recovered and recovered != evidence.commit:
-            raise ValueError("closeout recovery commit contradicts commit-proven evidence")
+        _require_recovered_leg(record.recoveryCommits, recovery_field[leg], evidence)
+
+
+def _require_recovered_leg(
+    commits: LifecycleOperationRecoveryCommits,
+    field: str,
+    evidence: GitMutationEvidence,
+) -> None:
+    if evidence.state != "commit-proven":
+        return
+    if getattr(commits, field) not in (None, "", evidence.commit):
+        raise ValueError("closeout recovery commit contradicts commit-proven evidence")
 
 
 def _require_legacy_migration(record: LifecycleOperationRecord) -> None:
     proof = record.legacyMigration
     if proof is None:
         return
-    if record.operationKind != "closeout" or not isinstance(record.input, CloseoutOperationInput):
-        raise ValueError("legacy migration proof belongs only to a closeout operation")
-    if (
-        record.operationKey != proof.legacyOperationKey
-        or record.fingerprint != proof.legacyFingerprint
-        or record.candidateState != proof.legacyCandidateState
-        or record.candidateTree != proof.legacyCandidateTree
+    closeout_input = _required_legacy_closeout_input(record)
+    _require_legacy_generation_identity(record, proof)
+    _require_legacy_recovery_commit(record, proof)
+    _require_legacy_effective_input(closeout_input, proof)
+    _require_active_legacy_generation(record)
+
+
+def _required_legacy_closeout_input(record: LifecycleOperationRecord) -> CloseoutOperationInput:
+    if (record.operationKind, isinstance(record.input, CloseoutOperationInput)) != (
+        "closeout",
+        True,
     ):
+        raise ValueError("legacy migration proof belongs only to a closeout operation")
+    assert isinstance(record.input, CloseoutOperationInput)
+    return record.input
+
+
+def _require_active_legacy_generation(record: LifecycleOperationRecord) -> None:
+    if (record.status == "cancelled", record.generationDisposition) != (False, "active"):
+        raise ValueError("legacy migration proof cannot be cancelled, retired, or superseded")
+
+
+def _require_legacy_generation_identity(
+    record: LifecycleOperationRecord,
+    proof: LegacyCloseoutMigrationProof,
+) -> None:
+    observed = (
+        record.operationKey,
+        record.fingerprint,
+        record.candidateState,
+        record.candidateTree,
+    )
+    expected = (
+        proof.legacyOperationKey,
+        proof.legacyFingerprint,
+        proof.legacyCandidateState,
+        proof.legacyCandidateTree,
+    )
+    if observed != expected:
         raise ValueError("legacy migration proof must retain the legacy generation identity")
+
+
+def _require_legacy_recovery_commit(
+    record: LifecycleOperationRecord,
+    proof: LegacyCloseoutMigrationProof,
+) -> None:
     commits = record.recoveryCommits
-    if commits is None or commits.codeCommit != proof.codeCommit:
+    if getattr(commits, "codeCommit", None) != proof.codeCommit:
         raise ValueError("legacy migration recovery code commit must equal its live proof")
-    effective = record.input.effectiveInput
-    if effective.code.state != "not-applicable" or effective.code.reason != (
-        "verified-existing legacy code output"
+
+
+def _require_legacy_effective_input(
+    operation_input: CloseoutOperationInput,
+    proof: LegacyCloseoutMigrationProof,
+) -> None:
+    effective = operation_input.effectiveInput
+    if (effective.code.state, effective.code.reason) != (
+        "not-applicable",
+        "verified-existing legacy code output",
     ):
         raise ValueError("legacy migration code leg must be typed verified-existing")
-    if (
-        effective.memory.state != "enabled"
-        or effective.ledger.state != "enabled"
-        or effective.memory.message != proof.memoryCommitMessage
-        or effective.ledger.message != proof.ledgerCommitMessage
-        or record.input.approvalNote != proof.legacyApprovalNote
+    if not isinstance(effective.memory, EnabledCloseoutLeg) or not isinstance(
+        effective.ledger,
+        EnabledCloseoutLeg,
     ):
+        raise ValueError("legacy migration must keep memory and ledger enabled")
+    observed = (
+        effective.memory.state,
+        effective.ledger.state,
+        effective.memory.message,
+        effective.ledger.message,
+        operation_input.approvalNote,
+    )
+    expected = (
+        "enabled",
+        "enabled",
+        proof.memoryCommitMessage,
+        proof.ledgerCommitMessage,
+        proof.legacyApprovalNote,
+    )
+    if observed != expected:
         raise ValueError("legacy migration must bind both unfinished message cells exactly")
-    if record.status == "cancelled" or record.generationDisposition != "active":
-        raise ValueError("legacy migration proof cannot be cancelled, retired, or superseded")
 
 
 def _require_worker_authority(record: LifecycleOperationRecord) -> None:
@@ -508,32 +616,61 @@ def _require_worker_authority(record: LifecycleOperationRecord) -> None:
         _require_no_direct_worker_authority(record)
         return
     binding = (record.workerPid, record.workerLease, record.workerProcessFingerprint)
-    if any(value is not None for value in binding) and not all(
-        value is not None for value in binding
-    ):
-        raise ValueError("detached worker pid, lease, and process fingerprint are one authority")
+    _require_complete_worker_binding(binding)
+    _require_termination_return_identity(record)
     termination = record.workerTermination
-    return_status = record.terminationReturnStatus
-    return_phase = record.terminationReturnPhase
-    if (record.status == "termination-required") != (
-        return_status is not None and return_phase is not None
-    ):
-        raise ValueError(
-            "termination-required status must retain the status and phase that requested "
-            "termination"
-        )
-    if (return_status is None) != (return_phase is None):
-        raise ValueError("termination return status and phase are one durable identity")
     if termination is None:
-        if return_status is not None:
-            raise ValueError("termination return status requires durable termination evidence")
+        _require_no_termination_return(record)
         return
-    if termination.lease != record.workerLease and termination.state != "exited":
-        raise ValueError("worker termination intent must retain the exact worker lease")
-    if termination.state != "exited" and termination.pid != record.workerPid:
-        raise ValueError("unproven termination must retain the exact worker pid")
-    if termination.state == "exited" and any(value is not None for value in binding):
+    _require_live_termination_identity(record, termination)
+    _require_exited_worker_release(termination, binding)
+
+
+def _require_complete_worker_binding(binding: tuple[int | None, str | None, str | None]) -> None:
+    present = tuple(value is not None for value in binding)
+    if any(present) != all(present):
+        raise ValueError("detached worker pid, lease, and process fingerprint are one authority")
+
+
+def _require_termination_return_identity(record: LifecycleOperationRecord) -> None:
+    return_identity = (
+        record.terminationReturnStatus is not None,
+        record.terminationReturnPhase is not None,
+    )
+    expected = (True, True) if record.status == "termination-required" else (False, False)
+    if return_identity != expected:
+        raise ValueError(
+            "termination-required status must retain one exact return status and phase identity"
+        )
+
+
+def _require_no_termination_return(record: LifecycleOperationRecord) -> None:
+    if record.terminationReturnStatus is not None:
+        raise ValueError("termination return status requires durable termination evidence")
+
+
+def _require_live_termination_identity(
+    record: LifecycleOperationRecord,
+    termination: WorkerTerminationEvidence,
+) -> None:
+    if termination.state == "exited":
+        return
+    if (termination.lease, termination.pid) != (record.workerLease, record.workerPid):
+        raise ValueError("unproven worker termination must retain the exact pid and lease")
+
+
+def _require_exited_worker_release(
+    termination: WorkerTerminationEvidence,
+    binding: tuple[int | None, str | None, str | None],
+) -> None:
+    if termination.state != "exited":
+        return
+    if _binding_present(binding):
         raise ValueError("proven worker exit must release pid and lease authority")
+
+
+def _binding_present(binding: tuple[int | None, str | None, str | None]) -> bool:
+    return any(value is not None for value in binding)
 
 
 def _require_no_direct_worker_authority(record: LifecycleOperationRecord) -> None:

@@ -172,7 +172,7 @@ class CloseoutQueueStore:
                 self._publish(current)
                 self._clear_build()
                 return current, ProjectionInvalidationResult(
-                    outcome="not-created", revision=current.revision
+                    outcome="persisted-empty", revision=current.revision
                 )
             if existed and current.serviceCondition == "invalid-empty":
                 self._clear_build()

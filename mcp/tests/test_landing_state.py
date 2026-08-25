@@ -30,10 +30,12 @@ from agents_remember.worktrees.worktree_contract import (
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     load_contract,
     write_contract,
 )
+from lifecycle_enclosure_test_support import publish_test_enclosure, terminalize_test_enclosure
 
 NOW = datetime(2026, 7, 12, 16, 0, tzinfo=UTC)
 
@@ -563,6 +565,11 @@ class LandingFreezeResurrectionTests(unittest.IsolatedAsyncioTestCase):
             root = Path(tmp)
             contract = _landed_contract(root, 0)
             _write_leaf_task_doc(contract)
+            location = publish_test_enclosure(
+                contract,
+                contract_publication_text(contract.contract_path, contract),
+            )
+            terminalize_test_enclosure(location)
             final = contract.contract_path.parent / "landing-final.json"
 
             # A genuine freeze, produced by the real sweep — the exact file a reopen must clear.
@@ -582,7 +589,7 @@ class LandingFreezeResurrectionTests(unittest.IsolatedAsyncioTestCase):
             ):
                 result = reopen_task(contract.contract_path)
 
-            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.returncode, 0, result.payload)
             self.assertEqual(result.payload["state"], "reopened")
             self.assertEqual(result.payload["frozenLanding"], "deleted")
             self.assertFalse(final.exists())

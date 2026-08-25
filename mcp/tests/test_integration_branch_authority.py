@@ -33,6 +33,7 @@ from agents_remember.worktrees.integration import integration_branch_authority a
 from agents_remember.worktrees.integration import (
     integration_operation_authority,
     integration_ref_transaction,
+    integration_topology_collisions,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
@@ -160,23 +161,29 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             cleaned = replace(fixture.leaf_contract, cleanup="completed")
             write_contract(cleaned.contract_path, cleaned)
             surfaces = integration_surfaces(cleaned)
-            branch_authority._require_no_live_leaf_collisions(
-                branch_authority._scope(cleaned),
-                surfaces,
-                surfaces,
-                {},
+            integration_topology_collisions.require_no_live_leaf_collisions(
+                integration_topology_collisions.TopologyCollisionRequest(
+                    scope=branch_authority._scope(cleaned),
+                    current=surfaces,
+                    candidate=surfaces,
+                    overrides={},
+                ),
+                branch_authority._topology_collision_services(),
             )
 
             with mock.patch.object(
-                branch_authority,
+                integration_topology_collisions,
                 "iter_leaf_enclosure_contracts",
                 return_value=[fixture.master_contract.contract_path],
             ):
-                branch_authority._require_no_live_leaf_collisions(
-                    branch_authority._scope(cleaned),
-                    surfaces,
-                    surfaces,
-                    {},
+                integration_topology_collisions.require_no_live_leaf_collisions(
+                    integration_topology_collisions.TopologyCollisionRequest(
+                        scope=branch_authority._scope(cleaned),
+                        current=surfaces,
+                        candidate=surfaces,
+                        overrides={},
+                    ),
+                    branch_authority._topology_collision_services(),
                 )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,14 +200,20 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 if (surface.side, surface.repository, surface.branch) != source_key
             )
             with (
-                mock.patch.object(branch_authority, "_require_live_leaf_source_authority"),
+                mock.patch.object(
+                    integration_topology_collisions,
+                    "_require_live_leaf_source_authority",
+                ),
                 self.assertRaisesRegex(RuntimeError, "source authority would be removed"),
             ):
-                branch_authority._require_no_live_leaf_collisions(
-                    branch_authority._scope(fixture.leaf_contract),
-                    current,
-                    candidate,
-                    {},
+                integration_topology_collisions.require_no_live_leaf_collisions(
+                    integration_topology_collisions.TopologyCollisionRequest(
+                        scope=branch_authority._scope(fixture.leaf_contract),
+                        current=current,
+                        candidate=candidate,
+                        overrides={},
+                    ),
+                    branch_authority._topology_collision_services(),
                 )
 
     def test_resolves_default_super_and_every_active_series_on_both_repositories(self) -> None:
@@ -1027,10 +1040,11 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     launcher=lambda *_: None,
                     now=future,
                 )
-            requeued = store.read()
-            assert requeued is not None
-            self.assertEqual(requeued.integrationAuthority, authority)
-            self.assertEqual(requeued.status, "queued")
+            retained = store.read()
+            assert retained is not None
+            self.assertEqual(retained.integrationAuthority, authority)
+            self.assertEqual(retained.status, "running")
+            self.assertEqual(retained.generation, running.generation)
             resumed = OperationRuntime(store).start()
             result = integrate_result(
                 WorktreeArgs(
@@ -1076,7 +1090,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             payload = json.loads(store.path.read_text(encoding="utf-8"))
             payload["schemaVersion"] = "1.0"
             store.path.write_text(json.dumps(payload), encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "cannot be resumed"):
+            with self.assertRaisesRegex(RuntimeError, "explicit worktree_legacy_operation bridge"):
                 store.read()
 
     def test_series_bootstrap_restarts_from_fresh_source_after_partial_crash(self) -> None:

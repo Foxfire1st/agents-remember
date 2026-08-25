@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -205,24 +206,22 @@ class IntegrationOrganizationalDecisionL2Tests(unittest.TestCase):
                 self.fixture.cfg,
                 OperationControlRequest(**recover["arguments"]),
             )
-        self.assertTrue(result["ok"])
-        projected = result["lifecycleOperation"]
+        self.assertFalse(result["ok"])
+        projected = self._status(contract)
         self.assertEqual(projected["legalControls"], [])
         self.assertEqual(
             projected["result"]["state"],
             "organizational-completion-publication-conflict",
         )
+        self.assertEqual(result["status"], projected["result"]["state"])
+        self.assertEqual(result["expected"], projected["result"]["expected"])
+        self.assertEqual(result["observed"], projected["result"]["observed"])
         after = self._snapshots(load_contract(contract.contract_path), store)
+        self.assertEqual(after["journal"], protected_before["journal"])
         self.assertEqual(after["tasks"], protected_before["tasks"])
         self.assertEqual(after["contract"], protected_before["contract"])
         self.assertEqual(after["queue"], protected_before["queue"])
         self.assertEqual(after["refs"], protected_before["refs"])
-        durable = store.read()
-        assert durable is not None and durable.result is not None
-        self.assertEqual(
-            durable.result["state"],
-            "organizational-completion-publication-conflict",
-        )
 
     def _assert_unreadable_task_side(self, side: str) -> None:
         contract, store, stale_recover = self._pending_publication()
@@ -338,14 +337,13 @@ class IntegrationOrganizationalDecisionL2Tests(unittest.TestCase):
         intent = record.integrationPublication.organizationalCompletion
         assert intent is not None
         hostile = intent.model_copy(update={"masterTaskDocument": "private-hostile\0task.json"})
-        hostile_publication = record.integrationPublication.model_copy(
-            update={"organizationalCompletion": hostile}
-        )
-        store.update(
-            lambda current: current.model_copy(
-                update={"integrationPublication": hostile_publication}
-            )
-        )
+        payload = record.model_dump(mode="json")
+        publication = payload["integrationPublication"]
+        assert isinstance(publication, dict)
+        completion = publication["organizationalCompletion"]
+        assert isinstance(completion, dict)
+        completion["masterTaskDocument"] = hostile.masterTaskDocument
+        store.path.write_text(json.dumps(payload), encoding="utf-8")
         before = self._snapshots(contract, store)
 
         projected = self._status(contract)

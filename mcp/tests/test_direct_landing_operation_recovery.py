@@ -205,7 +205,7 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
                 (2, "completed"),
             )
 
-    def test_existing_action_required_operation_is_a_refused_landing_outcome(self) -> None:
+    def test_exact_retry_resumes_the_existing_running_landing(self) -> None:
         fixture = self._fixture()
         self._admit_without_execution(fixture)
         record = direct_landing_store(fixture["contract"]).read()
@@ -213,17 +213,14 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
 
         observed = direct_landing_payload(fixture["config"], self._request(fixture))
 
-        self.assertFalse(observed["ok"])
-        self.assertEqual(observed["state"], "refused")
-        self.assertEqual(
-            observed["status"],
-            "direct-landing-operation-action-required",
-        )
-        self.assertEqual(observed["lifecycleOperation"]["status"], record.status)
+        self.assertTrue(observed["ok"])
+        self.assertEqual(observed["state"], "landed")
+        self.assertEqual(observed["lifecycleOperation"]["status"], "completed")
+        self.assertEqual(observed["lifecycleOperation"]["generation"], record.generation)
         validated = DirectLandingResponse.model_validate(observed)
-        self.assertEqual(validated.state, "refused")
+        self.assertEqual(validated.state, "landed")
         assert validated.lifecycleOperation is not None
-        self.assertEqual(validated.lifecycleOperation.status, record.status)
+        self.assertEqual(validated.lifecycleOperation.status, "completed")
 
     def test_direct_retry_reset_preserves_memory_and_ledger_admission_identity(self) -> None:
         fixture = self._fixture()

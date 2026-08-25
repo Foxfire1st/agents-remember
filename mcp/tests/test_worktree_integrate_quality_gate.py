@@ -17,6 +17,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from _quality_evidence_fixture import publish_passing_quality_gate
 from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
     IntegrationPublicationIntent,
@@ -490,6 +491,7 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
     def test_series_integration_runs_the_full_capped_gate(self) -> None:
         contract = integration_contract(self.root, kind="series")
         exact_candidate = self.root / "exact-master-candidate"
+        init_repo(exact_candidate, "main")
 
         with (
             mock.patch.object(
@@ -504,13 +506,15 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
                 return_value=mock.Mock(executor="dagger", memory_cap_bytes=2147483648),
             ) as settings,
             mock.patch.object(
-                quality_mod, "run_strict_code_quality_gate", return_value={"passed": True}
+                quality_mod,
+                "run_strict_code_quality_gate",
+                side_effect=publish_passing_quality_gate,
             ) as gate,
         ):
             result, blocked = integrate_mod._run_integration_quality_gate(contract)
 
         self.assertIsNone(blocked)
-        self.assertEqual(result, {"passed": True})
+        self.assertTrue(result["passed"])
         (target,), kwargs = gate.call_args
         self.assertEqual(
             target,
@@ -729,6 +733,21 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
                 "_integrated_memory_commits",
                 return_value=("", "", None),
             ),
+            mock.patch.object(
+                integrate_mod,
+                "transfer_and_publish_integration_claim",
+                return_value=_not_applicable_integration_publication(),
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "prepare_integration_publication_intent",
+                return_value=_not_applicable_integration_publication(),
+            ),
+            mock.patch.object(
+                integrate_mod,
+                "protected_integration_decision",
+                return_value=None,
+            ),
             mock.patch.object(integrate_mod, "merge_integrated_commits") as merge,
         ):
             result = integrate_mod._apply_integration(
@@ -737,7 +756,6 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
                     strategy="ff-only",
                     operation_key="a" * 64,
                     operation_generation=1,
-                    integration_publication=_not_applicable_integration_publication(),
                 ),
                 IntegrationSources(
                     current_code_source="c0",

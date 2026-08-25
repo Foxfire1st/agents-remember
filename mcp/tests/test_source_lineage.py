@@ -524,6 +524,7 @@ def _fixture(
             coordination,
             "light-task",
             memory_mode,
+            parent_task_name=master.task_name,
             parent_contract_path=master.contract_path,
         ),
         leaf=LeafIdentity("leaf", leaf_id="leaf-1"),

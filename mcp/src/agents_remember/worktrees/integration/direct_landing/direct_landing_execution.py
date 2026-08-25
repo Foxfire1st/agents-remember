@@ -476,12 +476,30 @@ def _prove_advanced_ledger_commit(
 ) -> GitMutationEvidence:
     before = evidence.before
     assert before is not None
-    if (
-        require_git(facts.memory_repo, ["rev-parse", f"{current.head}^"]) != before.head
-        or current.indexTree != current.headTree
-        or current.candidateTree != current.headTree
-        or current.statusFingerprint != hashlib.sha256(b"").hexdigest()
-    ):
+    _require_single_clean_ledger_commit(facts, before, current)
+    head_text, head_ledger = _head_ledger(facts, commit=current.head)
+    _require_intended_ledger_mapping(facts, intent, head_text, head_ledger)
+    return _proven_ledger_evidence(args, facts, evidence, current)
+
+
+def _require_single_clean_ledger_commit(
+    facts: _LedgerExecution,
+    before: GitMutationSnapshot,
+    current: GitMutationSnapshot,
+) -> None:
+    observed = (
+        require_git(facts.memory_repo, ["rev-parse", f"{current.head}^"]),
+        current.indexTree,
+        current.candidateTree,
+        current.statusFingerprint,
+    )
+    expected = (
+        before.head,
+        current.headTree,
+        current.headTree,
+        hashlib.sha256(b"").hexdigest(),
+    )
+    if observed != expected:
         raise DirectLandingError(
             "direct-landing-ledger-output-ambiguous",
             "ledger ref movement is not the one clean commit attributable to this intent",
@@ -492,13 +510,18 @@ def _prove_advanced_ledger_commit(
             },
             observed=current.model_dump(mode="json"),
         )
-    head_text, head_ledger = _head_ledger(facts, commit=current.head)
+
+
+def _require_intended_ledger_mapping(
+    facts: _LedgerExecution,
+    intent: DirectLandingLedgerIntent,
+    head_text: str,
+    head_ledger,
+) -> None:
     mapping = find_mapping(head_ledger, facts.code_commit)
-    if (
-        head_text != intent.intendedText
-        or mapping is None
-        or mapping.memory_commit != facts.memory_commit
-    ):
+    observed = (head_text, mapping.memory_commit if mapping is not None else None)
+    expected = (intent.intendedText, facts.memory_commit)
+    if observed != expected:
         raise DirectLandingError(
             "direct-landing-ledger-output-ambiguous",
             "the advanced ledger commit does not contain the exact intended mapping",
@@ -511,6 +534,14 @@ def _prove_advanced_ledger_commit(
                 "memoryCommit": mapping.memory_commit if mapping is not None else "",
             },
         )
+
+
+def _proven_ledger_evidence(
+    args: WorktreeArgs,
+    facts: _LedgerExecution,
+    evidence: GitMutationEvidence,
+    current: GitMutationSnapshot,
+) -> GitMutationEvidence:
     rebound = evidence.model_copy(update={"expectedOutputTree": current.headTree})
     prove_git_commit(
         args,

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
@@ -488,21 +489,7 @@ def _require_landed_sibling(
             f"organizational sibling {child_ref.key} belongs to another code repository"
         )
     integration_targets(contract)
-    if not (
-        is_ancestor(
-            contract.code_repo_path,
-            contract.code_base_commit,
-            contract.integrated_code_commit,
-        )
-        and is_ancestor(
-            contract.code_repo_path,
-            contract.integrated_code_commit,
-            completing_contract.code_base_commit,
-        )
-    ):
-        raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} code commit is not on the sprint super"
-        )
+    _require_sibling_code_ancestry(contract, completing_contract, child_ref)
     if contract.memory_mode == "external":
         _require_landed_sibling_memory(contract, expected)
     return {
@@ -515,6 +502,29 @@ def _require_landed_sibling(
     }
 
 
+def _require_sibling_code_ancestry(
+    contract: WorktreeContract,
+    completing_contract: WorktreeContract,
+    child_ref: TaskDocumentRef,
+) -> None:
+    code_ancestry = (
+        is_ancestor(
+            contract.code_repo_path,
+            contract.code_base_commit,
+            contract.integrated_code_commit,
+        ),
+        is_ancestor(
+            contract.code_repo_path,
+            contract.integrated_code_commit,
+            completing_contract.code_base_commit,
+        ),
+    )
+    if not all(code_ancestry):
+        raise OrganizationalCompletionError(
+            f"organizational sibling {child_ref.key} code commit is not on the sprint super"
+        )
+
+
 def _require_sibling_contract_identity(
     contract: WorktreeContract,
     expected: _SiblingExpectation,
@@ -523,26 +533,28 @@ def _require_sibling_contract_identity(
     child_ref = expected.child_ref
     source_branch = expected.source_branch
     door = contract.closeout_door
-    if (
-        contract.kind != "leaf"
-        or contract.task_id != completing_contract.task_id
-        or contract.task_name != completing_contract.task_name
-        or contract.repo_name != completing_contract.repo_name
-        or contract.coordination_root.resolve() != completing_contract.coordination_root.resolve()
-        or contract.task_root.resolve() != completing_contract.task_root.resolve()
-        or contract.contract_path != expected.contract_path
-        or contract.leaf_id != expected.child_id
-        or contract.parent_task_name != completing_contract.parent_task_name
-        or contract.parent_contract_path is not None
-        or contract.memory_mode != completing_contract.memory_mode
-        or door is None
-        or door.disposition != "claimed"
-        or door.sprintTaskDocumentRef != expected.sprint_ref
-        or door.taskDocumentRef != child_ref
-        or contract.code_source_branch != source_branch
-        or not contract.integrated_code_commit
-        or contract.integrated_code_commit != contract.code_commit
-    ):
+    identity_mismatch = any(
+        (
+            contract.kind != "leaf",
+            contract.task_id != completing_contract.task_id,
+            contract.task_name != completing_contract.task_name,
+            contract.repo_name != completing_contract.repo_name,
+            contract.coordination_root.resolve() != completing_contract.coordination_root.resolve(),
+            contract.task_root.resolve() != completing_contract.task_root.resolve(),
+            contract.contract_path != expected.contract_path,
+            contract.leaf_id != expected.child_id,
+            contract.parent_task_name != completing_contract.parent_task_name,
+            contract.parent_contract_path is not None,
+            contract.memory_mode != completing_contract.memory_mode,
+            getattr(door, "disposition", None) != "claimed",
+            getattr(door, "sprintTaskDocumentRef", None) != expected.sprint_ref,
+            getattr(door, "taskDocumentRef", None) != child_ref,
+            contract.code_source_branch != source_branch,
+            not contract.integrated_code_commit,
+            contract.integrated_code_commit != contract.code_commit,
+        )
+    )
+    if identity_mismatch:
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} has no exact landed code edge"
         )
@@ -565,21 +577,23 @@ def _require_sibling_memory_identity(
     completing_contract: WorktreeContract,
     child_ref: TaskDocumentRef,
 ) -> None:
-    if (
-        contract.memory_repo_path is None
-        or completing_contract.memory_repo_path is None
-        or not contract.integrated_memory_content_commit
-        or not contract.integrated_ledger_commit
-        or contract.integrated_memory_content_commit != contract.memory_content_commit
-        or contract.integrated_ledger_commit != contract.ledger_commit
-    ):
+    memory_repository = contract.memory_repo_path
+    completing_memory_repository = completing_contract.memory_repo_path
+    identity = (
+        memory_repository is not None,
+        completing_memory_repository is not None,
+        bool(contract.integrated_memory_content_commit),
+        bool(contract.integrated_ledger_commit),
+        contract.integrated_memory_content_commit == contract.memory_content_commit,
+        contract.integrated_ledger_commit == contract.ledger_commit,
+    )
+    if identity != (True, True, True, True, True, True):
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} has no exact landed memory edge"
         )
-    if not _same_repository(
-        contract.memory_repo_path,
-        completing_contract.memory_repo_path,
-    ):
+    memory_repository = cast(Path, memory_repository)
+    completing_memory_repository = cast(Path, completing_memory_repository)
+    if not _same_repository(memory_repository, completing_memory_repository):
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} belongs to another memory repository"
         )
@@ -624,28 +638,29 @@ def _require_sibling_memory_ancestry(
     child_ref: TaskDocumentRef,
 ) -> None:
     assert contract.memory_repo_path is not None
-    if (
-        not is_ancestor(
+    ancestry = (
+        is_ancestor(
             contract.memory_repo_path,
             contract.memory_base_commit,
             contract.integrated_memory_content_commit,
-        )
-        or not is_ancestor(
+        ),
+        is_ancestor(
             contract.memory_repo_path,
             contract.memory_base_commit,
             contract.integrated_ledger_commit,
-        )
-        or not is_ancestor(
+        ),
+        is_ancestor(
             contract.memory_repo_path,
             contract.integrated_memory_content_commit,
             contract.integrated_ledger_commit,
-        )
-        or not is_ancestor(
+        ),
+        is_ancestor(
             contract.memory_repo_path,
             contract.integrated_ledger_commit,
             completing_contract.memory_base_commit,
-        )
-    ):
+        ),
+    )
+    if not all(ancestry):
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} memory mapping is not on the sprint super"
         )
@@ -657,14 +672,11 @@ def _require_sibling_memory_mapping(
     mapping: LedgerRow | None,
     final_mapping: LedgerRow | None,
 ) -> None:
-    if mapping is None or mapping.memory_commit != contract.integrated_memory_content_commit:
+    if getattr(mapping, "memory_commit", None) != contract.integrated_memory_content_commit:
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} memory mapping is not on the sprint super"
         )
-    if (
-        final_mapping is None
-        or final_mapping.memory_commit != contract.integrated_memory_content_commit
-    ):
+    if getattr(final_mapping, "memory_commit", None) != contract.integrated_memory_content_commit:
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} mapping is not preserved in the proposed "
             "final ledger"
@@ -684,25 +696,42 @@ def _require_confined_sibling_contract_path(
 ) -> None:
     """Reject a sibling enclosure reached through any symlink or path escape."""
 
+    if _path_crosses_symlink(master_root, contract_path):
+        raise OrganizationalCompletionError(
+            f"organizational sibling {child_ref.key} contract escapes through a symlink"
+        )
+    resolved_root, resolved_contract = _resolved_sibling_paths(
+        master_root,
+        contract_path,
+        child_ref,
+    )
+    if not resolved_contract.is_relative_to(resolved_root):
+        raise OrganizationalCompletionError(
+            f"organizational sibling {child_ref.key} contract escapes its master task root"
+        )
+
+
+def _path_crosses_symlink(master_root: Path, contract_path: Path) -> bool:
     relative = contract_path.relative_to(master_root)
     cursor = master_root
     for part in relative.parts:
         cursor /= part
         if cursor.is_symlink():
-            raise OrganizationalCompletionError(
-                f"organizational sibling {child_ref.key} contract escapes through a symlink"
-            )
+            return True
+    return False
+
+
+def _resolved_sibling_paths(
+    master_root: Path,
+    contract_path: Path,
+    child_ref: TaskDocumentRef,
+) -> tuple[Path, Path]:
     try:
-        resolved_root = master_root.resolve(strict=True)
-        resolved_contract = contract_path.resolve(strict=True)
+        return master_root.resolve(strict=True), contract_path.resolve(strict=True)
     except OSError as error:
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} has no readable landing contract"
         ) from error
-    if not resolved_contract.is_relative_to(resolved_root):
-        raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} contract escapes its master task root"
-        )
 
 
 def _commit_tree(repository: Path, commit: str) -> str:
@@ -753,14 +782,21 @@ def _has_completion_marker(
 
 
 def _completion_marker_fingerprint(decision: object) -> str | None:
-    if getattr(decision, "decision", None) != _COMPLETION_DECISION:
-        return None
-    rationale = getattr(decision, "rationale", "")
-    if not isinstance(rationale, str) or not rationale.startswith(_COMPLETION_RATIONALE_PREFIX):
+    rationale = _completion_marker_rationale(decision)
+    if rationale is None:
         return None
     fingerprint = rationale.removeprefix(_COMPLETION_RATIONALE_PREFIX)
-    if len(fingerprint) != 64 or any(
-        character not in "0123456789abcdef" for character in fingerprint
-    ):
+    if fingerprint == rationale:
         return None
-    return fingerprint
+    return _valid_completion_fingerprint(fingerprint)
+
+
+def _completion_marker_rationale(decision: object) -> str | None:
+    if getattr(decision, "decision", None) != _COMPLETION_DECISION:
+        return None
+    rationale = getattr(decision, "rationale", None)
+    return rationale if isinstance(rationale, str) else None
+
+
+def _valid_completion_fingerprint(fingerprint: str) -> str | None:
+    return fingerprint if re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None else None

@@ -29,7 +29,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
     resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.worktree_contract import write_contract
+from agents_remember.worktrees.worktree_contract import contract_publication_text, write_contract
 from closeout_input_test_support import closeout_operation_input, start_closeout_operation
 from lifecycle_enclosure_test_support import enclosure_contract
 from test_lifecycle_operations import _contract
@@ -37,6 +37,33 @@ from test_lifecycle_operations import _contract
 
 class _PublicationCut(BaseException):
     pass
+
+
+def test_publication_refuses_invalid_or_identity_conflicting_contract_bytes(
+    tmp_path: Path,
+) -> None:
+    invalid_contract, _text = enclosure_contract(tmp_path / "invalid")
+    with pytest.raises(LifecycleOperationLocationError) as invalid:
+        publish_new_lifecycle_operation_location(
+            invalid_contract,
+            contract_text="not a worktree contract\n",
+        )
+    assert invalid.value.status == "operation-location-invalid"
+    assert invalid.value.observed["errorType"]
+
+    requested, _text = enclosure_contract(tmp_path / "mismatch")
+    contradictory = replace(requested, repo_name="other-repository")
+    with pytest.raises(LifecycleOperationLocationError) as mismatch:
+        publish_new_lifecycle_operation_location(
+            requested,
+            contract_text=contract_publication_text(
+                requested.contract_path,
+                contradictory,
+            ),
+        )
+    assert mismatch.value.status == "operation-location-mismatch"
+    assert mismatch.value.expected["repository"] == "repo"
+    assert mismatch.value.observed["repository"] == "other-repository"
 
 
 @pytest.mark.parametrize("kind", ["leaf", "series"])

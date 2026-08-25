@@ -77,7 +77,7 @@ def terminalize_test_enclosure(
         arguments=TerminalWorktreeAbandonArguments(force=False),
         dry_run=False,
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, result.payload
     shutil.rmtree(location.worktree_group)
     observed = inspect_lifecycle_operation_locator(
         location.locator_path.parent.parent.parent,

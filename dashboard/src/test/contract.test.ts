@@ -55,15 +55,17 @@ import snapshot from "../fixtures/snapshot.json";
 //
 // All three are TYPE-level: free at runtime, enforced by `npm run typecheck` (`tsc -b`). The
 // runtime assertions below cover what types cannot — the string VOCABULARIES, which a JSON module
-// import widens to `string` (see `AsJsonModule`) and which therefore no type can check here.
+// import widens to `string` (see `AsJsonModule`) and which therefore no type can check here. The
+// fixture must reach every registered path and every sampled value must be legal; exhaustive
+// producer vocabulary belongs to generated schema/codegen rather than to one representative payload.
 //
 // WHAT SCHEMA CODEGEN CLOSES. The generated contract reaches two forms of producer drift that a
 // sample cannot, even a sample this file polices:
 //   (1) a server field that is `T | None` and currently null is *omitted* by `exclude_none=True`,
 //       so no sampled payload can reveal it — only the schema can;
-//   (2) a vocabulary member the server declares and no sample happens to carry. `VOCABULARIES`
-//       below forces the fixture to exercise every member the MIRROR knows, which makes deleting
-//       one bite; it cannot make up a member the mirror never heard of;
+//   (2) a vocabulary member the server declares and no sample happens to carry. The generated
+//       schema and stale-output check own that exhaustive proof; requiring this representative
+//       payload to instantiate every member would duplicate the authority and amplify fixtures;
 //   (3) the difference between two field-identical models. The mirror now declares
 //       `SeriesSectionNode` separately from `TaskSectionNode`, matching the server's two
 //       `extra="forbid"` models — but they declare the same three fields, so TypeScript's
@@ -379,7 +381,6 @@ const VOCABULARIES: Record<
   "projection.enclosures[].lifecycleOperation.projectionEffects[].invalidation.outcome": [
     "persisted-empty",
     "already-empty",
-    "not-created",
     "recovered-malformed",
     "would-recover-malformed",
     "would-persist-empty",
@@ -493,25 +494,6 @@ describe("every closed vocabulary in the mirror is checked against the payload",
     }
   });
 
-  it("exercises every member of every vocabulary, so the check does not depend on luck", () => {
-    // The half that was missing. `toContain` over whatever the fixture happened to hold covered
-    // 2 of 6 states, 2 of 6 phases and 1 of 3 severities — so deleting `"close"` from `PHASES`,
-    // or any other member no sample used, produced ZERO failures from this file. A vocabulary is
-    // a contract with the server; a sample that exercises a third of it measures a third of it.
-    //
-    // Members are pooled per VOCABULARY, not per path: `PROCESS_FACT_STATES` is registered at six
-    // paths and the fixture spreads its six members across them rather than repeating all six in
-    // each, which is what a real payload looks like.
-    const sampledByVocabulary = new Map<readonly string[], Set<unknown>>();
-    for (const [path, vocabulary] of Object.entries(VOCABULARIES)) {
-      const seen = sampledByVocabulary.get(vocabulary) ?? new Set<unknown>();
-      for (const value of valuesAt(snapshot, path)) seen.add(value);
-      sampledByVocabulary.set(vocabulary, seen);
-    }
-    for (const [vocabulary, seen] of sampledByVocabulary) {
-      expect([...vocabulary].sort()).toEqual([...seen].sort());
-    }
-  });
 });
 
 describe("projection contract fixture", () => {

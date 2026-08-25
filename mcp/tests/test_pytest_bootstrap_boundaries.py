@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -180,14 +182,44 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
             )
 
     def test_diagnostic_plugin_has_no_admission_or_external_service_dependency(self) -> None:
-        package = Path(__file__).resolve().parents[1] / "src" / "agents_remember" / "testing"
-        diagnostic = (package / "pytest_bootstrap.py").read_text(encoding="utf-8")
+        package = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
+        diagnostic = (package / "testing" / "pytest_bootstrap.py").read_text(encoding="utf-8")
         certifying = (package / "pytest_certifying_bootstrap.py").read_text(encoding="utf-8")
         self.assertNotIn("dagger", diagnostic.lower())
         self.assertNotIn("worktree_services", diagnostic)
         self.assertNotIn("providers", diagnostic)
         self.assertIn("pytest_bootstrap", certifying)
         self.assertIn("worktree_services", certifying)
+
+    def test_certifying_plugin_defers_the_service_graph_until_fixture_execution(self) -> None:
+        source_root = Path(__file__).resolve().parents[1] / "src"
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = source_root.as_posix()
+        command = "\n".join(
+            (
+                "import sys",
+                "import agents_remember.pytest_certifying_bootstrap",
+                "forbidden = {",
+                "    'agents_remember.testing',",
+                "    'agents_remember.application.worktree_services',",
+                "    'agents_remember.models.lifecycles.operation',",
+                "}",
+                "loaded = sorted(forbidden.intersection(sys.modules))",
+                "raise SystemExit('eager imports: ' + ', '.join(loaded) if loaded else 0)",
+            )
+        )
+
+        completed = subprocess.run(
+            [sys.executable, "-c", command],
+            cwd=source_root.parent.parent,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_test_process_declaration_and_global_state_are_restored(self) -> None:
         before = snapshot_owned_mutable_state()

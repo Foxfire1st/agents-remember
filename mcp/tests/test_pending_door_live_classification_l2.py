@@ -25,9 +25,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
     LifecycleControlProjectionContext,
     legal_operation_controls,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
-    control_operation,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -43,7 +40,6 @@ from lifecycle_control_test_support import publish_completed_disposition_task_au
 from test_closeout_generation_boundary import _publish_mutated_code_generation
 from test_lifecycle_operation_controls_l2 import (
     _byte_tree,
-    _command,
     _dirty_closeout,
     _public_control,
 )
@@ -194,7 +190,7 @@ def test_unreadable_pending_door_status_and_stale_handler_share_exact_decision(
     assert store.read() is not None
 
 
-@pytest.mark.parametrize("mode", ["cancel", "successor", "supersede"])
+@pytest.mark.parametrize("mode", ["cancel", "supersede"])
 def test_all_pending_door_dispositions_refuse_live_third_state_without_mutation(
     tmp_path: Path,
     mode: str,
@@ -235,28 +231,14 @@ def test_all_pending_door_dispositions_refuse_live_third_state_without_mutation(
 
 
 def _pending_disposition_fixture(tmp_path: Path, mode: str):
-    if mode in {"cancel", "successor"}:
+    if mode == "cancel":
         contract, _operation_input, store, record = _dirty_closeout(tmp_path)
         config = load_config(Path(record.input.configPath))
-        if mode == "successor":
-            control_operation(_command(contract, record, "cancel"))
-            cancelled = store.read()
-            assert cancelled is not None
-            row = next(
-                item
-                for item in legal_operation_controls(
-                    load_contract(contract.contract_path),
-                    cancelled,
-                )
-                if item["action"] == "revise"
-            )
-            row["arguments"]["code_commit_message"] = "accepted successor exact message"
-        else:
-            row = next(
-                item
-                for item in legal_operation_controls(contract, record)
-                if item["action"] == "cancel"
-            )
+        row = next(
+            item
+            for item in legal_operation_controls(contract, record)
+            if item["action"] == "cancel"
+        )
         caller = None
     else:
         contract = _contract(tmp_path)

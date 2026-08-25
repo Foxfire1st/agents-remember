@@ -15,6 +15,7 @@ from agents_remember.application.lifecycle.lifecycle_operation_worker import Ope
 from agents_remember.errors import ConfiguredContractAuthorityError
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
+    IntegrationPublicationIntent,
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
@@ -28,6 +29,7 @@ from agents_remember.worktrees.integration import (
     integration_claim_transfer,
     integration_operation_authority,
     integration_ref_state,
+    integration_topology_collisions,
 )
 from agents_remember.worktrees.integration.integration_branch_types import (
     IntegrationSurface,
@@ -71,7 +73,7 @@ class IntegrationBranchRepositoryCoverageTests(unittest.TestCase):
 
         cases = (
             ([_git_result(stdout="refs/heads/loop\n")], "cycle"),
-            ([_git_result(2, stderr="permission denied")], "permission denied"),
+            ([_git_result(2, stderr="permission denied")], "unreadable"),
             ([_git_result(stdout="refs/tags/main\n")], "non-local target"),
             ([_git_result(stdout="refs/heads/\n")], "non-local target"),
         )
@@ -182,7 +184,7 @@ class IntegrationBranchRepositoryCoverageTests(unittest.TestCase):
                 "run_git",
                 return_value=_git_result(1, stderr="cannot list"),
             ),
-            self.assertRaisesRegex(RuntimeError, "cannot list"),
+            self.assertRaisesRegex(RuntimeError, "unreadable"),
         ):
             integration_branch_repository.branch_worktree_owners(repository, "main")
 
@@ -398,7 +400,7 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     external_authority,
                 )
 
-    def test_final_preparation_race_refuses_after_intent_before_ref_mutation(self) -> None:
+    def test_final_preparation_race_becomes_protected_ref_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root)
@@ -426,6 +428,26 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
 
             with (
                 mock.patch.object(
+                    integrate_module,
+                    "prepare_integration_publication_intent",
+                    return_value=IntegrationPublicationIntent(
+                        operationKey=running.operationKey,
+                        generation=running.generation,
+                        preparedAt="2026-08-22T00:00:00+00:00",
+                        claimState="not-applicable",
+                    ),
+                ),
+                mock.patch.object(
+                    integrate_module,
+                    "preview_integration_boundary",
+                    return_value=integrate_module.IntegrationBoundaryFacts(None, None, None),
+                ),
+                mock.patch.object(
+                    integrate_module,
+                    "_quality_gate_preview",
+                    return_value={"status": "certified-at-leaf-closeout"},
+                ),
+                mock.patch.object(
                     integration_claim_transfer,
                     "transfer_integration_claim",
                     side_effect=raced_transfer,
@@ -439,7 +461,10 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
             ):
                 result = integrate_module._apply_integration(
                     closed,
-                    WorktreeArgs(operation_key=running.operationKey),
+                    WorktreeArgs(
+                        operation_key=running.operationKey,
+                        operation_generation=running.generation,
+                    ),
                     integrate_module.IntegrationSources(
                         current_code_source=authority.codeSourceCommit,
                         current_memory_source="",
@@ -449,7 +474,8 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     handover_warning=None,
                 )
             self.assertEqual(result.returncode, 2)
-            self.assertEqual(result.payload["state"], "source-moved-during-quality")
+            self.assertEqual(result.payload["state"], "integration-ref-conflict")
+            self.assertEqual(result.payload["nextAction"], "developer-decision")
             merge.assert_not_called()
             self.assertTrue(any(item.get("integration_publication") for item in progress))
 
@@ -546,7 +572,8 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     external_fixture.config_path.as_posix(),
                 )
             self.assertEqual(
-                (raised.exception.side, raised.exception.name), ("memory", "candidate")
+                (raised.exception.side, raised.exception.name),
+                ("memory", "candidate-owner"),
             )
             foreign_memory = root / "foreign-memory"
             foreign_memory.mkdir()
@@ -556,7 +583,8 @@ class IntegrationOperationAuthorityCoverageTests(unittest.TestCase):
                     external_fixture.config_path.as_posix(),
                 )
             self.assertEqual(
-                (raised.exception.side, raised.exception.name), ("memory", "candidate")
+                (raised.exception.side, raised.exception.name),
+                ("memory", "candidate-owner"),
             )
 
     def test_lifecycle_stale_predicate_covers_process_and_terminal_states(self) -> None:
@@ -693,47 +721,48 @@ class IntegrationBranchAuthorityCoverageTests(unittest.TestCase):
             master = topology.resolve(master_ref)
             leaf_ref = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
 
+            live_leaf = topology.resolve(leaf_ref).document
             cases = (
                 (
                     replace(
-                        fixture.leaf_contract,
-                        queue_candidate_task_document="repo/wrong.json",
-                        queue_sprint_task_document=sprint_ref.key,
+                        master,
+                        document=master.document.model_copy(update={"subTasks": []}),
                     ),
-                    "queue identity changed",
+                    {},
+                    "not declared",
                 ),
                 (
-                    replace(
-                        fixture.leaf_contract,
-                        queue_candidate_task_document=leaf_ref.key,
-                        queue_sprint_task_document="",
-                    ),
-                    "queue binding is partial",
-                ),
-                (
-                    replace(
-                        fixture.leaf_contract,
-                        queue_candidate_task_document=leaf_ref.key,
-                        queue_sprint_task_document="repo/other/task.json",
-                    ),
-                    "queue owner changed",
+                    master,
+                    {leaf_ref: live_leaf.model_copy(update={"id": "wrong-leaf"})},
+                    "task identity changed",
                 ),
             )
-            for contract, reason in cases:
+            for current_master, overrides, reason in cases:
                 with self.subTest(reason=reason), self.assertRaisesRegex(RuntimeError, reason):
-                    integration_branch_authority._require_live_leaf_task_identity(
+                    integration_topology_collisions._require_live_leaf_task_identity(
                         topology,
-                        contract,
-                        master,
-                        {},
+                        fixture.leaf_contract,
+                        current_master,
+                        overrides,
                     )
 
             with self.assertRaisesRegex(RuntimeError, "source no longer matches"):
-                integration_branch_authority._require_live_leaf_source_authority(
+                collision_context = integration_topology_collisions._collision_context(
+                    integration_topology_collisions.TopologyCollisionRequest(
+                        scope=integration_branch_authority._scope(fixture.leaf_contract),
+                        current=integration_branch_authority.integration_surfaces(
+                            fixture.leaf_contract
+                        ),
+                        candidate=(),
+                        overrides={},
+                    ),
+                    integration_branch_authority._topology_collision_services(),
+                )
+                integration_topology_collisions._require_live_leaf_source_authority(
+                    collision_context,
                     fixture.leaf_contract,
                     master,
                     sprint_ref,
-                    (),
                     "atomic",
                 )
 
@@ -822,6 +851,7 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                     "run_git",
                     side_effect=[
                         _git_result(stdout=".git\n"),
+                        _git_result(),
                         _git_result(stdout=f"{internal_authority.codeSourceCommit}\n"),
                     ],
                 ),
@@ -842,6 +872,7 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                 "run_git",
                 side_effect=[
                     _git_result(stdout=".git\n"),
+                    _git_result(),
                     _git_result(stdout=f"{internal_authority.codeSourceCommit}\n"),
                 ],
             ):
@@ -859,6 +890,7 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                     "run_git",
                     side_effect=[
                         _git_result(stdout=".git\n"),
+                        _git_result(),
                         _git_result(stdout=f"{'f' * 40}\n"),
                     ],
                 ),
@@ -881,8 +913,10 @@ class IntegrationValidationCoverageTests(unittest.TestCase):
                     "run_git",
                     side_effect=[
                         _git_result(stdout=".git\n"),
+                        _git_result(),
                         _git_result(stdout=f"{external_authority.codeCandidateCommit}\n"),
                         _git_result(stdout=".git\n"),
+                        _git_result(),
                         _git_result(stdout=f"{'f' * 40}\n"),
                     ],
                 ),

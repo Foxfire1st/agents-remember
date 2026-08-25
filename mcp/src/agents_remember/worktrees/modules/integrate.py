@@ -28,6 +28,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_series_contract_authority,
 )
 from agents_remember.worktrees.integration.integration_claim_transfer import (
+    prove_recovery_publication_authority,
     transfer_and_publish_integration_claim,
 )
 from agents_remember.worktrees.integration.integration_operation_authority import (
@@ -495,6 +496,10 @@ def _recover_landed_refs(
 ) -> bool:
     """Finish or prove the exact named-ref transaction after an abrupt worker death."""
 
+    if contract.memory_mode != "external" and (commits.memoryContentCommit or commits.ledgerCommit):
+        raise RuntimeError(
+            "integration recovery recorded external-memory commits for an internal-memory contract"
+        )
     facts = classify_integration_authority_refs(authority, commits)
     if facts.state == "unchanged":
         return False
@@ -506,11 +511,6 @@ def _recover_landed_refs(
     code_before = authority.codeSourceCommit
     code_after = commits.codeCommit
     if contract.memory_mode != "external":
-        if commits.memoryContentCommit or commits.ledgerCommit:
-            raise RuntimeError(
-                "integration recovery recorded external-memory commits for an internal-memory "
-                "contract"
-            )
         if code_source != code_after:
             raise RuntimeError(
                 "integration recovery found an unowned code ref value: "
@@ -825,7 +825,12 @@ def _recover_integration_under_authority(
         authority.ledgerCommit,
     )
     try:
-        intent = transfer_and_publish_integration_claim(contract, args, intent, commits=commits)
+        intent = prove_recovery_publication_authority(
+            contract,
+            args,
+            intent,
+            commits=commits,
+        )
     except IntegrationDoorAuthorityConflict as error:
         return WorktreeCommandResult(2, integration_door_decision_payload(error.evidence))
 

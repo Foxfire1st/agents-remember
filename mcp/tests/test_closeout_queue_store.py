@@ -91,9 +91,9 @@ class CloseoutProjectionStoreTests(unittest.TestCase):
                 }
             )
 
-    def test_absent_invalidation_publishes_invalid_empty_and_reports_not_created(self) -> None:
+    def test_absent_invalidation_publishes_and_reports_persisted_empty(self) -> None:
         state, effect = self.store.invalidate(timestamp=NOW)
-        self.assertEqual(effect.outcome, "not-created")
+        self.assertEqual(effect.outcome, "persisted-empty")
         self.assertEqual(state.serviceCondition, "invalid-empty")
         self.assertEqual(state.members, [])
         self.assertTrue(self.store.state_path.is_file())

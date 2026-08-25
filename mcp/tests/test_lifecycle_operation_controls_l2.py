@@ -39,6 +39,9 @@ from agents_remember.worktrees.integration.lifecycle import (
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_operations as operations_module,
 )
+from agents_remember.worktrees.integration.lifecycle.control import (
+    cancellation as cancellation_module,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
     LifecycleControlCommand,
     control_operation,
@@ -499,7 +502,7 @@ def test_refused_active_revise_leaves_safe_cancelled_and_executable_revise(
         revise["arguments"]["intent_note"] = record.input.approvalNote
     with (
         mock.patch.object(controls_module, "launch_detached_worker") as launch,
-        mock.patch.object(controls_module, "signal_worker_and_prove_exit") as signal_worker,
+        mock.patch.object(cancellation_module, "signal_worker_and_prove_exit") as signal_worker,
     ):
         refused = _public_control(config, revise)
     assert refused["ok"] is False
@@ -558,7 +561,7 @@ def test_signal_denial_retains_worker_authority_and_only_advertises_cancel(
             return_value=None,
         ) as observation,
         mock.patch(
-            "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls."
+            "agents_remember.worktrees.integration.lifecycle.control.cancellation."
             "signal_worker_and_prove_exit",
             side_effect=_denied_worker_termination,
         ),

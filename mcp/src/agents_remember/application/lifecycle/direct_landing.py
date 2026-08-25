@@ -23,6 +23,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
     legal_operation_controls,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocation,
     LifecycleOperationLocationError,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_read_decision import (
@@ -187,30 +188,64 @@ def _unreadable_direct_decision(
 ) -> dict[str, object]:
     """Use the exact locator and strict current journal without parsing the contract."""
 
+    location, decision = _direct_operation_location(config, contract_path)
+    if decision is not None:
+        return decision
+    assert location is not None
+    projected = _unreadable_direct_projection(location, contract_path, error)
+    if projected is not None:
+        return projected
+    return _missing_direct_generation_decision(location, contract_path, error)
+
+
+def _direct_operation_location(
+    config: McpRuntimeConfig,
+    contract_path: Path,
+) -> tuple[LifecycleOperationLocation | None, dict[str, object] | None]:
     try:
         _, location = configured_lifecycle_operation_location(config, contract_path)
     except LifecycleOperationLocationError as exc:
-        return {
+        return None, {
             "expected": exc.expected,
             "observed": exc.observed,
             "nextAction": "developer-decision",
             "developerDecisionRequired": True,
             "decisionSurface": exc.detail,
         }
-    projection = next(
-        (
-            row
-            for row in unreadable_contract_operation_projections(
-                location,
-                error_type=type(error).__name__,
-                name=contract_path.name,
-            )
-            if row.kind == "direct-landing"
-        ),
-        None,
-    )
-    if projection is not None and isinstance(projection.result, dict):
+    return location, None
+
+
+def _unreadable_direct_projection(
+    location: LifecycleOperationLocation,
+    contract_path: Path,
+    error: Exception,
+) -> dict[str, object] | None:
+    projection = _first_unreadable_direct_projection(location, contract_path, error)
+    if projection is None:
+        return None
+    if isinstance(projection.result, dict):
         return dict(projection.result)
+    return None
+
+
+def _first_unreadable_direct_projection(
+    location: LifecycleOperationLocation,
+    contract_path: Path,
+    error: Exception,
+):
+    projections = unreadable_contract_operation_projections(
+        location,
+        error_type=type(error).__name__,
+        name=contract_path.name,
+    )
+    return next((row for row in projections if row.kind == "direct-landing"), None)
+
+
+def _missing_direct_generation_decision(
+    location: LifecycleOperationLocation,
+    contract_path: Path,
+    error: Exception,
+) -> dict[str, object]:
     detail = "the unreadable contract has no exact retained direct-landing generation"
     return {
         "expected": {

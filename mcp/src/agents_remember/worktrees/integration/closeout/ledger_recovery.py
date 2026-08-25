@@ -341,22 +341,46 @@ def _exact_intended_child(
 ) -> bool:
     before = evidence.before
     expected_tree = evidence.expectedOutputTree
-    if before is None or expected_tree is None or live.head == before.head:
+    if (before is None, expected_tree is None) != (False, False):
         return False
-    try:
-        head_text = _git_blob_text(repository, live.head, relative)
-        parent = require_git(repository, ["rev-parse", f"{live.head}^"])
-    except RuntimeError:
+    assert before is not None and expected_tree is not None
+    observation = _intended_child_observation(repository, relative, live)
+    if observation is None:
         return False
-    return bool(
-        live.headRef == before.headRef
-        and parent == before.head
-        and live.headTree == expected_tree
-        and live.indexTree == expected_tree
-        and live.candidateTree == expected_tree
-        and not _changed_paths(repository)
-        and head_text == intended_text
+    parent, head_text = observation
+    observed = (
+        live.headRef,
+        parent,
+        live.headTree,
+        live.indexTree,
+        live.candidateTree,
+        _changed_paths(repository),
+        head_text,
     )
+    expected = (
+        before.headRef,
+        before.head,
+        expected_tree,
+        expected_tree,
+        expected_tree,
+        set(),
+        intended_text,
+    )
+    return live.head != before.head and observed == expected
+
+
+def _intended_child_observation(
+    repository: Path,
+    relative: str,
+    live,
+) -> tuple[str, str] | None:
+    try:
+        return (
+            require_git(repository, ["rev-parse", f"{live.head}^"]),
+            _git_blob_text(repository, live.head, relative),
+        )
+    except RuntimeError:
+        return None
 
 
 def _changed_paths(repository: Path) -> set[str]:

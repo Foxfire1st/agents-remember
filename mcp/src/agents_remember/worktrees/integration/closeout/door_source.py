@@ -237,32 +237,11 @@ def _provenance_successor(
     request: CloseoutDoorRequest,
     actor: DeclaredCaller,
 ) -> CloseoutDoorGeneration:
-    current = context.contract.closeout_door
     assert request.expected_generation_id is not None
-    if current is None:
-        raise CloseoutQueueError(
-            "closeout-door-source-update-refused",
-            "provenance update has no current door generation",
-        )
+    current = _required_provenance_generation(context)
     if current.generationId != request.expected_generation_id:
-        replay = _declare_generation(
-            context,
-            request,
-            actor,
-            predecessor=request.expected_generation_id,
-            disposition="waiting",
-        )
-        if (
-            current.predecessorGenerationId == request.expected_generation_id
-            and replay.generationId == current.generationId
-        ):
-            return current
-        _require_expected(current, request.expected_generation_id)
-    if current.disposition not in {"waiting", "deferred"}:
-        raise CloseoutQueueError(
-            "closeout-door-source-update-refused",
-            "only a waiting or deferred generation may publish a provenance successor",
-        )
+        return _replayed_provenance_successor(context, request, actor, current)
+    _require_provenance_source_disposition(current)
     return _declare_generation(
         context,
         request,
@@ -270,6 +249,46 @@ def _provenance_successor(
         predecessor=current.generationId,
         disposition=current.disposition,
     )
+
+
+def _required_provenance_generation(context: DoorSourceContext) -> CloseoutDoorGeneration:
+    current = context.contract.closeout_door
+    if current is None:
+        raise CloseoutQueueError(
+            "closeout-door-source-update-refused",
+            "provenance update has no current door generation",
+        )
+    return current
+
+
+def _replayed_provenance_successor(
+    context: DoorSourceContext,
+    request: CloseoutDoorRequest,
+    actor: DeclaredCaller,
+    current: CloseoutDoorGeneration,
+) -> CloseoutDoorGeneration:
+    assert request.expected_generation_id is not None
+    replay = _declare_generation(
+        context,
+        request,
+        actor,
+        predecessor=request.expected_generation_id,
+        disposition="waiting",
+    )
+    observed = (current.predecessorGenerationId, replay.generationId)
+    expected = (request.expected_generation_id, current.generationId)
+    if observed == expected:
+        return current
+    _require_expected(current, request.expected_generation_id)
+    raise AssertionError("generation mismatch refusal must raise")
+
+
+def _require_provenance_source_disposition(current: CloseoutDoorGeneration) -> None:
+    if current.disposition not in {"waiting", "deferred"}:
+        raise CloseoutQueueError(
+            "closeout-door-source-update-refused",
+            "only a waiting or deferred generation may publish a provenance successor",
+        )
 
 
 def _transitioned_generation(

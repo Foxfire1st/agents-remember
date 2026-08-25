@@ -626,8 +626,9 @@ class TerminalCatalogSweepScalingTests(unittest.TestCase):
 
     Every RUNNING row exercises the mutator read-modify-write path (``record_liveness_probe`` +
     ``record_turn_state``) that used to re-read and rewrite the whole catalog file per row -- the
-    O(n^2) disk signature. The ``batch()`` unit of work collapses that to one disk read + one disk
-    write per sweep regardless of the row count; ``compact()`` reclaims aged ``terminated`` tombstones.
+    O(n^2) disk signature. The probe batch plus the post-lock registration/compaction snapshots
+    keep disk reads and writes constant per sweep regardless of row count; ``compact()`` reclaims
+    aged ``terminated`` tombstones without nesting the task CAS under the catalog lock.
     """
 
     def _sweep_disk_ops(self, rows: int) -> tuple[int, int]:
@@ -657,8 +658,8 @@ class TerminalCatalogSweepScalingTests(unittest.TestCase):
         for rows in (200, 2000):
             with self.subTest(rows=rows):
                 disk_reads, disk_writes = self._sweep_disk_ops(rows)
-                # One read (batch begin), at most one write (batch commit) -- independent of ``rows``.
-                assert_bounded_count(disk_reads, 1, label=f"sweep disk reads (n={rows})")
+                # Probe, post-lock registration, and compaction each take one bounded snapshot.
+                assert_bounded_count(disk_reads, 3, label=f"sweep disk reads (n={rows})")
                 assert_bounded_count(disk_writes, 1, label=f"sweep disk writes (n={rows})")
 
     def test_sweep_wall_clock_is_subquadratic(self) -> None:
