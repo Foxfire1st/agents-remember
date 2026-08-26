@@ -176,10 +176,9 @@ def test_cancelled_generation_replacement_requires_an_exact_successor() -> None:
 
 
 def test_cancelled_closeout_and_completed_replacement_bind_release_proof() -> None:
-    successor = _value(disposition="waiting", predecessorGenerationId="claimed")
-    predecessor = _value(
-        state="proven",
-        generation=_value(disposition="claimed", generationId="claimed"),
+    successor = _value(
+        disposition="waiting",
+        predecessorGenerationId="latest-provenance",
     )
     current = _value(
         generationDisposition="cancelled",
@@ -188,18 +187,23 @@ def test_cancelled_closeout_and_completed_replacement_bind_release_proof() -> No
     store = mock.Mock()
     queued = _value()
     store.replace_terminal.return_value = queued
-    with mock.patch.object(
-        operations, "claimed_predecessor_for_waiting_successor", return_value=predecessor
-    ):
-        assert operations._replace_cancelled_closeout(
-            store, queued, current, _contract(closeout_door=successor)
-        ) == (queued, True)
 
-        current.cancellationEvidence.workerExitProven = False
-        with pytest.raises(RuntimeError, match="proven worker exit"):
-            operations._replace_cancelled_closeout(
-                store, queued, current, _contract(closeout_door=successor)
-            )
+    assert operations._replace_cancelled_closeout(
+        store, queued, current, _contract(closeout_door=successor)
+    ) == (queued, True)
+
+    current.cancellationEvidence.workerExitProven = False
+    with pytest.raises(RuntimeError, match="proven worker exit"):
+        operations._replace_cancelled_closeout(
+            store, queued, current, _contract(closeout_door=successor)
+        )
+
+    current.cancellationEvidence.workerExitProven = True
+    successor.disposition = "deferred"
+    with pytest.raises(RuntimeError, match="current waiting door"):
+        operations._replace_cancelled_closeout(
+            store, queued, current, _contract(closeout_door=successor)
+        )
 
     replacement = _replacement("integrate", status="completed")
     replacement.store.replace_terminal.return_value = replacement.queued

@@ -56,7 +56,6 @@ from agents_remember.worktrees.integration.integration_publication_fence import 
     classify_integration_door_authority,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_closeout_claim_evidence import (
-    claimed_predecessor_for_waiting_successor,
     closeout_preview_args,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_generation_resume import (
@@ -656,19 +655,14 @@ def _replace_cancelled_closeout(
     contract: WorktreeContract,
 ) -> tuple[LifecycleOperationRecord, bool]:
     successor = contract.closeout_door
-    predecessor = claimed_predecessor_for_waiting_successor(current, successor)
     observed = (
         getattr(successor, "disposition", None),
-        getattr(predecessor, "state", None),
-        getattr(getattr(predecessor, "generation", None), "disposition", None),
-        getattr(successor, "predecessorGenerationId", None),
-        getattr(getattr(predecessor, "generation", None), "generationId", None),
         current.generationDisposition,
         getattr(current.cancellationEvidence, "workerExitProven", False),
     )
-    if observed != ("waiting", "proven", "claimed", observed[4], observed[4], "cancelled", True):
+    if observed != ("waiting", "cancelled", True):
         raise RuntimeError(
-            "cancelled closeout can advance only through an exact waiting door successor "
+            "cancelled closeout can advance only through the current waiting door "
             "after proven worker exit"
         )
     return store.replace_terminal(queued), True

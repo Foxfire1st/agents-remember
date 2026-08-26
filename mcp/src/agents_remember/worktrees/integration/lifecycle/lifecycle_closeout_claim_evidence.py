@@ -1,15 +1,8 @@
-"""Small immutable evidence helpers shared by closeout claim generation changes."""
+"""Immutable closeout preview arguments shared across lifecycle refusals."""
 
 from __future__ import annotations
 
-from agents_remember.models.lifecycles.door import (
-    CloseoutDoorGeneration,
-    DoorPublicationEvidence,
-)
-from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
-    LifecycleOperationRecord,
-)
+from agents_remember.models.lifecycles.operation import CloseoutOperationInput
 
 
 def closeout_preview_args(operation_input: CloseoutOperationInput) -> dict[str, object]:
@@ -25,22 +18,4 @@ def closeout_preview_args(operation_input: CloseoutOperationInput) -> dict[str, 
     return args
 
 
-def claimed_predecessor_for_waiting_successor(
-    current: LifecycleOperationRecord,
-    successor: CloseoutDoorGeneration | None,
-) -> DoorPublicationEvidence | None:
-    """Select the one claimed lineage cell moved to history by cancel publication."""
-
-    if successor is None or successor.disposition != "waiting":
-        return None
-    matches = [
-        publication
-        for publication in current.doorPublicationHistory
-        if publication.state == "proven"
-        and publication.generation.disposition == "claimed"
-        and publication.generation.generationId == successor.predecessorGenerationId
-    ]
-    return matches[0] if len(matches) == 1 else None
-
-
-__all__ = ["claimed_predecessor_for_waiting_successor", "closeout_preview_args"]
+__all__ = ["closeout_preview_args"]
