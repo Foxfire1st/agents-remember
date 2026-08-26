@@ -13,7 +13,6 @@ from agents_remember.kernel.memory_ledger import (
     find_mapping,
     ledger_to_text,
     parse_ledger_text,
-    prepend_mapping,
 )
 from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
@@ -399,10 +398,12 @@ def _exact_ledger_output_commit(
         or live.git.head != ledger_commit
         or live.git.headRef != operation_input.memoryBefore.headRef
         or not _snapshot_is_clean(live.git)
+        or not _ledger_output_preserves_accepted_history(
+            operation_input,
+            live.ledger_text,
+            memory_commit,
+        )
     ):
-        return False
-    intended_text = _deterministic_ledger_text(operation_input, memory_commit)
-    if intended_text is None or live.ledger_text != intended_text:
         return False
     try:
         parent = require_git(live.repository, ["rev-parse", f"{ledger_commit}^"])
@@ -410,27 +411,44 @@ def _exact_ledger_output_commit(
             parent == memory_commit
             and _git_blob_text(live.repository, memory_commit, live.relative)
             == operation_input.ledgerBeforeText
-            and _git_blob_text(live.repository, ledger_commit, live.relative) == intended_text
+            and _git_blob_text(live.repository, ledger_commit, live.relative) == live.ledger_text
             and _commit_changed_paths(live.repository, ledger_commit) == {live.relative}
         )
     except RuntimeError:
         return False
 
 
-def _deterministic_ledger_text(
+def _ledger_output_preserves_accepted_history(
     operation_input: DirectLandingOperationInput,
+    live_text: str,
     memory_commit: str,
-) -> str | None:
+) -> bool:
     try:
-        return ledger_to_text(
-            prepend_mapping(
-                parse_ledger_text(operation_input.ledgerBeforeText),
-                operation_input.codeCommit,
-                memory_commit,
-            )
-        )
+        accepted = parse_ledger_text(operation_input.ledgerBeforeText)
+        live = parse_ledger_text(live_text)
     except LedgerError:
-        return None
+        return False
+    newest = live.rows[0]
+    accepted_metadata = (
+        accepted.repo_name,
+        accepted.base_code_commit,
+        accepted.base_memory_commit,
+        accepted.sort_order,
+    )
+    live_metadata = (
+        live.repo_name,
+        live.base_code_commit,
+        live.base_memory_commit,
+        live.sort_order,
+    )
+    return bool(
+        len(live.rows) > len(accepted.rows)
+        and live.rows[-len(accepted.rows) :] == accepted.rows
+        and newest.code_commit == operation_input.codeCommit
+        and newest.memory_commit == memory_commit
+        and live_metadata == accepted_metadata
+        and ledger_to_text(live) == live_text
+    )
 
 
 def _commit_changed_paths(repository: Path, commit: str) -> set[str]:
