@@ -1,11 +1,10 @@
-"""Sprint scheduling-mode resolution: the atomic-sequential default and its lane (L13).
+"""Sprint scheduling-mode resolution for graph and atomic-sequential planning (L13).
 
 A sprint carries at most one scheduling authority. An authored ``executionGraph``
-selects the ``dag`` mode; its absence selects the ``atomic-sequential`` default
-(L13-R1): every commanded master runs one at a time and fully integrates before
-the next master's series begins, regardless of any declared execution nature.
-This module only reads canonical documents and stored series contracts; it never
-mutates them.
+selects the ``dag`` mode; its absence selects the ``atomic-sequential`` default.
+Source-pair activation separately decides which durable atomic master may expose
+implementation work; series-contract presence is never scheduling ownership. This
+module only reads canonical documents and stored terminal artifacts.
 """
 
 from __future__ import annotations
@@ -61,8 +60,8 @@ def resolve_scheduling_mode(
             sprint=sprint,
             masters=masters,
             facts=(
-                "executionGraph absent: atomic-sequential default — one master fully "
-                "integrates before the next master's series begins",
+                "executionGraph absent: atomic-sequential default — one source-pair-selected "
+                "atomic master exposes implementation work at a time",
             ),
         )
     return SchedulingMode(
@@ -82,8 +81,8 @@ def commanded_sprint_masters(
     """The exact commanded masters of a sprint under either scheduling mode (L13-R1).
 
     Graph sprints validate membership and natures; under the atomic-sequential
-    default the orchestrates aliases derive membership and the series lane — not a
-    graph — serializes the masters.
+    default the orchestrates aliases derive membership and source-pair activation —
+    not contract presence or a graph — serializes implementation exposure.
     """
 
     if sprint.document.executionGraph is None:
@@ -115,45 +114,6 @@ def effective_execution_nature(
         f"commanded master {master.slug!r} has no executionNature; "
         "set one with task_doc.author_execution_graph (set_nature)",
     )
-
-
-def sequential_lane_owner(
-    topology: TaskDocumentTopology, mode: SchedulingMode
-) -> ResolvedTaskDocument | None:
-    """The master whose live series contract owns the sequential lane, if any.
-
-    Ownership is a stored fact: the master's series contract exists with a
-    non-terminal cleanup cell. The existing terminal series flow (cleanup,
-    abandonment, reopen) releases the lane. When legacy state left more than one
-    live series, the deterministic first holder (canonical key order) owns the
-    lane so a blocked start names one exact master to land first.
-    """
-
-    if mode.mode != "atomic-sequential":
-        return None
-    for master in series_lane_holders(mode):
-        try:
-            return topology.resolve(master.ref)
-        except TaskDocumentRefError:
-            continue
-    return None
-
-
-def series_lane_holders(mode: SchedulingMode) -> tuple[ResolvedTaskDocument, ...]:
-    """Every commanded master whose series contract still owns the lane, in order."""
-
-    holders: list[ResolvedTaskDocument] = []
-    for master in mode.masters:
-        path = series_contract_path(master.path.parent)
-        if not path.is_file():
-            continue
-        try:
-            contract = load_contract(path)
-        except (ContractError, OSError):
-            continue
-        if contract.kind == "series" and contract.cleanup not in TERMINAL_SERIES_CLEANUP:
-            holders.append(master)
-    return tuple(holders)
 
 
 def stale_series_artifact_fact(task_root: Path) -> dict[str, str] | None:

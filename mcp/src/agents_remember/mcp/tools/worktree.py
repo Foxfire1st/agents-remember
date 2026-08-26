@@ -36,6 +36,7 @@ from agents_remember.application.worktree_tools import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import IntegrateStrategy
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 
 from .base import _tool_payload
 
@@ -57,7 +58,8 @@ def worktree_sync_payload(
     config: McpRuntimeConfig,
     contract_path: str,
     *,
-    memory_sync_choice: str | None = None,
+    memory_sync_choice: MemorySyncChoice | None = None,
+    resolution_action: SyncResolutionAction | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -66,6 +68,7 @@ def worktree_sync_payload(
             config,
             contract_path=contract_path,
             memory_sync_choice=memory_sync_choice,
+            resolution_action=resolution_action,
             dry_run=dry_run,
         ),
     )

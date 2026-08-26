@@ -233,26 +233,59 @@ reports archive-ready separately from cleanup-completed or abandoned, including 
 `cleanupArguments` and `nextArgs` for the required `worktree_cleanup` / `worktree_abandon` retry.
 Queue presence is neither required nor consulted on either route.
 
+Atomic-series implementation admission is a separate, source-pair-scoped authority. Exactly one
+atomic master for an exact code/memory source pair is selected at a time. Manager dispatch, worker
+dispatch, atomic `worktree_start`, and `worktree_attach` are selecting operations; reviewer and
+curator inspection is not. Once the requested canonical contract exists, selection first publishes
+`reconciling`, which logically pauses the former master without suspending its chat, process,
+worktree, contract, or already-claimed lifecycle journal. The selected master is source-synced and
+becomes `active` only when both protected source tips are current. A completed sync pass whose
+source moved again remains reconciling. Explicit sync cancellation publishes durable `vacant`;
+terminal cleanup releases an exact selected contract before its authority can disappear. Contract
+presence never elects an owner, and multiple paused/nonterminal contracts remain valid.
+
+Task authoring never reads this activation authority and is never blocked by it. A task mutation
+publishes first and invalidates/rebuilds affected queue projections. The closeout queue merely
+projects active, reconciling, paused, or vacant waiting candidates; it owns none of those lifecycle
+facts. A malformed selection makes only the affected projection invalid-empty. An exact selecting
+operation archives the malformed bytes with evidence and replaces them; there is no tolerant reader
+or contract-presence fallback.
+
 ## Mid-Task Sync
 
-A live worktree's base pair decays while parallel cycles land (a sibling leaf may
-advance the integration/source branch; carryover may advance official memory). `worktree_sync`
-(GitHub #54) pulls the moved official line in **atomically**: it fetches the
-source upstreams, requires the new code tip to be ledger-mapped at the official
-memory tip (a mid-cycle official line blocks with guidance to run
-`c-11-memory-carryover-from-branch` first), merges the source branch into the
-code work branch (conflicts abort cleanly), fast-forwards the memory work
-branch, and advances the contract's recorded base pair with a `sync_log` entry.
-Preview with `dry_run=true` first.
+A live worktree's base pair decays while parallel cycles land (a sibling leaf may advance the
+integration/source branch; carryover may advance official memory). `worktree_sync` (GitHub #54)
+reconciles the exact moved code/memory source pair as one resumable transaction. It fetches source
+upstreams, proves the new code tip is ledger-mapped at the admitted official memory tip, pins the
+recorded base, pre-sync branch head, and source tip for each participating side, and writes its
+journal below the stable worktree-enclosure root before merge mutation. A mid-cycle official line
+blocks with guidance to run `c-11-memory-carryover-from-branch` first. Preview with `dry_run=true`
+before admission.
 
-**Sync early — before memories are written.** With parked memory the sync is a
-pure fast-forward: the other cycle's sidecars and ledger rows end up beneath
-this task's future memory work, closeout appends on top, and end-of-series
-integration stays `ff-only` with no carryover reconciliation. If the memory
-work branch already has local commits and official memory moved, sync blocks
-with `memory_sync_choice` recoveries: `merge-memory` (merge attempted; ledger
-conflicts abort — the ledger is never auto-merged) or `skip-memory` (memory
-deferred to end-of-task carryover; only the code base advances).
+Automatic sync is only the first phase. A code or memory merge conflict is retained in its exact
+sync worktree and published as `code-resolution-required` or `memory-resolution-required`; it is not
+aborted or reduced to a generic refusal. Resolve mechanically derivable conflicts, stage the result,
+validate it, then call the advertised `resolution_action=continue` on the same contract. The journal
+and pinned refs make that continuation resumable across calls and process restarts. Escalate only
+when competing changes encode a semantic truth the agent cannot derive from current requirements,
+code, tests, and durable decisions. A routine textual, import, fixture, or ledger conflict is not by
+itself a developer decision.
+
+`resolution_action=cancel` is the explicit escape hatch when the operation should be abandoned. It
+restores each participating branch to its pinned pre-sync head, removes retained temporary sync
+worktrees, terminalizes the journal, and releases an exact reconciling atomic-series selection to
+vacant. Never imitate continuation or cancellation with direct Git. A selected atomic master remains
+reconciling while a conflict is retained; its worktree and journal stay intact.
+
+**Sync early — before memories are written.** With parked memory the sync is a pure fast-forward:
+the other cycle's sidecars and ledger rows end up beneath this task's future memory work, closeout
+appends on top, and end-of-series integration stays `ff-only` with no carryover reconciliation. If
+the memory work branch already has local commits and official memory moved, sync requires a
+`memory_sync_choice`: `merge-memory` retains any textual or semantic ledger conflict for explicit
+resolution and validates that every parent ledger row survives with exactly one mapping for every
+admitted code commit before continuation; `skip-memory` defers memory to end-of-task carryover and
+advances only the code base. An atomic-series selection cannot become active after `skip-memory`; it
+remains reconciling until the exact current memory source is merged and validated.
 
 ## Worktree Closeout
 
@@ -330,7 +363,13 @@ Strategies:
 1. `ff-only`: require current code and memory source branches to be ancestors of the closeout commits, then fast-forward both source branches.
 2. `replay`: when source branches moved because parallel work landed first, replay the code task commit onto current code source, replay only the memory content commit onto current memory source, regenerate `memory.md` for the final landed code and memory content commits, then fast-forward both source branches.
 
-Conflict rule: if code replay or memory-content replay conflicts, stop before moving source branches. The agent must discuss the resolution with the developer and decide what is true before continuing. Do not replay an old ledger commit over current memory main; always regenerate the ledger row after memory content has been mediated.
+Conflict rule: if code replay or memory-content replay conflicts, stop before moving source
+branches and resolve the retained conflict through the operation's advertised continuation path.
+The agent owns technically derivable merge resolution and its validation. Escalate through the
+architect only when current requirements and evidence leave a genuine semantic ambiguity; do not
+label ordinary technical reconciliation `developerDecisionRequired`. Do not replay an old ledger
+commit over current memory main; always regenerate the ledger row after memory content has been
+mediated.
 
 After successful integration, complete any repo-specific landing tail first: push/PR/merge for PR-gated code, pull the protected target back locally, and carry memory forward until the official memory branch maps the landed code commit. Then use `lifecycle_finalize_task` for the terminal edge.
 

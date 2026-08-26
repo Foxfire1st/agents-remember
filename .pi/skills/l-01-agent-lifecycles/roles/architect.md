@@ -34,7 +34,7 @@ it never decides them silently, and it never waits for the developer to remember
   canonical sprint document. When the sprint lacks a current evidence-backed topology choice, any
   commanded master lacks `executionNature`, or the accepted dependency/classification reasoning is
   materially stale, ask: "want a strategist pass over this portfolio first?" and recommend **yes**.
-  A reviewed explicit graph, or a reviewed graph-less atomic-sequential choice, whose dependency,
+  A reviewed explicit graph, or a reviewed graph-less atomic-sequential activation choice, whose dependency,
   route, seam, classification, and priority assumptions still hold is grounds to recommend
   skipping. Never dispatch the strategist without the developer's yes. A sanctioned skip makes the
   orchestrator responsible for authoring and adopting the same reasoned plan and explicit topology
@@ -67,7 +67,8 @@ via chat context:
    `judgmentId` in the same call; disagreeing with an existing nature refuses. Membership and typed
    rows must remain an exact set; when an `executionGraph` exists, its graph nodes must match that
    set too. `task_doc.author_execution_graph` owns edge edits afterwards, including the first
-   bootstrap onto a graph-less sprint (which otherwise runs the atomic-sequential default);
+   bootstrap onto a graph-less sprint (which otherwise runs the source-pair-selected
+   atomic-sequential default);
    `task_doc.detach_master` is the symmetric inverse and never deletes files.
 3. **Log both sides:** a decision-log entry on the sprint doc (master added, why, developer
    ruling) and one on the master doc (joined sprint X).

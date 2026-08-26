@@ -44,6 +44,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+from .closeout_projection_activation import project_series_activation
 from .closeout_projection_members import (
     ProjectionMemberContext,
     projection_member,
@@ -109,7 +110,7 @@ class _TaskCensus:
 class _DoorCensus:
     series_rows: tuple[dict[str, object], ...]
     door_rows: tuple[dict[str, object], ...]
-    live_series_owner: TaskDocumentRef | None
+    activation_waiting: Mapping[TaskDocumentRef, tuple[str, ...]]
     waiting: tuple[_ProjectionDoor, ...]
 
 
@@ -131,7 +132,7 @@ class _SeriesProjectionContext:
 @dataclass(frozen=True)
 class _SeriesSourceObservation:
     row: dict[str, object]
-    owner: TaskDocumentRef | None = None
+    live_contract: WorktreeContract | None = None
     door: tuple[_DoorSource, ResolvedTaskDocument, int] | None = None
 
 
@@ -286,7 +287,7 @@ def _door_census(
     problems: list[ProjectionSourceProblem],
     overrides: Mapping[TaskDocumentRef, TaskDocument] | None,
 ) -> _DoorCensus:
-    series_rows, live_series_owner, series_doors = _series_sources(
+    series_rows, activation_waiting, series_doors = _series_sources(
         tasks.sprint,
         tasks.masters,
         problems,
@@ -297,7 +298,7 @@ def _door_census(
     waiting = tuple(
         row for row in doors if row[0].door is not None and row[0].door.disposition == "waiting"
     )
-    return _DoorCensus(tuple(series_rows), tuple(door_rows), live_series_owner, waiting)
+    return _DoorCensus(tuple(series_rows), tuple(door_rows), activation_waiting, waiting)
 
 
 def _leaf_projection_doors(
@@ -514,8 +515,7 @@ def _projection_members(
                     order=order,
                     sprint=tasks.sprint,
                     graph=graph,
-                    sequential_owner=doors.live_series_owner,
-                    first_master=tasks.masters[0].ref if tasks.masters else None,
+                    activation_waiting=doors.activation_waiting.get(master.ref, ()),
                     source_blockers=tuple(source_blockers),
                 )
             )
@@ -578,30 +578,40 @@ def _series_sources(
     problems: list[ProjectionSourceProblem],
 ) -> tuple[
     list[dict[str, object]],
-    TaskDocumentRef | None,
+    Mapping[TaskDocumentRef, tuple[str, ...]],
     list[tuple[_DoorSource, ResolvedTaskDocument, int]],
 ]:
     rows: list[dict[str, object]] = []
-    owners: list[TaskDocumentRef] = []
+    activation_waiting: dict[TaskDocumentRef, tuple[str, ...]] = {}
     doors: list[tuple[_DoorSource, ResolvedTaskDocument, int]] = []
     for order, master in enumerate(masters):
         observed = _series_source(sprint, master, order, problems)
+        if observed.live_contract is not None:
+            _observe_series_activation(
+                observed,
+                master,
+                problems,
+                activation_waiting,
+            )
         rows.append(observed.row)
-        if observed.owner is not None:
-            owners.append(observed.owner)
         if observed.door is not None:
             doors.append(observed.door)
-    if len(owners) > 1:
-        problems.append(
-            _problem(
-                "series",
-                sorted(ref.key for ref in owners)[0],
-                "atomic-series-owner-conflict",
-                "complete, clean up, or abandon the conflicting live atomic series authority",
-            )
-        )
-        return rows, None, doors
-    return rows, owners[0] if owners else None, doors
+    return rows, activation_waiting, doors
+
+
+def _observe_series_activation(
+    observed: _SeriesSourceObservation,
+    master: ResolvedTaskDocument,
+    problems: list[ProjectionSourceProblem],
+    activation_waiting: dict[TaskDocumentRef, tuple[str, ...]],
+) -> None:
+    contract = observed.live_contract
+    assert contract is not None
+    activation = project_series_activation(contract, master.ref)
+    observed.row["activation"] = activation.source_fact
+    activation_waiting[master.ref] = activation.waiting
+    if activation.problem is not None:
+        problems.append(activation.problem)
 
 
 def _series_source(
@@ -659,7 +669,7 @@ def _series_source(
         if contract.closeout_door is not None
         else None
     )
-    return _SeriesSourceObservation(row, master.ref if live else None, door)
+    return _SeriesSourceObservation(row, contract if live else None, door)
 
 
 def _unreadable_series_source(

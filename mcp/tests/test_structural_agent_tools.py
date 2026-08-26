@@ -19,7 +19,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.application.structural.agent_tools import (
     StructuralAgentRuntime,
     _curator_route_review_refusal,
-    _manager_series_bootstrap_refusal,
+    _implementation_series_admission_refusal,
     dispatch_agent_tool,
     message_child_tool,
     message_parent_tool,
@@ -38,6 +38,10 @@ from agents_remember.serving.structural_seats import StructuralSeatError, Struct
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.worktrees.activation.atomic_series_activation import observe_atomic_series
+from agents_remember.worktrees.activation.atomic_series_activation_release import (
+    release_atomic_series_selection,
+)
 from agents_remember.worktrees.modules.git import branch_commit, branch_exists
 from agents_remember.worktrees.modules.startup import start_contract as start_contract_mod
 from agents_remember.worktrees.modules.startup.start_contract import (
@@ -52,6 +56,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from test_worktree_support import git, seed_memory_ledger
 
 
 class _Host:
@@ -67,6 +72,14 @@ def _config(root: Path) -> McpRuntimeConfig:
         transcript_root=root / "logs" / "mcp",
         repositories={"repo": RepositoryScope("repo", root / "workspace" / "repo")},
     )
+
+
+def _seed_dispatch_memory_source(code_repo: Path, memory_repo: Path) -> None:
+    """Give the external-memory super source its canonical code-tip mapping."""
+
+    git(memory_repo, "checkout", "ar/super")
+    seed_memory_ledger(memory_repo, "repo", branch_commit(code_repo, "ar/super"))
+    git(memory_repo, "checkout", "main")
 
 
 def _task_doc(**values: object) -> TaskDocument:
@@ -292,6 +305,7 @@ class StructuralAgentToolTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
+        _seed_dispatch_memory_source(code_repo, memory_repo)
         self.config = McpRuntimeConfig(
             config_path=self.root / "settings.json",
             coordination_root=self.root,
@@ -299,14 +313,17 @@ class StructuralAgentToolTests(unittest.TestCase):
             transcript_root=self.root / "logs" / "mcp",
             repositories={"repo": RepositoryScope("repo", code_repo, memory_root=memory_repo)},
         )
-        self.catalog = TerminalCatalog(terminal_catalog_path(self.root))
         self.catalog.upsert(_seat("orchestrator", self.sprint, "orchestrator"))
         contract_path = series_contract_path(self.root / "tasks" / "repo" / "master")
+
+        def spawned_after_manager_activation(*_args: object, **_kwargs: object) -> dict[str, str]:
+            self.assertEqual(observe_atomic_series(load_contract(contract_path)).state, "active")
+            return {"status": "spawned-unbriefed", "session": "manager-private"}
 
         with (
             mock.patch(
                 "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
-                return_value={"status": "spawned-unbriefed", "session": "manager-private"},
+                side_effect=spawned_after_manager_activation,
             ) as spawn,
             mock.patch(
                 "agents_remember.application.structural.agent_tools._post_initial_dispatch_brief",
@@ -355,6 +372,45 @@ class StructuralAgentToolTests(unittest.TestCase):
         self.assertEqual(contract.memory_base_commit, memory_super)
         self.assertTrue(contract_path.is_file())
         self.assertIsNone(lineage_refusal(source_lineage_for_task(self.root, self.master)))
+
+        release_atomic_series_selection(contract)
+        self.catalog.upsert(_seat("manager", self.master, "manager"))
+
+        def spawned_after_worker_activation(*_args: object, **_kwargs: object) -> dict[str, str]:
+            self.assertEqual(observe_atomic_series(load_contract(contract_path)).state, "active")
+            return {"status": "spawned-unbriefed", "session": "worker-private"}
+
+        with (
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
+                side_effect=spawned_after_worker_activation,
+            ) as worker_spawn,
+            mock.patch(
+                "agents_remember.application.structural.agent_tools._post_initial_dispatch_brief",
+                return_value={
+                    "ok": True,
+                    "deliveryState": "delivered",
+                    "adapterDeliveryState": "accepted",
+                },
+            ),
+        ):
+            worker_result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.leaf,
+                    role="worker",
+                    brief="Implement the leaf.",
+                ),
+                StructuralAgentRuntime(
+                    environ={
+                        "AR_HOSTED_SESSION_ID": "manager",
+                        "AR_SPAWN_ROLE": "manager",
+                    }
+                ),
+            )
+
+        self.assertEqual(worker_result["status"], "dispatched")
+        worker_spawn.assert_called_once()
 
         live_memory_worktree = self.root / "live-master-memory"
         subprocess.run(
@@ -474,6 +530,11 @@ class StructuralAgentToolTests(unittest.TestCase):
                 cwd=repo,
                 check=True,
             )
+        seed_memory_ledger(
+            memory_repo,
+            "repo",
+            branch_commit(code_repo, "ar/super"),
+        )
         return code_repo, memory_repo
 
     def _series_bootstrap_spec(
@@ -598,6 +659,7 @@ class StructuralAgentToolTests(unittest.TestCase):
                 check=True,
             )
         fresh_code = branch_commit(code_repo, "ar/super")
+        seed_memory_ledger(memory_repo, "repo", fresh_code)
         fresh_memory = branch_commit(memory_repo, "ar/super")
 
         contract = ensure_master_series_contract(spec)
@@ -900,7 +962,7 @@ class StructuralAgentToolTests(unittest.TestCase):
                 ),
             )
 
-        self.assertEqual(result["status"], "series-bootstrap-refused")
+        self.assertEqual(result["status"], "series-admission-refused")
         self.assertIn("sprint/task.json", result["detail"])
         self.assertIn("integrationBranch", result["detail"])
         self.assertIn("task_doc(operation='set_field'", result["detail"])
@@ -908,11 +970,13 @@ class StructuralAgentToolTests(unittest.TestCase):
 
     def test_manager_bootstrap_refuses_invalid_altitude_and_missing_repository(self) -> None:
         topology = TaskDocumentTopology(self.root)
-        invalid_altitude = _manager_series_bootstrap_refusal(
-            self.config, topology.resolve(self.sprint)
+        invalid_altitude = _implementation_series_admission_refusal(
+            self.config,
+            topology.resolve(self.sprint),
+            "manager",
         )
         assert invalid_altitude is not None
-        self.assertEqual(invalid_altitude.status, "series-bootstrap-refused")
+        self.assertEqual(invalid_altitude.status, "series-admission-refused")
         assert invalid_altitude.detail is not None
         self.assertIn("canonical master", invalid_altitude.detail)
 
@@ -935,7 +999,7 @@ class StructuralAgentToolTests(unittest.TestCase):
                 ),
             )
 
-        self.assertEqual(refused["status"], "series-bootstrap-refused")
+        self.assertEqual(refused["status"], "series-admission-refused")
         spawn.assert_not_called()
 
     def test_curator_review_admission_distinguishes_review_and_contract_refusals(self) -> None:

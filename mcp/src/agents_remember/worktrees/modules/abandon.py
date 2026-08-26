@@ -22,6 +22,9 @@ from typing import TypeAlias
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeAbandonArguments
+from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
+    with_terminal_atomic_series_release,
+)
 from agents_remember.worktrees.integration.atomic_series_terminal import (
     AtomicSeriesTerminalPermit,
     publish_atomic_series_terminal_under_authority,
@@ -96,7 +99,11 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
         ):
             return _terminal_archive_observation(contract, force=args.force)
         if terminal.state == "cleanup-completed":
-            return _already_abandoned(contract, force=args.force)
+            return with_terminal_atomic_series_release(
+                contract,
+                _already_abandoned(contract, force=args.force),
+                dry_run=args.dry_run,
+            )
         contract = terminal.archived_contract
     else:
         if contract.kind == "series":
@@ -133,7 +140,11 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
-    return _abandon_reserved(args, contract, preflight)
+    return with_terminal_atomic_series_release(
+        contract,
+        _abandon_reserved(args, contract, preflight),
+        dry_run=args.dry_run,
+    )
 
 
 def _abandon_reserved(

@@ -13,7 +13,6 @@ from agents_remember.models.closeout.projection import (
     CloseoutProjectionMember,
 )
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
-from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import completion_blockers
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 
@@ -31,8 +30,7 @@ class ProjectionMemberContext:
     order: int
     sprint: ResolvedTaskDocument
     graph: Any
-    sequential_owner: TaskDocumentRef | None
-    first_master: TaskDocumentRef | None
+    activation_waiting: tuple[str, ...] = ()
     source_blockers: tuple[str, ...] = ()
 
 
@@ -43,6 +41,7 @@ def projection_member(context: ProjectionMemberContext) -> CloseoutProjectionMem
     order = context.order
     blockers = _projection_blockers(context)
     waiting = _admission_waiting_reasons(door)
+    waiting.extend(context.activation_waiting)
     graph_waiting, order = _dependency_waiting_and_order(context, order)
     waiting.extend(graph_waiting)
     reasons = _bounded_reasons([*blockers, *waiting])
@@ -106,7 +105,7 @@ def _dependency_waiting_and_order(
     order: int,
 ) -> tuple[list[str], int]:
     if context.graph is None:
-        return _sequential_waiting_and_order(context, order)
+        return [], order
     waiting = predecessor_waiting_reasons(
         context.graph,
         context.master.ref,
@@ -116,18 +115,6 @@ def _dependency_waiting_and_order(
     if node is not None:
         order = context.graph.node_order[node] * 1000 + order % 1000
     return waiting, order
-
-
-def _sequential_waiting_and_order(
-    context: ProjectionMemberContext,
-    order: int,
-) -> tuple[list[str], int]:
-    owner = context.sequential_owner
-    if owner is None:
-        owner = context.first_master
-    if owner is None or owner == context.master.ref:
-        return [], order
-    return [f"atomic-series-lane-owned-by: {owner.key}"], order
 
 
 def scheduling_source_fact(

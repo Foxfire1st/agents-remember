@@ -18,7 +18,12 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
-from agents_remember.worktrees.worktree_contract import write_contract
+from agents_remember.worktrees.activation.atomic_series_activation import (
+    activation_path,
+    atomic_series_source_pair,
+    publish_atomic_series_selection,
+)
+from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from test_closeout_queue import MASTER_A, MASTER_B, REPO, QueueFixture
 from test_worktree_support import git
 
@@ -90,6 +95,28 @@ class TopologyPublicationIndependenceTests(unittest.TestCase):
             edit=TaskDocEdit(fields={"executionNature": "organizational"}),
         )
         self.assertEqual(read_task_doc(master_path).executionNature, "organizational")
+
+    def test_activation_state_and_corruption_never_veto_task_authoring(self) -> None:
+        fixture = QueueFixture(Path(self.temp.name), atomic_b=True, memory_mode="internal")
+        config = _config(fixture)
+        series = load_contract(fixture.tasks / "master-b" / "series-contract.md")
+        publish_atomic_series_selection(series, "active")
+        pointer = activation_path(fixture.coord, atomic_series_source_pair(series))
+        pointer.write_text("{malformed", encoding="utf-8")
+        master_path = fixture.tasks / "master-b" / "task.json"
+
+        task_doc_tool(
+            config,
+            TaskDocTarget(repo_id=REPO, task_name="master-b"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"statusNote": "planning remains authoritative"}),
+        )
+
+        self.assertEqual(
+            read_task_doc(master_path).statusNote,
+            "planning remains authoritative",
+        )
+        self.assertEqual(pointer.read_text(encoding="utf-8"), "{malformed")
 
     def test_live_atomic_series_does_not_veto_detach(self) -> None:
         fixture = QueueFixture(Path(self.temp.name), atomic_b=True)

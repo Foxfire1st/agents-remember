@@ -21,6 +21,9 @@ from agents_remember.tasks.leaf_doc import (
     resolve_terminal_leaf_doc,
 )
 from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
+from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
+    with_terminal_atomic_series_release,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.git import is_ancestor
@@ -148,6 +151,31 @@ def _finalized_result(
 ) -> WorktreeCommandResult:
     """Build the terminal response after cleanup and task truth have converged."""
 
+    activation_release = with_terminal_atomic_series_release(
+        contract,
+        WorktreeCommandResult(
+            0,
+            {
+                "state": "terminal-finalization-release",
+                "summary": "Terminal task truth is ready for archival.",
+            },
+        ),
+        dry_run=args.dry_run,
+    )
+    if activation_release.returncode != 0:
+        return WorktreeCommandResult(
+            2,
+            {
+                **_identity_payload(contract),
+                **activation_release.payload,
+                "state": "activation-release-blocked",
+                "dryRun": args.dry_run,
+                "contractPath": contract.contract_path.as_posix(),
+                "enclosurePath": contract.contract_path.as_posix(),
+                "cleanup": cleanup,
+                "taskUpdates": updates,
+            },
+        )
     if contract.kind == "series":
         archive = archive_completed_root_task(
             contract.coordination_root,
@@ -175,6 +203,14 @@ def _finalized_result(
             "taskUpdates": updates,
             "projectionEffects": projection_effects,
             "taskArchive": archive,
+            **{
+                key: activation_release.payload[key]
+                for key in (
+                    "atomicSeriesActivation",
+                    "atomicSeriesActivationRelease",
+                )
+                if key in activation_release.payload
+            },
             "summary": (
                 "Task lifecycle finalized."
                 if not args.dry_run

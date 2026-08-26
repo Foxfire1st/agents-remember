@@ -18,7 +18,7 @@ def _ref(path: str) -> TaskDocumentRef:
     return TaskDocumentRef(repository="agents-remember", path=path)
 
 
-def test_admission_and_sequential_waiting_reasons_are_explicit() -> None:
+def test_admission_and_activation_waiting_reasons_are_explicit() -> None:
     door = _value(
         admissionProvenance=_value(
             resourceReady=False,
@@ -32,23 +32,10 @@ def test_admission_and_sequential_waiting_reasons_are_explicit() -> None:
         "admission-blocked: predecessor active",
     ]
 
-    master_ref = _ref("sprint/master.json")
-    first_ref = _ref("sprint/first.json")
-    context = _value(
-        sequential_owner=None,
-        first_master=None,
-        master=_value(ref=master_ref),
-    )
-    assert members._sequential_waiting_and_order(context, 7) == ([], 7)
-
-    context.first_master = first_ref
-    assert members._sequential_waiting_and_order(context, 7) == (
-        [f"atomic-series-lane-owned-by: {first_ref.key}"],
-        7,
-    )
-
-    context.sequential_owner = master_ref
-    assert members._sequential_waiting_and_order(context, 7) == ([], 7)
+    # Activation is an independent waiting input. Dependency ordering does not
+    # invent a first-master owner when the sprint has no graph.
+    context = _value(graph=None)
+    assert members._dependency_waiting_and_order(context, 7) == ([], 7)
 
 
 def test_dependency_order_falls_back_or_uses_the_exact_graph_node() -> None:
@@ -56,8 +43,6 @@ def test_dependency_order_falls_back_or_uses_the_exact_graph_node() -> None:
         graph=None,
         master=_value(ref=_ref("sprint/master.json")),
         candidate=_value(ref=_ref("sprint/leaf.json")),
-        sequential_owner=None,
-        first_master=None,
     )
     assert members._dependency_waiting_and_order(context, 12) == ([], 12)
 

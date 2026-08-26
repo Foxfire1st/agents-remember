@@ -291,14 +291,15 @@ def require_parent_series_accepting_leaves(
 
 
 def require_sync_worktree(contract: WorktreeContract) -> None:
-    """Sync is ordinary work-branch mutation and never operates on a series ref."""
+    """Bind sync to an ordinary leaf or the exact task-owned atomic series refs."""
 
-    if contract.kind != "leaf":
-        raise RuntimeError(
-            "worktree_sync refused: a series integration branch is not an ordinary workbench; "
-            "move it only through a plane-owned integration transaction"
-        )
-    require_ordinary_worktree(contract, operation="worktree_sync")
+    if contract.kind == "leaf":
+        require_ordinary_worktree(contract, operation="worktree_sync")
+        return
+    if contract.kind == "series":
+        require_series_contract_authority(contract, operation="worktree_sync")
+        return
+    raise RuntimeError(f"worktree_sync refused: unsupported contract kind {contract.kind!r}")
 
 
 def require_source_branch_write(

@@ -13,6 +13,7 @@ from agents_remember.application.worktree_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 
 from ..tools import (
     worktree_attach_payload,
@@ -197,7 +198,8 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
     @server.tool()
     def worktree_sync(
         contract_path: str,
-        memory_sync_choice: str | None = None,
+        memory_sync_choice: MemorySyncChoice | None = None,
+        resolution_action: SyncResolutionAction | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Pull the moved official line into a live worktree (issue #54). Mutating: fetches
@@ -208,12 +210,15 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         Preview with dry_run=true. worktree_status's freshness block recommends this tool when
         the recorded bases fall behind the local source branch tips. If the memory work branch
         has local commits and official memory moved, the result blocks with
-        memory_sync_choice='merge-memory' (ledger conflicts abort cleanly) or 'skip-memory'
-        (defer to end-of-task carryover). Sync early — before memories are written — for the
+        memory_sync_choice='merge-memory' or preflight-only 'skip-memory'. A code or chosen
+        memory merge conflict is retained for agent resolution; stage the resolution and call
+        again with resolution_action='continue', or explicitly restore the pinned pre-sync heads
+        with resolution_action='cancel'. Sync early — before memories are written — for the
         friction-free fast-forward path."""
         return worktree_sync_payload(
             config,
             contract_path,
             memory_sync_choice=memory_sync_choice,
+            resolution_action=resolution_action,
             dry_run=dry_run,
         )

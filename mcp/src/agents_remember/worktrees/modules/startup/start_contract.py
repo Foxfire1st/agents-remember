@@ -18,6 +18,10 @@ from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampPlan,
     plan_leaf_doc_lifecycle_restamp,
 )
+from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
+    atomic_series_activation_input_refusal,
+    reconcile_selected_series_under_authority,
+)
 from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
@@ -48,9 +52,8 @@ from agents_remember.worktrees.scheduling_mode import (
     TERMINAL_SERIES_CLEANUP,
     commanded_sprint_masters,
     effective_execution_nature,
-    resolve_scheduling_mode,
-    sequential_lane_owner,
 )
+from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
 from agents_remember.worktrees.task_resolver import (
     leaf_enclosure_path,
     resolve_active_task_root,
@@ -219,6 +222,8 @@ def ensure_master_series_contract(
     spec: MasterSeriesContractSpec,
     *,
     dry_run: bool = False,
+    activation_args: WorktreeArgs | None = None,
+    leaf_admission_operation: str | None = None,
 ) -> WorktreeContract | WorktreeCommandResult:
     """Return or create the plane-owned contract for one canonical master document.
 
@@ -227,21 +232,28 @@ def ensure_master_series_contract(
     plane, not to the first worker request.  First-leaf start calls this same owner so both
     entry points remain one operation rather than competing bootstrap implementations.
 
-    Under the atomic-sequential default (L13-R1: the commanding sprint has no
-    executionGraph) at most one master is in flight: creating a series while another
-    commanded master still owns the lane returns a blocked result payload (state
-    ``sequential-lane-owned``) that orders the work — land the owner first — instead
-    of refusing it outright.
+    Contract presence proves durable work exists; it does not own scheduling.  Once
+    this operation has recovered or created the requested contract, it selects that
+    master for the exact protected source pair, marks it reconciling (logically
+    pausing the previous selection), syncs its pinned source pair, and publishes it
+    active before returning implementation authority.
     """
 
     _require_commanded_atomic_master(spec)
-    lane_block = _sequential_lane_block(spec)
-    if lane_block is not None:
-        return lane_block
-
     if dry_run:
-        existing = _existing_master_series_contract(spec)
-        return existing if existing is not None else _new_master_series_contract(spec)
+        candidate = _bootstrap_preflight_contract(spec)
+        if leaf_admission_operation is not None:
+            require_series_accepting_leaves(candidate, operation=leaf_admission_operation)
+        return candidate
+
+    preflight = _bootstrap_preflight_contract(spec)
+    invalid = atomic_series_activation_input_refusal(preflight, activation_args)
+    if invalid is not None:
+        return invalid
+    # Fetch is best-effort evidence and may touch remote-tracking refs, so it happens
+    # before repository integration authority is held.  The sync transaction derives
+    # and pins the exact local source commits again inside that authority.
+    fetch = fetch_source_upstreams(preflight)
 
     # Manager dispatch and first-leaf start are two public entries into one bootstrap.  Hold the
     # same host-local/process-local lock across the second existence check, both branch creations,
@@ -249,70 +261,50 @@ def ensure_master_series_contract(
     # it can never enter rollback and delete the winner's contract.
     with (
         integration_authority_lock(spec.coordination_root, spec.repo_name),
-        exclusive_access(
-            _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
-        ),
     ):
         _require_commanded_atomic_master(spec)
-        lane_block = _sequential_lane_block(spec)
-        if lane_block is not None:
-            return lane_block
-        recovering = _recover_master_series_bootstrap(spec)
-        if recovering is not None:
-            return recovering
-        existing = _existing_master_series_contract(spec)
-        if existing is not None:
-            return existing
-        contract = _new_master_series_contract(spec)
-        integration_surfaces(contract)
-        _publish_master_series_contract(spec, contract)
-        return contract
+        # Store locks never nest: finish the per-master bootstrap journal transaction
+        # before reading or writing the source-pair activation store.
+        with exclusive_access(
+            _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
+        ):
+            recovering = _recover_master_series_bootstrap(spec)
+            if recovering is not None:
+                contract = recovering
+            else:
+                existing = _existing_master_series_contract(spec)
+                if existing is not None:
+                    contract = existing
+                else:
+                    contract = _new_master_series_contract(spec)
+                    integration_surfaces(contract)
+                    _publish_master_series_contract(spec, contract)
+        if leaf_admission_operation is not None:
+            require_series_accepting_leaves(contract, operation=leaf_admission_operation)
+        return reconcile_selected_series_under_authority(
+            contract,
+            activation_args=activation_args,
+            fetch=fetch,
+        )
 
 
-def _sequential_lane_block(spec: MasterSeriesContractSpec) -> WorktreeCommandResult | None:
-    """Block a second in-flight master under the atomic-sequential default (L13-R1).
+def _bootstrap_preflight_contract(spec: MasterSeriesContractSpec) -> WorktreeContract:
+    """Read the contract identity that the locked bootstrap will adopt or recover.
 
-    A stored fact decides ownership: the other master's series contract exists with
-    non-terminal cleanup. The blocked result orders the work — land the owner first —
-    and always names a legal next operation.
+    A journaled bootstrap may already have created one or both protected refs before
+    contract publication failed. Fresh-creation validation must not reject those
+    journal-owned refs before recovery gets a chance to prove and finish or roll them
+    back. This read-only preflight therefore understands the journal, while the later
+    locked transaction remains the only mutation owner.
     """
 
-    topology = TaskDocumentTopology(spec.coordination_root)
-    master_ref = topology.canonical_ref(spec.repo_name, spec.task_root / "task.json")
-    sprint_ref = topology.parent(master_ref)
-    if sprint_ref is None:
-        # A standalone master is trivially sequential: no lane to contend for.
-        return None
-    # Fail closed (L13 review): if the commanding sprint cannot be resolved, the
-    # lane question is unanswered and the bootstrap must not proceed — the
-    # TaskDocumentRefError propagates as the typed refusal.
-    mode = resolve_scheduling_mode(topology, sprint_ref)
-    if mode.mode != "atomic-sequential":
-        return None
-    owner = sequential_lane_owner(topology, mode)
-    if owner is None or owner.ref == master_ref:
-        return None
-    owner_contract = series_contract_path(owner.path.parent)
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": "sequential-lane-owned",
-            "laneOwner": owner.ref.key,
-            "laneOwnerContractPath": owner_contract.as_posix(),
-            "legalNextOperations": [
-                f"complete master {owner.ref.key} and land its series "
-                "(worktree_closeout_apply, then worktree_integrate)",
-                "retire the owner series contract (worktree_cleanup or worktree_abandon): "
-                f"{owner_contract.as_posix()}",
-                "retry this master series bootstrap once the lane is free",
-            ],
-            "summary": (
-                f"atomic-sequential sprint {sprint_ref.key} already has master "
-                f"{owner.ref.key} in flight; one master fully integrates before the "
-                "next master's series begins"
-            ),
-        },
-    )
+    existing = _existing_master_series_contract(spec)
+    if existing is not None:
+        return existing
+    record = _load_master_series_bootstrap_record(spec)
+    if record is not None:
+        return _contract_from_bootstrap_record(spec, record)
+    return _new_master_series_contract(spec)
 
 
 def _require_commanded_atomic_master(spec: MasterSeriesContractSpec) -> None:
@@ -593,13 +585,9 @@ def _recover_master_series_bootstrap(
     spec: MasterSeriesContractSpec,
 ) -> WorktreeContract | None:
     path = _master_series_bootstrap_record_path(spec)
-    if not path.is_file():
+    record = _load_master_series_bootstrap_record(spec)
+    if record is None:
         return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        record = _SeriesBootstrapRecord.model_validate(payload)
-    except (json.JSONDecodeError, OSError, ValidationError) as exc:
-        raise RuntimeError(f"invalid master-series bootstrap record {path}: {exc}") from exc
     contract = _contract_from_bootstrap_record(spec, record)
     if contract.contract_path.is_file():
         existing = load_contract(contract.contract_path)
@@ -622,6 +610,21 @@ def _recover_master_series_bootstrap(
             path.unlink(missing_ok=True)
             return None
     return _finish_master_series_bootstrap(spec, record)
+
+
+def _load_master_series_bootstrap_record(
+    spec: MasterSeriesContractSpec,
+) -> _SeriesBootstrapRecord | None:
+    """Load the one typed recovery record used by preflight and locked recovery."""
+
+    path = _master_series_bootstrap_record_path(spec)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return _SeriesBootstrapRecord.model_validate(payload)
+    except (json.JSONDecodeError, OSError, ValidationError) as exc:
+        raise RuntimeError(f"invalid master-series bootstrap record {path}: {exc}") from exc
 
 
 def _rollback_partial_bootstrap_refs(
@@ -906,6 +909,8 @@ def _parent_series_contract(
             protected_branch=_declared_integration_source_branch(context, task_root),
         ),
         dry_run=args.dry_run,
+        activation_args=args,
+        leaf_admission_operation="atomic leaf start",
     )
     if isinstance(series, WorktreeCommandResult):
         return series
@@ -1076,7 +1081,7 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
     )
     parent_series = _parent_series_contract(context, args, memory_mode)
     if isinstance(parent_series, WorktreeCommandResult):
-        # Blocked start (e.g. the atomic-sequential lane is owned by another master).
+        # The requested series remains reconciling or its admission evidence refused.
         return parent_series
     source_branch = _start_source_branch(context, args, task_root, parent_series, repo)
     base_commit = _start_code_base(repo, source_branch, args, parent_series)

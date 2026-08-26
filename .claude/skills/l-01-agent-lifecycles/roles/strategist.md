@@ -130,9 +130,11 @@ treatment as everything else.
    still-planning leaf move. Place atomic masters as explicit blockers: predecessors finish before
    the block starts, the block exposes no partial result, and successors wait for its one landing.
    The graph may place a block first, between waves, or last. When no explicit graph is justified,
-   record the evidence-backed choice of the graph-less atomic-sequential default: one commanded
-   master fully integrates before the next starts. Never manufacture an edge merely to make the
-   plan look explicit. A throwaway experiment that should not stall the sprint stays outside the
+   record the evidence-backed choice of the graph-less atomic-sequential default: canonical
+   commanded-master order is the stable tie-break and source-pair activation exposes one atomic
+   master at a time, but selecting another may logically pause the former without inventing a
+   dependency or retiring its work. Never manufacture an edge merely to make the plan look
+   explicit. A throwaway experiment that should not stall the sprint stays outside the
    sprint topology and, if successful, follows its own single-master landing path.
 8. **The orchestration task** — fill `../templates/orchestration-task.md`; the template REQUIRES
    the shown work: evidence relations, blast-radius register, coherence findings, execution-nature

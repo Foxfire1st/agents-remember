@@ -422,21 +422,25 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     WorktreeArgs(contract_path=malicious.contract_path, dry_run=True),
                     malicious,
                 ),
-                lambda: sync_result(
-                    WorktreeArgs(contract_path=malicious.contract_path, dry_run=True)
-                ),
             ):
                 with (
                     self.subTest(operation=operation),
                     self.assertRaisesRegex(RuntimeError, "integration-branch-is-not-a-workbench"),
                 ):
                     operation()
+            refused = sync_result(WorktreeArgs(contract_path=malicious.contract_path, dry_run=True))
+            self.assertEqual(refused.returncode, 2)
+            self.assertEqual(refused.payload["state"], "sync-operation-refused")
+            detail = refused.payload["detail"]
+            assert isinstance(detail, str)
+            self.assertIn("integration-branch-is-not-a-workbench", detail)
 
-    def test_series_sync_and_direct_unjournaled_integration_are_refused(self) -> None:
+    def test_series_sync_uses_canonical_authority_but_direct_integration_is_refused(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = _authority_fixture(Path(tmp))
-            with self.assertRaisesRegex(RuntimeError, "series integration branch"):
-                require_sync_worktree(fixture.master_contract)
+            require_sync_worktree(fixture.master_contract)
 
             with self.assertRaisesRegex(RuntimeError, "plane-owned journaled"):
                 integrate_result(

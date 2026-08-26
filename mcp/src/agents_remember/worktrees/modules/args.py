@@ -24,6 +24,7 @@ from agents_remember.models.lifecycles.operation import (
     IntegrationQualityCertification,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 
@@ -50,7 +51,8 @@ class WorktreeArgs:
     memory_mode: str | None = None
     memory_choice: str | None = None
     stale_base_choice: str | None = None
-    memory_sync_choice: str | None = None
+    memory_sync_choice: MemorySyncChoice | None = None
+    resolution_action: SyncResolutionAction | None = None
     custom_instruction: str | None = None
     lifecycle_id: str = ""
 

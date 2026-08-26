@@ -10,6 +10,9 @@ from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
 from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
+from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
+    with_terminal_atomic_series_release,
+)
 from agents_remember.worktrees.integration.atomic_series_terminal import (
     AtomicSeriesTerminalPermit,
     publish_atomic_series_terminal_under_authority,
@@ -648,9 +651,13 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 teardown_providers=args.teardown_providers,
             )
         if terminal.state == "cleanup-completed":
-            return _already_completed_cleanup(
+            return with_terminal_atomic_series_release(
                 contract,
-                teardown_providers=args.teardown_providers,
+                _already_completed_cleanup(
+                    contract,
+                    teardown_providers=args.teardown_providers,
+                ),
+                dry_run=args.dry_run,
             )
         contract = terminal.archived_contract
     else:
@@ -696,7 +703,11 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
-    return _cleanup_reserved(args, contract, preflight)
+    return with_terminal_atomic_series_release(
+        contract,
+        _cleanup_reserved(args, contract, preflight),
+        dry_run=args.dry_run,
+    )
 
 
 def _cleanup_reserved(

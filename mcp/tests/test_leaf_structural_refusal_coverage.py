@@ -312,6 +312,7 @@ def test_dispatch_agent_refuses_invalid_spawn_and_unpersisted_brief(tmp_path: Pa
     with (
         patch.object(tools, "_structural_context", return_value=(catalog, topology, resolver)),
         patch.object(tools, "resolve_ambient_seat", return_value=caller),
+        patch.object(tools, "_implementation_series_admission_refusal", return_value=None),
         patch.object(
             tools,
             "_spawn_dispatch_child",
@@ -327,6 +328,7 @@ def test_dispatch_agent_refuses_invalid_spawn_and_unpersisted_brief(tmp_path: Pa
     with (
         patch.object(tools, "_structural_context", return_value=(catalog, topology, resolver)),
         patch.object(tools, "resolve_ambient_seat", return_value=caller),
+        patch.object(tools, "_implementation_series_admission_refusal", return_value=None),
         patch.object(
             tools,
             "_spawn_dispatch_child",
@@ -352,6 +354,7 @@ def test_dispatch_agent_reports_queued_and_delivered_adapter_states(tmp_path: Pa
     common = (
         patch.object(tools, "_structural_context", return_value=(catalog, topology, resolver)),
         patch.object(tools, "resolve_ambient_seat", return_value=caller),
+        patch.object(tools, "_implementation_series_admission_refusal", return_value=None),
         patch.object(
             tools,
             "_spawn_dispatch_child",
@@ -359,7 +362,7 @@ def test_dispatch_agent_reports_queued_and_delivered_adapter_states(tmp_path: Pa
         ),
         patch.object(tools, "_post_initial_dispatch_brief", post),
     )
-    with common[0], common[1], common[2], common[3]:
+    with common[0], common[1], common[2], common[3], common[4]:
         post.return_value = {
             "ok": True,
             "deliveryState": "queued",

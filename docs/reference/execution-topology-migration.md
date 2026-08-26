@@ -3,10 +3,13 @@
 This is the operator-facing procedure for the explicit execution topology
 (`executionNature` on commanded masters, `executionGraph` on orchestration sprints).
 A sprint without an `executionGraph` is not an error: it runs the atomic-sequential
-default — every commanded master runs one at a time and fully integrates before the
-next master's series begins, regardless of any declared nature. Authoring a graph is
-the explicit opt-in to dependency-aware scheduling; there is no separate migration
-operation.
+default — every commanded master executes atomically regardless of any declared
+nature, and exact source-pair activation exposes one selected master at a time.
+Selecting another master automatically and logically pauses the former; it does not
+require the former to integrate, retire its contract, or terminate its agent/worktree.
+Canonical commanded-master order is only the stable tie-break where priority is equal.
+Authoring a graph is the explicit opt-in to dependency-aware scheduling; there is no
+separate migration operation.
 
 ## 1. Inventory (read-only preview)
 
@@ -56,8 +59,18 @@ Classification rule (preserves current behavior):
 ## 3. Defaults and fail-closed seams
 
 - No `executionGraph`: the atomic-sequential default schedules the sprint; the
-  closeout queue's read path reports the degraded projection (`mode:
-  "atomic-sequential"`, the series lane owner, and legal next operations).
+  closeout queue reports `mode: "atomic-sequential"` plus waiting reasons derived
+  from the strict source-pair activation snapshot (`active`, `reconciling`, paused by
+  the selected master, or vacant). Contract presence never elects a master, and the
+  queue owns no activation transition or lifecycle operation.
+- Manager/worker dispatch and atomic `worktree_start`/`worktree_attach` are selecting
+  operations. They publish `reconciling` before source sync and `active` only after
+  both exact recorded bases are current. Reviewer/curator inspection does not switch
+  selection. Explicit sync cancellation publishes durable `vacant`.
+- A malformed activation snapshot fails closed only for the affected projection and
+  implementation admission. The next exact selecting operation archives the bytes
+  with evidence and replaces the snapshot; task-document authoring never reads or is
+  blocked by activation state.
 - A commanded master with no `executionNature` under an authored graph stays a hard
   refusal (`task-execution-topology-migration-required`) naming `set_nature`.
 - Malformed canonical registers degrade reads to facts; the write path
@@ -108,6 +121,7 @@ strategist/orchestrator ruling, never by the authoring mechanism itself.
   and graph-joined (`executionGraph`).
 - Graph authoring/migration writes run a served-build preflight and refuse with
   upgrade guidance when the serving runtime predates the topology schema.
-- A missing graph selects the atomic-sequential default, not a refusal; a missing
-  nature under an authored graph remains a hard refusal.
+- A missing graph selects the source-pair-selected atomic-sequential default, not a
+  refusal or a full-integration-before-switch rule; a missing nature under an
+  authored graph remains a hard refusal.
 - Rollback is snapshot-based; no dual-reader or feature-switch fallback remains.

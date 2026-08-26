@@ -13,6 +13,9 @@ from agents_remember.tasks.leaf_doc import (
     plan_leaf_doc_lifecycle_restamp,
 )
 from agents_remember.tasks.store import write_task_docs
+from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
+    activate_atomic_series_contract,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_parent_series_accepting_leaves,
@@ -168,6 +171,18 @@ def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "worktree_attach refused: an atomic integration branch is not a resumable workbench"
         )
     require_ordinary_worktree(contract, operation="worktree_attach")
+    parent_series = require_parent_series_accepting_leaves(
+        contract,
+        operation="worktree_attach",
+    )
+    if parent_series is not None:
+        activation = activate_atomic_series_contract(
+            parent_series,
+            activation_args=args,
+            dry_run=args.dry_run,
+        )
+        if isinstance(activation, WorktreeCommandResult):
+            return activation
     lineage = source_lineage_for_contract(contract)
     if lineage_refusal(lineage) is not None:
         assert lineage is not None

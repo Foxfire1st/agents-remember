@@ -11,7 +11,13 @@ from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.models.closeout.projection import CloseoutQueueState
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.tasks import read_task_doc, write_task_doc
+from agents_remember.worktrees.activation.atomic_series_activation import (
+    activation_path,
+    atomic_series_source_pair,
+    publish_atomic_series_selection,
+)
 from agents_remember.worktrees.queue.closeout_queue import QueueActor, closeout_queue_tool
+from agents_remember.worktrees.worktree_contract import load_contract
 from test_closeout_queue import LEAF_A, MASTER_A, MASTER_B, NOW, SPRINT, QueueFixture
 
 
@@ -186,3 +192,84 @@ class CloseoutProjectionCensusTests(unittest.TestCase):
         )
         self.assertEqual(stored.serviceCondition, "valid-built")
         self.assertEqual(stored.sourceClassification, "terminal")
+
+    def test_multiple_live_atomic_series_are_valid_active_paused_waiting_candidates(self) -> None:
+        fixture = QueueFixture(
+            Path(self.temporary.name) / "two-atomic",
+            atomic_a=True,
+            atomic_b=True,
+            memory_mode="internal",
+        )
+        actor = QueueActor(role="orchestrator", task_document_ref=SPRINT)
+        fixture.declare(MASTER_A)
+        vacant = fixture.declare(MASTER_B)
+        self.assertEqual(vacant["state"], "valid-built")
+        self.assertTrue(
+            all(
+                member["classification"] == "waiting"
+                and "atomic-series-not-selected" in member["reasons"]
+                for member in vacant["members"]
+            )
+        )
+
+        series_a = fixture.tasks / "master-a" / "series-contract.md"
+        selected_a = publish_atomic_series_selection(
+            load_contract(series_a),
+            "active",
+            timestamp=NOW,
+        )
+        self.assertEqual(fixture.status()["state"], "invalid-empty")
+        rebuilt_a = closeout_queue_tool(
+            fixture.cfg,
+            CloseoutQueueRequest(action="rebuild", sprint_task_document_ref=SPRINT),
+            actor=actor,
+            now=NOW,
+        )
+        by_master = {member["owningMaster"]["path"]: member for member in rebuilt_a["members"]}
+        self.assertEqual(by_master[MASTER_A.path]["classification"], "ready")
+        self.assertIn(
+            f"atomic-series-paused-by: {MASTER_A.key}",
+            by_master[MASTER_B.path]["reasons"],
+        )
+
+        publish_atomic_series_selection(
+            load_contract(fixture.tasks / "master-b" / "series-contract.md"),
+            "active",
+            timestamp="2026-08-26T00:00:01+00:00",
+        )
+        self.assertEqual(fixture.status()["state"], "invalid-empty")
+        rebuilt_b = closeout_queue_tool(
+            fixture.cfg,
+            CloseoutQueueRequest(action="rebuild", sprint_task_document_ref=SPRINT),
+            actor=actor,
+            now=NOW,
+        )
+        by_master = {member["owningMaster"]["path"]: member for member in rebuilt_b["members"]}
+        self.assertEqual(by_master[MASTER_B.path]["classification"], "ready")
+        self.assertIn(
+            f"atomic-series-paused-by: {MASTER_B.key}",
+            by_master[MASTER_A.path]["reasons"],
+        )
+        self.assertEqual(selected_a.selected_master, MASTER_A)
+
+    def test_malformed_activation_invalidates_only_projection_and_names_selection_repair(
+        self,
+    ) -> None:
+        fixture = QueueFixture(
+            Path(self.temporary.name) / "malformed-activation",
+            atomic_b=True,
+            memory_mode="internal",
+        )
+        fixture.declare(MASTER_B)
+        series = load_contract(fixture.tasks / "master-b" / "series-contract.md")
+        path = activation_path(fixture.coord, atomic_series_source_pair(series))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{malformed", encoding="utf-8")
+
+        result = fixture.status()
+
+        self.assertEqual(result["state"], "invalid-empty")
+        problem = next(
+            item for item in result["sourceProblems"] if item["address"] == path.as_posix()
+        )
+        self.assertIn("dispatch_agent", problem["repairAction"])

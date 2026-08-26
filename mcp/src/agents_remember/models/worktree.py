@@ -53,6 +53,29 @@ SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
 SourceLineageRelation = Literal["super-to-master", "master-to-leaf", "super-to-leaf"]
 SourceLineageSide = Literal["code", "memory"]
+SyncResolutionAction = Literal["continue", "cancel"]
+MemorySyncChoice = Literal["merge-memory", "skip-memory"]
+SyncSide = Literal["code", "memory"]
+SyncPhase = Literal[
+    "running-code",
+    "code-resolution-required",
+    "running-memory",
+    "memory-resolution-required",
+    "finalizing",
+    "cancelling",
+    "completed",
+    "cancelled",
+]
+SyncOperationState = Literal[
+    "running",
+    "resolution-required",
+    "cancelling",
+    "completed",
+    "cancelled",
+    "journal-malformed",
+    "journal-identity-invalid",
+    "quarantined",
+]
 
 
 class SourceLineageEdge(StrictResponseModel):
@@ -85,6 +108,29 @@ class SourceLineageProjection(StrictResponseModel):
     summary: str
     edges: list[SourceLineageEdge]
     recoveries: list[SourceLineageRecovery]
+
+
+class SyncOperationProjection(StrictResponseModel):
+    """Stable read-only view of the enclosure-root sync journal."""
+
+    state: SyncOperationState
+    phase: SyncPhase | Literal["journal-read", "quarantined"]
+    contractPath: str
+    journalContractPath: str | None = None
+    identityMismatch: bool = False
+    side: SyncSide | None = None
+    conflictFiles: tuple[str, ...] = ()
+    summary: str
+    nextArgs: dict[str, object] | None = None
+    cancelArgs: dict[str, object] | None = None
+    evidencePath: str | None = None
+
+
+class SyncResolutionProjection(StrictResponseModel):
+    side: SyncSide
+    owner: Literal["agent"] = "agent"
+    worktree: str | None = None
+    files: list[str] = Field(default_factory=list)
 
 
 # Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
@@ -149,6 +195,7 @@ class WorktreeSummary(StrictResponseModel):
     decisionSurface: str | None = Field(default=None, max_length=8192)
     lifecycleOperation: LifecycleOperationProjection | None = None
     sourceLineage: SourceLineageProjection | None = None
+    syncOperation: SyncOperationProjection | None = None
 
 
 class WorktreeCommandResponse(FlexibleToolResponse):
@@ -192,6 +239,7 @@ class WorktreeAttachResponse(WorktreeCommandResponse):
 class WorktreeStatusResponse(WorktreeCommandResponse):
     operation: Literal["worktree_status"] = "worktree_status"
     lifecycleOperations: list[LifecycleOperationProjection] = Field(default_factory=list)
+    syncOperation: SyncOperationProjection | None = None
 
 
 class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
@@ -207,6 +255,16 @@ class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
 
 class WorktreeSyncResponse(WorktreeCommandResponse):
     operation: Literal["worktree_sync"] = "worktree_sync"
+    phase: SyncPhase | Literal["quarantined"] | None = None
+    resolution: SyncResolutionProjection | None = None
+    resolutionOwner: Literal["agent"] | None = None
+    nextOperation: str | None = None
+    nextTool: Literal["worktree_sync"] | None = None
+    nextArgs: dict[str, object] | None = None
+    cancelArgs: dict[str, object] | None = None
+    evidencePath: str | None = None
+    invalidField: Literal["memory_sync_choice", "resolution_action"] | None = None
+    manualRepair: dict[str, object] | None = None
 
 
 class WorktreeCloseoutPreviewResponse(WorktreeCommandResponse):

@@ -23,6 +23,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.worktree import (
     SourceLineageProjection,
+    SyncOperationProjection,
     WorktreeState,
     WorktreeSummary,
 )
@@ -38,6 +39,7 @@ from agents_remember.worktrees.integration.lifecycle.observation.projection impo
     current_operation_projections,
 )
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
+from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
@@ -61,6 +63,10 @@ def worktree_status_packet(
         _, location = configured_lifecycle_operation_location(config, resolved)
     except LifecycleOperationLocationError as error:
         return _location_decision_summary(resolved, error)
+    sync_operation = observe_sync_operation(
+        location.worktree_group,
+        contract_path=resolved,
+    )
     try:
         contract = load_contract(resolved)
     except (ContractError, OSError, UnicodeError, ValueError) as error:
@@ -90,6 +96,7 @@ def worktree_status_packet(
                 missing=missing,
                 failure=failure,
                 decision=observation.decision,
+                sync_operation=sync_operation,
             )
         return WorktreeSummary(
             state="missingContract" if missing else "invalidContract",
@@ -102,11 +109,12 @@ def worktree_status_packet(
             ),
             errorEvidence=failure,
             lifecycleOperation=retained,
+            syncOperation=sync_operation,
         )
     try:
         require_contract_matches_lifecycle_operation_location(contract, location)
     except LifecycleOperationLocationError as error:
-        return _location_decision_summary(resolved, error)
+        return _location_decision_summary(resolved, error, sync_operation=sync_operation)
     return _summary_from_status_payload(
         git_worktree_manager.status_payload(contract),
         lifecycle_operation=primary_operation_projection(
@@ -116,12 +124,15 @@ def worktree_status_packet(
                 location=location,
             )
         ),
+        sync_operation=sync_operation,
     )
 
 
 def _location_decision_summary(
     contract_path: Path,
     error: LifecycleOperationLocationError,
+    *,
+    sync_operation: SyncOperationProjection | None = None,
 ) -> WorktreeSummary:
     """Carry the shared locator decision without inventing a context-only dialect."""
 
@@ -130,6 +141,7 @@ def _location_decision_summary(
         contract_path,
         state="missingContract" if not contract_path.exists() else "invalidContract",
         decision=decision,
+        sync_operation=sync_operation,
     )
 
 
@@ -139,12 +151,14 @@ def _contract_read_decision_summary(
     missing: bool,
     failure: dict[str, object],
     decision: LocationDecisionPayload,
+    sync_operation: SyncOperationProjection | None,
 ) -> WorktreeSummary:
     return _developer_decision_summary(
         contract_path,
         state="missingContract" if missing else "invalidContract",
         decision=decision,
         error_evidence=failure,
+        sync_operation=sync_operation,
     )
 
 
@@ -154,6 +168,7 @@ def _developer_decision_summary(
     state: WorktreeState,
     decision: LocationDecisionPayload,
     error_evidence: dict[str, object] | None = None,
+    sync_operation: SyncOperationProjection | None = None,
 ) -> WorktreeSummary:
     """Project one shared typed lifecycle-location/read decision onto context."""
 
@@ -171,6 +186,7 @@ def _developer_decision_summary(
         nextAction=decision["nextAction"],
         developerDecisionRequired=decision["developerDecisionRequired"],
         decisionSurface=decision["decisionSurface"],
+        syncOperation=sync_operation,
     )
 
 
@@ -178,6 +194,7 @@ def _summary_from_status_payload(
     payload: WorktreeStatusPayload,
     *,
     lifecycle_operation: LifecycleOperationProjection | None = None,
+    sync_operation: SyncOperationProjection | None = None,
 ) -> WorktreeSummary:
     """Project a snake_case status payload onto the camelCase wire model, field by field.
 
@@ -227,6 +244,7 @@ def _summary_from_status_payload(
         nextRequiredArgs=payload.get("nextRequiredArgs"),
         unknownContractCells=payload.get("unknown_contract_cells"),
         lifecycleOperation=lifecycle_operation,
+        syncOperation=sync_operation,
         sourceLineage=(
             SourceLineageProjection.model_validate(source_lineage)
             if source_lineage is not None

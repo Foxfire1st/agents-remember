@@ -4,7 +4,7 @@ The happy path through start / sync / integrate / cleanup is covered elsewhere. 
 not is the other side of each guard: the contract that refuses an unknown memory mode,
 the start that must hand a blocked preflight straight back instead of creating worktrees,
 the retired source fast-forward choice that must never rebuild or move protected refs,
-the sync that aborts a conflicting memory merge, the retirement that has to
+the source refresh that reports its bounded evidence, the retirement that has to
 step off the branch it is about to delete.
 
 Each of those is the case where getting it wrong is expensive -- worktrees created on a
@@ -44,11 +44,11 @@ from agents_remember.worktrees.modules import guidance as guidance_module
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import onboarding as onboarding_module
 from agents_remember.worktrees.modules import start as start_module
-from agents_remember.worktrees.modules import sync as sync_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.quality.clean_executor import clean_sandbox_root
 from agents_remember.worktrees.modules.startup import start_contract as start_contract_module
+from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -634,6 +634,11 @@ class ExistingContractStartTests(unittest.TestCase):
             with (
                 mock.patch.object(start_module, "require_ordinary_worktree"),
                 mock.patch.object(
+                    start_module,
+                    "require_parent_series_accepting_leaves",
+                    return_value=None,
+                ),
+                mock.patch.object(
                     start_module, "source_lineage_for_contract", return_value=lineage
                 ),
             ):
@@ -703,74 +708,6 @@ class PreflightedContractTests(unittest.TestCase):
         build.assert_not_called()
 
 
-class MemorySyncBlockTests(unittest.TestCase):
-    """The two memory-side sync refusals, and what each tells the caller to do next."""
-
-    def test_needs_review_asks_for_an_explicit_memory_sync_choice(self) -> None:
-        contract = contract_for(Path("/tmp"))
-        result = sync_module._memory_sync_block(
-            contract, {"state": "fast-forwarded"}, {"state": "needs-review"}, {"code": "fetched"}
-        )
-
-        assert result is not None
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.payload["state"], "blocked")
-        self.assertEqual(result.payload["nextRequiredArgs"], ["memory_sync_choice"])
-        self.assertIn("merge-memory", str(result.payload["summary"]))
-
-    def test_a_conflicting_merge_reports_the_abort_and_offers_skip_memory(self) -> None:
-        """The merge was already aborted, so the only forward move is to defer memory to
-        end-of-task carryover; the block says so rather than repeating the choice prompt."""
-        contract = contract_for(Path("/tmp"))
-        result = sync_module._memory_sync_block(
-            contract,
-            {"state": "fast-forwarded"},
-            {"state": "conflicts", "files": ["memory.md"]},
-            {"code": "fetched"},
-        )
-
-        assert result is not None
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.payload["state"], "blocked")
-        self.assertIn("the merge was aborted", str(result.payload["summary"]))
-        self.assertIn("skip-memory", str(result.payload["summary"]))
-        self.assertNotIn("nextRequiredArgs", result.payload)
-        self.assertEqual(result.payload["memory"], {"state": "conflicts", "files": ["memory.md"]})
-
-    def test_a_clean_memory_sync_does_not_block(self) -> None:
-        contract = contract_for(Path("/tmp"))
-        self.assertIsNone(
-            sync_module._memory_sync_block(
-                contract, {"state": "fast-forwarded"}, {"state": "merged"}, {}
-            )
-        )
-
-
-class MoveMemoryBranchTests(unittest.TestCase):
-    """A merge that cannot be resolved automatically leaves the worktree usable."""
-
-    def test_a_conflicting_merge_is_aborted_and_reported_with_its_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "repo"
-            repo.mkdir()
-            init_repo(repo, "main")
-            commit(repo, "memory.md", "base\n", "base")
-            run_git(repo, "checkout", "-b", "ar/edge-task")
-            commit(repo, "memory.md", "task line\n", "task edit")
-            run_git(repo, "checkout", "main")
-            commit(repo, "memory.md", "official line\n", "official edit")
-            run_git(repo, "checkout", "ar/edge-task")
-
-            state = sync_module._move_memory_branch(
-                repo, "main", move="merge", tip=run_git(repo, "rev-parse", "main")
-            )
-
-            self.assertEqual(state["state"], "conflicts")
-            self.assertEqual(state["files"], ["memory.md"])
-            self.assertEqual(run_git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "ar/edge-task")
-            self.assertEqual((repo / "memory.md").read_text(encoding="utf-8"), "task line\n")
-
-
 class FetchSourceUpstreamsTests(unittest.TestCase):
     """The best-effort pre-sync fetch reports per side rather than failing the sync."""
 
@@ -789,7 +726,7 @@ class FetchSourceUpstreamsTests(unittest.TestCase):
             run_git(root, "clone", str(origin), str(clone))
 
             contract = contract_for(root, code_repo=clone)
-            results = sync_module._fetch_source_upstreams(contract)
+            results = fetch_source_upstreams(contract)
 
             self.assertEqual(results, {"code": {"state": "fetched"}})
 
@@ -800,7 +737,7 @@ class FetchSourceUpstreamsTests(unittest.TestCase):
             repo.mkdir()
             init_repo(repo, "main")
 
-            results = sync_module._fetch_source_upstreams(contract_for(root, code_repo=repo))
+            results = fetch_source_upstreams(contract_for(root, code_repo=repo))
 
             self.assertEqual(results, {"code": {"state": "no-upstream"}})
 

@@ -109,6 +109,19 @@ def init_repo(repo: Path, branch: str = "main") -> str:  # pragma: no cover
     return commit
 
 
+def seed_memory_ledger(memory_repo: Path, repo_name: str, code_commit: str) -> str:
+    """Commit the canonical initial ledger for an external-memory test source."""
+
+    memory_content = git(memory_repo, "rev-parse", "HEAD")
+    write_ledger(
+        memory_repo / "memory.md",
+        create_initial_ledger(repo_name, code_commit, memory_content),
+    )
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "Add memory ledger")
+    return git(memory_repo, "rev-parse", "HEAD")
+
+
 def write_current_task_lineage(
     coordination_root: Path,
     *,

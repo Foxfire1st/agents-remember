@@ -246,8 +246,10 @@ the design: run the bulwark check against the portfolio and the past before disp
   one previewed `task_doc.attach_master` call (row + membership + nature assertion, plus a graph
   node only when a graph already exists, in a single atomic batch that refuses partial attaches;
   `detach_master` is its symmetric inverse and never deletes files). A sprint without an
-  `executionGraph` runs the atomic-sequential default (one master fully integrates before the next
-  starts). If the ruled topology instead adopts an explicit graph from that state, attach every
+  `executionGraph` runs the source-pair-selected atomic-sequential default: canonical commanded
+  order is the stable tie-break, while selecting another master may logically pause the former
+  without retiring its durable work or inventing a dependency. If the ruled topology instead
+  adopts an explicit graph from that state, attach every
   commanded master first, then use one complete `task_doc.author_execution_graph` batch containing
   every node and evidence-backed edge; edit the graph incrementally only after that bootstrap
   (edges are always graph-authoring work).
@@ -297,9 +299,13 @@ makes judgment visible; it does not turn the projection into the judge. Never pa
 tombstone, replan, or drain an old projection row.
 
 Dispatch independent ready organizational masters and their build work in parallel up to
-`orchestration.concurrency.maxParallelMasters`. An atomic master is an exclusive block: acquire it
-only after its predecessors are complete, pause other sprint landings, let its manager finish the
-isolated leaf sequence, land the block once, then recompute. For each admitted master, run the
+`orchestration.concurrency.maxParallelMasters`. An atomic master waits for its explicit graph
+predecessors, when any. Before its manager or worker receives implementation exposure, the
+control plane selects its exact code/memory source pair as `reconciling`, logically pausing the
+former selected master, source-syncs it, and publishes `active`. This never suspends a chat,
+process, worktree, contract, or already-claimed lifecycle journal; selecting another atomic master
+may later pause and preserve this one. Reviewer and curator inspection does not switch selection.
+For each admitted master, run the
 three-state hosted-role dispatch for `dispatch_agent` on the canonical master document with role
 `manager`, compiling its complete brief from `../templates/manager-brief.md`; the manager occupies
 `(master document, manager)` and the brief carries the load-bearing execution nature and source
@@ -316,11 +322,13 @@ Loop): this seat either re-runs the loop at ITS level (the orchestrator-level ag
 strongest models) or, when the blocker is a quo-vadis truth, emits a decision item to the
 architect. This spawned backend seat does not run flat hat-collapse (see The Hat-Collapse Rule).
 
-The atomic blocker and landing lane serialize only conflicting protected-ref movement. They cannot
+Source-pair activation serializes new atomic implementation exposure; the landing lane separately
+serializes conflicting protected-ref movement. Neither authority can
 veto task creation, replacement, progress/checkmarks, requirements/decisions/sections, route review,
 graph/linkage, attach/detach/reparent/removal, or sprint completion. Process those writes normally,
-then consume their per-scope projection effects. A present-unreadable landing owner fails closed
-for that exact conflicting landing, not for planning elsewhere.
+then consume their per-scope projection effects. Queue rows only project active/reconciling/paused
+waiting facts. A present-unreadable activation or landing owner fails closed at that exact
+projection/admission or conflicting landing boundary, not for planning elsewhere.
 
 **Delegated series authority:** after the developer accepts the orchestration plan, this seat owns
 subordinate execution without repeated developer formality. Managers may close out and integrate
@@ -378,9 +386,10 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    proposed super candidate, run the repository's full acceptance once **before** moving super,
    then atomically land that leaf and complete the organizational master only on pass. No master
    branch is merged because none exists.
-4. **Atomic:** acquire the exclusive blocker, let the manager integrate every certified leaf into
-   the isolated atomic branch, then run the full acceptance and land that one branch on super.
-   Expose no intermediate atomic leaf to super.
+4. **Atomic:** require the master to be the active source-pair selection while its manager exposes
+   implementation, integrate every certified leaf into the isolated atomic branch, then acquire
+   the narrow landing authority, run the full acceptance, and land that one branch on super.
+   Expose no intermediate atomic leaf to super; a paused master retains its branch and journals.
 5. Map the external-memory edge with the code edge. Prefer ancestry-preserving fast-forward/replay;
    carry-over is an explicit recovery for unavoidable divergence, not a routine consequence of
    parallel organizational work.
@@ -423,7 +432,7 @@ main
         ├── organizational master A (logical owner only)
         │     ├── leaf A1 (off current super) ──→ super
         │     └── leaf A2 (off refreshed super) ── full A gate ─→ super once
-        ├── atomic master B branch (off current super; exclusive blocker)
+        ├── atomic master B branch (off current super; source-pair-selected; one landing)
         │     ├── leaf B1 ─→ B
         │     └── leaf B2 ─→ B ── full B gate ─→ super once
         └── … final: super → main PR (remote merge) + memory carry-over to main + push

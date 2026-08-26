@@ -141,7 +141,14 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         )
 
         self.assertEqual(recorder.args, (self.config, "/tmp/contract.yaml"))
-        self.assertEqual(recorder.kwargs, {"memory_sync_choice": "merge-memory", "dry_run": False})
+        self.assertEqual(
+            recorder.kwargs,
+            {
+                "memory_sync_choice": "merge-memory",
+                "resolution_action": None,
+                "dry_run": False,
+            },
+        )
 
     def test_closeout_preview_groups_the_three_commit_messages(self) -> None:
         recorder = self.invoke(

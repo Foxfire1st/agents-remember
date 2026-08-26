@@ -216,8 +216,8 @@ class QueueFixture:
         root: Path,
         *,
         edge: bool = False,
+        atomic_a: bool = False,
         atomic_b: bool = False,
-        atomic_leaf_id: str = "LEAF-B",
         memory_mode: str = "external",
     ) -> None:
         self.root = root
@@ -226,6 +226,7 @@ class QueueFixture:
         self.code = root / "code"
         self.memory = self.coord / "memory-repos" / f"ar-{REPO}"
         self.memory_mode = memory_mode
+        self.atomic_a = atomic_a
         self.atomic_b = atomic_b
         code_base = init_repo(self.code, "main")
         memory_content = init_repo(self.memory, "main")
@@ -256,18 +257,22 @@ class QueueFixture:
         git(self.memory, "branch", "super", memory_base)
         atomic_leaf_ref = TaskDocumentRef(
             repository=REPO,
-            path=f"master-b/{atomic_leaf_id.lower()}.json",
+            path="master-b/leaf-b.json",
         )
         self.leaf_refs = {MASTER_A: LEAF_A, MASTER_B: atomic_leaf_ref}
         self.contracts = {
             MASTER_A: self._contract("master-a", "LEAF-A", code_base, memory_base),
-            MASTER_B: self._contract("master-b", atomic_leaf_id, code_base, memory_base),
+            MASTER_B: self._contract("master-b", "LEAF-B", code_base, memory_base),
         }
         self.master_docs = {
-            MASTER_A: _master(MASTER_A, "LEAF-A", "organizational"),
+            MASTER_A: _master(
+                MASTER_A,
+                "LEAF-A",
+                "atomic" if atomic_a else "organizational",
+            ),
             MASTER_B: _master(
                 MASTER_B,
-                atomic_leaf_id,
+                "LEAF-B",
                 "atomic" if atomic_b else "organizational",
             ),
         }
@@ -343,7 +348,9 @@ class QueueFixture:
         code_base: str,
         memory_base: str,
     ) -> WorktreeContract:
-        atomic = self.atomic_b and master == "master-b"
+        atomic = (self.atomic_a and master == "master-a") or (
+            self.atomic_b and master == "master-b"
+        )
         code_source = f"ar/{master}" if atomic else "super"
         memory_source = f"ar/{master}" if atomic else "super"
         code_work = f"ar/{leaf_id.lower()}"

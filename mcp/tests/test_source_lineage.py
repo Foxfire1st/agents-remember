@@ -18,6 +18,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.worktrees.activation.atomic_series_activation import observe_atomic_series
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
@@ -283,6 +284,7 @@ class SourceLineageTests(unittest.TestCase):
                 "Attach refused before stale task context",
                 cast(str, result.payload["summary"]),
             )
+            self.assertEqual(observe_atomic_series(fixture.master_contract).state, "active")
 
     def test_missing_leaf_contract_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

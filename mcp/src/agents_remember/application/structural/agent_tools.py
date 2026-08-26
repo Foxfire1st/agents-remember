@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from agents_remember.application.terminal_tools import (
@@ -507,8 +508,12 @@ def _admitted_dispatch_spawn(
     spawned_by: SpawnedBy,
     resolved_document: ResolvedTaskDocument,
 ) -> dict[str, Any]:
-    if request.role == "manager":
-        refusal = _manager_series_bootstrap_refusal(config, resolved_document)
+    if request.role in {"manager", "worker"}:
+        refusal = _implementation_series_admission_refusal(
+            config,
+            resolved_document,
+            request.role,
+        )
         if refusal is not None:
             return {"status": refusal.status, "detail": refusal.detail}
     refusal = (
@@ -527,71 +532,92 @@ def _admitted_dispatch_spawn(
     )
 
 
-def _manager_series_bootstrap_refusal(
-    config: McpRuntimeConfig, resolved: ResolvedTaskDocument
+def _implementation_series_admission_refusal(
+    config: McpRuntimeConfig,
+    resolved: ResolvedTaskDocument,
+    role: str,
 ) -> StructuralOutcome | None:
-    """Create the master identity edge before lineage admits its manager seat."""
+    """Select an atomic master before its manager or worker can expose work."""
 
     try:
         topology = TaskDocumentTopology(config.coordination_root)
-        if topology.altitude(resolved.ref) != "master":
-            raise ValueError("manager dispatch requires a canonical master task document")
-        parent_ref = topology.parent(resolved.ref)
+        master = _dispatch_owning_master(topology, resolved, role)
+        parent_ref = topology.parent(master.ref)
         parent = topology.resolve(parent_ref) if parent_ref is not None else None
         nature = effective_execution_nature(
-            resolved.document, parent.document if parent is not None else None
+            master.document, parent.document if parent is not None else None
         )
         if nature == "organizational":
             return None
-        repo = require_repo(config, resolved.ref.repository)
-        if parent is None:
-            parent_task_name = ""
-            protected_branch = repository_default_branch(repo.path)
-        else:
-            if not parent.document.integrationBranch:
-                raise ValueError(
-                    f"commanding sprint {parent.ref.path} does not declare integrationBranch; "
-                    "the orchestrator must preview and apply "
-                    "task_doc(operation='set_field', "
-                    f"repo_id='{parent.ref.repository}', task_name='{parent.path.parent.name}', "
-                    "fields={'integrationBranch': '<exact existing super branch>'}) before "
-                    "manager dispatch"
-                )
-            parent_task_name = parent.path.parent.name
-            protected_branch = parent.document.integrationBranch
+        repo = require_repo(config, master.ref.repository)
+        parent_task_name, protected_branch = _series_source_spec(parent, repo.path)
         series = ensure_master_series_contract(
             MasterSeriesContractSpec(
                 coordination_root=config.coordination_root,
                 repo_name=repo.repo_id,
                 code_repo=repo.path,
                 memory_root=repo.memory_root,
-                task_root=resolved.path.parent,
-                task_name=resolved.path.parent.name,
+                task_root=master.path.parent,
+                task_name=master.path.parent.name,
                 parent_task_name=parent_task_name,
                 protected_branch=protected_branch,
-            )
+            ),
+            leaf_admission_operation=("atomic worker dispatch" if role == "worker" else None),
         )
         if isinstance(series, WorktreeCommandResult):
-            # Blocked bootstrap (e.g. the atomic-sequential lane is owned): surface the
-            # ordering payload — it names the lane owner and the legal next operations.
             return StructuralOutcome(
                 "dispatch_agent",
                 False,
-                str(series.payload.get("state", "series-bootstrap-blocked")),
+                str(series.payload.get("state", "series-admission-blocked")),
                 resolved.ref,
-                "manager",
+                role,
                 json.dumps(series.payload, sort_keys=True, default=str),
             )
     except (AuthorityError, OSError, RuntimeError, TaskDocumentRefError, ValueError) as exc:
         return StructuralOutcome(
             "dispatch_agent",
             False,
-            "series-bootstrap-refused",
+            "series-admission-refused",
             resolved.ref,
-            "manager",
+            role,
             str(exc),
         )
     return None
+
+
+def _dispatch_owning_master(
+    topology: TaskDocumentTopology,
+    resolved: ResolvedTaskDocument,
+    role: str,
+) -> ResolvedTaskDocument:
+    altitude = topology.altitude(resolved.ref)
+    if role == "manager" and altitude == "master":
+        return resolved
+    if role == "worker" and altitude == "leaf":
+        master_ref = topology.parent(resolved.ref)
+        if master_ref is not None:
+            return topology.resolve(master_ref)
+        raise ValueError("worker dispatch leaf has no canonical owning master")
+    expected = "master" if role == "manager" else "leaf"
+    raise ValueError(
+        f"{role} dispatch does not address its required canonical {expected} task altitude"
+    )
+
+
+def _series_source_spec(
+    parent: ResolvedTaskDocument | None,
+    repository: Path,
+) -> tuple[str, str]:
+    if parent is None:
+        return "", repository_default_branch(repository)
+    if parent.document.integrationBranch:
+        return parent.path.parent.name, parent.document.integrationBranch
+    raise ValueError(
+        f"commanding sprint {parent.ref.path} does not declare integrationBranch; "
+        "the orchestrator must preview and apply task_doc(operation='set_field', "
+        f"repo_id='{parent.ref.repository}', task_name='{parent.path.parent.name}', "
+        "fields={'integrationBranch': '<exact existing super branch>'}) before manager dispatch"
+    )
 
 
 def _curator_route_review_refusal(

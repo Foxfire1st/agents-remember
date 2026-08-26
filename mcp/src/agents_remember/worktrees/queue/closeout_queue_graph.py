@@ -124,7 +124,8 @@ def _validated_graph_documents(
         raise CloseoutQueueError(
             "task-execution-topology-migration-required",
             "sprint has no executionGraph; the sprint runs atomic-sequentially by default "
-            "(masters land one at a time through the series lane), or bootstrap a graph "
+            "(one source-pair-selected atomic master exposes implementation at a time), "
+            "or bootstrap a graph "
             "with task_doc.author_execution_graph",
         )
     if len(graph.nodes) > MAX_CLOSEOUT_MASTERS:

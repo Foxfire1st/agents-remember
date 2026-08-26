@@ -154,7 +154,8 @@ complete all attachments first, then send one `task_doc.author_execution_graph` 
 ## Derived Waves And Blocker Walk
 - Explicit graph: Wave <n> (mechanically derived, not persisted): <master refs>
 - Explicit graph: Atomic blocker: <master ref> · predecessors <refs> · successors <refs> · blocker-placement judgment <id>
-- Graph-less default: <canonical commanded-master order; each fully integrates before the next starts>
+- Graph-less default: <canonical commanded-master tie-break; one source-pair-selected atomic master
+  exposes implementation at a time; selection may logically pause and later resume durable work>
 - Deterministic equal-priority tie-break: canonical graph node order when present; otherwise canonical commanded-master order
 
 ## Leaf Moves

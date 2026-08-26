@@ -61,10 +61,12 @@ release successors only after its one landing. Stable node order may break an eq
 but must never masquerade as priority.
 
 When no `executionGraph` exists, require an explicit, evidence-backed choice of the graph-less
-atomic-sequential default: the canonical commanded-master order runs one master through full
-integration before the next starts. Graph absence does not excuse missing classifications or
-planning judgments, and the author must not fabricate an edge merely to prove that planning
-occurred.
+atomic-sequential default: canonical commanded-master order is the stable tie-break, while exact
+source-pair activation exposes only one atomic master at a time. Selecting another master may
+logically pause the former without retiring its durable work, so graph absence must not be
+misrepresented as a dependency requiring full integration before another master can be selected.
+Graph absence does not excuse missing classifications or planning judgments, and the author must
+not fabricate an edge merely to prove that planning occurred.
 
 ### PR-5 — Honesty of the findings section
 

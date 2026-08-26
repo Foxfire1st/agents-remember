@@ -24,6 +24,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
 )
 from agents_remember.models.lifecycles.responses import TerminalState
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
@@ -71,6 +72,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence i
 from agents_remember.worktrees.integration.lifecycle.observation.projection import (
     current_operation_projections,
 )
+from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -94,6 +96,7 @@ from .lifecycle.lifecycle_control_authority import (
 )
 from .lifecycle.lifecycle_operation_location import (
     LifecycleOperationPublicAddress,
+    configured_lifecycle_operation_location,
     location_decision_payload,
     unreadable_operation_refusal,
     unreadable_status_operations,
@@ -296,92 +299,114 @@ def worktree_status_tool(
     args = _task_ref_namespace(config, task)
     result = _worktree_result("worktree_status", git_worktree_manager.status_result(args))
     contract_path = result.get("contract_path")
-    if isinstance(contract_path, str) and contract_path:
-        terminal = admit_configured_terminal_contract(config, contract_path)
-        if isinstance(terminal, TerminalConfiguredContractAccepted):
-            _project_terminal_contract_status(result, terminal)
-            result.pop("contractReadFailure", None)
-            result.pop("lifecycleOperation", None)
-            result["lifecycleOperations"] = []
-            return result
-        if isinstance(terminal, ConfiguredContractRefused) and terminal.status.startswith(
-            "terminal-archive-"
-        ):
-            result.update(
-                project_configured_contract_refusal(
-                    terminal,
-                    operation="worktree_status",
-                )
-            )
-            result.pop("contractReadFailure", None)
-            result.pop("lifecycleOperation", None)
-            result["lifecycleOperations"] = []
-            return result
-        try:
-            resolved_caller = resolve_lifecycle_caller(config, caller)
-        except LifecycleCallerError as exc:
-            return {
-                "ok": False,
-                "operation": "worktree_status",
-                "state": "refused",
-                "status": exc.status,
-                "detail": exc.detail,
-            }
-        path = Path(contract_path)
-        read_failure = result.get("contractReadFailure")
-        if isinstance(read_failure, dict):
-            operations = unreadable_status_operations(
-                config,
-                result,
-                path,
-                read_failure,
-            )
-        else:
-            try:
-                contract = load_contract(path)
-                location = require_matching_lifecycle_operation_location(contract)
-                operations = current_operation_projections(
-                    path,
-                    allow_completed_disposition=completed_disposition_authorized(
-                        contract,
-                        resolved_caller,
-                    ),
-                    caller=resolved_caller,
-                    contract=contract,
-                    location=location,
-                )
-            except LifecycleOperationLocationError as exc:
-                result.update(location_decision_payload(exc))
-                operations = []
-            except (ContractError, OSError, UnicodeError, ValueError) as exc:
-                detail = "the canonical worktree contract is unreadable"
-                result.update(
-                    {
-                        "ok": False,
-                        "state": "worktree-contract-unreadable",
-                        "status": "worktree-contract-unreadable",
-                        "summary": detail,
-                        "detail": detail,
-                    }
-                )
-                operations = unreadable_status_operations(
-                    config,
-                    result,
-                    path,
-                    public_failure_evidence(
-                        stage="contract-read",
-                        side="contract",
-                        name=path.name,
-                        error_type=type(exc).__name__,
-                        observed={"state": "missing" if not path.exists() else "unreadable"},
-                    ),
-                )
-        result.pop("contractReadFailure", None)
-        result.pop("lifecycleOperation", None)
-        result["lifecycleOperations"] = [
-            operation.model_dump(mode="json", exclude_none=True) for operation in operations
-        ]
+    if not isinstance(contract_path, str) or not contract_path:
+        return result
+    requested_path = Path(contract_path)
+    sync_operation = None
+    try:
+        _, sync_location = configured_lifecycle_operation_location(config, requested_path)
+        sync_operation = observe_sync_operation(
+            sync_location.worktree_group,
+            contract_path=requested_path,
+        )
+    except LifecycleOperationLocationError:
+        pass
+    if sync_operation is not None:
+        result["syncOperation"] = sync_operation.model_dump(mode="json", exclude_none=True)
+    return _project_contract_status(config, result, requested_path, caller)
+
+
+def _project_contract_status(
+    config: McpRuntimeConfig,
+    result: dict[str, Any],
+    path: Path,
+    caller: DeclaredCaller | None,
+) -> dict[str, Any]:
+    terminal = admit_configured_terminal_contract(config, path.as_posix())
+    if isinstance(terminal, TerminalConfiguredContractAccepted):
+        _project_terminal_contract_status(result, terminal)
+        _replace_operation_status(result, [])
+        return result
+    if isinstance(terminal, ConfiguredContractRefused) and terminal.status.startswith(
+        "terminal-archive-"
+    ):
+        result.update(project_configured_contract_refusal(terminal, operation="worktree_status"))
+        _replace_operation_status(result, [])
+        return result
+    try:
+        resolved_caller = resolve_lifecycle_caller(config, caller)
+    except LifecycleCallerError as exc:
+        return {
+            "ok": False,
+            "operation": "worktree_status",
+            "state": "refused",
+            "status": exc.status,
+            "detail": exc.detail,
+        }
+    read_failure = result.get("contractReadFailure")
+    if isinstance(read_failure, dict):
+        operations = unreadable_status_operations(config, result, path, read_failure)
+    else:
+        operations = _readable_status_operations(config, result, path, resolved_caller)
+    _replace_operation_status(result, operations)
     return result
+
+
+def _readable_status_operations(
+    config: McpRuntimeConfig,
+    result: dict[str, Any],
+    path: Path,
+    resolved_caller: DeclaredCaller | None,
+) -> list[LifecycleOperationProjection]:
+    try:
+        contract = load_contract(path)
+        location = require_matching_lifecycle_operation_location(contract)
+        return current_operation_projections(
+            path,
+            allow_completed_disposition=completed_disposition_authorized(
+                contract,
+                resolved_caller,
+            ),
+            caller=resolved_caller,
+            contract=contract,
+            location=location,
+        )
+    except LifecycleOperationLocationError as exc:
+        result.update(location_decision_payload(exc))
+        return []
+    except (ContractError, OSError, UnicodeError, ValueError) as exc:
+        detail = "the canonical worktree contract is unreadable"
+        result.update(
+            {
+                "ok": False,
+                "state": "worktree-contract-unreadable",
+                "status": "worktree-contract-unreadable",
+                "summary": detail,
+                "detail": detail,
+            }
+        )
+        return unreadable_status_operations(
+            config,
+            result,
+            path,
+            public_failure_evidence(
+                stage="contract-read",
+                side="contract",
+                name=path.name,
+                error_type=type(exc).__name__,
+                observed={"state": "missing" if not path.exists() else "unreadable"},
+            ),
+        )
+
+
+def _replace_operation_status(
+    result: dict[str, Any], operations: list[LifecycleOperationProjection]
+) -> None:
+    result.pop("contractReadFailure", None)
+    result.pop("lifecycleOperation", None)
+    result["lifecycleOperations"] = [
+        operation.model_dump(mode="json", exclude_none=True) for operation in operations
+    ]
 
 
 def _project_terminal_contract_status(
@@ -460,7 +485,8 @@ def worktree_sync_tool(
     config: McpRuntimeConfig,
     *,
     contract_path: str,
-    memory_sync_choice: str | None = None,
+    memory_sync_choice: MemorySyncChoice | None = None,
+    resolution_action: SyncResolutionAction | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     configured = admit_configured_contract(config, contract_path)
@@ -469,6 +495,7 @@ def worktree_sync_tool(
     args = git_worktree_manager.WorktreeArgs(
         contract_path=configured.contract_path,
         memory_sync_choice=memory_sync_choice,
+        resolution_action=resolution_action,
         dry_run=dry_run,
     )
     return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))

@@ -1,9 +1,9 @@
-"""L13-R1: the atomic-sequential default mode and its master series lane.
+"""L13-R1: atomic-sequential mode with independent source-pair activation.
 
 A sprint without an executionGraph processes every commanded master
-atomic-sequentially — regardless of declared nature — and at most one master is
-in flight: the lane owner is the stored fact of a live (non-terminal) series
-contract, released by the existing terminal series flow.
+atomic-sequentially regardless of declared nature. Multiple non-terminal series
+contracts may preserve work; one source-pair activation snapshot selects which
+master may expose implementation work.
 """
 
 from __future__ import annotations
@@ -16,11 +16,17 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from agents_remember.application.structural.agent_tools import _manager_series_bootstrap_refusal
+from agents_remember.application.structural.agent_tools import (
+    _implementation_series_admission_refusal,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.worktrees.activation.atomic_series_activation import (
+    activation_waiting_reason,
+    observe_atomic_series,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.startup import start_contract
@@ -32,8 +38,6 @@ from agents_remember.worktrees.modules.startup.start_contract import (
 from agents_remember.worktrees.scheduling_mode import (
     effective_execution_nature,
     resolve_scheduling_mode,
-    sequential_lane_owner,
-    series_lane_holders,
 )
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import (
@@ -161,34 +165,23 @@ class SchedulingModeTests(unittest.TestCase):
         self.assertEqual(effective_execution_nature(organizational, None), "organizational")
         self.assertEqual(effective_execution_nature(organizational, graphless_sprint), "atomic")
 
-    def test_lane_owner_is_the_live_series_contract_stored_fact(self) -> None:
-        fixture = self.fixture
-        mode = resolve_scheduling_mode(fixture.topology, SPRINT)
-        self.assertIsNone(sequential_lane_owner(fixture.topology, mode))
-
-        created = ensure_master_series_contract(fixture.spec("master-a"))
-        self.assertNotIsInstance(created, WorktreeCommandResult)
-        owner = sequential_lane_owner(fixture.topology, mode)
-        assert owner is not None
-        self.assertEqual(owner.ref, MASTER_A)
-        self.assertEqual(
-            [master.ref for master in series_lane_holders(mode)],
-            [MASTER_A],
-        )
-        # The existing terminal series flow releases the lane.
-        contract = load_contract(series_contract_path(fixture.tasks / "master-a"))
-        write_contract(contract.contract_path, replace(contract, cleanup="completed"))
-        self.assertIsNone(sequential_lane_owner(fixture.topology, mode))
-
-    def test_lane_owner_is_none_under_the_dag_mode(self) -> None:
+    def test_activation_is_independent_of_scheduling_mode_shape(self) -> None:
         fixture = DefaultModeFixture(Path(self.temp.name) / "dag", graph=True)
-        created = ensure_master_series_contract(fixture.spec("master-a"))
-        self.assertNotIsInstance(created, WorktreeCommandResult)
+        created_a = ensure_master_series_contract(fixture.spec("master-a"))
+        created_b = ensure_master_series_contract(fixture.spec("master-b"))
+        assert isinstance(created_a, WorktreeContract)
+        assert isinstance(created_b, WorktreeContract)
         mode = resolve_scheduling_mode(fixture.topology, SPRINT)
-        self.assertIsNone(sequential_lane_owner(fixture.topology, mode))
+        self.assertEqual(mode.mode, "dag")
+        observed = observe_atomic_series(created_a)
+        self.assertEqual(observed.selected_master, MASTER_B)
+        self.assertEqual(
+            activation_waiting_reason(observed, MASTER_A),
+            f"atomic-series-paused-by: {MASTER_B.key}",
+        )
 
 
-class SequentialLaneTests(unittest.TestCase):
+class AtomicSeriesSelectionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.fixture = DefaultModeFixture(Path(self.temp.name))
@@ -196,33 +189,31 @@ class SequentialLaneTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_second_master_series_bootstrap_is_blocked_not_stranded(self) -> None:
-        created = ensure_master_series_contract(self.fixture.spec("master-a"))
-        self.assertNotIsInstance(created, WorktreeCommandResult)
+    def test_second_master_selects_and_logically_pauses_first_without_retiring_it(self) -> None:
+        created_a = ensure_master_series_contract(self.fixture.spec("master-a"))
+        created_b = ensure_master_series_contract(self.fixture.spec("master-b"))
+        assert isinstance(created_a, WorktreeContract)
+        assert isinstance(created_b, WorktreeContract)
 
-        blocked = ensure_master_series_contract(self.fixture.spec("master-b"))
-        assert isinstance(blocked, WorktreeCommandResult)
-        self.assertEqual(blocked.returncode, 2)
-        self.assertEqual(blocked.payload["state"], "sequential-lane-owned")
-        self.assertEqual(blocked.payload["laneOwner"], MASTER_A.key)
+        selected_b = observe_atomic_series(created_a)
+        self.assertEqual(selected_b.state, "active")
+        self.assertEqual(selected_b.selected_master, MASTER_B)
         self.assertEqual(
-            blocked.payload["laneOwnerContractPath"],
-            series_contract_path(self.fixture.tasks / "master-a").as_posix(),
+            activation_waiting_reason(selected_b, MASTER_A),
+            f"atomic-series-paused-by: {MASTER_B.key}",
         )
-        self.assertTrue(blocked.payload["legalNextOperations"])
+        self.assertTrue(created_a.contract_path.is_file())
+        self.assertTrue(created_b.contract_path.is_file())
 
-        # The lane owner itself adopts its existing contract, even in dry run.
-        adopted = ensure_master_series_contract(self.fixture.spec("master-a"))
-        self.assertNotIsInstance(adopted, WorktreeCommandResult)
-        preview_blocked = ensure_master_series_contract(self.fixture.spec("master-b"), dry_run=True)
-        assert isinstance(preview_blocked, WorktreeCommandResult)
-        self.assertEqual(preview_blocked.payload["state"], "sequential-lane-owned")
+        # Previewing another selection is byte-for-byte read-only and cannot switch it.
+        before = selected_b.activation_path.read_bytes()
+        preview = ensure_master_series_contract(self.fixture.spec("master-a"), dry_run=True)
+        self.assertIsInstance(preview, WorktreeContract)
+        self.assertEqual(selected_b.activation_path.read_bytes(), before)
 
-        # After the owner lands and its series goes terminal, the next master starts.
-        contract = load_contract(series_contract_path(self.fixture.tasks / "master-a"))
-        write_contract(contract.contract_path, replace(contract, cleanup="completed"))
-        started = ensure_master_series_contract(self.fixture.spec("master-b"))
-        self.assertNotIsInstance(started, WorktreeCommandResult)
+        selected_a = ensure_master_series_contract(self.fixture.spec("master-a"))
+        assert isinstance(selected_a, WorktreeContract)
+        self.assertEqual(observe_atomic_series(selected_a).selected_master, MASTER_A)
 
     def test_terminal_stale_series_artifact_is_replaced_not_refused(self) -> None:
         # L13-R5b/R7: a terminal artifact left by an older lifecycle is swept by the
@@ -241,37 +232,43 @@ class SequentialLaneTests(unittest.TestCase):
         self.assertEqual(created.kind, "series")
         self.assertEqual(created.code_work_branch, "ar/master-a")
 
-    def test_lane_resolution_failure_fails_closed(self) -> None:
-        # L13 review: a scheduling-mode resolution failure in the TOCTOU window
-        # propagates as the typed refusal instead of silently skipping the lane.
+    def test_bootstrap_failure_before_contract_publication_keeps_former_selection(self) -> None:
+        selected_a = ensure_master_series_contract(self.fixture.spec("master-a"))
+        assert isinstance(selected_a, WorktreeContract)
         with (
             mock.patch.object(
                 start_contract,
-                "resolve_scheduling_mode",
-                side_effect=TaskDocumentRefError("task-document-not-found", "sprint moved"),
+                "_publish_master_series_contract",
+                side_effect=RuntimeError("bootstrap failed"),
             ),
-            self.assertRaises(TaskDocumentRefError),
+            self.assertRaisesRegex(RuntimeError, "bootstrap failed"),
         ):
-            ensure_master_series_contract(self.fixture.spec("master-a"))
+            ensure_master_series_contract(self.fixture.spec("master-b"))
 
-    def test_lane_block_is_rechecked_under_the_bootstrap_lock(self) -> None:
-        # The lane is checked once before the lock and again under it (the second
-        # check wins the race): a block surfacing only under the lock still returns
-        # the ordering payload.
-        ensure_master_series_contract(self.fixture.spec("master-a"))
-        blocked = ensure_master_series_contract(self.fixture.spec("master-b"))
-        assert isinstance(blocked, WorktreeCommandResult)
-        with mock.patch.object(
-            start_contract,
-            "_sequential_lane_block",
-            side_effect=[None, blocked],
+        observed = observe_atomic_series(selected_a)
+        self.assertEqual(observed.state, "active")
+        self.assertEqual(observed.selected_master, MASTER_A)
+
+    def test_sync_refusal_after_contract_publication_keeps_new_selection_reconciling(self) -> None:
+        selected_a = ensure_master_series_contract(self.fixture.spec("master-a"))
+        assert isinstance(selected_a, WorktreeContract)
+        blocked = WorktreeCommandResult(
+            2,
+            {"state": "sync-resolution-required", "summary": "resolve conflict"},
+        )
+        with mock.patch(
+            "agents_remember.worktrees.activation.atomic_series_activation_transaction."
+            "sync_contract_under_authority",
+            return_value=blocked,
         ):
             result = ensure_master_series_contract(self.fixture.spec("master-b"))
-        assert isinstance(result, WorktreeCommandResult)
-        self.assertEqual(result.payload["state"], "sequential-lane-owned")
 
-    def test_standalone_master_bootstrap_has_no_lane_contention(self) -> None:
-        # A standalone master is trivially sequential: no sprint, no lane.
+        assert isinstance(result, WorktreeCommandResult)
+        observed = observe_atomic_series(selected_a)
+        self.assertEqual(observed.state, "reconciling")
+        self.assertEqual(observed.selected_master, MASTER_B)
+
+    def test_standalone_master_bootstrap_selects_its_default_branch_pair(self) -> None:
         master_ref = TaskDocumentRef(repository=REPO, path="solo/task.json")
         write_task_doc(self.fixture.tasks / "solo", _master(master_ref, None))
         created = ensure_master_series_contract(
@@ -290,10 +287,9 @@ class SequentialLaneTests(unittest.TestCase):
         assert isinstance(created, WorktreeContract)
         self.assertEqual(created.code_work_branch, "ar/solo")
 
-    def test_parent_series_contract_passes_the_blocked_payload_through(
+    def test_parent_series_contract_selects_new_master_before_leaf_contract_build(
         self,
-    ) -> None:  # _parent_series_contract returns the lane block, and _build_start_contract
-        # passes it through unchanged.
+    ) -> None:
         ensure_master_series_contract(self.fixture.spec("master-a"))
         write_task_doc(
             self.fixture.tasks / "master-b",
@@ -322,17 +318,17 @@ class SequentialLaneTests(unittest.TestCase):
             code_repository_root=self.fixture.code,
             memory_mode="disabled",
         )
-        args = WorktreeArgs(task_name="master-b", worktree_name="leaf-1", dry_run=True)
+        args = WorktreeArgs(task_name="master-b", worktree_name="leaf-1")
         result = start_contract._parent_series_contract(context, args, "disabled")
-        assert isinstance(result, WorktreeCommandResult)
-        self.assertEqual(result.payload["state"], "sequential-lane-owned")
-        built = start_contract._build_start_contract(context, args)
-        assert isinstance(built, WorktreeCommandResult)
-        self.assertEqual(built.payload["state"], "sequential-lane-owned")
+        assert isinstance(result, WorktreeContract)
+        self.assertEqual(observe_atomic_series(result).selected_master, MASTER_B)
+        built = start_contract._build_start_contract(
+            context,
+            WorktreeArgs(task_name="master-b", worktree_name="leaf-1", dry_run=True),
+        )
+        assert isinstance(built, WorktreeContract)
 
-    def test_manager_dispatch_reports_the_lane_block_as_a_structural_outcome(self) -> None:
-        # L13-R1: dispatching the second master's manager reports the lane owner and
-        # the legal next operations instead of refusing or racing.
+    def test_manager_dispatch_selects_the_requested_master(self) -> None:
         ensure_master_series_contract(self.fixture.spec("master-a"))
         topology = TaskDocumentTopology(self.fixture.coord)
         resolved = topology.resolve(MASTER_B)
@@ -342,9 +338,11 @@ class SequentialLaneTests(unittest.TestCase):
                 REPO: SimpleNamespace(repo_id=REPO, path=self.fixture.code, memory_root=None)
             },
         )
-        outcome = _manager_series_bootstrap_refusal(cast(McpRuntimeConfig, config), resolved)
-        assert outcome is not None
-        self.assertFalse(outcome.ok)
-        self.assertEqual(outcome.status, "sequential-lane-owned")
-        assert outcome.detail is not None
-        self.assertIn(MASTER_A.key, outcome.detail)
+        outcome = _implementation_series_admission_refusal(
+            cast(McpRuntimeConfig, config),
+            resolved,
+            "manager",
+        )
+        self.assertIsNone(outcome)
+        selected = load_contract(series_contract_path(self.fixture.tasks / "master-b"))
+        self.assertEqual(observe_atomic_series(selected).selected_master, MASTER_B)

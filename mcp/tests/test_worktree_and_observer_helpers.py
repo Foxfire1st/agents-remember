@@ -58,7 +58,7 @@ from agents_remember.worktrees.worktree_contract import (
     default_series_contract,
     write_contract,
 )
-from test_worktree_support import git, init_repo
+from test_worktree_support import git, init_repo, seed_memory_ledger
 
 FAKE_DOCKER = "/usr/bin/docker-under-test"
 
@@ -1007,9 +1007,10 @@ class ParentSeriesContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_repo = root / "repo"
-            init_repo(code_repo)
+            code_head = init_repo(code_repo)
             memory_repo = root / "memory-repos" / f"ar-{self.REPO}"
-            memory_head = init_repo(memory_repo)
+            init_repo(memory_repo)
+            memory_head = seed_memory_ledger(memory_repo, self.REPO, code_head)
             self._write_task_artifact(root, "# Demo\n\n**Type:** Master\n")
 
             contract = _parent_series_contract(
@@ -1045,6 +1046,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                 ),
                 task_root=task_root,
             )
+            git(code_repo, "branch", f"ar/{self.TASK}", "super")
             write_contract(series_contract_path(task_root), existing)
 
             contract = _parent_series_contract(
@@ -1054,8 +1056,8 @@ class ParentSeriesContractTests(unittest.TestCase):
             assert isinstance(contract, WorktreeContract)
             self.assertEqual(contract.kind, "series")
             self.assertEqual(contract.code_work_branch, f"ar/{self.TASK}")
-            # Adoption must not touch the repo: the recorded branch is not invented.
-            self.assertNotIn(f"ar/{self.TASK}", self._branches(code_repo))
+            # Adoption retains the already-proven integration ref instead of rebuilding it.
+            self.assertEqual(git(code_repo, "rev-parse", f"ar/{self.TASK}"), head)
 
     def test_a_sealed_existing_series_refuses_a_new_leaf_start(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
