@@ -15,7 +15,8 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     LedgerRow,
-    find_unique_mapping,
+    contains_mapping,
+    find_mapping,
     parse_ledger_text,
 )
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
@@ -567,9 +568,11 @@ def _require_landed_sibling_memory(
     completing_contract = expected.completing_contract
     child_ref = expected.child_ref
     _require_sibling_memory_identity(contract, completing_contract, child_ref)
-    mapping, final_mapping = _sibling_memory_mappings(contract, completing_contract, child_ref)
+    mapping, final_mapping_preserved = _sibling_memory_mappings(
+        contract, completing_contract, child_ref
+    )
     _require_sibling_memory_ancestry(contract, completing_contract, child_ref)
-    _require_sibling_memory_mapping(contract, child_ref, mapping, final_mapping)
+    _require_sibling_memory_mapping(contract, child_ref, mapping, final_mapping_preserved)
 
 
 def _require_sibling_memory_identity(
@@ -603,33 +606,33 @@ def _sibling_memory_mappings(
     contract: WorktreeContract,
     completing_contract: WorktreeContract,
     child_ref: TaskDocumentRef,
-) -> tuple[LedgerRow | None, LedgerRow | None]:
+) -> tuple[LedgerRow | None, bool]:
     assert contract.memory_repo_path is not None
     assert completing_contract.memory_repo_path is not None
     try:
-        mapping = find_unique_mapping(
-            parse_ledger_text(
-                require_git(
-                    contract.memory_repo_path,
-                    ["show", f"{contract.integrated_ledger_commit}:memory.md"],
-                )
-            ),
-            contract.integrated_code_commit,
+        integrated_ledger = parse_ledger_text(
+            require_git(
+                contract.memory_repo_path,
+                ["show", f"{contract.integrated_ledger_commit}:memory.md"],
+            )
         )
-        final_mapping = find_unique_mapping(
-            parse_ledger_text(
-                require_git(
-                    completing_contract.memory_repo_path,
-                    ["show", f"{completing_contract.ledger_commit}:memory.md"],
-                )
-            ),
+        final_ledger = parse_ledger_text(
+            require_git(
+                completing_contract.memory_repo_path,
+                ["show", f"{completing_contract.ledger_commit}:memory.md"],
+            )
+        )
+        mapping = find_mapping(integrated_ledger, contract.integrated_code_commit)
+        final_mapping_preserved = contains_mapping(
+            final_ledger,
             contract.integrated_code_commit,
+            contract.integrated_memory_content_commit,
         )
     except LedgerError as error:
         raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} has duplicate code mappings"
+            f"organizational sibling {child_ref.key} has an invalid memory ledger"
         ) from error
-    return mapping, final_mapping
+    return mapping, final_mapping_preserved
 
 
 def _require_sibling_memory_ancestry(
@@ -670,13 +673,13 @@ def _require_sibling_memory_mapping(
     contract: WorktreeContract,
     child_ref: TaskDocumentRef,
     mapping: LedgerRow | None,
-    final_mapping: LedgerRow | None,
+    final_mapping_preserved: bool,
 ) -> None:
     if getattr(mapping, "memory_commit", None) != contract.integrated_memory_content_commit:
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} memory mapping is not on the sprint super"
         )
-    if getattr(final_mapping, "memory_commit", None) != contract.integrated_memory_content_commit:
+    if not final_mapping_preserved:
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} mapping is not preserved in the proposed "
             "final ledger"

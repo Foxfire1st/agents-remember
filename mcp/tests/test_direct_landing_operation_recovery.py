@@ -660,7 +660,7 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
 
         return mock.patch.object(execution, "prove_git_commit", side_effect=interrupted)
 
-    def test_existing_committed_mapping_is_proven_without_another_commit(self) -> None:
+    def test_newest_committed_mapping_with_older_history_is_recovered(self) -> None:
         fixture = self._fixture()
         request = self._request(fixture)
         original_prove = execution.prove_git_commit
@@ -676,10 +676,15 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
         ):
             direct_landing(fixture["config"], request, fixture["contract"])
         memory_commit = head_commit(fixture["memory"])
+        ledger = prepend_mapping(
+            load_ledger(fixture["contract"].ledger_path),
+            fixture["code_head"],
+            "f" * 40,
+        )
         write_ledger(
             fixture["contract"].ledger_path,
             prepend_mapping(
-                load_ledger(fixture["contract"].ledger_path),
+                ledger,
                 fixture["code_head"],
                 memory_commit,
             ),
@@ -694,43 +699,32 @@ class DirectLandingOperationRecoveryTests(unittest.TestCase):
         self.assertEqual(record.recoveryCommits.ledgerCommit, existing_ledger_commit)
         self.assertEqual(head_commit(fixture["memory"]), existing_ledger_commit)
 
-    def test_conflicting_mapping_has_zero_controls_and_stale_recover_is_nonmutating(self) -> None:
-        fixture = _series_fixture(Path(self.temp.name) / "conflict")
+    def test_historical_mapping_is_superseded_by_recovered_memory_only_change(self) -> None:
+        fixture = _series_fixture(Path(self.temp.name) / "history")
         ledger_path = fixture["contract"].ledger_path
+        historical_memory = "f" * 40
         write_ledger(
             ledger_path,
-            prepend_mapping(load_ledger(ledger_path), fixture["code_head"], "f" * 40),
+            prepend_mapping(load_ledger(ledger_path), fixture["code_head"], historical_memory),
         )
         git(fixture["memory"], "add", "memory.md")
-        git(fixture["memory"], "commit", "-m", "conflicting ledger mapping")
+        git(fixture["memory"], "commit", "-m", "historical ledger mapping")
         (fixture["memory"] / "memory-note.md").write_text("content\n", encoding="utf-8")
         controls = self._admit_without_execution(fixture)
-        stale_recover = next(row for row in controls if row["action"] == "recover")
-        first = self._public_control(fixture, stale_recover)
-        self.assertFalse(first["ok"])
-        self.assertEqual(first["status"], "direct-landing-ledger-mapping-conflict")
-        self.assertEqual(first["nextAction"], "developer-decision")
+        recover = next(row for row in controls if row["action"] == "recover")
+        completed = self._public_control(fixture, recover)
+        self.assertTrue(completed["ok"])
+        self.assertEqual(completed["lifecycleOperation"]["status"], "completed")
         record = direct_landing_store(fixture["contract"]).read()
         assert record is not None and record.recoveryCommits is not None
-        self.assertTrue(record.recoveryCommits.memoryContentCommit)
-        self.assertFalse(record.recoveryCommits.ledgerCommit)
-        status = self._status(fixture)
-        self.assertEqual(status["legalControls"], [])
-        decision = status["result"]
-        self.assertEqual(decision["state"], first["status"])
-        self.assertEqual(decision["expected"], first["expected"])
-        self.assertEqual(decision["observed"], first["observed"])
-        store_before = direct_landing_store(fixture["contract"]).path.read_bytes()
-        head_before = head_commit(fixture["memory"])
-        ledger_before = ledger_path.read_bytes()
-        stale = self._public_control(fixture, stale_recover)
-        self.assertFalse(stale["ok"])
-        self.assertEqual(stale["status"], decision["state"])
-        self.assertEqual(stale["expected"], decision["expected"])
-        self.assertEqual(stale["observed"], decision["observed"])
-        self.assertEqual(direct_landing_store(fixture["contract"]).path.read_bytes(), store_before)
-        self.assertEqual(head_commit(fixture["memory"]), head_before)
-        self.assertEqual(ledger_path.read_bytes(), ledger_before)
+        memory_commit = record.recoveryCommits.memoryContentCommit
+        ledger_commit = record.recoveryCommits.ledgerCommit
+        self.assertNotEqual(memory_commit, historical_memory)
+        ledger = load_ledger(ledger_path)
+        self.assertEqual(ledger.rows[0].code_commit, fixture["code_head"])
+        self.assertEqual(ledger.rows[0].memory_commit, memory_commit)
+        self.assertEqual(ledger.rows[1].memory_commit, historical_memory)
+        self.assertEqual(head_commit(fixture["memory"]), ledger_commit)
 
     def test_ledger_head_read_failure_keeps_same_generation_recoverable(self) -> None:
         fixture = self._fixture()

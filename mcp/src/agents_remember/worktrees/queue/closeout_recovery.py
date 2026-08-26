@@ -250,9 +250,7 @@ def resume_external_commits(
     memory_head = head_commit(contract.memory_worktree)
     ledger = load_ledger(contract.ledger_path)
     mapping = find_mapping(ledger, code_commit)
-    if mapping is not None and mapping.memory_commit != memory_commit:
-        raise RuntimeError("closeout recovery found a conflicting code-to-memory ledger row")
-    created_commit = mapping is None
+    created_commit = mapping is None or mapping.memory_commit != memory_commit
     if created_commit:
         if memory_head != memory_commit:
             raise RuntimeError(

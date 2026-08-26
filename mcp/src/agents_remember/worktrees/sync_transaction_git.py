@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
@@ -332,13 +331,6 @@ def _validate_required_ledger_rows(
     if missing:
         sample = ", ".join(f"{row.code_commit}->{row.memory_commit}" for row in missing[:10])
         raise SyncGitProofError(f"resolved memory ledger dropped parent mapping(s): {sample}")
-    counts = Counter(row.code_commit for row in resolved_rows)
-    duplicates = sorted(code for code, count in counts.items() if count != 1)
-    if duplicates:
-        raise SyncGitProofError(
-            "resolved memory ledger must contain exactly one row per code commit: "
-            f"{', '.join(duplicates[:10])}"
-        )
 
 
 def _ledger_rows(repository: Path, spec: str) -> list[LedgerRow]:

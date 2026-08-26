@@ -351,17 +351,10 @@ def _existing_direct_mapping(
     current_text: str,
     head_text: str,
 ) -> str | None:
-    if existing is None:
+    if existing is None or existing.memory_commit != facts.memory_commit:
+        # A different newest mapping is valid history. The proven memory commit must
+        # prepend a new authoritative row after the accepted ledger prestate is checked.
         return None
-    if existing.memory_commit != facts.memory_commit:
-        _raise_direct_input_required(
-            runtime,
-            "direct-landing-ledger-conflict",
-            f"ledger maps the accepted code commit to {existing.memory_commit}, "
-            f"not the proven memory commit {facts.memory_commit}",
-            expected={"memoryCommit": facts.memory_commit},
-            observed={"memoryCommit": existing.memory_commit},
-        )
     if current_text != head_text:
         _raise_direct_input_required(
             runtime,

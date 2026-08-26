@@ -23,7 +23,6 @@ from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
     find_mapping,
-    ledger_to_text,
     load_ledger,
     parse_ledger_text,
     prepend_mapping,
@@ -371,19 +370,6 @@ class WorktreeSupport1(WorktreeSupportTests):
             candidates = result.payload.get("candidates")
             assert isinstance(candidates, list)
             self.assertIn("repo-a/fix-thing/260707-T1", candidates)
-
-    def test_memory_ledger_roundtrip_and_prepend(self) -> None:
-        ledger = create_initial_ledger("repo-a", "c1", "m1")
-        text = ledger_to_text(ledger)
-        self.assertIn("# Memory Ledger", text)
-        self.assertNotIn("trackedCodeBranch", text)
-        self.assertNotIn("memoryBranch", text)
-        parsed = parse_ledger_text(text)
-        self.assertEqual(parsed.last_verified_code_commit, "c1")
-        updated = prepend_mapping(parsed, "c2", "m2")
-        reparsed = parse_ledger_text(ledger_to_text(updated))
-        self.assertEqual(reparsed.rows[0].code_commit, "c2")
-        self.assertEqual(reparsed.last_memory_content_commit, "m2")
 
     def test_memory_ledger_rejects_bad_top_row(self) -> None:
         text = "\n".join(

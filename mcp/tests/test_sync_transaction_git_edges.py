@@ -426,14 +426,13 @@ def test_rollback_side_translates_abort_reset_and_post_restore_failures(tmp_path
         sync_git.rollback_side(side)
 
 
-def test_ledger_validation_rejects_missing_and_duplicate_code_mappings() -> None:
+def test_ledger_validation_preserves_same_code_history_and_rejects_missing_rows() -> None:
     first = LedgerRow("a" * 40, "b" * 40)
     with pytest.raises(sync_git.SyncGitProofError, match="dropped parent mapping"):
         sync_git._validate_required_ledger_rows([first], [])
 
-    duplicate = LedgerRow(first.code_commit, "c" * 40)
-    with pytest.raises(sync_git.SyncGitProofError, match="exactly one row"):
-        sync_git._validate_required_ledger_rows([], [first, duplicate])
+    newer = LedgerRow(first.code_commit, "c" * 40)
+    sync_git._validate_required_ledger_rows([first], [newer, first])
 
 
 def test_ledger_rows_translate_missing_and_invalid_ledgers(tmp_path: Path) -> None:

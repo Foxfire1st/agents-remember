@@ -227,7 +227,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 strict_code_quality_required=False,
             )
 
-    def test_external_resume_rejects_conflict_missing_head_and_unreachable_content(self) -> None:
+    def test_external_resume_appends_history_and_rejects_invalid_head_or_ancestry(self) -> None:
         contract = SimpleNamespace(
             memory_worktree=Path("/memory"),
             ledger_path=Path("/memory/memory.md"),
@@ -235,20 +235,38 @@ class CloseoutRecoveryTests(unittest.TestCase):
         )
         args = WorktreeArgs()
         mapping = SimpleNamespace(memory_commit="b" * 40)
+        intended = object()
+        intent = object()
         with (
             mock.patch.object(closeout_recovery_journal, "require_clean"),
             mock.patch.object(closeout_recovery_journal, "load_ledger", return_value=[]),
-            mock.patch.object(closeout_recovery_journal, "head_commit", return_value="c" * 40),
+            mock.patch.object(closeout_recovery_journal, "head_commit", return_value="d" * 40),
             mock.patch.object(closeout_recovery_journal, "find_mapping", return_value=mapping),
-            self.assertRaisesRegex(RuntimeError, "conflicting"),
+            mock.patch.object(
+                closeout_recovery_journal,
+                "prepend_mapping",
+                return_value=intended,
+            ) as prepend,
+            mock.patch.object(closeout_recovery_journal, "ledger_to_text", return_value="ledger"),
+            mock.patch.object(
+                closeout_recovery_journal,
+                "begin_exact_file_git_mutation",
+                return_value=intent,
+            ),
+            mock.patch.object(closeout_recovery_journal, "write_ledger"),
+            mock.patch.object(closeout_recovery_journal, "require_git"),
+            mock.patch.object(closeout_recovery_journal, "commit_if_dirty", return_value="e" * 40),
+            mock.patch.object(closeout_recovery_journal, "prove_git_commit"),
         ):
-            closeout_recovery_journal.resume_external_commits(
+            resumed_history = closeout_recovery_journal.resume_external_commits(
                 contract,
                 args,
                 _message_authority(memory_mode="external"),
                 code_commit="a" * 40,
                 memory_commit="d" * 40,
             )
+        self.assertEqual(resumed_history, ("d" * 40, "e" * 40))
+        prepend.assert_called_once_with([], "a" * 40, "d" * 40)
         with (
             mock.patch.object(closeout_recovery_journal, "require_clean"),
             mock.patch.object(closeout_recovery_journal, "load_ledger", return_value=[]),

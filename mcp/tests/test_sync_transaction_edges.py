@@ -9,7 +9,11 @@ from typing import cast
 from unittest import mock
 
 import pytest
-from agents_remember.kernel.memory_ledger import LedgerError
+from agents_remember.kernel.memory_ledger import (
+    LedgerError,
+    create_initial_ledger,
+    prepend_mapping,
+)
 from agents_remember.models.worktree import SyncPhase, SyncResolutionAction, SyncSide
 from agents_remember.worktrees import sync_transaction as transaction
 from agents_remember.worktrees import sync_transaction_authority as authority
@@ -162,19 +166,21 @@ def test_official_pair_preflight_reports_each_ledger_failure(tmp_path: Path) -> 
         assert result is not None
         summary = result.payload["summary"]
         assert isinstance(summary, str) and "invalid" in summary
+    history = prepend_mapping(
+        create_initial_ledger("repo", SHA_SOURCE, SHA_PRE),
+        SHA_SOURCE,
+        SHA_RESULT,
+    )
     with (
         mock.patch.object(authority, "run_git", return_value=_result(stdout="ledger")),
-        mock.patch.object(authority, "parse_ledger_text", return_value=object()),
-        mock.patch.object(authority, "find_unique_mapping", side_effect=LedgerError("duplicate")),
+        mock.patch.object(authority, "parse_ledger_text", return_value=history),
     ):
         result = authority.preflight_official_pair(contract, SHA_SOURCE, SHA_SOURCE, True, {})
-        assert result is not None
-        summary = result.payload["summary"]
-        assert isinstance(summary, str) and "duplicate" in summary
+        assert result is None
+    unmapped = create_initial_ledger("repo", SHA_BASE, SHA_PRE)
     with (
         mock.patch.object(authority, "run_git", return_value=_result(stdout="ledger")),
-        mock.patch.object(authority, "parse_ledger_text", return_value=object()),
-        mock.patch.object(authority, "find_unique_mapping", return_value=None),
+        mock.patch.object(authority, "parse_ledger_text", return_value=unmapped),
     ):
         result = authority.preflight_official_pair(contract, SHA_SOURCE, SHA_SOURCE, True, {})
         assert result is not None

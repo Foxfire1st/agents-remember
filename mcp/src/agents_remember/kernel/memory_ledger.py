@@ -234,16 +234,15 @@ def find_mapping(ledger: MemoryLedger, code_commit: str) -> LedgerRow | None:
     return next((row for row in ledger.rows if row.code_commit == wanted), None)
 
 
-def find_unique_mapping(ledger: MemoryLedger, code_commit: str) -> LedgerRow | None:
-    """Return one code mapping while refusing duplicate authority rows."""
+def contains_mapping(
+    ledger: MemoryLedger,
+    code_commit: str,
+    memory_commit: str,
+) -> bool:
+    """Return whether the immutable history contains one exact mapping edge."""
 
-    wanted = code_commit.strip()
-    matches = [row for row in ledger.rows if row.code_commit == wanted]
-    if len(matches) > 1:
-        raise LedgerError(
-            "memory.md ledger must contain exactly one row for the landed code commit"
-        )
-    return matches[0] if matches else None
+    wanted = LedgerRow(code_commit.strip(), memory_commit.strip())
+    return wanted in ledger.rows
 
 
 def create_initial_ledger(

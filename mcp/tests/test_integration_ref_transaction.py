@@ -288,7 +288,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             ):
                 prepare_integration_ref_move(closed, commits, WorktreeArgs(), sources)
 
-    def test_integrated_ledger_refuses_duplicate_rows_for_the_landed_code(self) -> None:
+    def test_integrated_ledger_accepts_newest_settings_only_mapping_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = _authority_fixture(root, external_memory=True)
@@ -296,27 +296,39 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             assert closed.memory_repo_path is not None
             assert closed.memory_worktree is not None
             assert closed.ledger_path is not None
+            source_ledger = load_ledger(closed.ledger_path)
+            source_mapping = source_ledger.rows[0]
+            settings = closed.memory_worktree / "system" / "settings.md"
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            settings.write_text("setting: updated\n", encoding="utf-8")
+            _git(closed.memory_worktree, "add", "system/settings.md")
+            _git(closed.memory_worktree, "commit", "-m", "update memory settings")
+            settings_memory = _git(closed.memory_worktree, "rev-parse", "HEAD")
             write_ledger(
                 closed.ledger_path,
                 prepend_mapping(
-                    load_ledger(closed.ledger_path),
+                    source_ledger,
                     closed.code_commit,
-                    closed.memory_content_commit,
+                    settings_memory,
                 ),
             )
             _git(closed.memory_worktree, "add", "memory.md")
-            _git(closed.memory_worktree, "commit", "-m", "duplicate landed mapping")
-            duplicate_ledger = _git(closed.memory_worktree, "rev-parse", "HEAD")
-            with self.assertRaisesRegex(RuntimeError, "exactly one landed code mapping"):
-                integration_ref_transaction.require_integrated_ledger_mapping(
-                    closed,
-                    IntegratedCommits(
-                        closed.code_commit,
-                        closed.memory_content_commit,
-                        duplicate_ledger,
-                    ),
-                    memory_source_commit=closed.memory_base_commit,
-                )
+            _git(closed.memory_worktree, "commit", "-m", "map settings-only memory")
+            settings_ledger = _git(closed.memory_worktree, "rev-parse", "HEAD")
+
+            integration_ref_transaction.require_integrated_ledger_mapping(
+                closed,
+                IntegratedCommits(
+                    closed.code_commit,
+                    settings_memory,
+                    settings_ledger,
+                ),
+                memory_source_commit=closed.ledger_commit,
+            )
+            resolved = load_ledger(closed.ledger_path)
+            self.assertEqual(resolved.rows[0].code_commit, source_mapping.code_commit)
+            self.assertEqual(resolved.rows[0].memory_commit, settings_memory)
+            self.assertEqual(resolved.rows[1], source_mapping)
 
     def test_integrated_ledger_refuses_a_code_commit_with_no_landed_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -554,7 +566,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                     memory_source_commit=closed.memory_base_commit,
                 )
 
-    def test_both_landed_recovery_refuses_duplicate_code_mapping_before_finalization(
+    def test_both_landed_recovery_refuses_two_new_rows_before_finalization(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -576,7 +588,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
                 ),
             )
             _git(closed.memory_worktree, "add", "memory.md")
-            _git(closed.memory_worktree, "commit", "-m", "duplicate recovery mapping")
+            _git(closed.memory_worktree, "commit", "-m", "extra recovery mapping")
             forged = replace(
                 closed,
                 ledger_commit=_git(closed.memory_worktree, "rev-parse", "HEAD"),
@@ -586,7 +598,7 @@ class IntegrationRefTransactionTests(unittest.TestCase):
             running, recovery = self._land_external_recovery_pair(fixture, forged)
             contract_bytes = forged.contract_path.read_bytes()
 
-            with self.assertRaisesRegex(RuntimeError, "exactly one landed code mapping"):
+            with self.assertRaisesRegex(RuntimeError, "does not prepend exactly one mapping"):
                 integrate_result(
                     WorktreeArgs(
                         contract_path=forged.contract_path,

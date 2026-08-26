@@ -10,7 +10,7 @@ from agents_remember.kernel.memory_ledger import (
     LedgerError,
     LedgerRow,
     MemoryLedger,
-    find_unique_mapping,
+    find_mapping,
     parse_ledger_text,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
@@ -240,6 +240,29 @@ def merge_integrated_commits(
     )
 
 
+def _integrated_ledger_pair(
+    repository: Path,
+    ledger_commit: str,
+    source_commit: str,
+) -> tuple[MemoryLedger, MemoryLedger]:
+    blob = run_git(repository, ["show", f"{ledger_commit}:memory.md"])
+    if blob.returncode != 0:
+        raise RuntimeError("integrated ledger commit has no readable memory.md")
+    source_blob = run_git(
+        repository,
+        ["show", f"{source_commit}:memory.md"],
+    )
+    if source_blob.returncode != 0:
+        raise RuntimeError("exact memory source commit has no readable memory.md")
+    try:
+        return (
+            parse_ledger_text(blob.stdout),
+            parse_ledger_text(source_blob.stdout),
+        )
+    except LedgerError as error:
+        raise RuntimeError("integrated memory ledger is invalid") from error
+
+
 def require_integrated_ledger_mapping(
     contract: WorktreeContract,
     commits: IntegratedCommits,
@@ -250,30 +273,20 @@ def require_integrated_ledger_mapping(
     if contract.kind not in {"leaf", "series"}:
         raise RuntimeError("integrated memory ledger requires a leaf or series contract")
     assert contract.memory_repo_path is not None
-    blob = run_git(contract.memory_repo_path, ["show", f"{commits.ledger}:memory.md"])
-    if blob.returncode != 0:
-        raise RuntimeError("integrated ledger commit has no readable memory.md")
-    source_blob = run_git(
+    ledger, source_ledger = _integrated_ledger_pair(
         contract.memory_repo_path,
-        ["show", f"{memory_source_commit}:memory.md"],
+        commits.ledger,
+        memory_source_commit,
     )
-    if source_blob.returncode != 0:
-        raise RuntimeError("exact memory source commit has no readable memory.md")
-    try:
-        ledger = parse_ledger_text(blob.stdout)
-        source_ledger = parse_ledger_text(source_blob.stdout)
-        mapping = find_unique_mapping(ledger, commits.code)
-    except LedgerError as error:
-        raise RuntimeError(
-            "integrated memory ledger must contain exactly one landed code mapping"
-        ) from error
+    mapping = find_mapping(ledger, commits.code)
     if mapping is None or mapping.memory_commit != commits.memory_content:
         raise RuntimeError(
             "integrated memory ledger does not map landed code commit to landed memory content"
         )
-    if any(row.code_commit == commits.code for row in source_ledger.rows):
-        # No-change leaf: the landed code commit is already mapped by the source ledger, so the
-        # ledger and memory content are unchanged and there is nothing new to verify.
+    source_mapping = find_mapping(source_ledger, commits.code)
+    if source_mapping is not None and source_mapping.memory_commit == commits.memory_content:
+        # No-change leaf: the source ledger's current mapping already names the landed memory
+        # content, so there is no new ledger row to verify.
         return
     _require_preserved_ledger_history(
         contract,

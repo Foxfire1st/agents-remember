@@ -8,7 +8,7 @@ from typing import Literal, cast
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
-    find_unique_mapping,
+    find_mapping,
     parse_ledger_text,
 )
 from agents_remember.models.worktree import SyncPhase, SyncSide
@@ -142,15 +142,7 @@ def preflight_official_pair(
         return command_result(
             2, "blocked", f"The official memory ledger is invalid: {error}", fetch
         )
-    try:
-        mapping = find_unique_mapping(ledger, code_tip)
-    except LedgerError as error:
-        return command_result(
-            2,
-            "blocked",
-            f"The official memory ledger does not uniquely map the admitted code tip: {error}",
-            fetch,
-        )
+    mapping = find_mapping(ledger, code_tip)
     if mapping is None:
         return command_result(
             2,

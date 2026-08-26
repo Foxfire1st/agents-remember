@@ -139,7 +139,7 @@ def test_sibling_memory_identity_ancestry_and_mapping_are_exact() -> None:
     mapping = _value(memory_commit="landed-memory")
     with mock.patch.object(completion, "_same_repository", return_value=True):
         completion._require_sibling_memory_identity(contract, completing, expected.child_ref)
-    completion._require_sibling_memory_mapping(contract, expected.child_ref, mapping, mapping)
+    completion._require_sibling_memory_mapping(contract, expected.child_ref, mapping, True)
 
     with (
         mock.patch.object(completion, "_same_repository", return_value=False),
@@ -159,30 +159,31 @@ def test_sibling_memory_identity_ancestry_and_mapping_are_exact() -> None:
         completion._require_sibling_memory_ancestry(contract, completing, expected.child_ref)
 
     with pytest.raises(completion.OrganizationalCompletionError, match="sprint super"):
-        completion._require_sibling_memory_mapping(contract, expected.child_ref, None, mapping)
+        completion._require_sibling_memory_mapping(contract, expected.child_ref, None, True)
     with pytest.raises(completion.OrganizationalCompletionError, match="proposed final ledger"):
-        completion._require_sibling_memory_mapping(contract, expected.child_ref, mapping, None)
+        completion._require_sibling_memory_mapping(contract, expected.child_ref, mapping, False)
 
 
-def test_sibling_memory_mapping_reader_translates_ledger_ambiguity() -> None:
+def test_sibling_memory_mapping_reader_uses_canonical_lookup_and_translates_invalidity() -> None:
     contract, completing, expected = _contracts()
     first = _value(memory_commit="landed-memory")
-    second = _value(memory_commit="landed-memory")
     with (
         mock.patch.object(completion, "require_git", side_effect=("first", "second")),
         mock.patch.object(completion, "parse_ledger_text", side_effect=("one", "two")),
-        mock.patch.object(completion, "find_unique_mapping", side_effect=(first, second)),
+        mock.patch.object(completion, "find_mapping", return_value=first),
+        mock.patch.object(completion, "contains_mapping", return_value=True),
     ):
-        assert completion._sibling_memory_mappings(contract, completing, expected.child_ref) == (
-            first,
-            second,
-        )
+        result = completion._sibling_memory_mappings(contract, completing, expected.child_ref)
+        assert result == (first, True)
 
     with (
         mock.patch.object(completion, "require_git", return_value="ledger"),
-        mock.patch.object(completion, "parse_ledger_text", return_value="parsed"),
-        mock.patch.object(completion, "find_unique_mapping", side_effect=LedgerError("duplicate")),
-        pytest.raises(completion.OrganizationalCompletionError, match="duplicate code mappings"),
+        mock.patch.object(
+            completion,
+            "parse_ledger_text",
+            side_effect=LedgerError("invalid"),
+        ),
+        pytest.raises(completion.OrganizationalCompletionError, match="invalid memory ledger"),
     ):
         completion._sibling_memory_mappings(contract, completing, expected.child_ref)
 

@@ -282,8 +282,9 @@ the other cycle's sidecars and ledger rows end up beneath this task's future mem
 appends on top, and end-of-series integration stays `ff-only` with no carryover reconciliation. If
 the memory work branch already has local commits and official memory moved, sync requires a
 `memory_sync_choice`: `merge-memory` retains any textual or semantic ledger conflict for explicit
-resolution and validates that every parent ledger row survives with exactly one mapping for every
-admitted code commit before continuation; `skip-memory` defers memory to end-of-task carryover and
+resolution and validates that every exact parent ledger row survives before continuation. Repeated
+code commits remain valid newest-first memory history and are never collapsed; `skip-memory`
+defers memory to end-of-task carryover and
 advances only the code base. An atomic-series selection cannot become active after `skip-memory`; it
 remains reconciling until the exact current memory source is merged and validated.
 

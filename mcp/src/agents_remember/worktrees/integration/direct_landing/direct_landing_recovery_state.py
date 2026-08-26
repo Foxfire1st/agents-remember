@@ -10,7 +10,7 @@ from typing import Literal
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
-    find_unique_mapping,
+    find_mapping,
     ledger_to_text,
     parse_ledger_text,
     prepend_mapping,
@@ -40,7 +40,13 @@ DirectRecoveryState = Literal[
     "developer-decision",
 ]
 
-DirectLedgerMappingState = Literal["not-applicable", "absent", "exact", "conflict"]
+DirectLedgerMappingState = Literal[
+    "not-applicable",
+    "absent",
+    "historical",
+    "exact",
+    "conflict",
+]
 
 
 @dataclass(frozen=True)
@@ -206,7 +212,7 @@ def _mapping_conflict(
 ) -> DirectLandingRecoveryClassification:
     return _decision(
         "direct-landing-ledger-mapping-conflict",
-        "the accepted code mapping is different, duplicate, or unreadable",
+        "the accepted ledger cannot provide a readable code mapping",
         expected={
             **live.expected,
             "ledgerMapping": {
@@ -250,18 +256,18 @@ def _direct_ledger_mapping_state(
     if record.directLandingLedgerIntent is not None or not memory_commit:
         return "not-applicable", {"state": "not-applicable"}
     try:
-        mapping = find_unique_mapping(parse_ledger_text(ledger_text), operation_input.codeCommit)
+        mapping = find_mapping(parse_ledger_text(ledger_text), operation_input.codeCommit)
     except LedgerError:
         return "conflict", {"state": "unreadable", "errorType": "LedgerError"}
     if mapping is None:
         return "absent", {"state": "absent", "codeCommit": operation_input.codeCommit}
     observed: dict[str, object] = {
-        "state": "exact" if mapping.memory_commit == memory_commit else "different",
+        "state": "exact" if mapping.memory_commit == memory_commit else "historical",
         "codeCommit": mapping.code_commit,
         "memoryCommit": mapping.memory_commit,
     }
     return (
-        "exact" if mapping.memory_commit == memory_commit else "conflict",
+        "exact" if mapping.memory_commit == memory_commit else "historical",
         observed,
     )
 
@@ -311,7 +317,7 @@ def _infer_unpublished_memory_commit(
     if _memory_commit_matches_intent(live.repository, evidence, live.git.head):
         return live.git.head
     try:
-        mapping = find_unique_mapping(
+        mapping = find_mapping(
             parse_ledger_text(live.ledger_text),
             operation_input.codeCommit,
         )
