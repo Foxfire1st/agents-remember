@@ -120,6 +120,10 @@ class TerminalCatalogEntry:
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None
     session_log_path: Path | None = None
+    # The durable inbox row that completed this occupant's one-call spawn transaction. This is
+    # private reconciliation evidence, not a delivery address. It remains after bounded inbox
+    # compaction so a retry cannot mistake a briefed live seat for a crash-stranded process.
+    dispatch_brief_entry_id: str | None = None
     # Protocol-backed control metadata (260713-PHA-L1): additive and absent on legacy/plain-terminal
     # rows. ``control_endpoint`` is a user-private local socket; the exact identity tuple remains
     # id + tmux_name + created_at, and every IPC request repeats it.
@@ -220,6 +224,7 @@ class TerminalCatalogEntry:
             resolved_effort=_optional_str(data, "resolvedEffort"),
             session_log_entry_id=_optional_str(data, "sessionLogEntryId"),
             session_log_path=_optional_path(data, "sessionLogPath"),
+            dispatch_brief_entry_id=_optional_str(data, "dispatchBriefEntryId"),
             control_state=_control_state(data.get("controlState")),
             control_endpoint=_optional_path(data, "controlEndpoint"),
             control_protocol=_optional_str(data, "controlProtocol"),
@@ -307,6 +312,7 @@ class TerminalCatalogEntry:
                     "resolvedEffort": self.resolved_effort,
                     "sessionLogEntryId": self.session_log_entry_id,
                     "sessionLogPath": _optional_path_text(self.session_log_path),
+                    "dispatchBriefEntryId": self.dispatch_brief_entry_id,
                     "controlState": self.control_state,
                     "controlEndpoint": _optional_path_text(self.control_endpoint),
                     "controlProtocol": self.control_protocol,
@@ -380,12 +386,18 @@ class TerminalCatalogEntry:
         task_document_ref: TaskDocumentRef,
         seat_role: str,
     ) -> TerminalCatalogEntry:
-        """A copy moved to one ``(task document, role)`` binding in one catalog write."""
+        """Move to one seat, retaining address-bound brief proof only for that same seat."""
+
+        same_address = (
+            self.binding_task_document_ref == task_document_ref and self.binding_role == seat_role
+        )
 
         return replace(
             self,
             task_document_ref=task_document_ref,
             seat_role=seat_role,
+            replacement_for_task_document_ref=None,
+            dispatch_brief_entry_id=(self.dispatch_brief_entry_id if same_address else None),
         )
 
     def with_retirement(

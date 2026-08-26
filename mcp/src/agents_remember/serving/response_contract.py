@@ -28,7 +28,7 @@ the model did not know about simply reached the cockpit. With ``response_model``
 ``extra="forbid"`` they now answer **HTTP 500** (``ResponseValidationError``) if the payload
 gains a key, loses a required one, or changes a type. That is a deliberate fail-loud trade and
 not a silent one -- but it is a real hazard on ``/api/terminal/sessions``, because
-``TerminalCatalogEntry`` carries 36 optional fields and is actively grown: a future leaf adding
+``TerminalCatalogEntry`` carries 56 optional fields and is actively grown: a future leaf adding
 one to ``to_json`` and forgetting ``TerminalCatalogEntryWire`` would take down the cockpit's
 session list, not degrade it.
 
@@ -321,6 +321,7 @@ class TerminalCatalogEntryWire(WireResponse):
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None
     session_log_path: str | None = None
+    dispatch_brief_entry_id: str | None = None
     control_state: str | None = None
     control_endpoint: str | None = None
     control_protocol: str | None = None

@@ -20,6 +20,7 @@ from agents_remember.models.terminal_catalog import (
     TerminalSessionKind,
 )
 from agents_remember.serving.terminal_catalog import (
+    DispatchBriefReceiptStore,
     TerminalCatalog,
     terminal_catalog_path,
 )
@@ -216,6 +217,7 @@ class TerminalCatalogTests(unittest.TestCase):
             replace(
                 _entry("a", kind="harness"),
                 replacement_for_task_document_ref=leaf,
+                dispatch_brief_entry_id="dispatch-brief-1",
                 session_log_entry_id="brief-1",
                 session_log_path=Path("/tmp/session.jsonl"),
             )
@@ -224,10 +226,43 @@ class TerminalCatalogTests(unittest.TestCase):
         entry = self.catalog.get("a")
         assert entry is not None
         self.assertEqual(entry.replacement_for_task_document_ref, leaf)
+        self.assertEqual(entry.dispatch_brief_entry_id, "dispatch-brief-1")
         self.assertEqual(entry.session_log_entry_id, "brief-1")
         self.assertEqual(entry.session_log_path, Path("/tmp/session.jsonl"))
         self.assertEqual(entry.to_json()["replacementForTaskDocumentRef"], leaf.model_dump())
+        self.assertEqual(entry.to_json()["dispatchBriefEntryId"], "dispatch-brief-1")
         self.assertEqual(entry.to_json()["sessionLogEntryId"], "brief-1")
+
+    def test_dispatch_brief_receipts_are_idempotent_and_refuse_a_second_receipt(self) -> None:
+        self.catalog.upsert(_entry("a", kind="harness"))
+        receipts = DispatchBriefReceiptStore(self.catalog)
+        self.assertIsNone(receipts.bind("missing", entry_id="dispatch-brief-1"))
+
+        first = receipts.bind("a", entry_id="dispatch-brief-1")
+        repeated = receipts.bind("a", entry_id="dispatch-brief-1")
+
+        assert first is not None and repeated is not None
+        self.assertEqual(first.dispatch_brief_entry_id, "dispatch-brief-1")
+        self.assertEqual(repeated.dispatch_brief_entry_id, "dispatch-brief-1")
+        with self.assertRaisesRegex(ValueError, "different dispatch brief"):
+            receipts.bind("a", entry_id="dispatch-brief-2")
+        self.assertEqual(
+            self.catalog.get("a").dispatch_brief_entry_id,  # type: ignore[union-attr]
+            "dispatch-brief-1",
+        )
+
+    def test_task_binding_promotes_a_staged_replacement_to_the_canonical_seat(self) -> None:
+        leaf = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
+        staged = replace(
+            _entry("a", kind="harness"),
+            replacement_for_task_document_ref=leaf,
+        )
+
+        promoted = staged.with_task_binding(leaf, "worker")
+
+        self.assertEqual(promoted.task_document_ref, leaf)
+        self.assertEqual(promoted.seat_role, "worker")
+        self.assertIsNone(promoted.replacement_for_task_document_ref)
 
     def test_control_metadata_round_trips_additively_and_legacy_rows_remain_unset(self) -> None:
         self.catalog.upsert(

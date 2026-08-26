@@ -246,7 +246,14 @@ def ensure_master_series_contract(
             require_series_accepting_leaves(candidate, operation=leaf_admission_operation)
         return candidate
 
-    preflight = _bootstrap_preflight_contract(spec)
+    # Observe the journal -> task-bound-contract handoff under the same per-master
+    # mutex that publishes it.  Without this read lock a concurrent loser can see
+    # "no contract" before publication and "no journal" after retirement, then
+    # misclassify the winner's protected branch as an orphan.
+    with exclusive_access(
+        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
+    ):
+        preflight = _bootstrap_preflight_contract(spec)
     invalid = atomic_series_activation_input_refusal(preflight, activation_args)
     if invalid is not None:
         return invalid

@@ -17,6 +17,22 @@ class AgentsRememberError(ValueError):
     """Base class for all Agents Remember domain errors."""
 
 
+class SeatOccupancyError(AgentsRememberError):
+    """A canonical document-and-role seat has multiple claimants in one generation."""
+
+
+class StructuralDispatchError(AgentsRememberError):
+    """Durable dispatch evidence is ambiguous or contradicts the current seat."""
+
+
+class StructuralDispatchLockError(AgentsRememberError):
+    """The canonical-seat serializer could not establish cross-process exclusion."""
+
+
+class StructuralRoutingError(AgentsRememberError):
+    """A structural route is absent or ambiguous; routing must fail instead of guessing."""
+
+
 class AuthorityError(AgentsRememberError):
     """A path or repo argument violated the MCP authority settings.
 

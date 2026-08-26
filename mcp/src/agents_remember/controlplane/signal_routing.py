@@ -15,7 +15,12 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxMessageKind,
     OperatorInboxEntry,
 )
-from agents_remember.controlplane.seats import SeatDirectory, SeatRow
+from agents_remember.controlplane.seats import (
+    SeatDirectory,
+    SeatRow,
+    current_seat_occupant,
+)
+from agents_remember.errors import SeatOccupancyError, StructuralRoutingError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 _LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
@@ -25,10 +30,6 @@ class TaskHierarchy(Protocol):
     """The one task-containment operation routing needs from the task service."""
 
     def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None: ...
-
-
-class StructuralRoutingError(ValueError):
-    """A structural route is absent or ambiguous; routing fails instead of guessing."""
 
 
 @dataclass(frozen=True)
@@ -47,31 +48,12 @@ def _current_occupant(
     document: TaskDocumentRef,
     role: AgentRole,
 ) -> RoutedOwner:
-    primary = [
-        row
-        for row in catalog.list()
-        if row.status == "running"
-        and row.binding_role == role
-        and row.task_document_ref == document
-    ]
-    if len(primary) > 1:
-        raise StructuralRoutingError(f"multiple running occupants claim {document.key} as {role}")
-    candidates = primary
-    if not candidates:
-        candidates = [
-            row
-            for row in catalog.list()
-            if row.status == "running"
-            and row.binding_role == role
-            and row.replacement_for_task_document_ref == document
-        ]
-        if len(candidates) > 1:
-            raise StructuralRoutingError(
-                f"multiple running replacements claim {document.key} as {role}"
-            )
-    if not candidates:
+    try:
+        occupant = current_seat_occupant(catalog.list(), document=document, role=role)
+    except SeatOccupancyError as exc:
+        raise StructuralRoutingError(str(exc)) from exc
+    if occupant is None:
         return RoutedOwner(role=role, task_document_ref=document)
-    occupant = candidates[0]
     return RoutedOwner(
         role=role,
         task_document_ref=document,

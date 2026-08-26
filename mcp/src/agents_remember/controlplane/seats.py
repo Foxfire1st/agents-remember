@@ -30,8 +30,9 @@ dependency with a second definition of it, and the two would drift.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Protocol, TypeVar
 
+from agents_remember.errors import SeatOccupancyError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
@@ -106,3 +107,61 @@ class SeatDirectory(Protocol):
     def get(self, session_id: str) -> SeatRow | None: ...
 
     def list(self) -> Sequence[SeatRow]: ...
+
+
+_SeatRowT = TypeVar("_SeatRowT", bound=SeatRow)
+
+
+def _seat_claimants(
+    rows: Sequence[_SeatRowT],
+    *,
+    document: TaskDocumentRef,
+    role: str,
+    replacement: bool,
+) -> list[_SeatRowT]:
+    return [
+        row
+        for row in rows
+        if row.status == "running"
+        and row.binding_role == role
+        and (
+            row.replacement_for_task_document_ref == document
+            if replacement
+            else row.task_document_ref == document
+        )
+    ]
+
+
+def _one_claimant(
+    claimants: Sequence[_SeatRowT],
+    *,
+    ambiguity: str,
+) -> _SeatRowT | None:
+    if len(claimants) > 1:
+        raise SeatOccupancyError(ambiguity)
+    return claimants[0] if claimants else None
+
+
+def current_seat_occupant(
+    rows: Sequence[_SeatRowT],
+    *,
+    document: TaskDocumentRef,
+    role: str,
+) -> _SeatRowT | None:
+    """Resolve one canonical seat occupant, preferring its incumbent over one staged heir.
+
+    ``replacement_for_task_document_ref`` is the same structural address in a staged state,
+    never a second namespace.  One incumbent and one staged heir may coexist while a handover is
+    prepared; only the incumbent is current until it leaves.  Multiple incumbents or multiple
+    heirs are corrupt/ambiguous and fail closed even when the other side would otherwise win.
+    """
+
+    primary = _one_claimant(
+        _seat_claimants(rows, document=document, role=role, replacement=False),
+        ambiguity=f"multiple running occupants claim {document.key} as {role}",
+    )
+    replacement = _one_claimant(
+        _seat_claimants(rows, document=document, role=role, replacement=True),
+        ambiguity=f"multiple running replacements claim {document.key} as {role}",
+    )
+    return primary if primary is not None else replacement

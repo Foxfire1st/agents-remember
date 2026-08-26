@@ -21,6 +21,7 @@ from agents_remember.controlplane.signal_routing import (
     derive_row_owner,
     derive_signal_owner,
 )
+from agents_remember.errors import SeatOccupancyError, StructuralRoutingError
 from agents_remember.observer.events import Event, now_iso
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving._agent_notifier_evaluation import (
@@ -701,7 +702,12 @@ def act_on_finding(
     action = _FINDING_ACTIONS.get(finding.kind)
     if action is None:
         return AgentNotifierActionResult("none", finding, "skipped", "unhandled finding kind")
-    return action(ctx, finding, now=now, sweep=sweep)
+    try:
+        return action(ctx, finding, now=now, sweep=sweep)
+    except (SeatOccupancyError, StructuralRoutingError) as exc:
+        # A corrupt canonical seat fences only the finding addressed to it. Other retries and the
+        # sweep heartbeat still advance, and this row remains pending for a later unambiguous pass.
+        return AgentNotifierActionResult("none", finding, "skipped", str(exc))
 
 
 @dataclass(frozen=True)
@@ -726,7 +732,13 @@ def act_on_findings(
     prepared_indexes: list[int] = []
     topology = TaskDocumentTopology(ctx.coordination_root)
     for index, finding in enumerate(findings):
-        item = _prepare_expiry(ctx, finding, topology=topology, sweep=sweep)
+        try:
+            item = _prepare_expiry(ctx, finding, topology=topology, sweep=sweep)
+        except (SeatOccupancyError, StructuralRoutingError) as exc:
+            # Expiry preparation resolves structural owners before the ordinary action boundary.
+            # Fence only that finding when its route is ambiguous or malformed.
+            results[index] = AgentNotifierActionResult("none", finding, "skipped", str(exc))
+            continue
         if item is None:
             results[index] = act_on_finding(ctx, finding, now=now, sweep=sweep)
             continue

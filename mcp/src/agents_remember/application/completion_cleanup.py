@@ -119,7 +119,7 @@ def _completion_candidates(
     return [
         entry
         for entry in catalog.list(include_terminated=True)
-        if entry.task_document_ref == task_document_ref
+        if entry.binding_task_document_ref == task_document_ref
         and entry.status != "terminated"
         and entry.binding_role in CLOSABLE_LEAF_ROLES
     ]

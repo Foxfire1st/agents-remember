@@ -156,6 +156,7 @@ def _seat(
     role: str,
     *,
     status: str = "running",
+    spawned_by_kind: str | None = None,
 ) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
@@ -171,6 +172,7 @@ def _seat(
         status=status,  # type: ignore[arg-type]
         task_document_ref=document,
         seat_role=role,
+        spawned_by_kind=spawned_by_kind,
     )
 
 
@@ -207,8 +209,14 @@ class StructuralAgentToolTests(unittest.TestCase):
             {"session", "sessionId", "agentId", "lifecycleId", "entryId"}.isdisjoint(result)
         )
         row = next(iter(OperatorInboxStore(observer_root(self.config)).current().values()))
-        self.assertEqual(row.agentId, "manager-new")
+        self.assertIsNone(row.agentId)
         self.assertEqual(row.taskDocumentRef, self.master)
+        self.assertEqual(row.recipientRole, "manager")
+        self.assertEqual(row.ownerAgentId, "manager-new")
+        self.assertEqual(
+            target_session_for_entry(self.catalog, row).id,  # type: ignore[union-attr]
+            "manager-new",
+        )
 
     def test_parent_to_replacement_child_is_resolved_by_document_and_role(self) -> None:
         self.catalog.upsert(_seat("manager", self.master, "manager"))
@@ -1078,6 +1086,21 @@ class StructuralAgentToolTests(unittest.TestCase):
 
     def test_dispatch_persistence_failure_retires_the_unbriefed_child_privately(self) -> None:
         self.catalog.upsert(_seat("architect", self.sprint, "architect"))
+        self.catalog.upsert(
+            _seat(
+                "private-child-id",
+                self.sprint,
+                "orchestrator",
+                spawned_by_kind="plane",
+            )
+        )
+        retired = _seat(
+            "private-child-id",
+            self.sprint,
+            "orchestrator",
+            status="terminated",
+            spawned_by_kind="plane",
+        )
         with (
             mock.patch(
                 "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
@@ -1088,8 +1111,8 @@ class StructuralAgentToolTests(unittest.TestCase):
                 side_effect=ValueError("store refused"),
             ),
             mock.patch(
-                "agents_remember.application.structural.agent_tools.session_retire_tool",
-                return_value={"ok": True, "status": "retired"},
+                "agents_remember.application.structural.agent_tools.retire_entry",
+                return_value=retired,
             ) as retire,
         ):
             result = dispatch_agent_tool(
@@ -1109,7 +1132,10 @@ class StructuralAgentToolTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dispatch-persistence-refused")
         self.assertNotIn("private-child-id", str(result))
-        self.assertEqual(retire.call_args.kwargs["session_id"], "private-child-id")
+        self.assertEqual(retire.call_args.args[2].id, "private-child-id")
+        closure = retire.call_args.args[3]
+        self.assertEqual(closure.by_session, "architect")
+        self.assertEqual(closure.edge, "dispatch-rollback")
 
     def test_plane_dispatch_refuses_broken_plane_identity_without_downgrading(self) -> None:
         with mock.patch(

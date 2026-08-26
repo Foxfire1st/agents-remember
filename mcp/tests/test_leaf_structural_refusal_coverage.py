@@ -320,8 +320,8 @@ def test_dispatch_agent_refuses_invalid_spawn_and_unpersisted_brief(tmp_path: Pa
         ),
     ):
         refused = tools.dispatch_agent_tool(config, request, runtime)
-    assert refused["status"] == "seat-taken"
-    assert refused["detail"] == "occupied"
+    assert refused["status"] == "dispatch-reconciliation-refused"
+    assert "private current generation" in refused["detail"]
 
     posted = Mock(return_value={"ok": False, "status": "durable-refused"})
     failed = Mock(return_value={"status": "rolled-back"})
@@ -335,7 +335,7 @@ def test_dispatch_agent_refuses_invalid_spawn_and_unpersisted_brief(tmp_path: Pa
             return_value={"status": "spawned-unbriefed", "session": "child"},
         ),
         patch.object(tools, "_post_initial_dispatch_brief", posted),
-        patch.object(tools, "_failed_initial_dispatch", failed),
+        patch.object(tools, "_recover_initial_dispatch_failure", failed),
     ):
         assert tools.dispatch_agent_tool(config, request, runtime) == {"status": "rolled-back"}
     failed.assert_called_once()
@@ -388,7 +388,7 @@ def test_structural_agent_message_and_child_mutations_report_refusals(tmp_path: 
     catalog, topology, resolver = Mock(), Mock(), Mock()
     caller = SimpleNamespace(id="manager", binding_role="manager", binding_task_document_ref=leaf)
     target = SimpleNamespace(id="child", binding_role="worker", binding_task_document_ref=leaf)
-    resolver.parent.return_value = target
+    resolver.parent_address.return_value = (leaf, "manager")
     message = SimpleNamespace(
         task_document_ref=None,
         role=None,
@@ -413,6 +413,20 @@ def test_structural_agent_message_and_child_mutations_report_refusals(tmp_path: 
     topology.resolve.side_effect = None
     topology.resolve.return_value = SimpleNamespace(ref=leaf)
     resolver.child.return_value = target
+    with (
+        patch.object(tools, "_structural_context", return_value=(catalog, topology, resolver)),
+        patch.object(tools, "resolve_ambient_seat", return_value=caller),
+        patch.object(
+            tools,
+            "exclusive_structural_dispatch_lock",
+            side_effect=tools.StructuralDispatchLockError("busy"),
+        ),
+    ):
+        assert (
+            tools.retire_child_tool(config, request, runtime)["status"]
+            == "retire-serialization-refused"
+        )
+
     with (
         patch.object(tools, "_structural_context", return_value=(catalog, topology, resolver)),
         patch.object(tools, "resolve_ambient_seat", return_value=caller),
@@ -594,7 +608,7 @@ def test_inbox_delivery_structural_target_is_unique_and_dispatch_is_exact() -> N
         replacement_for_task_document_ref=None,
     )
     catalog.list.return_value = [primary, SimpleNamespace(**{**primary.__dict__, "id": "two"})]
-    with pytest.raises(ValueError, match="ambiguous structural inbox target"):
+    with pytest.raises(ValueError, match="multiple running occupants"):
         delivery._structural_target(catalog, entry)
     replacement = SimpleNamespace(
         **{
@@ -607,7 +621,7 @@ def test_inbox_delivery_structural_target_is_unique_and_dispatch_is_exact() -> N
         replacement,
         SimpleNamespace(**{**replacement.__dict__, "id": "replacement-two"}),
     ]
-    with pytest.raises(ValueError, match="ambiguous structural inbox replacement"):
+    with pytest.raises(ValueError, match="multiple running replacements"):
         delivery._structural_target(catalog, entry)
     dispatch = SimpleNamespace(messageKind=delivery.DISPATCH_BRIEF_KIND, agentId=None)
     assert delivery.target_session_for_entry(catalog, dispatch) is None
@@ -640,7 +654,7 @@ def test_retire_policy_and_manager_lookup_refuse_broken_topology() -> None:
         replacement_for_task_document_ref=None,
     )
     catalog.list.return_value = [manager, SimpleNamespace(**{**manager.__dict__, "id": "two"})]
-    with pytest.raises(ValueError, match="multiple managers"):
+    with pytest.raises(ValueError, match="multiple running occupants"):
         signals._manager_for_subordinate(catalog, hierarchy, subordinate)
     replacement = SimpleNamespace(
         **{
@@ -653,7 +667,7 @@ def test_retire_policy_and_manager_lookup_refuse_broken_topology() -> None:
         replacement,
         SimpleNamespace(**{**replacement.__dict__, "id": "replacement-two"}),
     ]
-    with pytest.raises(ValueError, match="multiple replacement managers"):
+    with pytest.raises(ValueError, match="multiple running replacements"):
         signals._manager_for_subordinate(catalog, hierarchy, subordinate)
 
 
@@ -733,7 +747,7 @@ def test_terminal_binding_conflicts_reap_dead_occupants_and_keep_live_ones(tmp_p
         is None
     )
     owner = SimpleNamespace(id="owner", tmux_name="owner-tmux")
-    catalog.active_for_task.return_value = owner
+    catalog.active_for_task.side_effect = [owner, None]
     host.has_session.return_value = False
     assert (
         assignment.task_binding_conflict_owner(
@@ -746,6 +760,20 @@ def test_terminal_binding_conflicts_reap_dead_occupants_and_keep_live_ones(tmp_p
         is None
     )
     catalog.mark_exited.assert_called_with("owner")
+
+    catalog.active_for_task.side_effect = [owner, owner]
+    catalog.mark_exited.reset_mock()
+    assert (
+        assignment.task_binding_conflict_owner(
+            catalog,
+            task_document_ref=leaf,
+            session_id="seat",
+            seat_role="worker",
+            host=host,
+        )
+        == "owner"
+    )
+    catalog.mark_exited.assert_called_once_with("owner")
 
     assert (
         assignment.replacement_binding_conflict_owner(

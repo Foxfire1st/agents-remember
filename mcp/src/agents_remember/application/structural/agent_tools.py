@@ -7,6 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from agents_remember.application.structural.dispatch_transaction import (
+    DispatchEvidenceRuntime,
+    DispatchTransaction,
+    execute_dispatch_transaction,
+    reconcile_dispatch_evidence,
+)
+from agents_remember.application.structural.outcomes import StructuralOutcome
+from agents_remember.application.structural.outcomes import (
+    structural_payload as _target_payload,
+)
 from agents_remember.application.terminal_tools import (
     RetiredSpawnInputs,
     SpawnedBy,
@@ -22,7 +32,11 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxPoster,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.errors import AuthorityError, HarnessControlError
+from agents_remember.errors import (
+    AuthorityError,
+    HarnessControlError,
+    StructuralDispatchLockError,
+)
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -49,9 +63,16 @@ from agents_remember.serving.operator_inbox_posts import (
 )
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.seat_events import log_retire_event
+from agents_remember.serving.structural_dispatch import (
+    exclusive_structural_dispatch_lock,
+)
 from agents_remember.serving.structural_seats import StructuralSeatError, StructuralSeatResolver
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
+from agents_remember.serving.terminal_catalog import (
+    DispatchBriefReceiptStore,
+    TerminalCatalog,
+    terminal_catalog_path,
+)
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -89,18 +110,6 @@ _DEFAULT_AGENT_RUNTIME = StructuralAgentRuntime()
 
 
 @dataclass(frozen=True)
-class StructuralOutcome:
-    operation: str
-    ok: bool
-    status: str
-    document: TaskDocumentRef | None
-    role: str
-    detail: str | None = None
-    delivery_state: str | None = None
-    adapter_delivery_state: str | None = None
-
-
-@dataclass(frozen=True)
 class StructuralMessageTarget:
     document: TaskDocumentRef
     role: str
@@ -122,28 +131,14 @@ class UnbriefedChild:
     role: StructuralRole
 
 
+@dataclass(frozen=True)
+class DispatchRollback:
+    retired: bool
+    detail: str
+
+
 def _catalog(config: McpRuntimeConfig) -> TerminalCatalog:
     return TerminalCatalog(terminal_catalog_path(config.coordination_root))
-
-
-def _target_payload(outcome: StructuralOutcome) -> dict[str, Any]:
-    """Return only stable work identity and structural delivery state."""
-
-    payload: dict[str, Any] = {
-        "ok": outcome.ok,
-        "operation": outcome.operation,
-        "status": outcome.status,
-        "role": outcome.role,
-    }
-    if outcome.document is not None:
-        payload["taskDocumentRef"] = outcome.document.model_dump()
-    if outcome.detail is not None:
-        payload["detail"] = outcome.detail
-    if outcome.delivery_state is not None:
-        payload["deliveryState"] = outcome.delivery_state
-    if outcome.adapter_delivery_state is not None:
-        payload["adapterDeliveryState"] = outcome.adapter_delivery_state
-    return payload
 
 
 def _structural_context(
@@ -191,7 +186,7 @@ def _post_structural_message(
         agent_id=target.exact_dispatch_target,
         recipient_role=cast(AgentRole, target.role),
     )
-    return post_operator_inbox_entry(
+    posted = post_operator_inbox_entry(
         OperatorInboxPostContext(
             config=config,
             store=OperatorInboxStore(observer_root(config)),
@@ -213,6 +208,32 @@ def _post_structural_message(
             ),
         ),
     )
+    _bind_dispatch_brief_receipt(context, target, message, posted)
+    return posted
+
+
+def _bind_dispatch_brief_receipt(
+    context: StructuralMessageContext,
+    target: StructuralMessageTarget,
+    message: InboxMessage,
+    posted: dict[str, Any],
+) -> None:
+    """Preserve the durable proof that this exact occupant received its initial brief."""
+
+    if message.message_kind != "dispatch-brief" or posted.get("ok") is not True:
+        return
+    entry_id = posted.get("entryId")
+    if not isinstance(entry_id, str) or not entry_id:
+        raise ValueError("durable dispatch brief did not return its entry id")
+    assert target.exact_dispatch_target is not None
+    if (
+        DispatchBriefReceiptStore(context.catalog).bind(
+            target.exact_dispatch_target,
+            entry_id=entry_id,
+        )
+        is None
+    ):
+        raise ValueError("dispatch target disappeared before its brief receipt was bound")
 
 
 def _retire_unbriefed_child(
@@ -221,48 +242,48 @@ def _retire_unbriefed_child(
     caller_id: str | None,
     child_id: str,
     host: TerminalHost | None,
-) -> str:
+) -> DispatchRollback:
     """Roll back a spawn whose exact initial brief never became durable.
 
-    A plane caller retires as the authority-gated actor. An ambient caller has no catalog
-    row to act as the retiring seat; the child it just spawned in this same transaction is
-    retired as a system closure instead -- the child id is the spawn result, never caller
-    input, so an ambient caller cannot retire an arbitrary session.
+    This is transaction rollback, not the public retire operation: ``child_id`` came from the
+    server-owned spawn/seat reconciliation path and never from caller input.  The plane therefore
+    closes it directly for every caller kind.  Reusing the public role policy here would strand an
+    architect's unbriefed orchestrator because public retire authority and transaction rollback are
+    deliberately different capabilities.
     """
 
-    if caller_id is None:
-        catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
-        entry = catalog.get(child_id)
-        if entry is None:
-            return "child retirement also failed"
-        if entry.status == "terminated":
-            return "child retired"
-        retire_host = host if host is not None else TerminalHost()
-        try:
-            updated = retire_entry(
-                catalog,
-                retire_host,
-                entry,
-                SeatClosure(
-                    at=now_iso(),
-                    reason="initial dispatch brief persistence failed",
-                    edge="ambient-dispatch-rollback",
+    catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    entry = catalog.get(child_id)
+    if entry is None:
+        return DispatchRollback(False, "child retirement also failed")
+    if entry.status == "terminated":
+        return DispatchRollback(True, "child retired")
+    retire_host = host if host is not None else TerminalHost()
+    try:
+        updated = retire_entry(
+            catalog,
+            retire_host,
+            entry,
+            SeatClosure(
+                at=now_iso(),
+                by_session=caller_id,
+                reason="initial dispatch brief persistence failed",
+                edge=(
+                    "dispatch-rollback" if caller_id is not None else "ambient-dispatch-rollback"
                 ),
-            )
-        except (HarnessControlError, OSError):
-            return "child retirement also failed"
-        if updated is None:
-            return "child retirement also failed"
+            ),
+        )
+    except (HarnessControlError, OSError):
+        return DispatchRollback(False, "child retirement also failed")
+    if updated is None:
+        return DispatchRollback(False, "child retirement also failed")
+    try:
         log_retire_event(config, updated)
-        return "child retired"
-    retired = session_retire_tool(
-        config,
-        actor_session_id=caller_id,
-        session_id=child_id,
-        reason="initial dispatch brief persistence failed",
-        host=host,
-    )
-    return "child retired" if retired.get("ok") else "child retirement also failed"
+    except OSError:
+        # Catalog retirement is the fencing authority. Preserve the observer-write failure as
+        # secondary evidence without reviving or stranding the already-retired generation.
+        return DispatchRollback(True, "child retired; retirement event logging failed")
+    return DispatchRollback(True, "child retired")
 
 
 def _spawn_dispatch_child(
@@ -331,8 +352,50 @@ def _failed_initial_dispatch(
             status,
             child.document,
             child.role,
-            f"{detail}; {rollback}",
+            f"{detail}; {rollback.detail}",
         )
+    )
+
+
+def _recover_initial_dispatch_failure(
+    config: McpRuntimeConfig,
+    context: StructuralMessageContext,
+    child: UnbriefedChild,
+    *,
+    status: str,
+    detail: str,
+) -> dict[str, Any]:
+    """Reconcile the durable commit point before deciding whether rollback is safe."""
+
+    try:
+        recovered = reconcile_dispatch_evidence(
+            DispatchEvidenceRuntime(
+                document=child.document,
+                role=child.role,
+                catalog=context.catalog,
+                inbox_store=OperatorInboxStore(observer_root(config)),
+            ),
+            owner_id=child.session_id,
+        )
+    except (OSError, ValueError) as exc:
+        return _target_payload(
+            StructuralOutcome(
+                "dispatch_agent",
+                False,
+                "dispatch-reconciliation-refused",
+                child.document,
+                child.role,
+                f"{detail}; durable brief state remains unknown: {exc}",
+            )
+        )
+    if recovered is not None:
+        return recovered
+    return _failed_initial_dispatch(
+        config,
+        context.runtime,
+        child,
+        status=status,
+        detail=detail,
     )
 
 
@@ -407,39 +470,69 @@ def dispatch_agent_tool(
     if refusal is not None:
         return refusal
 
-    spawned = _admitted_dispatch_spawn(
-        config,
-        request,
-        runtime,
-        spawned_by=(
-            SpawnedBy(
-                session_id=caller.id,
-                lifecycle_id=caller.lifecycle_id,
-                caller_kind="plane",
-            )
-            if caller is not None
-            else SpawnedBy(caller_kind="ambient")
-        ),
-        resolved_document=resolved_document,
+    spawned_by = (
+        SpawnedBy(
+            session_id=caller.id,
+            lifecycle_id=caller.lifecycle_id,
+            caller_kind="plane",
+        )
+        if caller is not None
+        else SpawnedBy(caller_kind="ambient")
     )
-    if spawned.get("status") != "spawned-unbriefed":
+    message_context = StructuralMessageContext(catalog, caller, runtime)
+    transaction = DispatchTransaction(
+        document=document,
+        role=request.role,
+        catalog=catalog,
+        inbox_store=OperatorInboxStore(observer_root(config)),
+        admitted_spawn=lambda: _admitted_dispatch_spawn(
+            config,
+            request,
+            runtime,
+            spawned_by=spawned_by,
+            resolved_document=resolved_document,
+        ),
+        retry_spawn=lambda: _spawn_dispatch_child(
+            config,
+            request,
+            runtime,
+            spawned_by=spawned_by,
+            document=document,
+        ),
+        brief_spawned=lambda target_session_id: _brief_spawned_child(
+            config,
+            request,
+            message_context,
+            document=document,
+            target_session_id=target_session_id,
+        ),
+        retire_generation=lambda target_session_id: (
+            _retire_unbriefed_child(
+                config,
+                caller_id=caller.id if caller is not None else None,
+                child_id=target_session_id,
+                host=runtime.host,
+            ).retired
+        ),
+    )
+    try:
+        with exclusive_structural_dispatch_lock(
+            config.coordination_root,
+            document,
+            request.role,
+        ):
+            return execute_dispatch_transaction(transaction)
+    except StructuralDispatchLockError as exc:
         return _target_payload(
             StructuralOutcome(
                 "dispatch_agent",
                 False,
-                str(spawned.get("status", "spawn-refused")),
+                "dispatch-serialization-refused",
                 document,
                 request.role,
-                cast(str | None, spawned.get("detail")),
+                str(exc),
             )
         )
-    return _brief_spawned_child(
-        config,
-        request,
-        StructuralMessageContext(catalog, caller, runtime),
-        document=document,
-        target_session_id=cast(str, spawned["session"]),
-    )
 
 
 def _brief_spawned_child(
@@ -463,18 +556,18 @@ def _brief_spawned_child(
             StructuralMessageTarget(document, request.role, target_session_id),
             request.brief,
         )
-    except (OSError, ValueError):
-        return _failed_initial_dispatch(
+    except (OSError, ValueError) as exc:
+        return _recover_initial_dispatch_failure(
             config,
-            context.runtime,
+            context,
             child,
             status="dispatch-persistence-refused",
-            detail="durable initial brief was refused",
+            detail=f"durable initial brief was refused: {exc}",
         )
     if posted.get("ok") is not True:
-        return _failed_initial_dispatch(
+        return _recover_initial_dispatch_failure(
             config,
-            context.runtime,
+            context,
             child,
             status=str(posted.get("status", "dispatch-persistence-refused")),
             detail="durable initial brief was not accepted",
@@ -686,17 +779,17 @@ def _message_tool(
     try:
         caller = resolve_ambient_seat(catalog, environ=runtime.environ)
         if operation == "message_parent":
-            target = resolver.parent(caller)
+            target_document, target_role = resolver.parent_address(caller)
         else:
             assert request.task_document_ref is not None and request.role is not None
             document = topology.resolve(request.task_document_ref).ref
-            target = resolver.child(caller, document=document, role=request.role)
-        target_document = target.binding_task_document_ref
-        assert target_document is not None
+            target_document, target_role = resolver.child_address(
+                caller, document=document, role=request.role
+            )
         posted = _post_structural_message(
             config,
             StructuralMessageContext(catalog, caller, runtime),
-            StructuralMessageTarget(target_document, target.binding_role),
+            StructuralMessageTarget(target_document, target_role),
             InboxMessage(
                 ask=request.ask,
                 response=request.response,
@@ -725,7 +818,7 @@ def _message_tool(
             True,
             "posted",
             target_document,
-            target.binding_role,
+            target_role,
             cast(str | None, posted.get("deliveryDetail")),
             delivery_state,
             adapter_state,
@@ -758,7 +851,19 @@ def retire_child_tool(
     try:
         document = topology.resolve(request.task_document_ref).ref
         caller = resolve_ambient_seat(catalog, environ=runtime.environ)
-        target = resolver.child(caller, document=document, role=request.role)
+        with exclusive_structural_dispatch_lock(
+            config.coordination_root,
+            document,
+            request.role,
+        ):
+            target = resolver.child(caller, document=document, role=request.role)
+            retired = session_retire_tool(
+                config,
+                actor_session_id=caller.id,
+                session_id=target.id,
+                reason=request.reason,
+                host=runtime.host,
+            )
     except (AmbientSeatError, StructuralSeatError) as exc:
         return _caller_error("retire_child", request.task_document_ref, request.role, exc)
     except TaskDocumentRefError as exc:
@@ -772,13 +877,17 @@ def retire_child_tool(
                 str(exc),
             )
         )
-    retired = session_retire_tool(
-        config,
-        actor_session_id=caller.id,
-        session_id=target.id,
-        reason=request.reason,
-        host=runtime.host,
-    )
+    except StructuralDispatchLockError as exc:
+        return _target_payload(
+            StructuralOutcome(
+                "retire_child",
+                False,
+                "retire-serialization-refused",
+                request.task_document_ref,
+                request.role,
+                str(exc),
+            )
+        )
     return _target_payload(
         StructuralOutcome(
             "retire_child",

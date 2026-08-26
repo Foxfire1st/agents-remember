@@ -114,6 +114,7 @@ def _seat(
     role: str,
     *,
     status: str = "running",
+    spawned_by_kind: str | None = "ambient",
 ) -> TerminalCatalogEntry:
     return TerminalCatalogEntry(
         id=session_id,
@@ -129,6 +130,7 @@ def _seat(
         status=status,  # type: ignore[arg-type]
         task_document_ref=document,
         seat_role=role,
+        spawned_by_kind=spawned_by_kind,
     )
 
 
@@ -269,7 +271,7 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         spawn.assert_not_called()
 
     def test_plane_dispatch_keeps_structural_caller_provenance(self) -> None:
-        self.catalog.upsert(_seat("architect", self.sprint, "architect"))
+        self.catalog.upsert(_seat("architect", self.sprint, "architect", spawned_by_kind=None))
         with (
             mock.patch(
                 "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
@@ -342,6 +344,7 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         session_retire.assert_not_called()
 
     def test_ambient_dispatch_persists_the_brief_without_a_plane_sender(self) -> None:
+        self.catalog.upsert(_seat("ambient-architect", self.sprint, "architect"))
         with (
             mock.patch(
                 "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
@@ -351,6 +354,7 @@ class DispatchAgentAmbientTests(unittest.TestCase):
                 "agents_remember.application.structural.agent_tools.post_operator_inbox_entry",
                 return_value={
                     "ok": True,
+                    "entryId": "initial-brief",
                     "deliveryState": "delivered",
                     "adapterDeliveryState": "accepted",
                 },
@@ -371,6 +375,10 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         self.assertIsNone(poster.sender_agent_id)
         self.assertIsNone(poster.sender_role)
         self.assertEqual(post.call_args.kwargs["address"].agent_id, "ambient-architect")
+        self.assertEqual(
+            self.catalog.get("ambient-architect").dispatch_brief_entry_id,  # type: ignore[union-attr]
+            "initial-brief",
+        )
 
     def test_resolve_ambient_caller_returns_none_when_plane_identity_is_present(self) -> None:
         caller = resolve_ambient_caller(environ={"AR_HOSTED_SESSION_ID": "seat-1"})
@@ -415,21 +423,24 @@ class DispatchAgentAmbientTests(unittest.TestCase):
     ) -> None:
         host = _FakeHost()
         _write_architect_settings(self.root)
-        inbox_log = self.root / "logs" / "observer" / "workspace" / "operator-inbox.jsonl"
-        inbox_log.mkdir(parents=True)  # a directory: the real append raises OSError
-        result = dispatch_agent_tool(
-            self.config,
-            DispatchAgentRequest(
-                task_document_ref=self.sprint,
-                role="architect",
-                brief="Design the sprint.",
-            ),
-            StructuralAgentRuntime(
-                host=host,  # type: ignore[arg-type]
-                spawn_overrides=SpawnOverrides(host=host, which=_detected),  # type: ignore[arg-type]
-                environ={},
-            ),
-        )
+        with mock.patch.object(
+            OperatorInboxStore,
+            "append",
+            side_effect=OSError("append refused"),
+        ):
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="architect",
+                    brief="Design the sprint.",
+                ),
+                StructuralAgentRuntime(
+                    host=host,  # type: ignore[arg-type]
+                    spawn_overrides=SpawnOverrides(host=host, which=_detected),  # type: ignore[arg-type]
+                    environ={},
+                ),
+            )
 
         self.assertEqual(result["status"], "dispatch-persistence-refused")
         self.assertIn("child retired", result["detail"])
@@ -438,7 +449,7 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         self.assertEqual(rows[0].status, "terminated")
         self.assertEqual([entry for entry, _ in host.terminated], [rows[0].id])
 
-    def test_ambient_dispatch_rollback_reports_a_missing_child_row(self) -> None:
+    def test_ambient_dispatch_refuses_rollback_when_the_child_row_is_missing(self) -> None:
         with (
             mock.patch(
                 "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
@@ -459,10 +470,10 @@ class DispatchAgentAmbientTests(unittest.TestCase):
                 StructuralAgentRuntime(environ={}),
             )
 
-        self.assertEqual(result["status"], "dispatch-persistence-refused")
-        self.assertIn("child retirement also failed", result["detail"])
+        self.assertEqual(result["status"], "dispatch-reconciliation-refused")
+        self.assertIn("durable brief state remains unknown", result["detail"])
 
-    def test_ambient_dispatch_rollback_accepts_an_already_terminated_child(self) -> None:
+    def test_ambient_dispatch_refuses_rollback_when_the_child_is_already_terminated(self) -> None:
         self.catalog.upsert(_seat("retired-child", self.sprint, "architect", status="terminated"))
         with (
             mock.patch(
@@ -484,8 +495,8 @@ class DispatchAgentAmbientTests(unittest.TestCase):
                 StructuralAgentRuntime(environ={}),
             )
 
-        self.assertEqual(result["status"], "dispatch-persistence-refused")
-        self.assertIn("child retired", result["detail"])
+        self.assertEqual(result["status"], "dispatch-reconciliation-refused")
+        self.assertIn("durable brief state remains unknown", result["detail"])
 
     def test_ambient_dispatch_rollback_reports_when_retirement_raises(self) -> None:
         child_entry = _seat("ambient-child", self.sprint, "architect")
@@ -546,6 +557,46 @@ class DispatchAgentAmbientTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dispatch-persistence-refused")
         self.assertIn("child retirement also failed", result["detail"])
+
+    def test_ambient_dispatch_rollback_preserves_an_observer_log_failure_as_secondary(self) -> None:
+        child_entry = _seat("ambient-child", self.sprint, "architect")
+        self.catalog.upsert(child_entry)
+        retired = child_entry.with_retirement(
+            at="2026-08-25T00:00:00+00:00",
+            by_session=None,
+            reason="initial dispatch brief persistence failed",
+            edge="ambient-dispatch-rollback",
+        )
+        with (
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
+                return_value={"status": "spawned-unbriefed", "session": "ambient-child"},
+            ),
+            mock.patch(
+                "agents_remember.application.structural.agent_tools._post_initial_dispatch_brief",
+                side_effect=ValueError("store refused"),
+            ),
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.retire_entry",
+                return_value=retired,
+            ),
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.log_retire_event",
+                side_effect=OSError("observer unavailable"),
+            ),
+        ):
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="architect",
+                    brief="Design the sprint.",
+                ),
+                StructuralAgentRuntime(environ={}),
+            )
+
+        self.assertEqual(result["status"], "dispatch-persistence-refused")
+        self.assertIn("child retired; retirement event logging failed", result["detail"])
 
 
 if __name__ == "__main__":  # pragma: no cover

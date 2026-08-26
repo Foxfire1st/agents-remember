@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agents_remember.controlplane.seats import current_seat_occupant
+from agents_remember.errors import SeatOccupancyError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.ports import TerminalCatalogPort
@@ -33,58 +35,52 @@ class StructuralSeatResolver:
             self.topology.validate_role(document, role)
         except TaskDocumentRefError as exc:
             raise StructuralSeatError(exc.status, str(exc)) from exc
-        rows = [
-            row
-            for row in self.catalog.list()
-            if row.status == "running"
-            and row.binding_role == role
-            and row.task_document_ref == document
-        ]
-        if len(rows) > 1:
-            raise StructuralSeatError(
-                "structural-seat-ambiguous",
-                f"multiple running occupants claim {document.key} as {role}",
-            )
-        if rows:
-            return rows[0]
-        replacements = [
-            row
-            for row in self.catalog.list()
-            if row.status == "running"
-            and row.binding_role == role
-            and row.replacement_for_task_document_ref == document
-        ]
-        if len(replacements) > 1:
-            raise StructuralSeatError(
-                "structural-seat-ambiguous",
-                f"multiple running replacements claim {document.key} as {role}",
-            )
-        if replacements:
-            return replacements[0]
+        try:
+            occupant = current_seat_occupant(self.catalog.list(), document=document, role=role)
+        except SeatOccupancyError as exc:
+            raise StructuralSeatError("structural-seat-ambiguous", str(exc)) from exc
+        if occupant is not None:
+            return occupant
         raise StructuralSeatError(
             "structural-seat-missing", f"no running occupant for {document.key} as {role}"
         )
 
-    def parent(self, caller: TerminalCatalogEntry) -> TerminalCatalogEntry:
-        """Resolve the caller's current structural parent without spawn ancestry."""
+    def parent_address(self, caller: TerminalCatalogEntry) -> tuple[TaskDocumentRef, str]:
+        """Return the caller's canonical parent address without requiring a live occupant."""
 
         document = caller.binding_task_document_ref
         if document is None:
             raise StructuralSeatError("ambient-seat-unbound", "caller has no task document")
         role = caller.binding_role
         if role in {"worker", "reviewer", "curator"}:
-            parent_document = self._parent_document(document)
-            return self.current(parent_document, "manager")
+            return self._parent_document(document), "manager"
         if role == "manager":
-            parent_document = self._parent_document(document)
-            return self.current(parent_document, "orchestrator")
+            return self._parent_document(document), "orchestrator"
         if role == "system-specialist":
-            return self.current(document, "orchestrator")
+            return document, "orchestrator"
         if role in {"orchestrator", "strategist", "designer"}:
-            return self.current(document, "architect")
+            return document, "architect"
         raise StructuralSeatError(
             "structural-parent-unsupported", f"role {role!r} has no messageable parent"
         )
+
+    def child_address(
+        self,
+        caller: TerminalCatalogEntry,
+        *,
+        document: TaskDocumentRef,
+        role: str,
+    ) -> tuple[TaskDocumentRef, str]:
+        """Return an authorized canonical child address even while its seat is vacant."""
+
+        self.authorize_child(caller, document=document, role=role)
+        return document, role
+
+    def parent(self, caller: TerminalCatalogEntry) -> TerminalCatalogEntry:
+        """Resolve the caller's current structural parent without spawn ancestry."""
+
+        document, role = self.parent_address(caller)
+        return self.current(document, role)
 
     def child(
         self,
@@ -95,8 +91,8 @@ class StructuralSeatResolver:
     ) -> TerminalCatalogEntry:
         """Resolve one authorized direct child inside the caller's document scope."""
 
-        self.authorize_child(caller, document=document, role=role)
-        return self.current(document, role)
+        child_document, child_role = self.child_address(caller, document=document, role=role)
+        return self.current(child_document, child_role)
 
     def authorize_child(
         self,
