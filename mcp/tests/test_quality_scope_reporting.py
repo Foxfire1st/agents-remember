@@ -119,6 +119,12 @@ def digest_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def write_executable(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
 def workflow_run_blocks(workflow: str) -> list[str]:
     lines = workflow.splitlines()
     blocks: list[str] = []
@@ -492,27 +498,28 @@ class UntrackedExposureTests(unittest.TestCase):
                 "-m",
                 "hook fixture",
             )
-            fake_python = root / ".venv/bin/python"
-            fake_python.parent.mkdir(parents=True)
-            fake_python.write_text(
+            write_executable(
+                root / ".venv/bin/python",
+                "#!/usr/bin/env sh\n"
+                'echo "the repository-root .venv must not run MCP hooks" >&2\n'
+                "exit 97\n",
+            )
+            write_executable(
+                root / "mcp/.venv/bin/python",
                 "#!/usr/bin/env sh\n"
                 'if [ "$1" = "-m" ] && '
                 '[ "$2" = "agents_remember_test_support.code_quality.scope_reporting" ]; then\n'
                 f'  exec {shlex.quote(sys.executable)} "$@"\n'
                 "fi\n"
                 "exit 0\n",
-                encoding="utf-8",
             )
-            fake_python.chmod(0o755)
             # The dashboard rail is fail-closed on a missing install: give the temp repo a real
             # node_modules and a stub npm so the sequencer contract test exercises the hook's
             # untracked-scope behavior without invoking a frontend toolchain that is not installed.
             (root / "dashboard/node_modules").mkdir(parents=True, exist_ok=True)
             shim_dir = Path(tmp).parent / "l8-sequencer-bin"
             shim_dir.mkdir(parents=True, exist_ok=True)
-            shim = shim_dir / "npm"
-            shim.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
-            shim.chmod(0o755)
+            write_executable(shim_dir / "npm", "#!/usr/bin/env sh\nexit 0\n")
             untracked = root / "pkg/untracked module.py"
             untracked.write_text("VALUE = 2\n", encoding="utf-8")
             git_dir = Path(run_git(root, "rev-parse", "--git-dir").stdout.strip())
@@ -558,6 +565,16 @@ class UntrackedExposureTests(unittest.TestCase):
 
 
 class CallerProvenanceTests(unittest.TestCase):
+    def test_hook_selects_only_the_mcp_development_environment(self) -> None:
+        gate = (REPOSITORY_ROOT / ".githooks/_gate.sh").read_text(encoding="utf-8")
+
+        self.assertIn('local_py="$root/mcp/.venv/bin/python"', gate)
+        self.assertIn('shared_py="$main_root/mcp/.venv/bin/python"', gate)
+        self.assertIn("import agents_remember_test_support.code_quality.scope_reporting", gate)
+        self.assertNotIn('[ -x ".venv/bin/python" ]', gate)
+        self.assertNotIn("command -v python3", gate)
+        self.assertIn("complete MCP dev environment not found at mcp/.venv", gate)
+
     def test_pre_push_ref_range_is_stated_without_a_worktree_certification_claim(self) -> None:
         raw = (
             "refs/heads/feature 1234567890abcdef refs/heads/feature "

@@ -7,14 +7,14 @@
 #     _gate.sh full      manual:     refuse and point at the Dagger-only gate.
 #
 # Enable once per clone:  ./setup-hooks.sh
-# Prerequisite:           pip install -e "mcp[dev]"
+# Prerequisite:           create mcp/.venv and install "mcp[dev]" into it
 #
 # The hook tiers run deterministic non-test checks only. Acceptance is owned by the
 # pinned Dagger graph exactly once at leaf closeout and once at master integration.
 # Push, pull-request, tag, publish, and leaf-integration paths do not rerun it. Pull
 # requests still own GitHub's deterministic non-test checks. In linked worktrees,
-# use the primary worktree's virtual environment when necessary and put the current
-# checkout's source first on PYTHONPATH.
+# use the primary worktree's MCP development environment when necessary and put the
+# current checkout's source first on PYTHONPATH.
 
 set -u
 
@@ -43,15 +43,24 @@ if [ -n "$common_git" ]; then
   main_root="$(CDPATH= cd -- "$common_git/.." 2>/dev/null && pwd)"
 fi
 
-if [ -x ".venv/bin/python" ]; then
-  py=".venv/bin/python"
-elif [ -n "$main_root" ] && [ -x "$main_root/.venv/bin/python" ]; then
-  py="$main_root/.venv/bin/python"
+# Scope reporting imports both MCP runtime and test-support modules. A repository-root
+# venv or system Python can see checkout source through PYTHONPATH while still lacking
+# the package dependencies, so only a complete MCP development environment is valid.
+dev_python_ready() {
+  "$1" -c \
+    'import pyright, ruff; import agents_remember_test_support.code_quality.scope_reporting' \
+    >/dev/null 2>&1
+}
+
+local_py="$root/mcp/.venv/bin/python"
+shared_py="$main_root/mcp/.venv/bin/python"
+if [ -x "$local_py" ] && dev_python_ready "$local_py"; then
+  py="$local_py"
+elif [ -n "$main_root" ] && [ -x "$shared_py" ] && dev_python_ready "$shared_py"; then
+  py="$shared_py"
 else
-  py="$(command -v python3 || command -v python)"
-fi
-if [ -z "$py" ]; then
-  echo "[$label] no python found; install the dev env: pip install -e 'mcp[dev]'" >&2
+  echo "[$label] complete MCP dev environment not found at mcp/.venv." >&2
+  echo "[$label] create it and install the package: python3 -m venv mcp/.venv && mcp/.venv/bin/python -m pip install -e 'mcp[dev]'" >&2
   exit 1
 fi
 
