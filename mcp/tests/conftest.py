@@ -12,17 +12,19 @@ import pytest
 # ``.pth`` entry from validating one checkout and collecting another.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MCP_SRC = REPOSITORY_ROOT / "mcp" / "src"
+MCP_TEST_SUPPORT = REPOSITORY_ROOT / "mcp" / "test_support"
 sys.path.insert(0, str(MCP_SRC))
+sys.path.insert(0, str(MCP_TEST_SUPPORT))
 
-from agents_remember.testing.certifying_bootstrap import (
+from agents_remember_test_support.testing.certifying_bootstrap import (
     CertifyingPytestBootstrap,
 )
-from agents_remember.testing.certifying_bootstrap import (
+from agents_remember_test_support.testing.certifying_bootstrap import (
     prepare_certifying_pytest_bootstrap as _prepare_certifying_pytest_bootstrap,
 )
-from agents_remember.testing.dagger_admission import DaggerAdmissionError
-from agents_remember.testing.global_state import begin_pytest_process
-from agents_remember.testing.hermetic_bootstrap import (
+from agents_remember_test_support.testing.dagger_admission import DaggerAdmissionError
+from agents_remember_test_support.testing.global_state import begin_pytest_process
+from agents_remember_test_support.testing.hermetic_bootstrap import (
     BootstrapConfigurationError,
     EnvironmentLease,
     activate_current_pytest_environment,
@@ -45,10 +47,10 @@ _ENVIRONMENT_LEASE: EnvironmentLease = activate_current_pytest_environment(
 )
 begin_pytest_process()
 
-# Pytest imports this only after the module-level admission above succeeds. The diagnostic route
-# loads ``agents_remember.testing.pytest_bootstrap`` directly and therefore never imports this
-# certifying service composition.
-pytest_plugins = ("agents_remember.pytest_certifying_bootstrap",)
+# Pytest imports this only after the module-level admission above succeeds. Non-accepting Dagger
+# evidence routes load ``agents_remember_test_support.testing.pytest_bootstrap`` directly and
+# therefore never import this certifying service composition.
+pytest_plugins = ("agents_remember_test_support.pytest_certifying_bootstrap",)
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:

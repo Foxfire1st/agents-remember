@@ -26,7 +26,7 @@ from agents_remember.kernel.primitives.checkout_coordination import (
     resolve_checkout_location,
 )
 from agents_remember.kernel.primitives.runtime_config import ConfigError, load_config
-from agents_remember.testing.global_state import preserve_owned_mutable_state
+from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
 
 
 class CheckoutCoordinationIsolationTests(unittest.TestCase):

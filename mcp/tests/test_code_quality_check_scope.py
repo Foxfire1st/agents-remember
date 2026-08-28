@@ -7,10 +7,9 @@ from pathlib import Path
 from unittest import mock
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check
+from agents_remember_test_support.code_quality import check
 from test_code_quality_check import (
     ENVIRONMENT_NAME,
-    MCP_SRC,
     REPOSITORY_ROOT,
     ini_strings,
     pytest_ini_options,
@@ -22,9 +21,9 @@ from test_code_quality_check import (
 
 class GateScopeDerivationTests(unittest.TestCase):
     def test_module_declares_no_hand_written_scope_constant(self) -> None:
-        source = (MCP_SRC / "agents_remember" / "code_quality" / "check.py").read_text(
-            encoding="utf-8"
-        )
+        source = (
+            REPOSITORY_ROOT / "mcp/test_support/agents_remember_test_support/code_quality/check.py"
+        ).read_text(encoding="utf-8")
 
         self.assertNotIn("DEFAULT_SOURCE_PATHS", source)
         self.assertNotIn("DEFAULT_TEST_PATHS", source)
@@ -32,9 +31,6 @@ class GateScopeDerivationTests(unittest.TestCase):
     def test_scope_derived_from_this_checkout_applies_each_rail_to_its_owner(self) -> None:
         scope = check.derive_scope(REPOSITORY_ROOT)
         expected_coverage = [Path("mcp/src/agents_remember")]
-        dagger_package = Path(".dagger/src/agents_remember_quality")
-        if any(path.is_relative_to(dagger_package) for path in scope.lint_paths):
-            expected_coverage.insert(0, dagger_package)
 
         self.assertGreater(len(scope.lint_paths), 500)
         self.assertEqual(scope.lint_paths, scope.type_paths)
@@ -96,6 +92,64 @@ class GateScopeDerivationTests(unittest.TestCase):
 
         self.assertEqual(check.top_level_packages(tracked), [Path("mcp/src/agents_remember")])
 
+    def test_new_importable_package_requires_explicit_product_or_verification_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_sample_repository(Path(tmp))
+            support = root / "support"
+            support.mkdir()
+            (support / "__init__.py").write_text("", encoding="utf-8")
+            run_git(root, "add", "support/__init__.py")
+
+            with self.assertRaises(check.ScopeError) as raised:
+                check.derive_scope(root)
+
+            self.assertIn("missing=['support']", str(raised.exception))
+
+            pyproject = root / "pyproject.toml"
+            pyproject.write_text(
+                pyproject.read_text(encoding="utf-8").replace(
+                    "verification_package_roots = []",
+                    'verification_package_roots = ["support"]',
+                ),
+                encoding="utf-8",
+            )
+            scope = check.derive_scope(root)
+
+            self.assertEqual(scope.coverage_paths, [Path("pkg")])
+            self.assertIn(Path("support/__init__.py"), scope.lint_paths)
+            self.assertIn(Path("support/__init__.py"), scope.type_paths)
+
+    def test_package_authority_rejects_overlap_and_stale_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = write_sample_repository(Path(tmp))
+            pyproject = root / "pyproject.toml"
+            original = pyproject.read_text(encoding="utf-8")
+            pyproject.write_text(
+                original.replace(
+                    "verification_package_roots = []",
+                    'verification_package_roots = ["pkg"]',
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(check.ScopeError) as overlap:
+                check.derive_scope(root)
+
+            self.assertIn("both product and verification", str(overlap.exception))
+
+            pyproject.write_text(
+                original.replace(
+                    "verification_package_roots = []",
+                    'verification_package_roots = ["missing_support"]',
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(check.ScopeError) as stale:
+                check.derive_scope(root)
+
+            self.assertIn("stale=['missing_support']", str(stale.exception))
+
     def test_missing_testpaths_is_an_error_rather_than_a_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -150,15 +204,17 @@ class GateScopeDerivationTests(unittest.TestCase):
 
             self.assertIn("git tracks no Python files", str(raised.exception))
 
-    def test_python_that_belongs_to_no_package_leaves_coverage_nothing_to_measure(self) -> None:
-        # Tracked Python, but no directory holding `__init__.py`: lint and type-check have
-        # paths, `--cov=` would have none. Coverage over an empty set reports 100% of
-        # nothing, and the CRAP step scores an empty report, so this refuses instead.
+    def test_python_that_belongs_to_no_package_refuses_explicit_product_authority(self) -> None:
+        # Tracked Python, but no importable package. The explicit authority contract cannot
+        # name an operational product root, so the gate refuses before deriving empty coverage.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_git(root, "init", "--quiet")
             (root / "pyproject.toml").write_text(
-                '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
+                '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+                "[tool.agents_remember]\nproduct_package_roots = []\n"
+                "verification_package_roots = []\n",
+                encoding="utf-8",
             )
             (root / "sync.py").write_text("value = 1\n", encoding="utf-8")
             run_git(root, "add", "-A")
@@ -168,8 +224,10 @@ class GateScopeDerivationTests(unittest.TestCase):
             with self.assertRaises(check.ScopeError) as raised:
                 check.derive_scope(root)
 
-            self.assertIn("no tracked top-level Python package", str(raised.exception))
-            self.assertIn("coverage and CRAP would have nothing to measure", str(raised.exception))
+            self.assertIn(
+                "product_package_roots must contain at least one operational package",
+                str(raised.exception),
+            )
 
     def test_scope_failure_exits_non_zero_with_an_explanation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

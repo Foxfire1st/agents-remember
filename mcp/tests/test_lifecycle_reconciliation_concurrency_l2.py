@@ -5,15 +5,27 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest import mock
 
+import pytest
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.application.worktree_tools import (
     OperationControlRequest,
     worktree_operation_control_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
+    DirectLandingError,
+)
+from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
+    DirectLandingRecoveryClassification,
+)
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operation_recovery
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
+    LifecycleControlError,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
     legal_operation_controls,
 )
@@ -22,6 +34,10 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 )
 from closeout_input_test_support import with_commit_proven, with_mutation_intent
 from test_lifecycle_operation_controls_l2 import _dirty_closeout, _public_control
+
+
+def _value(**fields: object) -> Any:
+    return cast(Any, SimpleNamespace(**fields))
 
 
 def test_public_control_reconciliation_cannot_overwrite_concurrent_worker_progress(
@@ -122,3 +138,111 @@ def test_stale_cancel_at_commit_boundary_returns_and_executes_exact_recovery(
     assert recovered["ok"] is True
     assert recovered["lifecycleOperation"]["generation"] == proven.generation
     launch.assert_called_once()
+
+
+def test_direct_recovery_state_refuses_only_developer_decisions() -> None:
+    recoverable = DirectLandingRecoveryClassification(state="recoverable")
+    decision = DirectLandingRecoveryClassification(
+        state="developer-decision",
+        status="direct-landing-ambiguous",
+        detail="developer must choose",
+    )
+    with mock.patch.object(
+        lifecycle_operation_recovery,
+        "classify_direct_landing_recovery",
+        return_value=recoverable,
+    ):
+        lifecycle_operation_recovery._require_recoverable_direct_state(_value(), _value())
+    with (
+        mock.patch.object(
+            lifecycle_operation_recovery,
+            "classify_direct_landing_recovery",
+            return_value=decision,
+        ),
+        pytest.raises(LifecycleControlError, match="direct-landing-ambiguous"),
+    ):
+        lifecycle_operation_recovery._require_recoverable_direct_state(_value(), _value())
+
+
+def test_direct_recovery_failure_preserves_typed_error_and_current_record() -> None:
+    recoverable = DirectLandingRecoveryClassification(state="recoverable")
+    durable = _value(name="durable")
+    fallback = _value(name="fallback")
+    store = _value(read=mock.Mock(return_value=durable))
+    error = DirectLandingError(
+        "direct-landing-ledger-changed",
+        "ledger changed",
+        expected={"state": "accepted"},
+        observed={"state": "changed"},
+    )
+    with mock.patch.object(
+        lifecycle_operation_recovery,
+        "classify_direct_landing_recovery",
+        return_value=recoverable,
+    ):
+        translated = lifecycle_operation_recovery._direct_recovery_failure(
+            _value(),
+            store,
+            fallback,
+            error,
+        )
+    assert translated.status == error.status
+    assert translated.next_action == "recover"
+    assert translated.expected == error.expected
+    assert translated.observed == error.observed
+    assert lifecycle_operation_recovery._current_record(store, fallback) is durable
+    assert (
+        lifecycle_operation_recovery._current_record(
+            _value(read=mock.Mock(return_value=None)),
+            fallback,
+        )
+        is fallback
+    )
+
+
+def test_direct_recovery_failure_reclassifies_typed_developer_decision() -> None:
+    decision = DirectLandingRecoveryClassification(
+        state="developer-decision",
+        status="direct-landing-output-ambiguous",
+        detail="developer decision required",
+    )
+    store = _value(read=mock.Mock(return_value=None))
+    fallback = _value()
+    with mock.patch.object(
+        lifecycle_operation_recovery,
+        "classify_direct_landing_recovery",
+        return_value=decision,
+    ):
+        refused = lifecycle_operation_recovery._direct_recovery_failure(
+            _value(),
+            store,
+            fallback,
+            DirectLandingError("direct-landing-cut", "cut"),
+        )
+    assert refused.status == decision.status
+    assert refused.next_action == "developer-decision"
+
+
+def test_direct_recovery_does_not_translate_invariant_runtime_errors() -> None:
+    contract = _value(contract_path=Path("contract.json"))
+    requeued = _value(generation=4)
+    store = _value(resume_generation=mock.Mock(return_value=(requeued, True)))
+    runtime = _value(contract=contract)
+    with (
+        mock.patch.object(lifecycle_operation_recovery, "load_contract", return_value=contract),
+        mock.patch.object(lifecycle_operation_recovery, "_require_recoverable_direct_state"),
+        mock.patch.object(
+            lifecycle_operation_recovery, "DirectLandingRuntime", return_value=runtime
+        ),
+        mock.patch.object(
+            lifecycle_operation_recovery,
+            "execute_or_require_direct_landing_recovery",
+            side_effect=RuntimeError("journal invariant failed"),
+        ),
+        pytest.raises(RuntimeError, match="journal invariant failed"),
+    ):
+        lifecycle_operation_recovery.recover_direct_landing_under_authority(
+            contract,
+            store,
+            _value(generation=4),
+        )

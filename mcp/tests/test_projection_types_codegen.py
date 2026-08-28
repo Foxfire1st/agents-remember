@@ -14,7 +14,6 @@ import unittest
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.code_quality import projection_types
 from agents_remember.observer.projection import (
     AgentPickupNode,
     Analytics,
@@ -25,6 +24,7 @@ from agents_remember.observer.projection import (
     TaskDocNode,
     WorkspaceProjection,
 )
+from agents_remember_test_support.code_quality import projection_types
 from pydantic import BaseModel
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -283,7 +283,10 @@ class ProjectionSchemaDriftTests(unittest.TestCase):
         configuration = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         environments = configuration["tool"]["pyright"]["executionEnvironments"]
 
-        self.assertIn({"root": "scripts", "extraPaths": ["mcp/src"]}, environments)
+        self.assertIn(
+            {"root": "scripts", "extraPaths": ["mcp/src", "mcp/test_support"]},
+            environments,
+        )
 
     def test_projection_provenance_claims_stay_true(self) -> None:
         forbidden = (

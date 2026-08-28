@@ -102,7 +102,7 @@ from agents_remember.providers.metrics import (
     ProviderMetricsStore,
 )
 from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
-from agents_remember.testing.global_state import preserve_owned_mutable_state
+from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
 

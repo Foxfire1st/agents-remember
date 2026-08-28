@@ -80,7 +80,6 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 _TS = "2026-06-14T10:00:00Z"
 _FRESH_GATE_TS = "2999-01-01T10:00:00+00:00"
 _FRESH_GATE_TS_LATER = "2999-01-01T10:05:00+00:00"
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "sim"
 
 
 def _build_wire(build: ServingBuild) -> dict[str, Any]:

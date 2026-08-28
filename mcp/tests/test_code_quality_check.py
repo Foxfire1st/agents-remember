@@ -12,30 +12,24 @@ import unittest
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import (
-    Any,
-    TypeGuard,
-)
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import (
+from _ruff_repository_evidence import (
+    ruff_lint_configuration,
+    run_ruff_over_tracked_python,
+    run_ruff_with_repository_configuration,
+)
+from agents_remember_test_support.code_quality import (
     check,
     crap_calculator,
+    quality_plan,
 )
 
 COMPLEXITY_RULES = ("C901", "PLR0911", "PLR0912", "PLR0915")
-
-ARGUMENT_COUNT_RULE = "PLR0913"
-# The one path exempt from PLR0913, spelled twice on purpose. The pattern is what
-# `pyproject.toml` must say verbatim; the directory is what that pattern must resolve to.
-# Widening the exemption has to defeat both, and `ToolSignatureExemptionTests` still walks
-# whatever the pyproject pattern actually matches rather than what these constants claim.
-TOOL_DECLARATION_DIRECTORY = "mcp/src/agents_remember/mcp/registration"
-TOOL_DECLARATION_PATTERN = "mcp/src/agents_remember/mcp/registration/*.py"
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 TESTS_ROOT = Path(__file__).resolve().parent
@@ -44,6 +38,11 @@ SKIP_DECORATORS = ("skipUnless", "skipIf", "skipif")
 
 
 class CodeQualityCheckTests(unittest.TestCase):
+    def test_check_is_the_stable_facade_for_the_single_quality_plan(self) -> None:
+        self.assertIs(check.CheckConfig, quality_plan.CheckConfig)
+        self.assertIs(check.Step, quality_plan.Step)
+        self.assertIs(check.quality_steps, quality_plan.quality_steps)
+
     def test_progress_and_coverage_state_overwrite_report_local_paths(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             root = Path(tmp)
@@ -169,10 +168,10 @@ class CodeQualityCheckTests(unittest.TestCase):
                 [
                     "ruff",
                     "ruff",
-                    "agents_remember.code_quality.file_size",
-                    "agents_remember.code_quality.layering",
+                    "agents_remember_test_support.code_quality.file_size",
+                    "agents_remember_test_support.code_quality.layering",
                     "pyright",
-                    "agents_remember.testing.evidence_lifecycle",
+                    "agents_remember_test_support.testing.evidence_lifecycle",
                     "radon",
                     "radon",
                     "pytest",
@@ -242,11 +241,14 @@ class CodeQualityCheckTests(unittest.TestCase):
         workflow = (REPOSITORY_ROOT / ".github/workflows/quality-checks.yml").read_text(
             encoding="utf-8"
         )
-        dagger_module = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
+        dagger_main = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
             encoding="utf-8"
         )
+        dagger_command = (
+            REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/quality_command.py"
+        ).read_text(encoding="utf-8")
 
-        self.assertNotIn("agents_remember.code_quality.check", hook)
+        self.assertNotIn("agents_remember_test_support.code_quality.check", hook)
         self.assertIn("acceptance is Dagger-only", hook)
         self.assertNotIn("for step in lint typecheck test", hook)
         self.assertNotIn('npm --prefix dashboard run "test"', hook)
@@ -254,9 +256,10 @@ class CodeQualityCheckTests(unittest.TestCase):
         self.assertIn("./.githooks/_gate.sh targeted", workflow)
         self.assertNotIn("pytest", workflow)
         self.assertNotIn("npm run test", workflow)
-        self.assertNotIn("agents_remember.code_quality.check", workflow)
-        self.assertIn("agents_remember.code_quality.check", dagger_module)
-        for content in (hook, workflow, dagger_module):
+        self.assertNotIn("agents_remember_test_support.code_quality.check", workflow)
+        self.assertIn("quality_wrapper_command", dagger_main)
+        self.assertIn("agents_remember_test_support.code_quality.check", dagger_command)
+        for content in (hook, workflow, dagger_main, dagger_command):
             self.assertNotIn("fail-on-crap-threshold", content)
 
     def test_workflows_preserve_the_pr_check_and_release_only_boundaries(self) -> None:
@@ -508,9 +511,8 @@ class EveryEnforcingStepCanFailTests(unittest.TestCase):
         # place to put the next offender. The module, its file and the wrapper step that
         # ran it all go together, and the two local gates lose the routing that fed it.
         self.assertFalse((REPOSITORY_ROOT / "quality").exists())
-        self.assertFalse(
-            (MCP_SRC / "agents_remember" / "code_quality" / "complexity_baseline.py").exists()
-        )
+        support = REPOSITORY_ROOT / "mcp/test_support/agents_remember_test_support/code_quality"
+        self.assertFalse((support / "complexity_baseline.py").exists())
         for gate_file in (
             REPOSITORY_ROOT / ".githooks" / "_gate.sh",
             REPOSITORY_ROOT / ".github" / "workflows" / "quality-checks.yml",
@@ -524,85 +526,6 @@ class EveryEnforcingStepCanFailTests(unittest.TestCase):
             shell_command_lines(REPOSITORY_ROOT / ".githooks" / "_gate.sh", "-m ruff check"),
             ['if over_tracked_python "$py" -m ruff check; then'],
         )
-
-
-class ToolSignatureExemptionTests(unittest.TestCase):
-    """PLR0913's one exemption covers published MCP tool declarations and nothing else.
-
-    ``mcp/src/agents_remember/mcp/registration/`` is exempt because FastMCP derives each
-    tool's published JSON input schema from the Python signature, so collapsing a parameter
-    list into an object is a breaking wire change rather than a refactor. That reason holds
-    only for `@server.tool()` declarations. These tests are what stops the exemption from
-    becoming a place to park ordinary code: the moment a plain function appears under that
-    path, or a second path is exempted, or the pattern is widened, one of them fails.
-    """
-
-    def test_plr0913_is_armed_and_nothing_globally_ignores_it(self) -> None:
-        lint = ruff_lint_configuration()
-
-        # `PL` selects the PLR09xx family, PLR0913 included.
-        self.assertIn("PL", set(lint.get("select", [])))
-        self.assertNotIn(ARGUMENT_COUNT_RULE, set(lint.get("ignore", [])))
-        # Ruff's default max-args is 5, which is the number the memory root's
-        # system/coding-guidelines.md states ("Function arguments | <= 5 normal args").
-        # Configuring the knob at all can only weaken the rule to the size of whatever
-        # offender prompted the edit, so its absence is asserted rather than its value.
-        self.assertNotIn("max-args", lint.get("pylint", {}))
-
-    def test_the_registration_modules_are_the_only_path_exempt_from_plr0913(self) -> None:
-        # The pattern is asserted verbatim rather than "some pattern ending in
-        # registration". Widening it -- to the package above, to `*.py`, to a second
-        # directory -- is exactly the failure this exists to catch, and a widened pattern
-        # still satisfies any assertion loose enough to describe it.
-        exempted = {
-            pattern
-            for pattern, codes in ruff_lint_configuration().get("per-file-ignores", {}).items()
-            if ARGUMENT_COUNT_RULE in codes
-        }
-
-        self.assertEqual(exempted, {TOOL_DECLARATION_PATTERN})
-
-    def test_every_function_in_the_exempted_path_is_a_published_tool_declaration(self) -> None:
-        # Read through the pattern, not through a second hand-written path: a pattern that
-        # reaches further immediately drags more files into this walk, so widening the
-        # exemption fails here too and not only in the assertion above.
-        modules = exempted_tool_modules()
-        self.assertEqual(
-            modules,
-            sorted((REPOSITORY_ROOT / TOOL_DECLARATION_DIRECTORY).glob("*.py")),
-            "the exemption pattern no longer matches exactly the tool declaration modules",
-        )
-
-        for module in modules:
-            with self.subTest(module=module.name):
-                self.assertEqual(ordinary_code_in_tool_module(module), [])
-
-    def test_no_suppression_directive_in_the_tree_holds_an_argument_count_finding_down(
-        self,
-    ) -> None:
-        # The path exemption is visible in `pyproject.toml` and is held to one category by
-        # the tests above. A line-level suppression is neither: Ruff honours it, so the gate
-        # goes green whatever it covers. `--ignore-noqa` asks the question the gate cannot.
-        completed = run_ruff_over_tracked_python("--ignore-noqa", "--select", ARGUMENT_COUNT_RULE)
-
-        self.assertEqual(completed.returncode, 0, completed.stdout)
-
-    def test_ruff_rejects_a_seven_parameter_function_at_this_repository_configuration(
-        self,
-    ) -> None:
-        # Proved against the real configuration rather than inferred from the flag list.
-        # A rule can be selected and still not bite -- an ignore entry, a `max-args`
-        # override or a per-file pattern that reaches too far all read as "armed" to
-        # anything that only inspects `select`.
-        with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "seven_parameters.py"
-            source.write_text(seven_parameter_function(), encoding="utf-8")
-
-            completed = run_ruff_with_repository_configuration(source)
-
-            self.assertEqual(completed.returncode, 1, completed.stdout)
-            reported = {entry["code"] for entry in json.loads(completed.stdout)}
-            self.assertIn(ARGUMENT_COUNT_RULE, reported)
 
 
 class CrapThresholdEnforcementTests(unittest.TestCase):
@@ -725,6 +648,9 @@ def write_sample_repository(root: Path) -> Path:
                 "branch = true",
                 "[tool.pytest.ini_options]",
                 'testpaths = ["tests"]',
+                "[tool.agents_remember]",
+                'product_package_roots = ["pkg"]',
+                "verification_package_roots = []",
                 "",
             )
         ),
@@ -750,135 +676,6 @@ def unwrapped_help() -> str:
     return re.sub(r"\s+", " ", check.build_parser().format_help())
 
 
-def ruff_lint_configuration() -> dict[str, Any]:
-    with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as handle:
-        data = tomllib.load(handle)
-    return data["tool"]["ruff"]["lint"]
-
-
-def exempted_tool_modules() -> list[Path]:
-    """Every file the PLR0913 per-file-ignore actually reaches.
-
-    Resolved from the pattern `pyproject.toml` carries, not from a path written here, so a
-    widened pattern drags its new files into the AST walk instead of quietly escaping it.
-    """
-    patterns = [
-        pattern
-        for pattern, codes in ruff_lint_configuration().get("per-file-ignores", {}).items()
-        if ARGUMENT_COUNT_RULE in codes
-    ]
-    return sorted({match for pattern in patterns for match in REPOSITORY_ROOT.glob(pattern)})
-
-
-# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_code_quality_check.py:598).
-def ordinary_code_in_tool_module(module: Path) -> list[str]:  # pragma: no cover
-    """Everything in ``module`` that is not a published tool declaration or a registrar.
-
-    The exemption's justification -- a signature that IS the published MCP input schema --
-    covers `@server.tool()` declarations and the thin `register_*_tools(server, config)`
-    that hosts them. Nothing else in these files has that excuse, so anything else is named
-    here and the caller fails on it.
-
-    260731-EFA-L6 taught this two more shapes, because a registrar body grows one tool at a
-    time and six of them had reached 127-163 lines under the 100-line cap that leaf armed.
-    A registrar may now delegate to another registrar DEFINED IN THE SAME MODULE, and it
-    may carry a docstring saying what it groups. That is the whole widening, and it stays
-    tight where it matters: a call to anything this module does not define as a registrar
-    is still ordinary code, so delegation cannot become a route for arbitrary calls, and a
-    private `_register_*_tools` helper is held to the same body rule as the public one.
-
-    Read from the AST rather than the source text. A grep for the decorator cannot tell a
-    real declaration from the same characters in a docstring, and cannot see that a helper
-    two levels down is undecorated at all.
-    """
-    tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
-    registrars = {node for node in tree.body if is_tool_registrar(node)}
-    registrar_names = {registrar.name for registrar in registrars}
-    findings: list[str] = []
-    for node in ast.walk(tree):
-        where = f"{module.name}:{getattr(node, 'lineno', 0)}"
-        if isinstance(node, ast.ClassDef):
-            # A class body is a second place to put methods, and a seven-parameter method
-            # inside one would inherit the exemption without inheriting its reason.
-            findings.append(f"{where} class {node.name}")
-        elif isinstance(node, ast.Lambda):
-            findings.append(f"{where} lambda")
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if node in registrars:
-                findings.extend(registrar_body_findings(node, registrar_names, module.name))
-            elif not any(is_server_tool_decorator(decorator) for decorator in node.decorator_list):
-                findings.append(f"{where} function {node.name} is not a @server.tool()")
-    return findings
-
-
-def is_tool_registrar(node: ast.stmt) -> TypeGuard[ast.FunctionDef | ast.AsyncFunctionDef]:
-    """A module-level, undecorated ``[_]register_<something>_tools`` host."""
-    return (
-        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.lstrip("_").startswith("register_")
-        and node.name.endswith("_tools")
-        and not node.decorator_list
-    )
-
-
-# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_code_quality_check.py:648).
-def registrar_body_findings(  # pragma: no cover
-    registrar: ast.FunctionDef | ast.AsyncFunctionDef,
-    registrar_names: set[str],
-    module_name: str,
-) -> list[str]:
-    """Registrar statements that are neither a tool declaration nor a delegation."""
-    findings: list[str] = []
-    for index, statement in enumerate(registrar.body):
-        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        if index == 0 and is_docstring(statement):
-            continue
-        if is_registrar_delegation(statement, registrar_names):
-            continue
-        findings.append(
-            f"{module_name}:{statement.lineno} registrar {registrar.name} contains "
-            f"{type(statement).__name__}"
-        )
-    return findings
-
-
-def is_docstring(statement: ast.stmt) -> bool:
-    return (
-        isinstance(statement, ast.Expr)
-        and isinstance(statement.value, ast.Constant)
-        and isinstance(statement.value.value, str)
-    )
-
-
-def is_registrar_delegation(statement: ast.stmt, registrar_names: set[str]) -> bool:
-    """A bare call to a registrar this module defines -- and to nothing else."""
-    return (
-        isinstance(statement, ast.Expr)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Name)
-        and statement.value.func.id in registrar_names
-    )
-
-
-def is_server_tool_decorator(decorator: ast.expr) -> bool:
-    """True for exactly `@server.tool()` -- matched on the syntax tree, not on its spelling."""
-    return (
-        isinstance(decorator, ast.Call)
-        and isinstance(decorator.func, ast.Attribute)
-        and decorator.func.attr == "tool"
-        and isinstance(decorator.func.value, ast.Name)
-        and decorator.func.value.id == "server"
-    )
-
-
-def seven_parameter_function() -> str:
-    """An ordinary function two parameters over Ruff's default `max-args` of 5."""
-    names = [f"value_{index}" for index in range(7)]
-    signature = ", ".join(f"{name}: int" for name in names)
-    return f"def ordinary({signature}) -> int:\n    return {' + '.join(names)}\n"
-
-
 def over_complex_function() -> str:
     """A function that trips all four complexity rules at once.
 
@@ -901,53 +698,6 @@ def shell_command_lines(script: Path, needle: str) -> list[str]:
         for line in script.read_text(encoding="utf-8").splitlines()
         if needle in (stripped := line.strip()) and not stripped.startswith("#")
     ]
-
-
-def run_ruff_over_tracked_python(*arguments: str) -> subprocess.CompletedProcess[str]:
-    """Ruff with ``arguments`` over every tracked Python file in this checkout."""
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "ruff",
-            "check",
-            "--no-cache",
-            *arguments,
-            *(path.as_posix() for path in check.git_ls_files(REPOSITORY_ROOT, "*.py")),
-        ],
-        cwd=REPOSITORY_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
-
-
-def run_ruff_with_repository_configuration(source: Path) -> subprocess.CompletedProcess[str]:
-    """Ruff over one file, at this repository's real lint configuration.
-
-    `--config` is what makes the run meaningful: the sample lives in a temporary directory
-    where Ruff would otherwise discover no `pyproject.toml` and fall back to its defaults,
-    which is a different question from the one being asked.
-    """
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "ruff",
-            "check",
-            "--no-cache",
-            "--config",
-            str(REPOSITORY_ROOT / "pyproject.toml"),
-            "--output-format",
-            "json",
-            str(source),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
 
 
 def pytest_ini_options() -> dict[str, object]:

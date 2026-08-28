@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from agents_remember.code_quality import clean_room
+from agents_remember_test_support.code_quality import clean_room
 
 
 def test_clean_room_cli_passes_explicit_candidate_and_memory_limit(tmp_path: Path) -> None:

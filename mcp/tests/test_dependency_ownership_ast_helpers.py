@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 from pathlib import Path
 
 import pytest
-from agents_remember.code_quality import dependency_ownership as ownership
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
+from agents_remember_test_support.code_quality.dependency_ownership import (
+    DependencyOwnershipGraph,
+)
+from agents_remember_test_support.code_quality.scope import ScopeError
+from agents_remember_test_support.testing import dependency_facts as facts
 
 
 def test_file_imports_includes_python_and_declared_pytest_plugins(tmp_path: Path) -> None:
@@ -21,7 +27,7 @@ def test_file_imports_includes_python_and_declared_pytest_plugins(tmp_path: Path
         ),
         encoding="utf-8",
     )
-    imports = ownership.file_imports(conftest, None)
+    imports = facts.file_imports(conftest, None)
     assert {
         "package",
         "package.child",
@@ -33,12 +39,12 @@ def test_file_imports_includes_python_and_declared_pytest_plugins(tmp_path: Path
     }.issubset(imports)
 
     ordinary = tmp_path / "module.py"
-    ordinary.write_text("pytest_plugins = ('ignored.plugin',)\n", encoding="utf-8")
-    assert ownership.file_imports(ordinary, None) == set()
+    ordinary.write_text("pytest_plugins = ('recursive.plugin',)\n", encoding="utf-8")
+    assert {"recursive", "recursive.plugin"}.issubset(facts.file_imports(ordinary, None))
     invalid = tmp_path / "invalid.py"
     invalid.write_text("def broken(:\n", encoding="utf-8")
-    with pytest.raises(ownership.ScopeError, match="could not parse"):
-        ownership.file_imports(invalid, None)
+    with pytest.raises(ScopeError, match="could not parse"):
+        facts.file_imports(invalid, None)
 
 
 def test_pytest_plugin_ast_helpers_accept_only_assignment_string_values() -> None:
@@ -52,22 +58,137 @@ def test_pytest_plugin_ast_helpers_accept_only_assignment_string_values() -> Non
     assert isinstance(first, ast.Assign)
     assert isinstance(second, ast.AnnAssign)
     assert isinstance(other, ast.Assign)
-    assert ownership._pytest_plugins_value(first) is not None
-    assert ownership._pytest_plugins_value(second) is not None
-    assert ownership._pytest_plugins_value(other) is None
-    assert ownership._pytest_plugins_value(ast.Pass()) is None
+    assert facts._pytest_plugins_value(first) is not None
+    assert facts._pytest_plugins_value(second) is not None
+    assert facts._pytest_plugins_value(other) is None
+    assert facts._pytest_plugins_value(ast.Pass()) is None
+    assert facts._pytest_plugins_target(first.targets[0])
+    assert not facts._pytest_plugins_target(other.targets[0])
 
-    assert len(ownership._assignment_targets(first)) == 1
-    assert len(ownership._assignment_targets(second)) == 1
-    assert ownership._assignment_targets(ast.Pass()) == ()
-    assert ownership._is_pytest_plugins_target(first.targets[0])
-    assert not ownership._is_pytest_plugins_target(other.targets[0])
+    assert second.value is not None
+    with pytest.raises(ScopeError, match="literal dotted module names"):
+        facts._literal_plugin_names(first.value)
+    assert facts._literal_plugin_names(second.value) == ("two.plugin",)
+    with pytest.raises(ScopeError, match="literal string or sequence"):
+        facts._literal_plugin_names(ast.Name(id="dynamic"))
+    with pytest.raises(ScopeError, match="literal dotted module names"):
+        facts._pytest_plugin_imports(tree)
 
-    plugins = ownership._declared_pytest_plugins(first.value)
-    assert {"one", "one.plugin"}.issubset(plugins)
-    assert ownership._pytest_plugin_name(ast.Constant(value="plugin")) == "plugin"
-    assert ownership._pytest_plugin_name(ast.Constant(value=1)) is None
-    assert ownership._pytest_plugin_name(ast.Name(id="dynamic")) is None
-    assert {"one", "one.plugin", "two", "two.plugin"}.issubset(
-        ownership._pytest_plugin_imports(tree)
+
+def test_nested_pytest_plugin_edges_reach_the_complete_test_population(tmp_path: Path) -> None:
+    _initialize_repository(tmp_path)
+    _write(tmp_path, "tests/conftest.py", "pytest_plugins = ('plugins.alpha',)\n")
+    _write(tmp_path, "tests/plugins/alpha.py", "pytest_plugins = ('plugins.beta',)\n")
+    _write(tmp_path, "tests/plugins/beta.py", "VALUE = 1\n")
+    _write(tmp_path, "tests/test_one.py", "def test_one():\n    assert True\n")
+    _write(tmp_path, "tests/test_two.py", "def test_two():\n    assert True\n")
+    _write(tmp_path, "mcp/tests/fixtures/anchor.json", "{}\n")
+    write_synthetic_evidence_catalog(
+        tmp_path,
+        {"mcp/tests/fixtures/anchor.json": ("tests/test_one.py",)},
     )
+
+    impact = DependencyOwnershipGraph(tmp_path).resolve([Path("tests/plugins/beta.py")])
+
+    assert impact.complete
+    assert impact.fresh_rerun_reason is None
+    assert impact.tests == (Path("tests/test_one.py"), Path("tests/test_two.py"))
+    assert all(
+        any(reason.kind.value == "import-consumer" for reason in impact.reasons_for(test))
+        for test in impact.tests
+    )
+
+
+def test_dynamic_nested_plugin_declaration_refuses_complete_ownership(tmp_path: Path) -> None:
+    _initialize_repository(tmp_path)
+    _write(tmp_path, "tests/conftest.py", "pytest_plugins = ('plugins.alpha',)\n")
+    _write(tmp_path, "tests/plugins/alpha.py", "pytest_plugins = dynamic_plugins\n")
+    _write(tmp_path, "tests/plugins/beta.py", "VALUE = 1\n")
+    _write(tmp_path, "tests/test_one.py", "def test_one():\n    assert True\n")
+    _write(tmp_path, "mcp/tests/fixtures/anchor.json", "{}\n")
+    write_synthetic_evidence_catalog(
+        tmp_path,
+        {"mcp/tests/fixtures/anchor.json": ("tests/test_one.py",)},
+    )
+
+    impact = DependencyOwnershipGraph(tmp_path).resolve([Path("tests/plugins/beta.py")])
+
+    assert not impact.complete
+    assert impact.fresh_rerun_reason is not None
+    assert "import-graph-invalid" in impact.fresh_rerun_reason.detail
+    assert impact.tests == (Path("tests/test_one.py"),)
+
+
+def test_imported_support_reaches_a_test_that_loads_its_owner_by_literal_path(
+    tmp_path: Path,
+) -> None:
+    _initialize_repository(tmp_path)
+    _write(tmp_path, ".dagger/src/quality/__init__.py", "")
+    _write(tmp_path, ".dagger/src/quality/support.py", "VALUE = 1\n")
+    _write(tmp_path, ".dagger/src/quality/main.py", "from quality.support import VALUE\n")
+    _write(
+        tmp_path,
+        "tests/test_quality.py",
+        "from pathlib import Path\n"
+        "MODULE = Path('.dagger/src/quality/main.py')\n"
+        "def test_module():\n"
+        "    assert 'VALUE' in MODULE.read_text(encoding='utf-8')\n",
+    )
+    _write(tmp_path, "mcp/tests/fixtures/anchor.json", "{}\n")
+    write_synthetic_evidence_catalog(
+        tmp_path,
+        {"mcp/tests/fixtures/anchor.json": ("tests/test_quality.py",)},
+    )
+
+    impact = DependencyOwnershipGraph(tmp_path).resolve([Path(".dagger/src/quality/support.py")])
+
+    assert impact.complete
+    assert impact.tests == (Path("tests/test_quality.py"),)
+    assert any(
+        reason.kind.value == "import-consumer"
+        for reason in impact.reasons_for(Path("tests/test_quality.py"))
+    )
+
+
+def test_exact_dotted_module_literal_is_an_observable_test_consumer(tmp_path: Path) -> None:
+    _initialize_repository(tmp_path)
+    _write(tmp_path, "src/pkg/__init__.py", "")
+    _write(tmp_path, "src/pkg/wiring.py", "VALUE = 1\n")
+    _write(
+        tmp_path,
+        "tests/test_wiring.py",
+        'WIRING_MODULE = "pkg.wiring"\n'
+        "def test_wiring_identity():\n"
+        "    assert WIRING_MODULE.endswith('.wiring')\n",
+    )
+    _write(tmp_path, "mcp/tests/fixtures/anchor.json", "{}\n")
+    write_synthetic_evidence_catalog(
+        tmp_path,
+        {"mcp/tests/fixtures/anchor.json": ("tests/test_wiring.py",)},
+    )
+
+    impact = DependencyOwnershipGraph(tmp_path).resolve([Path("src/pkg/wiring.py")])
+
+    assert impact.complete
+    assert impact.tests == (Path("tests/test_wiring.py"),)
+    assert any(
+        reason.kind.value == "literal-consumer"
+        for reason in impact.reasons_for(Path("tests/test_wiring.py"))
+    )
+
+
+def _initialize_repository(root: Path) -> None:
+    subprocess.run(
+        ["git", "init", "--quiet", "--initial-branch=main"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _write(root, "pyproject.toml", "[tool.pytest.ini_options]\ntestpaths = ['tests']\n")
+
+
+def _write(root: Path, relative: str, content: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")

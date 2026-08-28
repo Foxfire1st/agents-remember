@@ -19,7 +19,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import pytest
-from agents_remember.code_quality import structural_limits
+from agents_remember_test_support.code_quality import structural_limits
 
 pytestmark = pytest.mark.fitness
 

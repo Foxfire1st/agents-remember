@@ -4,17 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from agents_remember.code_quality.projection_types import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "mcp" / "test_support"))
+sys.path.insert(0, str(REPO_ROOT / "mcp" / "src"))
+
+from agents_remember_test_support.code_quality.projection_types import (  # noqa: E402
     REGENERATE_COMMAND,
     SCHEMA_OUTPUT,
     TYPESCRIPT_OUTPUT,
     stale_generated_files,
     sync_generated_files,
 )
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def parse_args() -> argparse.Namespace:

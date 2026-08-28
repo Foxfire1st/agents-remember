@@ -14,11 +14,12 @@ from pathlib import Path
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+MCP_TEST_SUPPORT = Path(__file__).resolve().parents[1] / "test_support"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check, file_size
-from agents_remember.code_quality import scope as quality_scope
+from agents_remember_test_support.code_quality import check, file_size
+from agents_remember_test_support.code_quality import scope as quality_scope
 from test_code_quality_check import REPOSITORY_ROOT, sample_config
 
 
@@ -118,7 +119,12 @@ class FileSizeCliTests(unittest.TestCase):
                 self.assertRaises(SystemExit) as raised,
             ):
                 runpy.run_path(
-                    str(MCP_SRC / "agents_remember" / "code_quality" / "file_size.py"),
+                    str(
+                        MCP_TEST_SUPPORT
+                        / "agents_remember_test_support"
+                        / "code_quality"
+                        / "file_size.py"
+                    ),
                     run_name="__main__",
                 )
             self.assertEqual(raised.exception.code, 0)
@@ -137,7 +143,7 @@ class FileSizeWrapperWiringTests(unittest.TestCase):
 
             step = steps["file-size"]
             self.assertTrue(step.enforcing)
-            self.assertIn("agents_remember.code_quality.file_size", step.command)
+            self.assertIn("agents_remember_test_support.code_quality.file_size", step.command)
             self.assertIn(source.as_posix(), step.command)
 
     def test_unarmed_step_reports_and_armed_step_fails(self) -> None:
@@ -208,6 +214,8 @@ class FileSizeScopeTests(unittest.TestCase):
                     'testpaths = ["tests"]\n'
                     "[tool.agents_remember]\n"
                     "file_size_armed = false\n"
+                    'product_package_roots = ["pkg"]\n'
+                    "verification_package_roots = []\n"
                 ),
                 encoding="utf-8",
             )
@@ -235,14 +243,17 @@ def run_detector(extra: list[str]) -> subprocess.CompletedProcess[str]:
         [
             sys.executable,
             "-m",
-            "agents_remember.code_quality.file_size",
+            "agents_remember_test_support.code_quality.file_size",
             *extra,
         ],
         capture_output=True,
         text=True,
         check=False,
         stdin=subprocess.DEVNULL,
-        env={"PYTHONPATH": str(MCP_SRC), "PATH": "/usr/bin:/bin"},
+        env={
+            "PYTHONPATH": f"{MCP_TEST_SUPPORT}:{MCP_SRC}",
+            "PATH": "/usr/bin:/bin",
+        },
     )
 
 
@@ -255,6 +266,8 @@ def write_sample_repository_and_source(root: Path) -> Path:
             'testpaths = ["tests"]\n'
             "[tool.agents_remember]\n"
             "file_size_armed = false\n"
+            'product_package_roots = ["pkg"]\n'
+            "verification_package_roots = []\n"
         ),
         encoding="utf-8",
     )

@@ -65,6 +65,7 @@ LIVE_OPT_IN = "AR_RUN_EVIDENCE_INSTALLED"
 CODEX_PINNED = "0.144.5"
 PI_PINNED = "0.80.7"
 CLAUDE_LOCKED = "2.1.211"
+CLAUDE_FIXTURE = FIXTURE_ROOT / "claude-2.1.211.json"
 PROMPT = "Reply with exactly the word OK and nothing else."
 
 
@@ -383,7 +384,7 @@ class ClaudeInstalledHonestyTests(unittest.TestCase):
         if executable is None:
             self.skipTest("installed claude executable is unavailable")
         version = _version_of(executable).split(" ", 1)[0]
-        fixture = json.loads((FIXTURE_ROOT / f"claude-{CLAUDE_LOCKED}.json").read_text())
+        fixture = json.loads(CLAUDE_FIXTURE.read_text())
         substrate_rows = [
             row
             for row in fixture["observations"]

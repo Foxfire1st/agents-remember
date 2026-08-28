@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -17,15 +18,14 @@ sys.path.insert(0, str(MCP_SRC))
 
 from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check, retry_proof
-from agents_remember.code_quality.scope import GateScope
+from agents_remember_test_support.code_quality import check, retry_coverage, retry_proof
+from agents_remember_test_support.code_quality.scope import GateScope
 
 
 @pytest.fixture(autouse=True)
 def _isolate_outer_quality_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unit tests own the invocation mode instead of inheriting the wrapper's CI marker."""
+    """Focused proofs never inherit the explicit retry rollback switch."""
 
-    monkeypatch.delenv("AR_QUALITY_INVOCATION", raising=False)
     monkeypatch.delenv(retry_proof.DISABLE_ENV, raising=False)
 
 
@@ -43,7 +43,7 @@ def test_changed_test_contexts_and_collection_context_are_removed(tmp_path: Path
         data.add_arcs({measured: [arc]})
     data.write()
 
-    retry_proof._filtered_coverage_data(  # pyright: ignore[reportPrivateUsage]
+    assert retry_coverage.retain_unchanged_contexts(
         source,
         destination,
         [Path("mcp/tests/test_changed.py")],
@@ -51,7 +51,7 @@ def test_changed_test_contexts_and_collection_context_are_removed(tmp_path: Path
 
     filtered = CoverageData(basename=str(destination))
     filtered.read()
-    assert filtered.measured_contexts() == {retry_proof.CACHED_CONTEXT}
+    assert filtered.measured_contexts() == {retry_coverage.CACHED_CONTEXT}
     assert filtered.arcs(measured) == [(3, 4)]
 
 
@@ -96,7 +96,7 @@ def test_full_proof_becomes_exact_then_test_delta_and_source_change_invalidates(
     exact.finish(coverage_json, quality_passed=False)
 
     test_path.write_text(
-        "def test_sample():\n    assert True\n\ndef test_more():\n    assert True\n",
+        test_path.read_text(encoding="utf-8") + "\ndef test_more():\n    assert True\n",
         encoding="utf-8",
     )
     delta = retry_proof.prepare(
@@ -202,7 +202,10 @@ def test_retry_reruns_declared_support_and_fixture_consumers_but_not_unaffected_
     assert "global-test-input" in output[-1]
 
 
-def test_wrapper_retry_runs_only_changed_test_module(tmp_path: Path) -> None:
+def test_wrapper_retry_runs_only_changed_test_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "repo"
     test_path = root / "tests" / "test_sample.py"
     source_path = root / "src" / "sample.py"
@@ -216,8 +219,10 @@ def test_wrapper_retry_runs_only_changed_test_module(tmp_path: Path) -> None:
     _git(root, "config", "user.name", "Retry Proof Test")
     _git(root, "add", ".")
     _git(root, "commit", "-m", "base")
+    monkeypatch.setenv(retry_proof.CACHE_ROOT_ENV, str(root.parent / "retry-cache"))
     coverage_json = root / "coverage.json"
     commands: list[list[str]] = []
+    output: list[str] = []
 
     def runner(
         name: str,
@@ -266,29 +271,33 @@ def test_wrapper_retry_runs_only_changed_test_module(tmp_path: Path) -> None:
         mock.patch.object(check, "run_subprocess", runner),
         mock.patch.object(check, "run_coverage_rails", return_value=1),
     ):
-        assert check.run_quality_check(config, runner=runner, printer=lambda line: None) == 1
+        first_result = check.run_quality_check(config, runner=runner, printer=output.append)
+    assert first_result == 1, "\n".join(output)
 
     test_path.write_text(
-        "def test_sample():\n    assert True\n\ndef test_more():\n    assert True\n",
+        test_path.read_text(encoding="utf-8") + "\ndef test_more():\n    assert True\n",
         encoding="utf-8",
     )
     commands.clear()
+    output.clear()
     with (
         mock.patch.object(check, "run_subprocess", runner),
         mock.patch.object(check, "run_coverage_rails", side_effect=[1, 0]),
     ):
-        assert check.run_quality_check(config, runner=runner, printer=lambda line: None) == 0
+        retry_result = check.run_quality_check(config, runner=runner, printer=output.append)
+    assert retry_result == 0, "\n".join(output)
 
     pytest_commands = [command for command in commands if "pytest" in command]
     assert len(pytest_commands) == 2
-    delta_command, fallback_command = pytest_commands
-    assert "tests/test_sample.py" in delta_command
-    assert "tests" not in delta_command
-    assert "--cov-append" in delta_command
+    delta_command, fresh_rerun_command = pytest_commands
+    assert "tests" in delta_command
+    assert "agents_remember_test_support.testing.retry_selection" in delta_command
+    assert "--ar-retry-execute-path=tests/test_sample.py" in delta_command
+    assert "--cov-append" not in delta_command
     assert "--cov-context=test" in delta_command
-    assert "tests" in fallback_command
-    assert "--cov-append" not in fallback_command
-    assert "--cov-context=test" in fallback_command
+    assert "tests" in fresh_rerun_command
+    assert "--cov-append" not in fresh_rerun_command
+    assert "--cov-context=test" in fresh_rerun_command
 
 
 def test_exact_proof_is_not_scored_when_a_cheap_rail_breaks(tmp_path: Path) -> None:
@@ -394,11 +403,8 @@ def test_snapshot_and_inventory_fail_closed_with_actionable_errors(tmp_path: Pat
         pytest.raises(RuntimeError, match="inventory failed"),
     ):
         retry_proof._tracked_paths(root)  # pyright: ignore[reportPrivateUsage]
-    with (
-        mock.patch.object(retry_proof.git_command, "run_git", return_value=failed),
-        pytest.raises(RuntimeError, match="inventory failed"),
-    ):
-        retry_proof._cache_dir(root)  # pyright: ignore[reportPrivateUsage]
+    with pytest.raises(RuntimeError, match="must be absolute"):
+        retry_proof._cache_dir(Path("relative-cache"))  # pyright: ignore[reportPrivateUsage]
 
     with mock.patch.object(
         retry_proof,
@@ -434,6 +440,10 @@ def test_retry_shape_helpers_cover_direct_new_and_malformed_selections(tmp_path:
         coverage_paths=(Path("src"),),
         test_arguments=(direct,),
         untracked_paths=(),
+        cache_root=tmp_path / "retry-cache",
+        lane_digest="lane-digest",
+        lane_trigger="affected",
+        lane_population=("accept=unit-regression",),
     )
     with mock.patch.object(retry_proof, "_tracked_paths", return_value=()):
         assert retry_proof._selected_test_modules(  # pyright: ignore[reportPrivateUsage]
@@ -446,6 +456,47 @@ def test_retry_shape_helpers_cover_direct_new_and_malformed_selections(tmp_path:
     assert not retry_proof._selection_is_compatible(  # pyright: ignore[reportPrivateUsage]
         {"selectedTests": "not-a-list"}, [direct], [direct]
     )
+
+
+def test_retry_environment_identity_ignores_only_explicit_runtime_transport() -> None:
+    first = {
+        "AR_QUALITY_INVOCATION": "ci",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:33473",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://127.0.0.1:33473/v1/traces",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "http://127.0.0.1:33473/v1/logs",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "http://127.0.0.1:33473/v1/metrics",
+        "TRACEPARENT": "00-first",
+        "BAGGAGE": "global-logs-span=first",
+    }
+    second = {
+        **first,
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:45939",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://127.0.0.1:45939/v1/traces",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "http://127.0.0.1:45939/v1/logs",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "http://127.0.0.1:45939/v1/metrics",
+        "TRACEPARENT": "00-second",
+        "BAGGAGE": "global-logs-span=second",
+    }
+
+    digest = retry_proof._environment_digest  # pyright: ignore[reportPrivateUsage]
+    assert digest(first) == digest(second)
+    second["AR_QUALITY_RETRY_CONTEXT_VARIANT"] = "changed-test-semantics"
+    assert digest(first) != digest(second)
+
+
+def test_retry_tool_identity_records_missing_distribution_explicitly() -> None:
+    def version(name: str) -> str:
+        if name == "pytest-xdist":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return f"{name}-version"
+
+    with mock.patch.object(retry_proof.importlib.metadata, "version", side_effect=version):
+        assert retry_proof._tool_versions() == {  # pyright: ignore[reportPrivateUsage]
+            "coverage": "coverage-version",
+            "pytest": "pytest-version",
+            "pytest-cov": "pytest-cov-version",
+            "pytest-xdist": "absent",
+        }
 
 
 def test_prepare_disable_and_fail_closed_routes(tmp_path: Path) -> None:
@@ -465,19 +516,8 @@ def test_prepare_disable_and_fail_closed_routes(tmp_path: Path) -> None:
         )
     assert retry_proof.DISABLE_ENV in output[-1]
 
-    with mock.patch.dict(
-        os.environ,
-        {"AR_QUALITY_INVOCATION": retry_proof.CI_INVOCATION},
-    ):
-        assert (
-            retry_proof.prepare(
-                inputs,
-                admission=QUALITY_TEST_ADMISSION,
-                printer=output.append,
-            )
-            is None
-        )
-    assert "CI requires a fresh matrix proof" in output[-1]
+    with mock.patch.dict(os.environ, {"AR_QUALITY_INVOCATION": "ci"}):
+        assert retry_proof._disabled_reason(inputs) is None  # pyright: ignore[reportPrivateUsage]
 
     assert "untracked" in str(
         retry_proof._disabled_reason(  # pyright: ignore[reportPrivateUsage]
@@ -563,16 +603,55 @@ def test_reuse_plan_rejects_changed_selection_and_unusable_context(tmp_path: Pat
     assert "unusable-context-proof" in output[-1]
 
 
-def test_cache_dir_accepts_an_absolute_git_common_directory(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    common = tmp_path / "common-git"
-    completed = subprocess.CompletedProcess(
-        args=["git", "rev-parse"], returncode=0, stdout=f"{common}\n", stderr=""
+def test_cache_dir_uses_only_the_explicit_dagger_owner(tmp_path: Path) -> None:
+    cache = retry_proof._cache_dir(tmp_path)  # pyright: ignore[reportPrivateUsage]
+    assert cache == tmp_path / retry_proof.CACHE_DIRECTORY
+
+
+def test_manifest_misses_report_absence_corruption_and_digest_failure_explicitly(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(tmp_path)
+
+    manifest, reason = retry_proof._load_manifest(  # pyright: ignore[reportPrivateUsage]
+        plan
     )
-    with mock.patch.object(retry_proof.git_command, "run_git", return_value=completed):
-        cache = retry_proof._cache_dir(root)  # pyright: ignore[reportPrivateUsage]
-    assert cache.parent == common / retry_proof.CACHE_DIRECTORY
+    assert manifest is None
+    assert reason == "no-prior-proof"
+
+    plan.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    plan.manifest_path.write_text("{not-json\n", encoding="utf-8")
+    manifest, reason = retry_proof._load_manifest(  # pyright: ignore[reportPrivateUsage]
+        plan
+    )
+    assert manifest is None
+    assert reason == "manifest-invalid-json"
+
+    plan.proof_data_path.write_bytes(b"tampered")
+    plan.proof_json_path.write_text("{}", encoding="utf-8")
+    plan.manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": retry_proof.SCHEMA_VERSION,
+                "compatibilityKey": plan.compatibility_key,
+                "laneDigest": plan.lane_digest,
+                "laneTrigger": plan.lane_trigger,
+                "lanePopulation": list(plan.lane_population),
+                "snapshot": plan.snapshot,
+                "selectedTests": [path.as_posix() for path in plan.selected_tests],
+                "coverageDataSha256": "wrong",
+                "coverageJsonSha256": retry_proof._file_digest(  # pyright: ignore[reportPrivateUsage]
+                    plan.proof_json_path
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest, reason = retry_proof._load_manifest(  # pyright: ignore[reportPrivateUsage]
+        plan
+    )
+    assert manifest is None
+    assert reason == "manifest-invalid:coverage-data-digest-mismatch"
 
 
 def test_context_proof_and_filtering_reject_non_branch_or_contextless_data(
@@ -584,11 +663,9 @@ def test_context_proof_and_filtering_reject_non_branch_or_contextless_data(
     data.add_lines({measured: [1]})
     data.write()
     with pytest.raises(RuntimeError, match="branch coverage data is missing"):
-        retry_proof._validate_context_proof(  # pyright: ignore[reportPrivateUsage]
-            line_only
-        )
+        retry_coverage.validate_context_proof(line_only)
     with pytest.raises(RuntimeError, match="does not contain branch arcs"):
-        retry_proof._filtered_coverage_data(  # pyright: ignore[reportPrivateUsage]
+        retry_coverage.retain_unchanged_contexts(
             line_only, tmp_path / "filtered.coverage", [Path("tests/test_one.py")]
         )
 
@@ -598,9 +675,7 @@ def test_context_proof_and_filtering_reject_non_branch_or_contextless_data(
     data.add_arcs({measured: [(1, 2)]})
     data.write()
     with pytest.raises(RuntimeError, match="pytest test contexts are missing"):
-        retry_proof._validate_context_proof(  # pyright: ignore[reportPrivateUsage]
-            contextless
-        )
+        retry_coverage.validate_context_proof(contextless)
 
 
 def test_publish_proof_refuses_missing_or_invalid_artifacts(tmp_path: Path) -> None:
@@ -621,7 +696,7 @@ def test_publish_proof_refuses_missing_or_invalid_artifacts(tmp_path: Path) -> N
     assert not plan.manifest_path.exists()
 
 
-def test_delta_fallback_without_coverage_reports_early_failure(tmp_path: Path) -> None:
+def test_delta_fresh_rerun_without_coverage_reports_early_failure(tmp_path: Path) -> None:
     plan = _plan(tmp_path, mode="delta")
     plan.pytest_passed = True
     coverage_json = tmp_path / "coverage.json"
@@ -649,7 +724,7 @@ def test_delta_fallback_without_coverage_reports_early_failure(tmp_path: Path) -
     assert any("result: diff-coverage SKIPPED" in line for line in output)
 
 
-def test_pytest_fallback_and_exact_paths_report_their_own_results(tmp_path: Path) -> None:
+def test_pytest_fresh_rerun_and_exact_paths_report_their_own_results(tmp_path: Path) -> None:
     coverage_json = tmp_path / "coverage.json"
     config = mock.Mock(project_root=tmp_path, scope=mock.Mock(), targeted=True)
     plan = _plan(tmp_path, mode="fresh")
@@ -665,7 +740,7 @@ def test_pytest_fallback_and_exact_paths_report_their_own_results(tmp_path: Path
             )
             == 1
         )
-    assert "result: pytest FAIL (full fallback derived no pytest rail)" in output
+    assert "result: pytest FAIL (fresh full rerun derived no pytest rail)" in output
 
     pytest_step = check.Step(name="pytest", command=["pytest"])
     exact = _plan(tmp_path, mode="exact")
@@ -758,6 +833,10 @@ def test_retry_artifact_and_scope_failures_fall_back_without_stale_evidence(
 
 
 def _inputs(root: Path) -> retry_proof.RetryInputs:
+    lane_rows = tuple(
+        f"file:{path.relative_to(root).as_posix()}=unit-regression"
+        for path in sorted((root / "tests").glob("test_*.py"))
+    )
     return retry_proof.RetryInputs(
         project_root=root,
         targeted=False,
@@ -768,6 +847,10 @@ def _inputs(root: Path) -> retry_proof.RetryInputs:
         coverage_paths=(Path("src"),),
         test_arguments=(Path("tests"),),
         untracked_paths=(),
+        cache_root=root.parent / "retry-cache",
+        lane_digest="lane-digest",
+        lane_trigger="release",
+        lane_population=("accept=release", *lane_rows),
     )
 
 
@@ -785,6 +868,31 @@ def _write_retry_contract(root: Path, *, fixture_consumer: str | None = None) ->
         fixture.parent.mkdir()
         fixture.write_text("{}\n", encoding="utf-8")
         artifacts["mcp/tests/fixtures/owned.json"] = (fixture_consumer,)
+    test_files = sorted(
+        path.relative_to(root).as_posix() for path in (root / "tests").glob("test_*.py")
+    )
+    lanes = root / "mcp/tests/test-evidence-lanes.toml"
+    lanes.write_text(
+        "\n".join(
+            [
+                'schema_version = "ar-test-evidence-lanes/v1"',
+                "",
+                "[files]",
+                "unit-regression = [",
+                *(f'  "{path}",' for path in test_files),
+                "]",
+                "public-contract = []",
+                "integration = []",
+                "architecture-fitness = []",
+                "provider-conformance = []",
+                "stress-durability = []",
+                "migration = []",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    artifacts["mcp/tests/test-evidence-lanes.toml"] = ("tests/test_sample.py",)
     write_synthetic_evidence_catalog(root, artifacts)
 
 
@@ -798,9 +906,13 @@ def _plan(tmp_path: Path, *, mode: str = "fresh") -> retry_proof.RetryPlan:
         proof_data_path=cache / "proof.coverage",
         proof_json_path=cache / "proof.json",
         active_data_path=cache / "active.coverage",
+        retained_data_path=cache / "retained.coverage",
         snapshot={},
         selected_tests=(Path("tests/test_one.py"),),
         compatibility_key="key",
+        lane_digest="lane-digest",
+        lane_trigger="release",
+        lane_population=("accept=release",),
         delta_tests=(Path("tests/test_one.py"),) if mode == "delta" else (),
     )
 

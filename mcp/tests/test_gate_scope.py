@@ -26,6 +26,7 @@ is a change to a rail, not a line in a list.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -38,7 +39,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check, crap_calculator
+from agents_remember_test_support.code_quality import check, crap_calculator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -184,8 +185,6 @@ class PythonGateScopeTests(unittest.TestCase):
             path for path in git_ls_files("*.py") if is_under(path, scope.coverage_paths)
         ]
         expected_coverage = [Path("mcp/src/agents_remember")]
-        if git_ls_files(".dagger/src/agents_remember_quality/*.py"):
-            expected_coverage.insert(0, Path(".dagger/src/agents_remember_quality"))
         self.assertEqual(
             sorted(scope.coverage_paths),
             expected_coverage,
@@ -199,6 +198,29 @@ class PythonGateScopeTests(unittest.TestCase):
             sorted(test_files),
             sorted(collected),
             "pytest's testpaths no longer covers every tracked test file",
+        )
+
+    def test_operational_product_never_imports_the_verification_package(self) -> None:
+        offenders: dict[str, list[str]] = {}
+        for relative in git_ls_files("mcp/src/**/*.py"):
+            path = REPO_ROOT / relative
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+            imported: list[str] = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.extend(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                    imported.append(node.module)
+            forbidden = sorted(
+                name for name in imported if name.startswith("agents_remember_test_support")
+            )
+            if forbidden:
+                offenders[relative] = forbidden
+
+        self.assertEqual(
+            offenders,
+            {},
+            "operational product code cannot depend on repository verification infrastructure",
         )
 
 

@@ -17,9 +17,10 @@ sys.path.insert(0, str(MCP_SRC))
 
 from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check, diff_coverage, targeted
-from agents_remember.code_quality.dependency_ownership import SelectionReasonKind
-from agents_remember.code_quality.scope import ScopeError
+from agents_remember_test_support.code_quality import check, diff_coverage, targeted
+from agents_remember_test_support.code_quality.causal_preflight import evaluate_preflights
+from agents_remember_test_support.code_quality.dependency_ownership import SelectionReasonKind
+from agents_remember_test_support.code_quality.scope import ScopeError
 
 
 def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -46,6 +47,9 @@ def write_quality_config(root: Path) -> None:
                 "branch = true",
                 "[tool.pytest.ini_options]",
                 'testpaths = ["tests"]',
+                "[tool.agents_remember]",
+                'product_package_roots = ["src/pkg"]',
+                'verification_package_roots = [".dagger/src/quality"]',
                 "",
             )
         ),
@@ -58,10 +62,13 @@ def targeted_repository(root: Path) -> str:
     run_git(root, "init", "--quiet", "--initial-branch=main")
     write_quality_config(root)
     (root / "src/pkg").mkdir(parents=True)
+    (root / ".dagger/src/quality").mkdir(parents=True)
     (root / "tests").mkdir()
     (root / "mcp/tests").mkdir(parents=True)
     (root / "scripts").mkdir()
     (root / "src/pkg/__init__.py").write_text("", encoding="utf-8")
+    (root / ".dagger/src/quality/__init__.py").write_text("", encoding="utf-8")
+    (root / ".dagger/src/quality/support.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "src/pkg/module.py").write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
     (root / "src/pkg/relative.py").write_text(
         "from .module import value\nRELATIVE = value()\n", encoding="utf-8"
@@ -147,6 +154,13 @@ def fake_runner(
     def run(name: str, command: list[str], cwd: Path, env: Mapping[str, str]) -> check.StepResult:
         del cwd, env
         commands.append(command)
+        if name == "causal-preflight":
+            report_path = Path(command[command.index("--report") + 1])
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(_passing_causal_payload(root)),
+                encoding="utf-8",
+            )
         if name == "pytest" and coverage_paths:
             coverage_json.write_text(
                 json.dumps(coverage_json_for(root, coverage_paths)), encoding="utf-8"
@@ -154,6 +168,14 @@ def fake_runner(
         return check.StepResult(name, 0, command)
 
     return run
+
+
+def _passing_causal_payload(root: Path) -> dict[str, object]:
+    return evaluate_preflights(
+        (),
+        root,
+        candidate={"tree": "a" * 40, "environmentId": "b" * 64},
+    )
 
 
 class TargetedScopeDerivationTests(unittest.TestCase):
@@ -223,21 +245,13 @@ class TargetedScopeDerivationTests(unittest.TestCase):
                 "from pkg.internal import inner\n\ndef value() -> int:\n    return inner()\n",
                 encoding="utf-8",
             )
-            (root / "tests/test_module.py").write_text(
-                "from pkg.internal import inner\n"
-                "from pkg.module import value\n"
-                "\n"
-                "def test_value() -> None:\n"
-                "    assert value() == inner()\n",
-                encoding="utf-8",
-            )
             run_git(root, "add", "-A")
 
             derived = targeted.derive_targeted_scope(root, base)
 
             self.assertIn(Path("src/pkg/internal.py"), derived.changed_paths)
-            # No test imports pkg.internal directly; the derived subset must
-            # reach it through pkg.module and its importers.
+            # No test imports pkg.internal directly; the derived subset reaches
+            # it through pkg.module and that module's test importer.
             self.assertTrue(any(path.name == "test_module.py" for path in derived.test_paths))
 
     def test_changed_production_module_without_owner_selects_safe_full_population(self) -> None:
@@ -252,7 +266,7 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             derived = targeted.derive_targeted_scope(root, base)
 
             self.assertFalse(derived.test_impact.complete)
-            self.assertIsNotNone(derived.test_impact.fallback)
+            self.assertIsNotNone(derived.test_impact.fresh_rerun_reason)
             self.assertEqual(
                 derived.test_paths,
                 (Path("tests/test_extra.py"), Path("tests/test_module.py")),
@@ -310,7 +324,10 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             self.assertEqual(derived.test_paths, (Path("tests/test_extra.py"),))
             self.assertEqual(
                 {reason.kind for reason in derived.test_impact.reasons_for(derived.test_paths[0])},
-                {SelectionReasonKind.DECLARED_CONSUMER},
+                {
+                    SelectionReasonKind.DECLARED_CONSUMER,
+                    SelectionReasonKind.LITERAL_CONSUMER,
+                },
             )
 
     def test_conftest_change_invalidates_the_whole_python_test_population(self) -> None:
@@ -348,10 +365,12 @@ class TargetedScopeDerivationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
-            (root / "tests/test_module.py").write_text(
-                "from pkg.module import value\n\n"
-                "def test_value() -> None:\n"
-                "    assert value() == 2\n",
+            test_module = root / "tests/test_module.py"
+            test_module.write_text(
+                test_module.read_text(encoding="utf-8").replace(
+                    "assert value() == SUPPORT",
+                    "assert value() == SUPPORT + 1",
+                ),
                 encoding="utf-8",
             )
 
@@ -360,6 +379,21 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             self.assertEqual(derived.changed_paths, (Path("tests/test_module.py"),))
             self.assertEqual(derived.coverage_paths, ())
             self.assertEqual(derived.test_paths, (Path("tests/test_module.py"),))
+
+    def test_verification_package_change_never_becomes_product_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = targeted_repository(root)
+            verification = root / ".dagger/src/quality/support.py"
+            verification.write_text("VALUE = 2\n", encoding="utf-8")
+
+            derived = targeted.derive_targeted_scope(root, base)
+
+            self.assertEqual(derived.changed_paths, (Path(".dagger/src/quality/support.py"),))
+            self.assertEqual(derived.lint_paths, derived.changed_paths)
+            self.assertIn(Path(".dagger/src/quality/support.py"), derived.type_paths)
+            self.assertEqual(derived.coverage_paths, ())
+            self.assertEqual(derived.coverage_root_modules, ("pkg",))
 
     def test_documentation_change_is_visible_but_derives_no_python_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -446,7 +480,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertTrue(any("targeted changed files (1)" in line for line in output))
             self.assertTrue(
                 any(
-                    "targeted reverse-import closure for pyright adds 5 file(s)" in line
+                    "targeted reverse-import closure for pyright adds 6 file(s)" in line
                     for line in output
                 )
             )
@@ -454,10 +488,10 @@ class TargetedWrapperRunTests(unittest.TestCase):
             ruff = commands[0]
             self.assertEqual(ruff[2:], ["ruff", "check", "src/pkg/module.py"])
             file_size = commands[2]
-            self.assertEqual(file_size[2], "agents_remember.code_quality.file_size")
+            self.assertEqual(file_size[2], "agents_remember_test_support.code_quality.file_size")
             self.assertIn("src/pkg/module.py", file_size)
             layering = commands[3]
-            self.assertEqual(layering[2], "agents_remember.code_quality.layering")
+            self.assertEqual(layering[2], "agents_remember_test_support.code_quality.layering")
             pyright = commands[4]
             self.assertIn("--pythonpath", pyright)
             self.assertIn("src/pkg/module.py", pyright)
@@ -613,11 +647,11 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 [
                     "ruff",
                     "ruff",
-                    "agents_remember.code_quality.file_size",
-                    "agents_remember.code_quality.layering",
+                    "agents_remember_test_support.code_quality.file_size",
+                    "agents_remember_test_support.code_quality.layering",
                     "pyright",
-                    "agents_remember.testing.evidence_lifecycle",
-                    "agents_remember.code_quality.causal_preflight",
+                    "agents_remember_test_support.testing.evidence_lifecycle",
+                    "agents_remember_test_support.code_quality.causal_preflight",
                     "pytest",
                 ],
             )
@@ -659,11 +693,11 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 [
                     "ruff",
                     "ruff",
-                    "agents_remember.code_quality.file_size",
-                    "agents_remember.code_quality.layering",
+                    "agents_remember_test_support.code_quality.file_size",
+                    "agents_remember_test_support.code_quality.layering",
                     "pyright",
-                    "agents_remember.testing.evidence_lifecycle",
-                    "agents_remember.code_quality.causal_preflight",
+                    "agents_remember_test_support.testing.evidence_lifecycle",
+                    "agents_remember_test_support.code_quality.causal_preflight",
                     "pytest",
                 ],
             )
@@ -682,11 +716,15 @@ class TargetedWrapperRunTests(unittest.TestCase):
             (root / "scripts/sync.py").write_text("VALUE = 1\n", encoding="utf-8")
 
             self.assertEqual(
-                check.source_import_roots(root, [Path("src/pkg/module.py")]),
+                check.quality_subprocess_environment.source_import_roots(
+                    root, [Path("src/pkg/module.py")]
+                ),
                 [root / "src"],
             )
             self.assertEqual(
-                check.source_import_roots(root, [Path("scripts/sync.py")]),
+                check.quality_subprocess_environment.source_import_roots(
+                    root, [Path("scripts/sync.py")]
+                ),
                 [root / "scripts"],
             )
 
@@ -696,6 +734,8 @@ class TargetedWrapperRunTests(unittest.TestCase):
             (root / "__init__.py").write_text("", encoding="utf-8")
 
             self.assertEqual(
-                check.source_import_roots(root, [Path("__init__.py")]),
+                check.quality_subprocess_environment.source_import_roots(
+                    root, [Path("__init__.py")]
+                ),
                 [root],
             )

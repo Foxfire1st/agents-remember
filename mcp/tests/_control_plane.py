@@ -19,7 +19,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal, cast
 
-from agents_remember.errors import HarnessControlError
 from agents_remember.models.conversations.control_wire import (
     AcceptanceState,
     AdapterSnapshot,
@@ -106,11 +105,9 @@ class FakeControlAdapter:
         *,
         vendor_id: str = "thread-1",
         harness: Literal["codex", "pi", "claude"] = "codex",
-        interrupt_capable: bool = True,
     ) -> None:
         self.vendor_id = vendor_id
         self.harness = harness
-        self.interrupt_capable = interrupt_capable
         self.current: AdapterSnapshot | None = None
         self.events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue()
         self.event_sequence = 0
@@ -120,7 +117,6 @@ class FakeControlAdapter:
         self.active_turn: str | None = None
         self.transcript_sequence = 0
         self.interrupt_error: Exception | None = None
-        self.last_interrupt: tuple[tuple[str, str], InterruptResult] | None = None
         self.auto_release = False
         self.submit_gate: asyncio.Event | None = None
         self.next_acceptance: str | None = None
@@ -213,39 +209,25 @@ class FakeControlAdapter:
         turn_id: str | None,
         expected_operation_id: str | None,
     ) -> InterruptResult:
-        if not self.interrupt_capable:
-            raise AssertionError("interrupt must not be called on a non-capable double")
         if self.interrupt_error is not None:
             raise self.interrupt_error
-        if self.harness == "codex":
-            if self.active_turn is None:
-                raise HarnessControlError("no active Codex turn to interrupt")
-            if turn_id is not None and turn_id != self.active_turn:
-                raise HarnessControlError("interrupt turn id does not match the active Codex turn")
-            active = self.active_turn
-        else:
-            active_operation = self.operations[-1] if self.operations else None
-            if active_operation is None or (
-                expected_operation_id is not None
-                and expected_operation_id != active_operation.operation_id
-            ):
-                raise HarnessControlError("no active Pi operation matches the expected identity")
-            active = expected_operation_id or "unknown"
-        pair = (turn_id or expected_operation_id or "", active)
-        if self.last_interrupt is not None and self.last_interrupt[0] == pair:
-            return self.last_interrupt[1]
+        correlations = tuple(
+            value for value in (turn_id, expected_operation_id) if value is not None
+        )
+        if len(correlations) != 1:
+            raise AssertionError(
+                "control topology must pass exactly one native interrupt correlation"
+            )
         self.interrupt_calls.append(
             {"turn_id": turn_id, "expected_operation_id": expected_operation_id}
         )
-        result = InterruptResult(
+        return InterruptResult(
             acknowledgement="accepted",
             bridge_epoch="",
             operation=self.operations[-1] if self.operations else None,
-            vendor_correlation_id=active,
+            vendor_correlation_id=correlations[0],
             detail="fake native interrupt acknowledged",
         )
-        self.last_interrupt = (pair, result)
-        return result
 
     async def respond(self, response: InteractionResponse) -> None:
         del response

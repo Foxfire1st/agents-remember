@@ -13,7 +13,41 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 3. onboarding update through `c-05-create-or-update-onboarding-files` after approved changes, with durable findings routed through that skill during implementation when they become clear enough
 4. separate commit approval before `c-09-git-worktree-manager` closeout creates Git commits for worktree-backed tasks
 
-## Phase 1 — Create Or Update The Task Wrapper
+## Phase 0 — Compile And Approve Requirements Before Task Topology
+
+After intent and scope are established, but before creating a sprint, master, standalone task, or
+leaf document, the architect creates only the planning wrapper and its canonical requirement
+corpus:
+
+```text
+<task-root>/<task-slug>/
+└── requirements/
+    ├── README.md              # stable ID + version index
+    └── <stable-id>-<version>-<slug>.md  # one immutable address per revision
+```
+
+The architect must:
+
+1. compile every independently falsifiable obligation into `requirements/README.md` with a stable
+   ID, explicit version, short name, packet link, status, and developer-approval citation;
+2. split clauses whenever they can be violated, reviewed, owned, evidenced, or superseded
+   independently;
+3. create one self-contained, version-addressed packet per ID + version from
+   `requirement-packet-template.md`, covering the problem, required behavior, rationale, scope,
+   exclusions, preservation boundaries,
+   failure/recovery behavior, examples, forbidden overreach, expected deliverable and verification
+   evidence, authority/provenance, dependencies, and open truth gaps, with diagrams wherever they
+   materially clarify state, sequence, ownership, or interactions;
+4. cold-read every packet through a fresh agent without the planning transcript and record whether
+   it can explain what changes, what remains unchanged, the important failure states, and what
+   would prove conformance; and
+5. present the complete corpus to the developer and stop for approval.
+
+A failed cold read returns the packet for rewriting. A pending approval leaves the topology absent.
+Only after the corpus is approved may Phase 1 create task documents and project the approved IDs +
+versions into them.
+
+## Phase 1 — Project The Approved Corpus Into Task Documents
 
 ### 1. Ensure the local task area exists
 
@@ -23,7 +57,10 @@ All light-task artifacts live under the `c-08-ar-coordination-context-resolver` 
 <task-root>/<task-slug>/task.md
 ```
 
-Create this wrapper folder as soon as the task class, name, and workflow variables are clear. That can and should happen before any `c-09-git-worktree-manager` worktree is created. If the task later becomes worktree-backed, the `c-09-git-worktree-manager` skill places its leaf contract at `enclosures/<leaf-id>/series-contract.md` under the wrapper folder.
+The same `<task-slug>` wrapper and `requirements/` corpus already exist from Phase 0. Create
+`task.md` only after the corpus approval. If the task later becomes worktree-backed, the
+`c-09-git-worktree-manager` skill places its leaf contract at
+`enclosures/<leaf-id>/series-contract.md` under the wrapper folder.
 
 ### 2. Reuse an existing active task when appropriate
 
@@ -81,13 +118,31 @@ Write every checkbox on its own line. Under a parent step, indent nested checkli
 The file must include:
 
 1. objective
-2. requirements
+2. a filtered requirement projection: stable ID, exact approved version, canonical packet link,
+   and topology role; never rewritten requirement prose
 3. design sized to the request per `tasks/AGENTS.md`, or a note that no design reasoning is needed
 4. implementation steps with one checkbox per line and nested checkbox items indented by two spaces under the parent step
 5. proposed code examples for each distinct implementation change when code changes are in scope; if examples are deferred to the plan gate, record that intent via `codeExamplesNote` so the render distinguishes deferred from none-needed
 6. decision log
 7. open questions
 8. references
+9. for any durable fixture, recording, shared test support, or proof: the stable executable contract
+   it graduates to, or the dated expiry/retirement event that removes it
+
+Use `R1`, `R2`, ... or another corpus-local stable ID convention and pair every ID with its approved
+version. The task projection links the canonical packet; it does not create master-owned or
+leaf-owned rewritten contracts. Every requirement must be uniquely and durably addressable before
+task creation, implementation, or dispatch. The packet and dispatch brief name the required
+deliverable and verification evidence classes; "requirements addressed" is never a replacement
+for the exact ID + version list.
+
+Concrete examples of the required decision shape:
+
+- A versioned Codex frame retained as durable provider evidence names
+  `contract:codex-agent-wire-version-matrix`, its source owner, and its executable conformance node.
+- A migration comparison retained only through `2026-09-30` names
+  `node:mcp/tests/test_migration.py::test_replacement` as the executable replacement and records
+  removal at expiry. An undated "temporary" row is invalid.
 
 Use `YYYY-MM-DDTHH:MM` for task-local timestamps such as `Created`, decision log entries, progress notes, and review outcomes.
 
@@ -139,6 +194,41 @@ For each implementation section:
 7. mark a substep complete only after its code or artifact change, its onboarding capture or update through `c-05-create-or-update-onboarding-files`, and its relevant listed checks are done
 8. mark the parent step checkbox complete only after its nested implementation items and verification checkbox are complete
 9. record any meaningful judgment call as a new decision log entry
+10. before promoting task-local proof into durable evidence, record the stable-contract-or-expiry
+    decision in the task and lifecycle catalog; run the public lifecycle validator through the
+    repository quality route, which must reject missing, stale, contradictory, or unowned rows
+11. maintain one acceptance block for the task's owned primary stable requirement ID + version in
+    the builder handoff artifact (the worker turn report when a worker exists, otherwise a
+    task-local implementation handoff). Record dependency/preservation checks separately without
+    claiming to close them. The primary block
+    block records `satisfied | blocked | approved-change`, delivery rationale/citations,
+    verification rationale/citations including the failure caught, and exact command/result or
+    durable evidence. Code uses path + symbol anchors; non-code work uses deliverable paths plus
+    sections/anchors. `blocked` and `approved-change` additionally cite the durable developer ruling
+    for the exception. Keep this envelope separate from the durable-evidence
+    stable-contract-or-expiry hold point.
+12. advance a worker delivery attempt only when an exact candidate is handed to independent review,
+    or after reviewer rejection when a successor candidate is handed off. Internal implementation,
+    test, and evidence reruns are experimental protocol events, not attempts; preserve them
+    separately with candidate identity, command, result, failure cause, repair, and expected next
+    proof. Before review handoff, append one immutable record for the owned primary requirement
+    revision and leaf manifestation to the leaf's detailed Requirement Attempt Journal. Bind the
+    leaf-local
+    attempt ID, predecessor and carried findings, exact candidate tree/commit or non-code
+    digest/anchors, requirement-specific status/rationale/citations/findings/failure class, a
+    content-addressed reference to immutable expanded evidence, and append time. The frozen artifact
+    carries shared definitions and complete command results; do not duplicate the complete master
+    envelope or experimental-run body in each attempt. Never edit a prior record. A
+    rejected-attempt repair creates a successor attempt at its next review handoff. An unrelated
+    later candidate does not reopen an accepted attempt.
+    Validate the complete record before append. Append plus exact-candidate review handoff is one
+    logical formal-attempt boundary. Preserve a malformed pre-handoff row with an append-only
+    `non-attempt-correction`/void reference, consume no attempt ID, and use the same next ID for the
+    corrected handoff. A malformed handed-off row requires independent reviewer rejection before
+    the worker may append a successor at the next candidate handoff.
+13. classify each blocked finding as exactly `implementation defect`, `evidence gap`, `requirement
+    contradiction/overconstraint`, `test/tool defect`, or `external blocker`. Requirement problems
+    route to architect/developer revision authority and cannot be rewritten by the implementer.
 
 If the `c-08-ar-coordination-context-resolver` resolved `tools_path` is still blank, there may be no repo-specific checks listed yet; the file exists so the developer can fill in that checklist over time.
 
@@ -155,10 +245,15 @@ After each step:
 When the approved plan has been fully implemented:
 
 1. confirm the checklist reflects completed code changes, onboarding updates, and listed checks
-2. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
-3. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
-4. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
-5. leave worktree-backed task status below `Completed` after closeout; every declared parent/nested step must be explicitly `done` (or intentionally skipped through exact `task_doc.skip_step`) before `lifecycle_finalize_task` can set completion. If a final step includes cleanup, run standalone `worktree_cleanup`, mark that exact step done afterwards, then finalize the already-clean contract
+2. confirm the builder handoff has exactly one complete acceptance block for the owned primary
+   requirement ID; an aggregate completion statement, missing citation, or approval-pending
+   exception is not completion
+3. confirm each delivered leaf manifestation has a newly appended immutable worker attempt bound
+   to the exact candidate and that all predecessor findings are accounted for
+4. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
+5. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
+6. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
+7. leave worktree-backed task status below `Completed` after closeout; every declared parent/nested step must be explicitly `done` (or intentionally skipped through exact `task_doc.skip_step`) before `lifecycle_finalize_task` can set completion. If a final step includes cleanup, run standalone `worktree_cleanup`, mark that exact step done afterwards, then finalize the already-clean contract
 
 ## Phase 3 — Close
 
@@ -182,6 +277,15 @@ Before final closure:
 1. verify any referenced workflow or skill paths still resolve
 2. check whether newly introduced terms belong in the glossary or naming references listed in the `c-08-ar-coordination-context-resolver` resolved `sources_path`
 3. update any repo-level descriptions that would now be misleading
+4. independently review the owned primary stable-ID + version acceptance block as `accepted |
+   rejected`, opening the
+   cited artifacts and giving a reviewer rationale; missing rationale, wrong-class evidence,
+   invalid citations, or missing developer approval forces rejection, and closure cannot pass
+   while any ID is rejected. Bind the adjudication to the exact worker attempt, leaf manifestation,
+   and candidate; append a separate immutable reviewer record without changing the worker record.
+   Every rejection uses one closed failure class. Accepted attempts remain closed unless an
+   independent reviewer proves direct regression and the owning manager (architect in a flat run)
+   records bounded invalidation, or an approved requirement revision affects that manifestation.
 
 ## Three-touch iteration cycle
 
@@ -193,7 +297,8 @@ Update the task file first:
 
 | What changed     | Update                                                                           |
 | ---------------- | -------------------------------------------------------------------------------- |
-| New requirement  | Append it to Requirements with a short annotation noting when it was added       |
+| New requirement  | Compile a new stable ID + v1 packet, cold-read it, obtain developer approval, then project it into affected task docs |
+| Changed requirement | Increment the existing ID's version, record developer approval, invalidate affected acceptance state, update affected projections, and rebrief affected leaves |
 | New work slice   | Add a new `S#` section or new checkbox items under an existing section           |
 | Changed approach | Rewrite the affected step text and append the reason to the decision log         |
 | Deferred work    | Mark it as deferred in the relevant step or note it in a dedicated deferred line |
@@ -231,6 +336,24 @@ If the session ends mid-task:
 When the work outgrows a single-page plan, escalate to a **master + light sub-task series**. Create one
 wrapper folder with a master `task.md` (scaffold in `master-template.md`) plus flat, numbered sub-task
 files `NN_<name>.md` in execution order.
+
+Masters and leaves project the corpus's stable IDs and versions across that series. Every leaf
+brief, builder handoff, and reviewer verdict carries the exact applicable subset; master-exit
+review adjudicates the complete set without replacing it with an aggregate master claim. A master
+summarizes thematic goals and carries only a filtered ID + version + packet-link projection. Every
+leaf owns exactly one primary requirement revision and links its complete packet. One revision may
+map to multiple leaves when it has independently executable manifestations. Adjacent requirements
+may be listed as dependencies or preservation constraints, but the leaf cannot claim to close
+them; a leaf that would close multiple independently falsifiable requirements must be split.
+
+Each leaf's append-only worker attempt records and independent reviewer records are the detailed
+Requirement Attempt Journal and remain authoritative. Maintain a rebuildable master summary with
+attempt identities, rejection history/count, current state, dominant open failure class, and links
+to those leaf records. The summary is a disposable projection: it is never a requirement contract,
+lifecycle/closeout gate, queue authority, or task-authoring lock. Missing or stale summary state is
+rebuilt from leaf journals and cannot block work. Keep the leaf records requirement-specific and
+lightweight by linking content-addressed expanded evidence; keep internal experimental protocol
+events in their own log rather than inflating attempt history or the summary.
 
 Run the series as **one master integration branch plus leaf enclosure worktrees**:
 

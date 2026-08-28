@@ -13,17 +13,14 @@ flowchart TD
     A --> Q[Dagger quality route]
     R --> Q
 
-    C --> D{Exact sealed diagnostic cohort?}
-    D -->|yes| X[Serial direct diagnostic]
-    D -->|no| F[Fail-closed refusal]
-
+    C --> I[Explicit non-accepting Dagger investigation]
     S[Scheduled / provider-bump / migration trigger] --> K[Dagger cadence route]
 
     Q --> P[Candidate-bound immutable publication]
     P --> E[Certifying evidence]
     E --> L[Quality / lifecycle / closeout / integration]
 
-    X --> N[Non-certifying local feedback]
+    I --> N[Non-accepting investigation evidence]
     K --> N2[Non-accepting cadence evidence]
     N -. cannot enter .-> L
     N2 -. cannot enter .-> L
@@ -31,25 +28,25 @@ flowchart TD
 
 ## Evidence altitude
 
-There are two evidence altitudes:
+There are two consumer outcomes:
 
 | Altitude | Construction | Consumers |
 | --- | --- | --- |
-| Diagnostic | Exact nodes admitted by the sealed direct-cohort policy and executed serially by `./scripts/test-python`. | Local developer or agent feedback only. |
+| Non-accepting | Explicit Dagger investigation, cadence, retry-matrix, causal, and measurement artifacts labelled `acceptanceEligible=false`. | Developer/agent diagnosis and review context only. |
 | Certifying | A passed quality result published by the Dagger executor in an immutable generation bound to the exact candidate tree and result digest. | Coverage, quality, retry, lifecycle, closeout, and integration. |
 
-`DiagnosticTestEvidence` and `CertifyingTestEvidence` are different types. Certifying evidence has
-no public constructor. The nonce/file admission handshake prevents ordinary wrong-route startup,
+`CertifyingTestEvidence` has no public constructor. An arbitrary non-certifying object or copied
+artifact cannot satisfy an accepting consumer. The nonce/file admission handshake prevents ordinary wrong-route startup,
 but it is not treated as authentication against the owner of the repository and interpreter. The
 immutable Dagger publication is the durable acceptance boundary.
 
-Direct diagnostics do not silently invoke Dagger, and a failed or non-accepting Dagger cadence run
-does not become acceptance evidence. There is no compatibility reader for the superseded
-publication schema and no bypass flag that changes evidence altitude.
+Candidate A's direct host route was deleted after its exact-candidate retention falsifier failed.
+There is no compatibility command, classifier, or fallback. A failed or non-accepting Dagger route
+does not become acceptance evidence, and no bypass flag changes evidence authority.
 
 ## Executable evidence categories
 
-`agents_remember.testing.evidence_lanes` is the closed executable category registry.
+`agents_remember_test_support.testing.evidence_lanes` is the closed executable category registry.
 
 | Category | Default authority | Minimum fidelity | Normal trigger | Expected lifetime |
 | --- | --- | --- | --- | --- |
@@ -60,13 +57,15 @@ publication schema and no bypass flag that changes evidence altitude.
 | Provider conformance | Independent recording or specification | Independent boundary | Affected, provider bump, release | Versioned to the provider/protocol |
 | Stress/durability | Process, race, load, or historical-sensitivity contract | Process/race | Scheduled, release | While the durability contract is supported |
 | Migration | Named temporary transition owner | Transition comparison | Affected, migration window, release | Until verified graduation or expiry |
-| Diagnostic | Exact-node direct route | Exact-node diagnostic | Explicit diagnostic invocation | Invocation-local only |
+| Diagnostic | Explicit non-accepting Dagger investigation | Controlled investigation | Explicit investigation invocation | Invocation-local only |
 
-Unmarked tests are ordinary unit regressions. Category markers are mutually exclusive. Provider
-gates are classified as provider conformance even when the test author omitted the category marker.
+`mcp/tests/test-evidence-lanes.toml` assigns every current test file to exactly one category, with
+explicit class/node overrides where a file contains mixed evidence. There is no unmarked-unit
+default: missing, conflicting, stale, unknown, or provider-gate-inconsistent membership refuses
+collection. Pytest markers are a checked projection of that manifest, not an alternate authority.
 The affected route excludes sustained stress; the full release route runs the whole population.
 Scheduled, provider-bump, and migration-window commands run in the pinned Dagger environment but
-write explicitly non-accepting results. Release and direct-diagnostic triggers are not accepted by
+write explicitly non-accepting results. Release and investigation triggers are not accepted by
 that cadence runner, so it cannot become a shadow quality route.
 
 ## Durable evidence lifecycle
@@ -86,9 +85,9 @@ expired migration, nonexistent replacement node/contract, or missing rationale. 
 references are parsed and must name exactly one real top-level function or class method; prose that
 merely resembles a selector is not sufficient.
 
-The current inventory contains 27 artifacts: 14 independent recordings, one recording generator,
-one non-Python fixture, and 11 shared-support files. Ten are permanent, 16 are versioned, and one
-is demo-only. There is no surviving task/date-shaped migration proof in the governed population.
+The current inventory contains 34 artifacts: 20 shared-support files, 11 recordings, two
+fixtures, and one recording generator. Twenty are permanent, 13 are versioned, and one is
+demo-only. There is no surviving task/date-shaped migration proof in the governed population.
 
 ## Fixture authority
 
@@ -164,25 +163,32 @@ consumers.
 
 Retry is an internal Dagger optimization after a passed pytest run and a later coverage-derived
 failure. Its schema binds repository bytes, selected tests, diff base, Python/tool versions,
-environment digest, and measurement settings.
+environment digest, measurement settings, and the exact included/excluded lane population. Proof
+lives only in the explicit `AR_QUALITY_RETRY_CACHE` root mounted from the locked Dagger
+`ar-quality-retry-v3` volume; there is no Git-directory or compatibility reader.
 
 | Candidate change after a proof | Retry decision |
 | --- | --- |
 | No change | Reuse exact proof; pytest does not restart. |
 | Completely owned, no affected selected test | Reuse exact proof. |
-| Completely owned ordinary test/support/fixture change | Remove affected test contexts and collection context, then rerun affected selected tests with coverage append. |
+| Completely owned ordinary test/support/fixture change | Retain unaffected test contexts outside pytest-cov, rerun affected selected tests into clean coverage data, then explicitly merge and regenerate the scored JSON report. |
 | Affected consumer lies outside the current selection | Fresh safe population. |
-| Global input, incomplete/ambiguous ownership, selection/config/environment drift, corrupt proof, or missing contexts | Fresh safe population. |
+| Global input or incomplete/ambiguous ownership | Fresh safe population with the exact ownership reason. |
+| Selection/config/environment/lane drift | Fresh safe population with the mismatched manifest fields. |
+| Missing, malformed, corrupt, or digest-mismatched proof | Fresh safe population with the exact cache-integrity reason. |
 
 The retry path never chains a filtered proof as a new baseline. A passing wrapper deletes the
-proof; only a fresh full pytest pass followed by a later rail failure may publish one. Lifecycle
-acceptance may disable reuse, and diagnostic execution cannot read or publish retry authority.
+proof; only a fresh full pytest pass followed by a later rail failure may publish one. The actual
+Dagger route leaves retry enabled. `AR_QUALITY_NO_RETRY=1` is the one explicit rollback switch: it
+preserves the cache for diagnosis and runs the full fresh population. Non-accepting investigation
+routes cannot read or publish retry authority outside their invocation-owned proof.
 
 ## Causal failure localization
 
 The quality route validates high-fanout prerequisites once at their owner before pytest. A failed
-preflight writes one stable causal identity and uses only declared/import ownership edges to mark
-dependent test files as blocked. Incomplete ownership never produces blanket suppression.
+preflight writes one stable causal identity. Source-derived module/symbol imports plus the executed
+helper/fixture call chain may prove exact dependent nodes; reverse importers of the observer are
+not causal edges. Incomplete ownership never produces blanket suppression.
 
 Pytest still executes independent evidence. The resulting JSON and Markdown artifacts contain the
 first causal failure, corrective owner, dependency chains, blocked nodes, and independent
@@ -195,17 +201,17 @@ symptoms are skipped.
 
 | Intent | Command owner | Authority |
 | --- | --- | --- |
-| Exact Python feedback | `./scripts/test-python <EXACT_NODE ...>` | Diagnostic only; one to eight sealed-cohort nodes, serial |
 | Targeted leaf acceptance | lifecycle-owned Dagger `quality --mode=targeted` | Certifying when the exact publication passes |
 | Master/release acceptance | lifecycle-owned Dagger `quality --mode=full` | Sole whole-system Python acceptance |
+| Retry/causal/measurement investigation | Explicit Dagger evidence functions | Non-accepting, candidate-bound review evidence |
 | Scheduled stress | Dagger `cadence-evidence --trigger=scheduled` | Non-accepting cadence evidence |
 | Provider refresh | Dagger `cadence-evidence --trigger=provider-bump` | Non-accepting cadence evidence |
 | Migration window | Dagger `cadence-evidence --trigger=migration-window` | Non-accepting cadence evidence or loud not-applicable result |
 | Targeted Vitest | existing dashboard command | Diagnostic only; unchanged by this reform |
 
-Host pytest and direct invocation of the quality wrapper remain unsupported. The direct Python
-route accepts exact manifest nodes, not arbitrary pytest flags, files, globs, markers, or a whole
-suite. Any refusal executes zero nodes and never substitutes another route.
+Host pytest and direct invocation of the quality wrapper remain unsupported. No direct Python
+compatibility command or classifier is shipped; an investigation route must be selected explicitly
+through Dagger and never substitutes itself for acceptance.
 
 ## Maintenance rules
 
@@ -213,15 +219,14 @@ suite. Any refusal executes zero nodes and never substitutes another route.
 2. Prefer canonical builders for internal truth and independent recordings/specifications for
    external truth.
 3. Add ownership edges to the lifecycle catalog or real imports; do not add a second selector map.
-4. Treat safe-full behavior as a correctness refusal with a named cause, not a silent fallback or
-   compatibility mechanism.
+4. Treat every fresh/full decision as an explicit conservative result with a stable cause, never a
+   silent fallback or compatibility mechanism.
 5. Keep stress out of affected repair runs without deleting deterministic durability regressions.
-6. Do not expand the direct cohort without a separate measured decision. Update hashes only after
-   re-auditing every declared import, symbol, fixture, and effect fact.
+6. Do not recreate Candidate A without a new developer-approved requirement and evidence that
+   overturns its exact-candidate cost falsifier.
 7. Preserve one unresolved requirement set during review. Reviewer findings describe deltas; they
    do not create new leaf scope or restart already-approved requirements.
 8. Run one full Dagger gate only after the complete master candidate is assembled.
 
-The implementation-specific direct-route contracts remain in
-`python-direct-diagnostics.md`, `python-direct-cohort.md`, `python-pytest-bootstrap.md`, and
-`python-test-evidence.md`.
+The admission/bootstrap and accepting-consumer contracts remain in
+`python-pytest-bootstrap.md` and `python-test-evidence.md`.

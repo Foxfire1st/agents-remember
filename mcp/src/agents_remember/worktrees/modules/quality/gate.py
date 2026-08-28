@@ -31,7 +31,7 @@ from agents_remember.worktrees.modules.quality.published_manifest import (
     load_published_quality_manifest,
 )
 
-QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
+QUALITY_WRAPPER = Path("mcp/test_support/agents_remember_test_support/code_quality/check.py")
 FAILURE_OUTPUT_LINES = 40
 REPORT_DIRECTORY_NAME = "reports"
 TEST_RESULTS_REPORT_NAME = "test-results.md"

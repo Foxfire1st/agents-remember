@@ -49,6 +49,7 @@ LIVE_OPT_IN = "AR_RUN_CONTROL_PLANE_INSTALLED"
 CODEX_PINNED = "0.144.5"
 PI_PINNED = "0.80.7"
 CLAUDE_LOCKED = "2.1.211"
+CLAUDE_FIXTURE = FIXTURE_ROOT / "claude-2.1.211.json"
 LONG_PROMPT = "Write a 600-word essay about the ocean. Start writing immediately."
 TINY_PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
@@ -396,7 +397,7 @@ class ClaudeInstalledHonestyTests(unittest.TestCase):
         if executable is None:
             self.skipTest("installed claude executable is unavailable")
         version = _version_of(executable).split(" ", 1)[0]
-        fixture = json.loads((FIXTURE_ROOT / f"claude-{CLAUDE_LOCKED}.json").read_text())
+        fixture = json.loads(CLAUDE_FIXTURE.read_text())
         rows = [
             row for row in fixture["observations"] if row["operation"].startswith("control-plane/")
         ]

@@ -28,7 +28,6 @@ from agents_remember.application.gate_tools import (
     record_gate_decision,
     record_lifecycle_gate_decision,
 )
-from agents_remember.code_quality import single_owner
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.records import GateAnchor
 from agents_remember.kernel.primitives.runtime_config import (
@@ -60,6 +59,7 @@ from agents_remember.serving import dispatch_brief
 from agents_remember.worktrees.modules import cleanup
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember_test_support.code_quality import single_owner
 
 
 def _citation(path: str = "a.py") -> model.Citation:

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from agents_remember.testing.evidence_lanes import (
+from agents_remember_test_support.testing.evidence_lanes import (
     EVIDENCE_LANES,
     EvidenceTrigger,
     category_for_item,
@@ -17,9 +17,11 @@ from agents_remember.testing.evidence_lanes import (
     pytest_configure,
     validate_lane_registry,
 )
-from agents_remember.testing.evidence_lifecycle import EvidenceCategory
+from agents_remember_test_support.testing.evidence_lifecycle import EvidenceCategory
+from agents_remember_test_support.testing.lane_manifest import load_lane_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MANIFEST = load_lane_manifest(REPO_ROOT)
 
 
 class _Item:
@@ -67,7 +69,7 @@ class EvidenceLaneRegistryTests(unittest.TestCase):
             lane for lane in EVIDENCE_LANES if lane.category is EvidenceCategory.DIAGNOSTIC
         )
         self.assertIn("non-accepting", diagnostic.authority)
-        self.assertEqual(diagnostic.fidelity.value, "exact-node-diagnostic")
+        self.assertEqual(diagnostic.fidelity.value, "controlled-investigation")
         self.assertIn("invocation-local", diagnostic.expected_lifetime)
         self.assertEqual(diagnostic.triggers, {EvidenceTrigger.DIAGNOSTIC})
 
@@ -87,27 +89,58 @@ class EvidenceLaneRegistryTests(unittest.TestCase):
         self.assertEqual(expression_for(EvidenceTrigger.SCHEDULED), "evidence_stress")
         self.assertEqual(expression_for(EvidenceTrigger.MIGRATION_WINDOW), "evidence_migration")
         self.assertIsNone(expression_for(EvidenceTrigger.RELEASE))
-        with self.assertRaisesRegex(ValueError, "exact-node selection"):
+        with self.assertRaisesRegex(ValueError, "explicit route"):
             expression_for(EvidenceTrigger.DIAGNOSTIC)
 
     def test_item_category_is_exact_and_provider_gates_are_provider_evidence(self) -> None:
         self.assertIs(
-            category_for_item(_as_item(_Item())),
+            category_for_item(
+                _as_item(_Item(path=REPO_ROOT / "mcp/tests/test_active_projector_singleflight.py")),
+                MANIFEST,
+            ),
             EvidenceCategory.UNIT_REGRESSION,
         )
         self.assertIs(
-            category_for_item(_as_item(_Item("evidence_integration"))),
+            category_for_item(
+                _as_item(_Item(path=REPO_ROOT / "mcp/tests/test_conversation_control_api.py")),
+                MANIFEST,
+            ),
             EvidenceCategory.INTEGRATION,
         )
         self.assertIs(
-            category_for_item(_as_item(_Item("ar_run_pi_rpc_smoke"))),
+            category_for_item(
+                _as_item(
+                    _Item(
+                        "ar_run_pi_rpc_smoke",
+                        path=REPO_ROOT / "mcp/tests/test_pi_rpc_real_smoke.py",
+                    )
+                ),
+                MANIFEST,
+            ),
             EvidenceCategory.PROVIDER_CONFORMANCE,
         )
 
         with self.assertRaisesRegex(pytest.UsageError, "conflicting evidence categories"):
-            category_for_item(_as_item(_Item("fitness", "evidence_contract")))
-        with self.assertRaisesRegex(pytest.UsageError, "provider-gated evidence conflicts"):
-            category_for_item(_as_item(_Item("ar_run_pi_rpc_smoke", "evidence_integration")))
+            category_for_item(
+                _as_item(_Item("evidence_fitness", "evidence_contract")),
+                MANIFEST,
+            )
+        with self.assertRaisesRegex(pytest.UsageError, "checked-in marker"):
+            category_for_item(
+                _as_item(
+                    _Item(
+                        "ar_run_pi_rpc_smoke",
+                        "evidence_integration",
+                        path=REPO_ROOT / "mcp/tests/test_pi_rpc_real_smoke.py",
+                    )
+                ),
+                MANIFEST,
+            )
+        with self.assertRaisesRegex(pytest.UsageError, "no explicit evidence lane"):
+            category_for_item(
+                _as_item(_Item(path=REPO_ROOT / "mcp/tests/test_unknown_lane.py")),
+                MANIFEST,
+            )
 
     def test_plugin_registers_the_registry_and_reports_category_on_each_item(self) -> None:
         config = _Config()
@@ -115,11 +148,15 @@ class EvidenceLaneRegistryTests(unittest.TestCase):
         expected = {lane.marker for lane in EVIDENCE_LANES if lane.marker is not None}
         self.assertEqual({line.partition(":")[0] for line in config.markers}, expected)
 
-        item = _Item("evidence_contract")
+        item = _Item(path=REPO_ROOT / "mcp/tests/test_conversation_control_api.py")
         pytest_collection_modifyitems(cast(pytest.Config, config), [_as_item(item)])
-        self.assertEqual(item.user_properties, [("arEvidenceCategory", "public-contract")])
+        self.assertEqual(item.user_properties[0], ("arEvidenceCategory", "integration"))
+        self.assertEqual(item.user_properties[1][0], "arEvidenceLaneDigest")
 
         provider = _Item(path=REPO_ROOT / "mcp/tests/test_pi_rpc_adapter.py")
         pytest_collection_modifyitems(cast(pytest.Config, config), [_as_item(provider)])
         self.assertIn("evidence_provider", provider.markers)
-        self.assertEqual(provider.user_properties, [("arEvidenceCategory", "provider-conformance")])
+        self.assertEqual(
+            provider.user_properties[0],
+            ("arEvidenceCategory", "provider-conformance"),
+        )

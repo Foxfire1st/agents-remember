@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 import pytest
-from agents_remember.code_quality.application_boundary import (
+from agents_remember_test_support.code_quality.application_boundary import (
     BoundaryContractError,
     application_boundary_violations,
 )

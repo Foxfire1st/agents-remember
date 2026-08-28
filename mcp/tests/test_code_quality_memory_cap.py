@@ -13,8 +13,8 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import check
 from agents_remember.kernel.primitives import memory_cap
+from agents_remember_test_support.code_quality import check
 
 
 def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -42,6 +42,9 @@ def minimal_repository(root: Path) -> Path:
                 "branch = true",
                 "[tool.pytest.ini_options]",
                 'testpaths = ["tests"]',
+                "[tool.agents_remember]",
+                'product_package_roots = ["pkg"]',
+                "verification_package_roots = []",
                 "",
             )
         ),
@@ -108,7 +111,7 @@ class MemoryCapPlanningTests(unittest.TestCase):
         with mock.patch.object(memory_cap.os, "geteuid", return_value=1000):
             plan = memory_cap.plan_capped_command(
                 "python",
-                ["-m", "agents_remember.code_quality.check", "--diff-base", "abc"],
+                ["-m", "agents_remember_test_support.code_quality.check", "--diff-base", "abc"],
                 2147483648,
                 systemd_run_available=True,
             )
@@ -126,7 +129,7 @@ class MemoryCapPlanningTests(unittest.TestCase):
         with mock.patch.object(memory_cap.os, "geteuid", return_value=0):
             root_plan = memory_cap.plan_capped_command(
                 "python",
-                ["-m", "agents_remember.code_quality.check"],
+                ["-m", "agents_remember_test_support.code_quality.check"],
                 2147483648,
                 systemd_run_available=True,
             )
@@ -135,7 +138,7 @@ class MemoryCapPlanningTests(unittest.TestCase):
     def test_rlimit_fallback_inserts_the_self_cap_flag(self) -> None:
         plan = memory_cap.plan_capped_command(
             "/venv/bin/python",
-            ["-m", "agents_remember.code_quality.check", "--diff-base", "abc"],
+            ["-m", "agents_remember_test_support.code_quality.check", "--diff-base", "abc"],
             1073741824,
             systemd_run_available=False,
         )
@@ -146,7 +149,7 @@ class MemoryCapPlanningTests(unittest.TestCase):
             [
                 "/venv/bin/python",
                 "-m",
-                "agents_remember.code_quality.check",
+                "agents_remember_test_support.code_quality.check",
                 "--memory-cap-bytes",
                 "1073741824",
                 "--diff-base",

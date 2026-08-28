@@ -9,11 +9,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 from agents_remember.application.lifecycle import lifecycle_operation_worker
-from agents_remember.testing.global_state import preserve_owned_mutable_state
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
 )
+from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
 from closeout_input_test_support import start_closeout_operation
 from test_lifecycle_operations import _contract, _input
 

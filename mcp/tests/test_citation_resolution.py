@@ -16,7 +16,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import citations
+from agents_remember_test_support.code_quality import citations
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 REPO_ROOT = MCP_SRC.parents[1]
@@ -103,7 +103,10 @@ class CitationGrammarTests(unittest.TestCase):
         self.assertEqual(_cited("``kernel/git_command.py:12-30``"), ["kernel/git_command.py:12-30"])
 
     def test_a_line_anchor_past_end_of_file_is_reported(self) -> None:
-        source = '"""see ``code_quality/citations.py:99999`` for the grammar."""\n'
+        source = (
+            '"""see ``mcp/test_support/agents_remember_test_support/'
+            'code_quality/citations.py:99999`` for the grammar."""\n'
+        )
         offenders = citations.module_citation_offenders(
             source,
             ast.parse(source),

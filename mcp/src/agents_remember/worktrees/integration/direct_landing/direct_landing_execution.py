@@ -42,10 +42,13 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence i
     public_failure_evidence,
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
+    CLEAN_STATUS_FINGERPRINT,
     begin_git_mutation,
     bind_expected_output_tree,
     git_mutation_snapshot,
     prove_git_commit,
+    snapshot_is_clean,
+    snapshot_is_clean_at_head,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -351,24 +354,17 @@ def _existing_direct_mapping(
     current_text: str,
     head_text: str,
 ) -> str | None:
-    if existing is None or existing.memory_commit != facts.memory_commit:
+    if getattr(existing, "memory_commit", None) != facts.memory_commit:
         # A different newest mapping is valid history. The proven memory commit must
         # prepend a new authoritative row after the accepted ledger prestate is checked.
         return None
-    if current_text != head_text:
-        _raise_direct_input_required(
-            runtime,
-            "direct-landing-ledger-bytes-ambiguous",
-            "the working ledger differs from the exact branch HEAD ledger blob",
-            expected={"headLedgerSha256": _text_sha256(head_text)},
-            observed={"workingLedgerSha256": _text_sha256(current_text)},
-        )
+    _require_head_ledger_bytes(runtime, current_text=current_text, head_text=head_text)
     ledger_commit = head_commit(facts.memory_repo)
     snapshot = git_mutation_snapshot(
         facts.memory_repo,
         runtime.contract.worktree_group / "reports" / ".direct-existing-ledger.index",
     )
-    if snapshot.head != ledger_commit or not _snapshot_is_clean(snapshot):
+    if not snapshot_is_clean_at_head(snapshot, ledger_commit):
         _raise_direct_input_required(
             runtime,
             "direct-landing-ledger-repository-dirty",
@@ -388,6 +384,23 @@ def _existing_direct_mapping(
         },
     )
     return ledger_commit
+
+
+def _require_head_ledger_bytes(
+    runtime: DirectLandingRuntime,
+    *,
+    current_text: str,
+    head_text: str,
+) -> None:
+    if current_text == head_text:
+        return
+    _raise_direct_input_required(
+        runtime,
+        "direct-landing-ledger-bytes-ambiguous",
+        "the working ledger differs from the exact branch HEAD ledger blob",
+        expected={"headLedgerSha256": _text_sha256(head_text)},
+        observed={"workingLedgerSha256": _text_sha256(current_text)},
+    )
 
 
 def _require_accepted_memory_prestate(
@@ -490,7 +503,7 @@ def _require_single_clean_ledger_commit(
         before.head,
         current.headTree,
         current.headTree,
-        hashlib.sha256(b"").hexdigest(),
+        CLEAN_STATUS_FINGERPRINT,
     )
     if observed != expected:
         raise DirectLandingError(
@@ -617,7 +630,7 @@ def _prepare_ledger_intent(runtime, facts: _LedgerExecution, ledger, current_tex
         current_text != accepted.ledgerBeforeText
         or head_text != accepted.ledgerBeforeText
         or current.head != facts.memory_commit
-        or not _snapshot_is_clean(current)
+        or not snapshot_is_clean(current)
     ):
         _raise_direct_input_required(
             runtime,
@@ -812,14 +825,6 @@ def _ledger_evidence_index(args: WorktreeArgs) -> Path:
     if contract_path is None:
         raise RuntimeError("direct landing ledger recovery has no contract authority")
     return contract_path.parent / "reports" / ".ledger-mutation-evidence.index"
-
-
-def _snapshot_is_clean(snapshot) -> bool:
-    return (
-        snapshot.indexTree == snapshot.headTree
-        and snapshot.candidateTree == snapshot.headTree
-        and snapshot.statusFingerprint == hashlib.sha256(b"").hexdigest()
-    )
 
 
 def _text_sha256(text: str) -> str:

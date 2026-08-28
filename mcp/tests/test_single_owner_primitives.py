@@ -18,7 +18,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import pytest
-from agents_remember.code_quality import single_owner
+from agents_remember_test_support.code_quality import single_owner
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 

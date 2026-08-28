@@ -1,8 +1,9 @@
 # Python Pytest Admission and Bootstrap Boundary
 
-The certifying and diagnostic routes share deterministic process setup, but only the Dagger route
-can obtain admission or load certifying-only service composition. Missing admission is a refusal;
-it is never a route selector.
+Python pytest execution is supported only inside the pinned Dagger graph. Admission and reusable
+process setup remain separate responsibilities: the capability authorizes the certifying route;
+the shared bootstrap establishes deterministic pytest behavior. Missing admission is a refusal,
+never a route selector.
 
 ```mermaid
 flowchart TD
@@ -11,12 +12,7 @@ flowchart TD
     C --> R[Root conftest]
     R --> S[Shared pytest bootstrap]
     R --> X[Certifying service plugin]
-
-    E[Current EligibleDirectSelection] --> D[Diagnostic bootstrap]
-    D --> S
-
-    A -. capability unavailable .-> D
-    X -. plugin unavailable .-> D
+    A -. unavailable .-> F[Refuse before collection]
 ```
 
 ## Owners
@@ -26,50 +22,31 @@ flowchart TD
 | Dagger nonce/file handshake | `testing.dagger_admission` | opaque `DaggerAdmission` or one controlled refusal |
 | Candidate source and process environment | `testing.hermetic_bootstrap` | candidate-bound import path, scrubbed Git selectors, disposable identity, isolated cache and native POSIX temp paths |
 | Certifying composition | `testing.certifying_bootstrap` and root conftest | admission before plugin loading or collection |
-| Diagnostic composition | `testing.diagnostic_bootstrap` | still-current eligible selection, with no admission field |
 | Shared pytest behavior | `testing.pytest_bootstrap` | test-process declaration, cache isolation, deterministic order, owned-global restoration |
 | Certifying-only services | `testing.pytest_certifying_bootstrap` | worktree service binding and teardown |
 
-`DaggerAdmission` has no public constructor and stores only a digest of the nonce. The diagnostic
-composition does not import it, accept it, or expose a boolean that could change evidence altitude.
-The only way to receive it is to pass the real nonce/file handshake.
+`DaggerAdmission` has no public constructor and stores only a digest of the nonce. The only way to
+receive it is to pass the real nonce/file handshake. That handshake is an in-process wrong-route
+guard, not authentication against a hostile repository owner; durable authority comes from the
+Dagger executor's immutable candidate-bound publication.
 
-That handshake is an in-process route guard against ordinary unsupported host invocation, not
-authentication against a hostile repository owner. The host controls the source, interpreter,
-environment, and filesystem, so no check inside that same process can prove such an adversarial
-property. Certifying authority instead comes from the Dagger executor's candidate-bound immutable
-report generation; the handshake prevents the certifying pytest composition from starting through
-the wrong route.
+## Preserved protections
 
-## Component matrix
+The certifying route retains candidate import pinning, Git selector scrubbing, disposable Git
+identity, explicit test-process declaration, per-process/worker cache isolation, owned-global
+restoration, deterministic random ordering, route-neutral phase/node reporting, and certifying
+service composition. The shared module does not import admission, providers, or worktree services;
+the certifying composition adds those capabilities only after admission succeeds.
 
-| Protection | Certifying | Direct diagnostic | Reason |
-| --- | :---: | :---: | --- |
-| Candidate checkout import pin | yes | yes | both routes must test the same source |
-| Git repository-selector scrub | yes | yes | ambient selectors cannot redirect any imported helper or subprocess |
-| Disposable Git identity | yes | yes | no test process inherits developer identity |
-| Test-process declaration | yes | yes | checkout coordination stays in explicit test mode |
-| Per-process/worker cache isolation | yes | yes | independent executions cannot share application cache state |
-| Owned-global leak restoration | yes | yes | pass, failure, and teardown restore registered state |
-| Deterministic random-order support | yes | yes | one pytest configuration and hook implementation |
-| Route-neutral phase/node report | yes | yes | one reporter vocabulary supports parity and cost analysis without sharing authority |
-| Worktree/provider service composition | yes | no | Candidate A refuses any test whose closure needs these unsafe families |
-| Dagger admission capability | yes | no | diagnostic output cannot certify work |
+## Candidate A retirement boundary
 
-The diagnostic omission is structural rather than a speed switch: the L1 classifier accepts only
-the content-sealed cohort whose reviewed effect ledger is known-safe; every protected family,
-unknown effect, non-member, or changed closure/configuration fingerprint refuses before pytest.
-Therefore an admitted diagnostic test cannot legitimately consume the certifying service bundle.
+The former diagnostic composition and its `EligibleDirectSelection` were deleted when Candidate A
+failed its measured retention threshold. `scripts/test-python`, its manifest, classifier,
+diagnostic bootstrap, and compatibility surface do not exist. This is an evidence-backed terminal
+disposition under the approved master, not a fallback to host pytest. Arbitrary non-certifying
+objects remain rejected by accepting consumers.
 
-## Four-state forcing proof
-
-| State | Expected boundary |
-| --- | --- |
-| Valid certification | matching nonce/file mints admission, then candidate bootstrap proceeds |
-| Valid diagnostics | current eligible selection prepares bootstrap without consulting admission |
-| Invalid certification | missing, malformed, unavailable, or mismatched admission refuses before candidate resolution and collection |
-| Attempted elevation | diagnostic evidence is rejected by accepting consumers and a caller-shaped admission object is rejected |
-
-The focused pure proof is `mcp/tests/test_pytest_bootstrap_boundaries.py`. It models admission facts
-without starting Dagger, a socket, a service, Git, or pytest itself. The final master gate later
-exercises the same production composition inside the real Dagger graph.
+The focused pure proof is `mcp/tests/test_pytest_bootstrap_boundaries.py`. It checks valid and
+invalid certifying admission, shared-bootstrap isolation, absence of Candidate-A shadows, and
+rejection of non-certifying elevation. The final master gate later exercises the same certifying
+composition inside the real Dagger graph.

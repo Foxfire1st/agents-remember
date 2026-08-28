@@ -18,15 +18,15 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import (
+from agents_remember_test_support.code_quality import (
     application_boundary,
     check,
     crap_calculator,
     scope,
     single_owner,
 )
-from agents_remember.code_quality.application_boundary import BoundaryContractError
-from agents_remember.code_quality.scope import ScopeError
+from agents_remember_test_support.code_quality.application_boundary import BoundaryContractError
+from agents_remember_test_support.code_quality.scope import ScopeError
 
 
 def _git(repo: Path, *args: str) -> None:

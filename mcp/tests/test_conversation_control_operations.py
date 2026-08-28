@@ -26,6 +26,7 @@ from _control_plane import OPERATOR, FakeControlAdapter, make_harness
 from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlClientError,
+    HarnessControlError,
 )
 from agents_remember.models.conversations.submissions import (
     ConversationSubmitRequest,
@@ -116,6 +117,9 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
             await self._interrupt(turn="turn-other")
 
     async def test_no_active_turn_refuses_with_rejected_failed(self) -> None:
+        self.adapter.interrupt_error = HarnessControlError(
+            "native Codex adapter reports that no turn is active"
+        )
         operation = await self._interrupt()
         self.assertEqual(operation.acknowledgement, "rejected")
         self.assertEqual(operation.settlement, "failed")
@@ -249,6 +253,9 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pi_stale_expected_identity_refuses_before_write(self) -> None:
         await self._submit("req-pi-1")
+        self.adapter.interrupt_error = HarnessControlError(
+            "native Pi adapter rejects a stale expected operation identity before writing"
+        )
         operation = await operations.interrupt(
             ControlRequest(
                 service=self.service,
@@ -513,6 +520,9 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stale_expected_identity_refuses_before_any_native_call(self) -> None:
         await self._submit("req-cl-1")
+        self.adapter.interrupt_error = HarnessControlError(
+            "native Claude adapter rejects a stale expected operation identity before writing"
+        )
         operation = await self._interrupt(turn="req-cl-stale", request_id="int-cl-2")
         self.assertEqual(operation.acknowledgement, "rejected")
         self.assertEqual(operation.settlement, "failed")

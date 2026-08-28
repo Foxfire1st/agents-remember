@@ -35,6 +35,30 @@ JOURNALED_CLOSEOUT_REQUIRED = (
     "worktree closeout mutation requires the journaled "
     "worktree_closeout_apply operation; synchronous apply is not authorized"
 )
+CLEAN_STATUS_FINGERPRINT = hashlib.sha256(b"").hexdigest()
+
+
+def snapshot_is_clean(snapshot: GitMutationSnapshot) -> bool:
+    """Whether index, candidate, and status all describe the exact current HEAD."""
+    return snapshot_is_clean_at_head(snapshot, snapshot.head)
+
+
+def snapshot_is_clean_at_head(
+    snapshot: GitMutationSnapshot,
+    expected_head: str,
+) -> bool:
+    """Whether ``snapshot`` is clean at one expected commit identity."""
+    return (
+        snapshot.head,
+        snapshot.indexTree,
+        snapshot.candidateTree,
+        snapshot.statusFingerprint,
+    ) == (
+        expected_head,
+        snapshot.headTree,
+        snapshot.headTree,
+        CLEAN_STATUS_FINGERPRINT,
+    )
 
 
 def require_closeout_mutation_authority(args: WorktreeArgs) -> None:
@@ -157,11 +181,10 @@ def _isolated_file_candidate_tree(
         )
     )
     alternate = common_dir / "objects"
-    clean_status = hashlib.sha256(b"").hexdigest()
     if (
         before.indexTree != before.headTree
         or before.candidateTree != before.headTree
-        or before.statusFingerprint != clean_status
+        or before.statusFingerprint != CLEAN_STATUS_FINGERPRINT
     ):
         raise RuntimeError("exact file mutation requires a clean accepted HEAD tree before intent")
     tree_entry = require_git(repository, ["ls-tree", before.headTree, "--", relative])

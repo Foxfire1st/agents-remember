@@ -43,12 +43,10 @@ from agents_remember.serving.pi_rpc_protocol import (
 # different build proves the adapter works against a runtime nobody ships.
 PI_RPC_VERSION = "0.80.7"
 
-FIXTURES = Path(__file__).parent / "fixtures" / "pi_rpc"
-
-# The capability recording for exactly the pinned build. Naming it after PI_RPC_VERSION is
-# what stops the two drifting apart: bump the pin without re-recording and this path does
-# not exist, so the suite fails instead of re-validating a build nobody ships.
-CAPABILITY_FIXTURE = FIXTURES / f"{PI_RPC_VERSION}-capabilities.json"
+# The literal path keeps the lifecycle catalog's consumer relationship source-observable. The
+# capability test separately requires the recording's embedded version to equal PI_RPC_VERSION,
+# so bumping the runtime pin without re-recording still fails loudly.
+CAPABILITY_FIXTURE = Path(__file__).parent / "fixtures/pi_rpc/0.80.7-capabilities.json"
 
 
 # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_pi_rpc_real_smoke.py:52).

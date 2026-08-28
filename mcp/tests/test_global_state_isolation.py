@@ -8,7 +8,7 @@ from agents_remember.controlplane.durable_store import (
     declare_process_role,
     declared_process_role,
 )
-from agents_remember.testing.global_state import (
+from agents_remember_test_support.testing.global_state import (
     restore_owned_mutable_state,
     snapshot_owned_mutable_state,
 )

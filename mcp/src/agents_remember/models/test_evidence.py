@@ -1,12 +1,11 @@
-"""Separate diagnostic feedback from candidate-bound Dagger certification."""
+"""Opaque candidate-bound Dagger certification for accepting consumers."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final, TypeAlias
+from typing import Final
 
 EVIDENCE_SCHEMA_VERSION = "python-test-evidence/v1"
 
@@ -29,25 +28,6 @@ class EvidenceConsumer(StrEnum):
     LIFECYCLE = "lifecycle"
     CLOSEOUT = "closeout"
     INTEGRATION = "integration"
-
-
-@dataclass(frozen=True)
-class CandidateBinding:
-    """Content binding that invalidates evidence when code or config moves."""
-
-    digest: str
-    policy_version: str
-    configuration_paths: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class DiagnosticTestEvidence:
-    """Local feedback that cannot satisfy an accepting consumer."""
-
-    binding: CandidateBinding
-    nodes: tuple[str, ...]
-    exit_code: int
-    altitude: EvidenceAltitude = EvidenceAltitude.DIAGNOSTIC
 
 
 class _DaggerAuthority:
@@ -88,15 +68,8 @@ class CertifyingTestEvidence:
         return instance
 
 
-TestEvidence: TypeAlias = DiagnosticTestEvidence | CertifyingTestEvidence
-
-
 class EvidenceConsumerRefusal(RuntimeError):
     """A consumer was offered evidence below its required altitude."""
-
-
-class EvidencePayloadError(ValueError):
-    """Serialized test evidence is malformed or requests unavailable authority."""
 
 
 def _certifying_evidence_from_verified_dagger(
@@ -119,7 +92,7 @@ def _certifying_evidence_from_verified_dagger(
 
 
 def require_certifying_evidence(
-    evidence: TestEvidence | None,
+    evidence: object | None,
     *,
     consumer: EvidenceConsumer,
 ) -> CertifyingTestEvidence:
@@ -133,26 +106,14 @@ def require_certifying_evidence(
     ):
         raise EvidenceConsumerRefusal(
             f"{consumer.value} requires candidate-bound Dagger certification; "
-            "direct diagnostic output is not acceptance evidence"
+            "non-certifying or diagnostic output is not acceptance evidence"
         )
     return evidence
 
 
-def evidence_payload(evidence: TestEvidence) -> dict[str, object]:
-    """Serialize an altitude-discriminated result without granting new authority."""
+def evidence_payload(evidence: CertifyingTestEvidence) -> dict[str, object]:
+    """Serialize verified certification without granting authority to a caller."""
 
-    if isinstance(evidence, DiagnosticTestEvidence):
-        return {
-            "schemaVersion": EVIDENCE_SCHEMA_VERSION,
-            "altitude": evidence.altitude.value,
-            "candidate": {
-                "digest": evidence.binding.digest,
-                "policyVersion": evidence.binding.policy_version,
-                "configurationPaths": list(evidence.binding.configuration_paths),
-            },
-            "nodes": list(evidence.nodes),
-            "exitCode": evidence.exit_code,
-        }
     require_certifying_evidence(evidence, consumer=EvidenceConsumer.QUALITY)
     return {
         "schemaVersion": EVIDENCE_SCHEMA_VERSION,
@@ -160,61 +121,3 @@ def evidence_payload(evidence: TestEvidence) -> dict[str, object]:
         "candidateTree": evidence.candidate_tree,
         "resultSha256": evidence.result_sha256,
     }
-
-
-def load_diagnostic_test_evidence(raw: Mapping[str, object]) -> DiagnosticTestEvidence:
-    """Load local feedback; certifying payloads require the Dagger manifest loader."""
-
-    if raw.get("schemaVersion") != EVIDENCE_SCHEMA_VERSION:
-        raise EvidencePayloadError("test evidence schema version is unsupported")
-    if raw.get("altitude") != EvidenceAltitude.DIAGNOSTIC.value:
-        raise EvidencePayloadError(
-            "serialized certifying evidence is not caller-loadable; verify its Dagger publication"
-        )
-    if set(raw) != {"schemaVersion", "altitude", "candidate", "nodes", "exitCode"}:
-        raise EvidencePayloadError("diagnostic evidence fields are invalid")
-    binding = _load_candidate_binding(raw.get("candidate"))
-    raw_nodes = raw.get("nodes")
-    exit_code = raw.get("exitCode")
-    if (
-        not isinstance(raw_nodes, list)
-        or not raw_nodes
-        or any(not isinstance(node, str) or not node for node in raw_nodes)
-    ):
-        raise EvidencePayloadError("diagnostic evidence nodes are invalid")
-    if isinstance(exit_code, bool) or not isinstance(exit_code, int) or exit_code < 0:
-        raise EvidencePayloadError("diagnostic evidence exit code is invalid")
-    return DiagnosticTestEvidence(binding, tuple(raw_nodes), exit_code)
-
-
-def _load_candidate_binding(raw: object) -> CandidateBinding:
-    binding = _candidate_binding_mapping(raw)
-    digest = _candidate_digest(binding.get("digest"))
-    policy_version = _candidate_policy_version(binding.get("policyVersion"))
-    paths = _candidate_configuration_paths(binding.get("configurationPaths"))
-    return CandidateBinding(digest, policy_version, paths)
-
-
-def _candidate_binding_mapping(raw: object) -> dict[object, object]:
-    expected = {"digest", "policyVersion", "configurationPaths"}
-    if not isinstance(raw, dict) or set(raw) != expected:
-        raise EvidencePayloadError("diagnostic candidate binding is invalid")
-    return raw
-
-
-def _candidate_digest(raw: object) -> str:
-    if not isinstance(raw, str) or re.fullmatch(r"[0-9a-f]{64}", raw) is None:
-        raise EvidencePayloadError("diagnostic candidate digest is invalid")
-    return raw
-
-
-def _candidate_policy_version(raw: object) -> str:
-    if not isinstance(raw, str) or not raw:
-        raise EvidencePayloadError("diagnostic policy version is invalid")
-    return raw
-
-
-def _candidate_configuration_paths(raw: object) -> tuple[str, ...]:
-    if not isinstance(raw, list) or any(not isinstance(path, str) or not path for path in raw):
-        raise EvidencePayloadError("diagnostic configuration paths are invalid")
-    return tuple(raw)

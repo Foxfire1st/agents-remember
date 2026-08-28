@@ -98,6 +98,73 @@ the requirement's class:
 Evidence of the wrong class for a requirement is a finding, never a pass (260815-DAG: L8-R3 was
 passed on projection-only evidence).
 
+## Per-Requirement Independent Attempt Adjudication
+
+The review scope includes the exact stable-ID + version requirement set dispatched to the builder.
+First verify that every cited canonical packet matches that revision, is approved, and records the
+durable corpus ruling. Resolve the immutable worker attempt record, leaf manifestation, and exact
+candidate for every revision. Adjudicate every requirement revision separately as exactly
+`accepted` or `rejected`; that revision adjudication must target one exact worker attempt and
+candidate. An aggregate completion verdict
+or a sampled subset is invalid. For each ID:
+
+1. confirm the worker record binds the exact requirement revision, leaf manifestation, leaf-local
+   attempt ID, predecessor/findings when present, and candidate tree/commit or non-code digest;
+2. read the worker's requirement-specific status (`satisfied`, `blocked`, or `approved-change`),
+   rationale, citations, findings/failure class, and content-addressed expanded-evidence reference;
+   verify the referenced digest and exact requirement anchor rather than expecting the complete
+   master envelope or experimental-run body to be copied into the attempt;
+3. independently open the cited deliverable/implementation artifacts and exact anchors rather than
+   accepting the handoff's characterization;
+4. independently open or execute the cited verification evidence and explain what behavior it
+   proves, what failure it catches, and whether it is evidence of the requirement's class;
+5. validate every citation and exact command/result or durable evidence reference;
+6. for `blocked` or `approved-change`, inspect the cited durable developer ruling and confirm that
+   it authorizes this exact exception or changed delivery;
+7. write the reviewer's own acceptance/rejection rationale and refutation attempt; and
+8. append a separate immutable reviewer record against this exact attempt and candidate to the
+   same single physical leaf journal, without modifying the worker record or any earlier bytes;
+   then link that exact journal anchor from the independently authored verdict rather than copying
+   the record.
+
+Internal implementation, test, and evidence reruns are experimental protocol events rather than
+worker attempts. Inspect that separate log when it supports a claim, but never adjudicate its event
+IDs as delivery attempts or treat a rerun count as attempt lineage.
+
+A malformed pre-handoff row is not assigned to review: it remains preserved with an append-only
+`non-attempt-correction`/void reference and consumes no attempt ID. A malformed handed-off row is a
+formal attempt. Reject it independently as an evidence gap or the applicable exact failure class;
+do not edit it, and require a successor only when the worker hands off the next exact candidate.
+
+A missing, unapproved, or mismatched version is an invalid citation and forces rejection. If the
+corpus shows a newer approved version, reject stale acceptance and require the affected leaf to be
+rebriefed.
+
+Missing rationale, missing or wrong-class evidence, an invalid citation, or absent developer
+approval forces `rejected` for that ID. The overall recommendation cannot be PASS or
+PASS-WITH-NOTES while any requirement is rejected. A truthful `blocked` row may be `accepted` as a
+handoff state, but the overall recommendation remains BLOCK until the requirement becomes
+`satisfied` or an authorized `approved-change`. Code requirements use path + symbol citations;
+non-code requirements use deliverable/verification paths plus sections or anchors, never invented
+code fields.
+
+Every rejection finding has exactly one primary class: `implementation defect`, `evidence gap`,
+`requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A
+requirement contradiction/overconstraint is a rejection that requests architect/developer
+revision authority; never rewrite the packet or accept a workaround as changed semantics. If the
+unadjudicated candidate for this manifestation moved during review, reject the stale attempt and
+require a successor worker attempt plus reviewer record. A rejected attempt
+closes as rejected; its successor cites every carried finding. An accepted attempt remains closed
+unless the independent reviewer proves a direct regression against it and the owning manager
+(architect in a flat run) records a bounded invalidation citing the reviewer record, the accepted attempt, the regressing
+candidate, and affected set; a developer-approved new requirement version is the other trigger.
+An unrelated later candidate does not reopen an accepted attempt. Your finding alone does not
+reopen work or extend leaf scope.
+
+Requirement adjudication and the durable-evidence promotion hold point are independent. A valid
+stable-contract-or-expiry disposition cannot fill a missing requirement rationale or verification
+proof, and a satisfied requirement cannot waive missing lifecycle metadata for durable evidence.
+
 ## The Three Review Lenses
 
 Fan out sub-agents (each writing a durable report) across three lenses. For a leaf code-change
@@ -119,6 +186,13 @@ and make every finding traceable to a durable evidence file.
 3. **Onboarding-vs-code** — changed files' sidecars updated in the same pass · drift clean · route
    overviews current. This is the paired `read_ar_files` + `memory_quality_check` + `drift_check`
    check. (`../templates/onboarding-coherency.md`.)
+
+Every lens also carries the **durable-evidence promotion hold point**. For each new or retained
+fixture, recording, generator, shared support file, or migration proof, the verdict must report
+either (a) a registered stable contract with a real owner, executable evidence node, and complete
+source-observed consumers, or (b) a dated expiry/retirement event with executable replacement,
+owner, and compatibility consequence. Block when neither exists or when the public lifecycle
+validator does not prove the row. A generic statement that evidence is useful is not a decision.
 
 ## Seam-Specific Rubrics
 
@@ -181,23 +255,32 @@ integrated on super.
 2. **Run the standing catalogs + the three lenses**, fanning out sub-agents that write durable
    reports; adopt the refute-or-confirm posture — a finding that cannot survive an attempt to
    refute it is not a finding. Owe the exploratory mandate on top of the catalog.
-3. **Write the verdict artifact** (`../templates/verdict.md`, the matching seam variant): findings ranked,
+3. **Adjudicate the complete stable-ID + version requirement set** using one independent record per
+   exact worker attempt, leaf manifestation, and candidate. Reject missing/invalid/wrong-class
+   evidence, stale candidate binding, and unapproved exceptions; do not replace the
+   blocks with general prose or a single "requirements addressed" statement.
+4. **Write the verdict artifact** (`../templates/verdict.md`, the matching seam variant): findings ranked,
    an explicit **pass / block** recommendation, durable under the series `notes/reports/` directory —
    including the per-criterion catalog results and any proposed catalog amendments (the promotion
    ratchet).
-4. **For leaf route review, hand the owner the complete route table** so it can call
+   Include the explicit durable-evidence checklist output even when it is `N/A`; when applicable,
+   cite the task decision, catalog row, executable owner/node or expiry, and validator result.
+5. **For leaf route review, hand the owner the complete route table** so it can call
    `task_doc.record_route_review`; never invent or carry a candidate-tree hash yourself. The plane
    binds the current tree only after all referenced report files exist.
-5. **Attach the verdict as judge evidence** on the handover gate — the decider decides; the reviewer
+6. **Attach the verdict as judge evidence** on the handover gate — the decider decides; the reviewer
    does not. (A loop review's verdict goes to the loop owner the same way: evidence, never a
    decision.)
-6. **Decompose a blocking verdict into fix leaves** — concrete, **leaf-shaped** findings the owning
+7. **Decompose a blocking verdict into fix leaves** — concrete, **leaf-shaped** findings the owning
    manager (master-exit) or orchestrator (super-exit) can dispatch. A block is **never prose-only**; if
    it cannot be named as fix leaves, it is not yet a block.
-7. **Serve delta-verifies when resumed:** confirm the landed residuals of a round you already
-   reviewed via the follow-up channel, appending the delta section to your own verdict artifact —
-   never a fresh full round in disguise. Reuse the same route reviewers; add a reviewer only when
-   the repair opens a new major route.
+8. **Serve delta-verifies when resumed:** through the follow-up channel, confirm only the previously
+   rejected requirement rows, their direct regressions, and any newly authorized changed delivery.
+   Retain already accepted attempts; do not silently reopen them or resample the complete set.
+   Append a new reviewer record for the successor attempt to the authoritative leaf Requirement
+   Attempt Journal before or alongside the verdict update, and link its exact journal anchor from
+   the verdict artifact. Confirm that the rejected set shrinks and never disguise it as a fresh
+   full round. Reuse the same route reviewers; add one only when the repair opens a new major route.
 
 ## Artifact Obligations
 

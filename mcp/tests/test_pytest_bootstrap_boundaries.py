@@ -8,45 +8,37 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
-from _direct_cohort_candidate import write_synthetic_direct_cohort
 from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from agents_remember.kernel.primitives.checkout_coordination import declared_execution_mode
 from agents_remember.models.test_evidence import (
-    DiagnosticTestEvidence,
     EvidenceConsumer,
     EvidenceConsumerRefusal,
     require_certifying_evidence,
 )
-from agents_remember.testing.certifying_bootstrap import (
+from agents_remember_test_support.testing.certifying_bootstrap import (
     prepare_certifying_pytest_bootstrap,
 )
-from agents_remember.testing.dagger_admission import (
+from agents_remember_test_support.testing.dagger_admission import (
     DAGGER_TEST_ATTESTATION_ENV,
     DaggerAdmission,
     DaggerAdmissionError,
     dagger_admission_refusal,
     require_dagger_admission_capability,
 )
-from agents_remember.testing.diagnostic_bootstrap import (
-    prepare_diagnostic_pytest_bootstrap,
-)
-from agents_remember.testing.eligibility import classify_direct_selection
-from agents_remember.testing.global_state import (
+from agents_remember_test_support.testing.global_state import (
     begin_pytest_process,
     end_pytest_process,
     restore_owned_mutable_state,
     snapshot_owned_mutable_state,
 )
-from agents_remember.testing.hermetic_bootstrap import (
+from agents_remember_test_support.testing.hermetic_bootstrap import (
     DISPOSABLE_GIT_IDENTITY,
     BootstrapConfigurationError,
     activate_current_pytest_environment,
     candidate_test_process,
     hermetic_pytest_environment,
 )
-from agents_remember.testing.selection_contract import EligibleDirectSelection
 
 VALID_NONCE = "0123456789abcdef0123456789abcdef"
 
@@ -58,6 +50,9 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
         package = self.root / "mcp" / "src" / "agents_remember"
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
+        test_support = self.root / "mcp" / "test_support" / "agents_remember_test_support"
+        test_support.mkdir(parents=True)
+        (test_support / "__init__.py").write_text("", encoding="utf-8")
         tests = self.root / "mcp" / "tests"
         tests.mkdir(parents=True)
         (tests / "test_plain.py").write_text(
@@ -73,17 +68,11 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
             '[tool.pytest.ini_options]\ntestpaths = ["mcp/tests"]\n',
             encoding="utf-8",
         )
-        node = "mcp/tests/test_plain.py::test_plain"
-        write_synthetic_direct_cohort(
-            self.root,
-            (node,),
-            {"mcp/tests/test_plain.py": ("test_plain",)},
-        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def test_four_state_authority_matrix(self) -> None:
+    def test_candidate_a_retirement_preserves_certifying_authority_boundary(self) -> None:
         attestation = self.root / "attestation"
         attestation.write_text(VALID_NONCE, encoding="utf-8")
         certifying = prepare_certifying_pytest_bootstrap(
@@ -96,20 +85,6 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
             certifying.admission,
         )
 
-        decision = classify_direct_selection(
-            self.root,
-            ("mcp/tests/test_plain.py::test_plain",),
-        )
-        self.assertIsInstance(decision, EligibleDirectSelection)
-        assert isinstance(decision, EligibleDirectSelection)
-        with mock.patch(
-            "agents_remember.testing.dagger_admission.require_dagger_admission",
-            side_effect=AssertionError("diagnostics consulted admission"),
-        ) as admission:
-            diagnostic = prepare_diagnostic_pytest_bootstrap(decision)
-        admission.assert_not_called()
-        self.assertEqual(diagnostic.selection.nodes, decision.nodes)
-
         with self.assertRaisesRegex(DaggerAdmissionError, "absent or invalid"):
             prepare_certifying_pytest_bootstrap(
                 self.root / "not-a-candidate",
@@ -117,9 +92,19 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
                 attestation_path=attestation,
             )
 
-        evidence = DiagnosticTestEvidence(decision.binding, decision.nodes, 0)
         with self.assertRaises(EvidenceConsumerRefusal):
-            require_certifying_evidence(evidence, consumer=EvidenceConsumer.QUALITY)
+            require_certifying_evidence(object(), consumer=EvidenceConsumer.QUALITY)
+
+        repository_root = Path(__file__).resolve().parents[2]
+        self.assertFalse((repository_root / "scripts/test-python").exists())
+        support = repository_root / "mcp/test_support/agents_remember_test_support/testing"
+        for retired in (
+            "diagnostic_bootstrap.py",
+            "direct_runner.py",
+            "direct_source_closure.py",
+            "eligibility.py",
+        ):
+            self.assertFalse((support / retired).exists(), retired)
 
     def test_admission_matrix_is_total_and_does_not_expose_the_nonce(self) -> None:
         attestation = self.root / "attestation"
@@ -157,7 +142,10 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
         self.assertNotIn("GIT_DIR", child)
         self.assertNotIn("GIT_WORK_TREE", child)
         self.assertEqual(child["GIT_AUTHOR_NAME"], DISPOSABLE_GIT_IDENTITY["GIT_AUTHOR_NAME"])
-        self.assertEqual(child["PYTHONPATH"], process.source_root.as_posix())
+        self.assertEqual(
+            child["PYTHONPATH"],
+            os.pathsep.join((process.test_support_root.as_posix(), process.source_root.as_posix())),
+        )
         self.assertEqual(child["KEEP"], "yes")
         expected_temp = (self.root.parent / "isolated-cache" / "tmp").as_posix()
         self.assertEqual(
@@ -181,26 +169,32 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
                 cache_root=self.root / ".cache",
             )
 
-    def test_diagnostic_plugin_has_no_admission_or_external_service_dependency(self) -> None:
-        package = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
-        diagnostic = (package / "testing" / "pytest_bootstrap.py").read_text(encoding="utf-8")
+    def test_shared_pytest_plugin_has_no_admission_or_external_service_dependency(self) -> None:
+        package = (
+            Path(__file__).resolve().parents[1] / "test_support" / "agents_remember_test_support"
+        )
+        shared = (package / "testing" / "pytest_bootstrap.py").read_text(encoding="utf-8")
         certifying = (package / "pytest_certifying_bootstrap.py").read_text(encoding="utf-8")
-        self.assertNotIn("dagger", diagnostic.lower())
-        self.assertNotIn("worktree_services", diagnostic)
-        self.assertNotIn("providers", diagnostic)
+        self.assertNotIn("dagger", shared.lower())
+        self.assertNotIn("worktree_services", shared)
+        self.assertNotIn("providers", shared)
         self.assertIn("pytest_bootstrap", certifying)
         self.assertIn("worktree_services", certifying)
 
     def test_certifying_plugin_defers_the_service_graph_until_fixture_execution(self) -> None:
-        source_root = Path(__file__).resolve().parents[1] / "src"
+        mcp_root = Path(__file__).resolve().parents[1]
+        source_root = mcp_root / "src"
+        test_support_root = mcp_root / "test_support"
         environment = dict(os.environ)
-        environment["PYTHONPATH"] = source_root.as_posix()
+        environment["PYTHONPATH"] = os.pathsep.join(
+            (test_support_root.as_posix(), source_root.as_posix())
+        )
         command = "\n".join(
             (
                 "import sys",
-                "import agents_remember.pytest_certifying_bootstrap",
+                "import agents_remember_test_support.pytest_certifying_bootstrap",
                 "forbidden = {",
-                "    'agents_remember.testing',",
+                "    'agents_remember_test_support.testing',",
                 "    'agents_remember.application.worktree_services',",
                 "    'agents_remember.models.lifecycles.operation',",
                 "}",
@@ -211,7 +205,7 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
 
         completed = subprocess.run(
             [sys.executable, "-c", command],
-            cwd=source_root.parent.parent,
+            cwd=mcp_root.parent,
             env=environment,
             check=False,
             capture_output=True,
@@ -226,11 +220,11 @@ class PytestBootstrapBoundaryTests(unittest.TestCase):
         try:
             end_pytest_process()
             self.assertIsNone(declared_execution_mode())
-        finally:
             begin_pytest_process()
-        self.assertEqual(declared_execution_mode(), "test")
+            self.assertEqual(declared_execution_mode(), "test")
+        finally:
+            restore_owned_mutable_state(before)
         self.assertEqual(snapshot_owned_mutable_state(), before)
-        restore_owned_mutable_state(before)
 
 
 if __name__ == "__main__":

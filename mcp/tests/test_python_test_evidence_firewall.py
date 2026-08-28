@@ -8,32 +8,25 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-from agents_remember.code_quality import check, retry_proof
 from agents_remember.models.test_evidence import (
-    CandidateBinding,
-    DiagnosticTestEvidence,
     EvidenceConsumer,
     EvidenceConsumerRefusal,
-    evidence_payload,
     require_certifying_evidence,
 )
-from agents_remember.testing.consumer_inventory import ACCEPTING_CONSUMER_INVENTORY
-from agents_remember.testing.dagger_admission import (
+from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
+from agents_remember_test_support.code_quality import check, retry_proof
+from agents_remember_test_support.testing.consumer_inventory import ACCEPTING_CONSUMER_INVENTORY
+from agents_remember_test_support.testing.dagger_admission import (
     DaggerAdmission,
     DaggerAdmissionError,
 )
-from agents_remember.worktrees.modules.quality import clean_executor as clean_quality_executor
 
 
 class PythonTestEvidenceFirewallTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.diagnostic = DiagnosticTestEvidence(
-            CandidateBinding("0" * 64, "policy/v1", ("pyproject.toml",)),
-            ("mcp/tests/test_plain.py::test_plain",),
-            0,
-        )
+        self.non_certifying = object()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -45,12 +38,12 @@ class PythonTestEvidenceFirewallTests(unittest.TestCase):
                 self.assertRaises(EvidenceConsumerRefusal),
             ):
                 require_certifying_evidence(
-                    self.diagnostic,
+                    self.non_certifying,
                     consumer=contract.consumer,
                 )
 
     def test_coverage_and_retry_require_the_opaque_admission_capability(self) -> None:
-        forged = cast(DaggerAdmission, self.diagnostic)
+        forged = cast(DaggerAdmission, self.non_certifying)
         config = check.CheckConfig(
             project_root=self.root,
             scope=check.GateScope(
@@ -77,6 +70,10 @@ class PythonTestEvidenceFirewallTests(unittest.TestCase):
             coverage_paths=(),
             test_arguments=(Path("mcp/tests/test_plain.py"),),
             untracked_paths=(),
+            cache_root=self.root / "retry-cache",
+            lane_digest="lane-digest",
+            lane_trigger="release",
+            lane_population=("accept=release",),
         )
         with self.assertRaises(DaggerAdmissionError):
             retry_proof.prepare(inputs, admission=forged, printer=lambda _line: None)
@@ -88,7 +85,13 @@ class PythonTestEvidenceFirewallTests(unittest.TestCase):
         exported.mkdir()
         reports = self.root / "reports"
         (exported / "clean-quality-results.json").write_text(
-            json.dumps(evidence_payload(self.diagnostic)),
+            json.dumps(
+                {
+                    "schemaVersion": "non-accepting-investigation/v1",
+                    "status": "passed",
+                    "acceptanceEligible": False,
+                }
+            ),
             encoding="utf-8",
         )
         with self.assertRaisesRegex(RuntimeError, "no valid authoritative result"):

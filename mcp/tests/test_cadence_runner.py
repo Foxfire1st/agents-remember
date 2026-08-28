@@ -10,9 +10,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agents_remember.testing import cadence_runner
-from agents_remember.testing.dagger_admission import DaggerAdmissionError
-from agents_remember.testing.evidence_lanes import EvidenceTrigger
+from agents_remember_test_support.testing import cadence_runner
+from agents_remember_test_support.testing.dagger_admission import DaggerAdmissionError
+from agents_remember_test_support.testing.evidence_lanes import EvidenceTrigger
+from agents_remember_test_support.testing.pytest_phase_reporter import (
+    PYTEST_PHASE_REPORT_SCHEMA,
+)
+
+PROVENANCE = {
+    "schemaVersion": "ar-nonaccepting-evidence-provenance/v1",
+    "candidate": {"digest": "a" * 64, "candidateTree": "b" * 40},
+    "environment": {"python": "test"},
+    "environmentId": "c" * 64,
+}
 
 
 class CadenceRunnerTests(unittest.TestCase):
@@ -23,6 +33,13 @@ class CadenceRunnerTests(unittest.TestCase):
         self.result = self.root / "reports/cadence.json"
         self.events = self.root / "reports/events.jsonl"
         self.phases = self.root / "reports/phases.json"
+        provenance = mock.patch.object(
+            cadence_runner,
+            "capture_provenance",
+            return_value=PROVENANCE,
+        )
+        provenance.start()
+        self.addCleanup(provenance.stop)
 
     def run_trigger(self, trigger: EvidenceTrigger) -> int:
         return cadence_runner.run_cadence_evidence(
@@ -32,6 +49,26 @@ class CadenceRunnerTests(unittest.TestCase):
             pytest_report_log=self.events,
             pytest_phase_report=self.phases,
         )
+
+    def completed(self, return_code: int) -> subprocess.CompletedProcess[bytes]:
+        self.events.parent.mkdir(parents=True, exist_ok=True)
+        self.events.write_text("{}\n", encoding="utf-8")
+        self.phases.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": PYTEST_PHASE_REPORT_SCHEMA,
+                    "pytestExitCode": return_code,
+                    "population": {
+                        "collected": 7201,
+                        "selected": 10,
+                        "deselected": 7191,
+                        "reported": 10,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess([], return_code)
 
     def test_host_process_is_refused_before_inventory_or_execution(self) -> None:
         refusal = DaggerAdmissionError("not admitted")
@@ -47,7 +84,7 @@ class CadenceRunnerTests(unittest.TestCase):
         execute.assert_not_called()
 
     def test_scheduled_stress_is_serial_loud_and_explicitly_non_accepting(self) -> None:
-        completed = subprocess.CompletedProcess([], 0)
+        completed = self.completed(0)
         with (
             mock.patch.object(cadence_runner, "require_dagger_admission"),
             mock.patch.object(
@@ -68,9 +105,15 @@ class CadenceRunnerTests(unittest.TestCase):
         self.assertFalse(payload["acceptanceEligible"])
         self.assertFalse(payload["certifying"])
         self.assertEqual(payload["trigger"], "scheduled")
+        self.assertEqual(payload["candidateProvenance"], PROVENANCE)
+        self.assertEqual(payload["population"]["collected"], 7201)
+        self.assertEqual(payload["population"]["deselected"], 7191)
+        self.assertEqual(payload["topology"]["xdistWorkers"], 0)
+        self.assertEqual(payload["repetitions"], {"requested": 1, "completed": 1})
+        self.assertEqual(payload["artifacts"]["pytestPhaseReport"]["path"], "phases.json")
 
     def test_provider_bump_uses_its_own_population(self) -> None:
-        completed = subprocess.CompletedProcess([], 1)
+        completed = self.completed(1)
         with (
             mock.patch.object(cadence_runner, "require_dagger_admission"),
             mock.patch.object(
@@ -87,6 +130,28 @@ class CadenceRunnerTests(unittest.TestCase):
         self.assertEqual(command[command.index("-m", 3) + 1], "evidence_provider")
         payload = json.loads(self.result.read_text(encoding="utf-8"))
         self.assertEqual(payload["status"], "failed")
+
+    def test_missing_phase_report_fails_loud_after_preserving_subprocess_truth(self) -> None:
+        completed = subprocess.CompletedProcess([], 0)
+        with (
+            mock.patch.object(cadence_runner, "require_dagger_admission"),
+            mock.patch.object(
+                cadence_runner,
+                "load_evidence_inventory",
+                return_value=SimpleNamespace(artifacts=()),
+            ),
+            mock.patch.object(cadence_runner.subprocess, "run", return_value=completed),
+        ):
+            exit_code = self.run_trigger(EvidenceTrigger.SCHEDULED)
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(self.result.read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "failed")
+        self.assertTrue(payload["executed"])
+        self.assertEqual(payload["pytestExitCode"], 0)
+        self.assertIsNone(payload["population"])
+        self.assertEqual(payload["artifacts"], {})
+        self.assertIn("phase report is unavailable", payload["message"])
 
     def test_empty_migration_window_is_not_applicable_without_running_pytest(self) -> None:
         with (

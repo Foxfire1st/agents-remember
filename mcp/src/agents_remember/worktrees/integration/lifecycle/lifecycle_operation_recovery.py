@@ -30,9 +30,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
-    public_failure_evidence,
-)
 from agents_remember.worktrees.integration.mutation_evidence import (
     reconcile_closeout_mutations,
 )
@@ -47,9 +44,7 @@ def recover_direct_landing_under_authority(
     """Recover one direct generation while the caller owns its Git landing authority."""
 
     current_contract = load_contract(contract.contract_path)
-    classification = classify_direct_landing_recovery(current_contract, record)
-    if classification.state == "developer-decision":
-        raise direct_recovery_refusal(classification)
+    _require_recoverable_direct_state(current_contract, record)
     requeued, changed = store.resume_generation(
         lifecycle_generation_resume.requeued_same_generation,
         expected_generation=record.generation,
@@ -66,46 +61,52 @@ def recover_direct_landing_under_authority(
     try:
         execute_or_require_direct_landing_recovery(runtime.contract, runtime)
     except DirectLandingError as exc:
-        classification = classify_direct_landing_recovery(
+        raise _direct_recovery_failure(
             current_contract,
-            store.read() or requeued,
-        )
-        if classification.state == "developer-decision":
-            raise direct_recovery_refusal(classification) from exc
-        raise LifecycleControlError(
-            exc.status,
-            exc.detail,
-            expected=exc.expected,
-            observed=exc.observed,
-            next_action="recover",
+            store,
+            requeued,
+            exc,
         ) from exc
-    except RuntimeError as exc:
-        classification = classify_direct_landing_recovery(
-            current_contract,
-            store.read() or requeued,
-        )
-        if classification.state == "developer-decision":
-            raise direct_recovery_refusal(classification) from exc
-        detail = "direct landing was interrupted and requires same-generation recovery"
-        observed = public_failure_evidence(
-            stage="direct-recovery-control",
-            side="direct-landing",
-            name="accepted-generation",
-            error_type=type(exc).__name__,
-            observed={"state": "interrupted"},
-        )
-        runtime.require_input(
-            status="direct-landing-recovery-required",
-            detail=detail,
-            observed=observed,
-        )
-        raise LifecycleControlError(
-            "direct-landing-recovery-required",
-            detail,
-            observed=observed,
-            next_action="recover",
-        ) from exc
-    return store.read() or requeued
+    return _current_record(store, requeued)
+
+
+def _require_recoverable_direct_state(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord,
+) -> None:
+    classification = classify_direct_landing_recovery(contract, record)
+    if classification.state == "developer-decision":
+        raise direct_recovery_refusal(classification)
+
+
+def _direct_recovery_failure(
+    current_contract: WorktreeContract,
+    store: LifecycleOperationStore,
+    requeued: LifecycleOperationRecord,
+    error: DirectLandingError,
+) -> LifecycleControlError:
+    """Translate one failed attempt after reclassifying its current evidence."""
+    classification = classify_direct_landing_recovery(
+        current_contract,
+        _current_record(store, requeued),
+    )
+    if classification.state == "developer-decision":
+        return direct_recovery_refusal(classification)
+    return LifecycleControlError(
+        error.status,
+        error.detail,
+        expected=error.expected,
+        observed=error.observed,
+        next_action="recover",
+    )
+
+
+def _current_record(
+    store: LifecycleOperationStore,
+    fallback: LifecycleOperationRecord,
+) -> LifecycleOperationRecord:
+    current = store.read()
+    return fallback if current is None else current
 
 
 def direct_recovery_refusal(

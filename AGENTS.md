@@ -162,18 +162,10 @@ acceptance gates. No host-wrapper or second Dagger projection is an acceptance g
 The Python, Playwright, and changed-lines coverage harnesses fail closed at startup unless the
 pinned Dagger graph supplies a matching per-run environment nonce and in-container attestation
 file. Direct targeted Vitest unit/component runs are supported as non-certifying diagnostic
-feedback. Python has one equally non-certifying, structurally bounded command for at most eight
-exact serial pytest nodes:
-
-```text
-./scripts/test-python mcp/tests/test_file.py::test_name [EXACT_NODE ...]
-```
-
-The command classifies the complete request before execution, refuses the whole request when any
-node or transitive closure is unsafe or unresolved, never accepts pytest flags, and never falls
-back to Dagger. Its JSON result records exact node outcomes and phase timings but never provides
-acceptance, changed-lines coverage, retry, lifecycle, closeout, or integration evidence. There is
-no host compatibility path for the guarded acceptance and integration harnesses.
+feedback. Python has no supported host pytest route: Candidate A was removed after exact-candidate
+measurement showed that its 2,774-line safety/proof surface was slower than the equivalent warm
+Dagger micro-route. There is no host compatibility path, retained classifier, or fallback for the
+guarded Python acceptance and integration harnesses.
 Use `docs/design/python-evidence-system.md` before changing test evidence, fixtures, support,
 selection, retry, cadence, or causal reporting. Durable evidence must enter the enforced lifecycle
 catalog; internal truth comes from canonical product owners, external conformance stays

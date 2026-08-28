@@ -66,24 +66,14 @@ For larger workflow changes, open a discussion or draft pull request early inste
 ### Acceptance runs in Dagger
 
 For this repository, only the pinned Dagger Ubuntu graph produces acceptance
-evidence. Host `pytest`, Playwright, and direct `agents_remember.code_quality.check`
+evidence. Host `pytest`, Playwright, and direct `agents_remember_test_support.code_quality.check`
 execution refuse before test or retry planning. A direct targeted `npm test -- <files>` Vitest
 run is supported as a fast unit/component diagnostic loop; it never substitutes for Dagger
-acceptance, changed-lines coverage, or lifecycle evidence. For Python, the only supported direct
-diagnostic command is:
-
-```text
-./scripts/test-python mcp/tests/test_file.py::test_name [EXACT_NODE ...]
-```
-
-Pass one to eight exact node IDs already present in `mcp/tests/python-direct-cohort.toml`. The
-command runs serially and validates the complete content-sealed cohort policy before pytest starts:
-reviewed file/symbol closure, local-import facts, effect disposition, and configuration hashes.
-It refuses the whole request if any node is outside the manifest, any dependency/effect fact is
-unknown or unsafe, or any audited content changed. It accepts no pytest flags, never runs an
-eligible subset, never falls back to Dagger, and marks every JSON result `altitude=diagnostic`,
-`certifying=false`. The timing record separates admission, bootstrap, collection, first-node
-delay, execution, and reporting; none of those measurements or outcomes is acceptance evidence.
+acceptance, changed-lines coverage, or lifecycle evidence. Python has no supported host pytest
+diagnostic command. Candidate A was retired after its exact-candidate cost comparison failed the
+approved retention threshold; do not recreate its command, manifest, analyzer, or compatibility
+wrapper. Use an explicit non-accepting Dagger evidence route for investigation and the canonical
+quality function for acceptance.
 Before adding a durable fixture, recording, migration proof, or shared-support world, follow the
 authority, lifecycle, cadence, and replacement rules in
 [`docs/design/python-evidence-system.md`](docs/design/python-evidence-system.md). The executable
@@ -104,7 +94,7 @@ the current inputs; the lifecycle tools construct the source snapshot and ancest
 bundle and invoke it automatically.
 
 Inside that nonce-attested graph, one wrapper,
-`python -m agents_remember.code_quality.check`, is the gate. It is an internal
+`python -m agents_remember_test_support.code_quality.check`, is the gate. It is an internal
 executor, not a host command. Four of its steps enforce and fail the run on any
 finding: ruff (lint, including the
 complexity rules `C901`, `PLR0911`, `PLR0912`, `PLR0915`), `ruff format --check`,
@@ -147,7 +137,7 @@ untested twenty-line function moves that by 0.04 points, which no threshold can 
 A floor on changed lines is the only form that can. And it is 100% because anything
 lower is a budget for untested code that grows with the size of the change — at a 90%
 floor the median commit here (234 changed units) may leave 23 lines untested, which is
-a whole function. `mcp/src/agents_remember/code_quality/diff_coverage.py` carries the
+a whole function. `mcp/test_support/agents_remember_test_support/code_quality/diff_coverage.py` carries the
 measurements.
 
 The lifecycle supplies the comparison point as `AR_GATE_DIFF_BASE` from the

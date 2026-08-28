@@ -26,6 +26,82 @@ and the loop-review adaptation below.
    evidence of the requirement's class** (rendering → mounted-UI proof, scheduling →
    operation-level proof, data model → artifact-level proof). A self-review or a wrong-class
    verdict is a verdict-laundering finding.
+8. **Report the durable-evidence promotion hold point:** `N/A`, or one row per introduced/retained
+   artifact naming its stable executable contract or dated expiry/retirement event, owner,
+   source-observed consumers, compatibility consequence, and public lifecycle-validator result.
+9. **Adjudicate every requirement attempt separately.** Use the mandatory block below once per
+   exact stable ID + version, leaf manifestation, worker attempt, and exact candidate, and choose
+   only `accepted` or `rejected`. Independently inspect the matching canonical packet and every cited artifact;
+   missing rationale, wrong-class evidence, invalid citations, or missing developer approval forces
+   rejection. PASS and PASS-WITH-NOTES are forbidden while any requirement is rejected. A worker
+   row correctly adjudicated as `blocked` still requires an overall BLOCK until it is delivered or
+   becomes an authorized `approved-change`.
+10. **Do not merge the two evidence contracts.** Per-requirement acceptance and the
+    durable-evidence stable-contract-or-expiry hold point are separately mandatory; neither is
+    evidence for the other.
+11. Append the reviewer block as a separate immutable record in the same single physical leaf
+    Requirement Attempt Journal that contains the worker attempt. In the verdict body, link that
+    exact journal anchor instead of copying the record into a second authority. Never edit the
+    worker record or any earlier journal bytes. A pre-adjudication candidate change for this
+    manifestation requires a successor worker attempt and new reviewer record; acceptance does not
+    float to “latest,” but an unrelated later candidate also does not reopen accepted work.
+    A malformed pre-handoff row never enters review: preserve its append-only
+    `non-attempt-correction`/void reference and consume no attempt ID. A malformed handed-off row is
+    a formal attempt; reject it independently without editing it, and require a successor only at
+    the worker's next exact-candidate handoff.
+12. Classify every rejection finding as exactly one of `implementation defect`, `evidence gap`,
+    `requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A
+    requirement problem is rejected for architect/developer-approved revision; a reviewer cannot
+    rewrite it. Previously accepted attempts stay closed unless this reviewer proves direct
+    regression and the owning manager (architect in a flat run) records bounded invalidation citing
+    the accepted attempt, reviewer record, regressing candidate, and affected set, or an approved
+    new requirement version affects that manifestation. This verdict cannot reopen work by itself.
+
+## Mandatory Requirement Adjudication Block (repeat once per stable ID + version in every variant)
+
+This block is the mandatory reviewer record. Append it once per stable ID + version to the single physical leaf Requirement Attempt
+Journal. The independently authored verdict links the resulting journal anchor; it does not become
+a second copy of the authoritative record.
+
+```md
+### <stable requirement ID> @ <version> — <exact requirement label>
+
+- Record kind: `reviewer-attempt-adjudication`
+- Reviewer record ID: `<leaf-local reviewer record id>`
+- Worker attempt ID: `<exact immutable worker attempt id>`
+- Worker record reference: `<leaf journal path + attempt anchor>`
+- Leaf manifestation: `<leaf-id>/<stable requirement ID>@<version>`
+- Exact candidate inspected: `<Git tree/commit | non-code artifact digest + durable anchors>`
+- Predecessor and carried findings checked: `<attempt id + finding ids | none>`
+- Reviewer record appended at: `<YYYY-MM-DDTHH:MM>`
+- Canonical packet inspection: <version-addressed path + matching ID/version + approved state +
+  durable corpus ruling | mismatch/unapproved, therefore rejected>
+- Worker/handoff status: `satisfied` | `blocked` | `approved-change`
+- Reviewer adjudication: `accepted` | `rejected`
+- Independently inspected delivery/implementation artifacts:
+  - <code: `path` — `symbol`; non-code: `path` — `section/anchor`; include inspection result>
+- Independently inspected verification artifacts:
+  - <`path` — `test symbol/node`, report section, scenario anchor, or other exact evidence>
+- Evidence-class check: <required class> → <observed class> → <match | mismatch>
+- Reviewer rationale: <why the independently inspected delivery and verification do or do not
+  satisfy this exact requirement>
+- Demonstrated behavior and failure caught: <reviewer's account, not copied worker prose>
+- Refutation attempted: <how the claim was challenged and result>
+- Exact command/result or durable evidence reference: <verified value>
+- Exception approval (`blocked` or `approved-change` only):
+  - Why unchanged delivery is impossible: <reviewed reason>
+  - Changed delivery: <reviewed delivery | none>
+  - Durable developer ruling: <citation + inspection result | missing, therefore rejected>
+- Rejection findings (`accepted` may state `none`):
+
+| Finding ID | Failure class (exactly one) | Reviewer evidence and rationale | Required next action |
+| ---------- | --------------------------- | ------------------------------- | -------------------- |
+| <id or none> | <one exact failure class> | <independent anchors and reason> | <class-owned recovery> |
+
+Allowed failure classes are exactly `implementation defect`, `evidence gap`, `requirement
+contradiction/overconstraint`, `test/tool defect`, and `external blocker`. A requirement problem
+must point to a requested developer-approved revision; it cannot be rewritten in this record.
+```
 
 ## Leaf Route-Review Variant (every code-changing leaf)
 
@@ -42,6 +118,9 @@ and the loop-review adaptation below.
 | artifact path   | notes/reports/<leaf-id>-route-review-verdict.md    |
 | written         | <YYYY-MM-DDTHH:MM>                                 |
 
+## Requirement Adjudication
+<Repeat the Mandatory Requirement Adjudication Block once for every exact in-scope stable ID + version.>
+
 ## Major-Route Coverage (every material route accounted for)
 | Major route | Independent reviewer report | Verdict | Changed + surrounding scope reviewed |
 | ----------- | --------------------------- | ------- | ------------------------------------ |
@@ -51,6 +130,11 @@ and the loop-review adaptation below.
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------- | -------- |
 | <CS-1 · code-seam>       | yes | none    | <what was refute-tested> |
+
+## Durable-Evidence Promotion Hold Point
+| Artifact | Decision | Owner + consumers | Executable contract or expiry/removal | Lifecycle validator |
+| -------- | -------- | ----------------- | ------------------------------------- | ------------------- |
+| <path or N/A> | <stable-contract, expiry, or N/A> | <owner + source-observed consumers> | <contract id + node, or date + replacement/removal> | <command + result> |
 
 ## Findings (ranked; each refute-tested)
 | # | Severity | Route | Finding | Evidence file/ref | Refutation attempted | Survives? |
@@ -85,10 +169,14 @@ delta-verify and the owner to record a fresh packet.
 | gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass, pass-with-notes, or block> |
 | written         | <YYYY-MM-DDTHH:MM>                                  |
 
+## Requirement Adjudication
+<Repeat the Mandatory Requirement Adjudication Block once for every exact master/leaf stable ID + version in scope.>
+
 ## Lens 1 — Completion vs Task Docs
 - Master requirement/substep coverage: addressed | delta justified | MISSING
 - Leaf task docs and worker reports reconcile with the master task_doc: yes | <gaps>
 - backing evidence file: <impact-analysis report path>
+- durable-evidence promotion hold point: N/A | <artifact → stable executable contract or dated expiry/removal; validator evidence>
 
 ## Lens 2 — Code Quality
 - targeted leaf acceptance: current | failing:<which>
@@ -138,11 +226,15 @@ reviewer does not.
 | gate evidence   | kind=reviewer-verdict; ref=<artifact path>; verdict=<pass, pass-with-notes, or block> |
 | written         | <YYYY-MM-DDTHH:MM>                                  |
 
+## Requirement Adjudication
+<Repeat the Mandatory Requirement Adjudication Block once for every exact portfolio/master stable ID + version in scope.>
+
 ## Lens 1 — Completion vs Portfolio Task Docs
 - Portfolio objective and dependency order satisfied: yes | <gaps>
 - Master handover packets and prior master-exit verdicts reconciled: yes | <gaps>
 - Cross-master conflicts, duplicate implementations, and deferred follow-ups surfaced: yes | <finding>
 - backing evidence file: <impact-analysis report path>
+- durable-evidence promotion hold point: N/A | <artifact → stable executable contract or dated expiry/removal; validator evidence>
 
 ## Lens 2 — Code Quality
 - resolved system/tools.md suite for the accumulated super branch: green | failing:<which>
@@ -184,5 +276,9 @@ owner** (the leaf's owning seat, or the architect for the plan review), scope to
 change set (or the orchestration-task draft), and keep everything else — recommendation, Criteria
 Catalog Results (the loop's bound catalogs, e.g. `plan-review` + `report-verification` for a plan
 review), ranked refute-tested findings, and fix decomposition. The verdict remains **evidence to
-the loop owner, never a decision**; a delta-verify appends a dated delta section to this same
-artifact rather than opening a new one.
+the loop owner, never a decision**. Keep the mandatory Requirement Adjudication section and one
+block per stable ID + version. A delta-verify appends a dated delta section to this same artifact, rechecks
+only rejected IDs, direct regressions, and newly developer-authorized changed deliveries, and
+retains earlier accepted adjudications rather than opening a new full review. An approved new
+requirement version cannot inherit the prior version's acceptance; append its own reviewer record
+to the authoritative journal and link that anchor here.

@@ -549,7 +549,14 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         git(repo, "commit", "-m", "base")
         base = git(repo, "rev-parse", "HEAD")
         git(repo, "switch", "-c", "atomic-candidate")
-        wrapper = repo / "mcp" / "src" / "agents_remember" / "code_quality" / "check.py"
+        wrapper = (
+            repo
+            / "mcp"
+            / "test_support"
+            / "agents_remember_test_support"
+            / "code_quality"
+            / "check.py"
+        )
         wrapper.parent.mkdir(parents=True)
         wrapper.write_text("print('quality')\n", encoding="utf-8")
         git(repo, "add", wrapper.relative_to(repo).as_posix())
@@ -801,7 +808,10 @@ class IntegrationDryRunTests(unittest.TestCase):
     def test_dry_run_reports_the_planned_gate_without_running_it(self) -> None:
         contract = integration_contract(self.root, kind="series")
         git(contract.code_repo_path, "checkout", contract.code_work_branch)
-        wrapper = contract.code_worktree / "mcp/src/agents_remember/code_quality/check.py"
+        wrapper = (
+            contract.code_worktree
+            / "mcp/test_support/agents_remember_test_support/code_quality/check.py"
+        )
         wrapper.parent.mkdir(parents=True)
         wrapper.write_text("# marker\n", encoding="utf-8")
         git(contract.code_repo_path, "add", wrapper.relative_to(contract.code_repo_path).as_posix())

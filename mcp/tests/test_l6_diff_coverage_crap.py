@@ -21,8 +21,8 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import diff_coverage, scope, scope_reporting
-from agents_remember.code_quality.scope import GateScope, ScopeError
+from agents_remember_test_support.code_quality import diff_coverage, scope, scope_reporting
+from agents_remember_test_support.code_quality.scope import GateScope, ScopeError
 
 
 def _valid_repository(root: Path) -> None:
@@ -39,6 +39,9 @@ def _valid_repository(root: Path) -> None:
                 "branch = true",
                 "[tool.pytest.ini_options]",
                 'testpaths = ["tests"]',
+                "[tool.agents_remember]",
+                'product_package_roots = ["pkg"]',
+                "verification_package_roots = []",
                 "",
             )
         ),
@@ -336,10 +339,17 @@ class TestScopeReportingCoverage:
             dashboard, {"path": "tsconfig.app.json"}, 0
         )
         assert finding is None and inputs == {dashboard / "src" / "app.ts"}
+        (dashboard / "worker" / "src").mkdir(parents=True)
+        (dashboard / "worker" / "src" / "worker.ts").write_text("", encoding="utf-8")
+        (dashboard / "worker" / "tsconfig.json").write_text(
+            json.dumps({"files": ["src/worker.ts"]}), encoding="utf-8"
+        )
+        inputs, finding = scope_reporting.tsconfig_project_inputs(dashboard, {"path": "worker"}, 1)
+        assert finding is None and inputs == {dashboard / "worker" / "src" / "worker.ts"}
         inputs, finding = scope_reporting.tsconfig_project_inputs(dashboard, {"bad": 1}, 0)
         assert finding is not None and inputs == set()
         inputs, finding = scope_reporting.tsconfig_project_inputs(
-            dashboard, {"path": "tsconfig.missing.json"}, 1
+            dashboard, {"path": "tsconfig.missing.json"}, 2
         )
         assert finding is not None and inputs == set()
 

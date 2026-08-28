@@ -28,6 +28,7 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
     ephemeral_git_mutation_snapshot,
+    snapshot_is_clean,
 )
 from agents_remember.worktrees.modules.git import is_ancestor, require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -310,7 +311,7 @@ def _infer_unpublished_memory_commit(
         or evidence.observed is not None
         or evidence.before is None
         or live.git.headRef != evidence.before.headRef
-        or not _snapshot_is_clean(live.git)
+        or not snapshot_is_clean(live.git)
     ):
         return ""
     if _memory_commit_matches_intent(live.repository, evidence, live.git.head):
@@ -351,13 +352,13 @@ def _memory_output_matches_evidence(
         not memory_commit
         or live.head != expected_live_head
         or live.headRef != operation_input.memoryBefore.headRef
-        or (outputs.ledger_commit and not _snapshot_is_clean(live))
+        or (outputs.ledger_commit and not snapshot_is_clean(live))
     ):
         return False
     if evidence.state in {"pre-mutation", "reconciled-unchanged"}:
         return bool(
             memory_commit == operation_input.memoryBefore.head
-            and _snapshot_is_clean(operation_input.memoryBefore)
+            and snapshot_is_clean(operation_input.memoryBefore)
         )
     if evidence.state == "mutation-intent":
         return _memory_commit_matches_intent(repository, evidence, memory_commit)
@@ -397,7 +398,7 @@ def _exact_ledger_output_commit(
         or ledger_commit == memory_commit
         or live.git.head != ledger_commit
         or live.git.headRef != operation_input.memoryBefore.headRef
-        or not _snapshot_is_clean(live.git)
+        or not snapshot_is_clean(live.git)
         or not _ledger_output_preserves_accepted_history(
             operation_input,
             live.ledger_text,
@@ -501,9 +502,7 @@ def _memory_prestate_converges(
     if live.head != recovery.memoryContentCommit:
         return False
     ledger = record.mutationEvidence.get("ledger")
-    return _snapshot_is_clean(live) or bool(
-        ledger is not None and ledger.state == "mutation-intent"
-    )
+    return snapshot_is_clean(live) or bool(ledger is not None and ledger.state == "mutation-intent")
 
 
 def _memory_commit_proof_converges(
@@ -558,7 +557,7 @@ def _journaled_ledger_state_converges(
     if evidence.state in {"pre-mutation", "reconciled-unchanged"}:
         return bool(
             live.git.head == intent.memoryCommit
-            and _snapshot_is_clean(live.git)
+            and snapshot_is_clean(live.git)
             and live.ledger_text == intent.beforeText
             and _git_blob_text(live.repository, live.git.head, live.relative) == intent.beforeText
         )
@@ -579,7 +578,7 @@ def _journaled_ledger_state_converges(
     return bool(
         recovery.ledgerCommit == evidence.commit
         and live.git.head == evidence.commit
-        and _snapshot_is_clean(live.git)
+        and snapshot_is_clean(live.git)
         and live.ledger_text == intent.intendedText
         and _git_blob_text(live.repository, live.git.head, live.relative) == intent.intendedText
     )
@@ -606,7 +605,7 @@ def _ledger_without_intent_converges(
     if outputs.memory_commit:
         return bool(
             live.git.head == outputs.memory_commit
-            and _snapshot_is_clean(live.git)
+            and snapshot_is_clean(live.git)
             and _git_blob_text(live.repository, live.git.head, live.relative) == live.ledger_text
         )
     return live.git == operation_input.memoryBefore
@@ -687,7 +686,7 @@ def _committed_intent_converges(
         and live.git.headTree == expected_tree
         and live.git.indexTree == expected_tree
         and live.git.candidateTree == expected_tree
-        and _snapshot_is_clean(live.git)
+        and snapshot_is_clean(live.git)
     ):
         return False
     return (
@@ -707,14 +706,6 @@ def _same_precommit_base(live: GitMutationSnapshot, before: GitMutationSnapshot)
         and live.head == before.head
         and live.headTree == before.headTree
         and live.refLogFingerprint == before.refLogFingerprint
-    )
-
-
-def _snapshot_is_clean(snapshot: GitMutationSnapshot) -> bool:
-    return bool(
-        snapshot.indexTree == snapshot.headTree
-        and snapshot.candidateTree == snapshot.headTree
-        and snapshot.statusFingerprint == hashlib.sha256(b"").hexdigest()
     )
 
 

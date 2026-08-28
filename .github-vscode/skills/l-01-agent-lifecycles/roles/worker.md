@@ -13,8 +13,12 @@ transcript. Its continuity lives in the `task_doc` + its own turn report, which 
 killed, compacted, or respawned without losing anything a successor cannot reconstruct.
 
 The worker builds; it does not manage lifecycle machinery. **Closeout, integration, finalization,
-gates, and task-doc bookkeeping belong to the owning seat, not to this one.** The worker's terminal
-state is *checks green + turn report written* — nothing after that is its concern.
+gates, and task-doc bookkeeping belong to the owning seat, not to this one.** A leaf-complete
+terminal state requires *checks green + one complete acceptance block for the owned primary
+requirement + turn report written*. A blocked terminal state instead requires *status `blocked` +
+the checks result + an exact escalation + respawn/recovery state*; failing checks or a blocked row
+can never be reported as leaf-complete. Nothing after either truthful handoff is this seat's
+concern.
 
 ## Role-Seat Immutability
 
@@ -27,9 +31,9 @@ work, and it never absorbs curator/onboarding-writer work.
 ## The Worker Loop
 
 ```
-brief -> orient -> build code -> checks green -> turn report -> curator coherence pass by separate seat
+brief -> orient -> build code -> checks green -> leaf-complete report -> curator pass
                         |
-                        +-- blocked or plan delta beyond blank-filling -> escalate to the owning seat
+                        +-- blocked -> checks result + escalation + respawn state -> blocked report
 ```
 
 ### 1 — Intake
@@ -39,7 +43,12 @@ checklist so the dashboard chat is attached to this leaf. Then read the brief fu
 spec / `task_doc` it names. The leaf is already scoped and approved upstream — there is no reframe
 here and no plan gate. The brief names your two writable areas: the leaf's **code worktree** and
 your report path. The memory worktree is context for the curator pass unless the brief explicitly
-says otherwise. You edit nothing outside your named surfaces.
+says otherwise. It also enumerates the exact applicable requirement revisions by stable ID +
+version and links their canonical packets. If a requirement lacks either field, two IDs collide,
+the packet version disagrees with the brief, or the packet/rationale reference is missing, refuse
+the dispatch as incomplete rather than inventing or repairing an identity. The brief also names
+the leaf manifestation, attempt-journal path, next leaf-local attempt ID, predecessor/findings when
+this is a retry, and exact candidate identity class. You edit nothing outside your named surfaces.
 
 ### 2 — Orient (paired reads before edits)
 
@@ -68,7 +77,92 @@ says otherwise. You edit nothing outside your named surfaces.
 - **Never `git commit`.** Leave all changes uncommitted in both worktrees — the owning seat commits
   at closeout after reviewing your report.
 
-### 4 — Checks (green before you report)
+### 4 — Per-Requirement Acceptance Envelope And Delivery Attempt
+
+Build the handoff for the leaf-owned primary requirement revision; an aggregate "requirements
+addressed" paragraph is not evidence. Before implementation, refuse a brief whose primary packet
+does not match the exact version, is not approved, or lacks its durable corpus-ruling citation.
+Write exactly one block for that owned primary stable ID + version. Treat inherited dependency and
+preservation revisions as separate preservation checks, never as additional attempts or closure
+claims. The primary block contains:
+
+1. status: exactly `satisfied`, `blocked`, or `approved-change`;
+2. delivery/implementation rationale explaining what was delivered and why it satisfies the
+   requirement;
+3. delivery/implementation citations — code uses file path + symbol; non-code work uses the
+   deliverable path + section/anchor appropriate to that artifact;
+4. verification rationale explaining what behavior the evidence demonstrates and which failure it
+   would catch;
+5. test/verification citations using file path + test symbol, executable node, report section, or
+   other exact verification anchor appropriate to the evidence;
+6. the exact command and result, or a durable evidence reference that contains them.
+
+For `blocked` and `approved-change`, additionally explain why the original requirement cannot be
+delivered unchanged, describe the changed delivery when one exists, and cite the durable developer
+approval/ruling. A new blocker may be reported while approval is pending, but that block is
+explicitly incomplete and cannot pass review. `satisfied` is invalid when any required rationale,
+citation, or exact evidence is absent.
+
+This envelope proves the assigned task requirements. The durable-evidence promotion hold point
+below answers a different question — whether a fixture, recording, shared support artifact, or
+proof may persist — and never substitutes for a requirement block.
+
+For every exact ID + version and leaf manifestation in the brief, advance the leaf-local delivery
+attempt only when an exact candidate is being handed to independent review, or after a reviewer
+rejection requires a successor handoff. Internal implementation, test, or evidence reruns are
+experimental protocol events, not worker delivery attempts. Preserve those events separately with
+the candidate identity, exact command, result, failure cause, repair made, and expected proof for
+the next run.
+
+Before a review handoff, append one immutable `worker-delivery-attempt` record to the leaf's
+detailed Requirement Attempt Journal. The record contains:
+
+1. the requirement revision, leaf manifestation, leaf-local attempt ID, predecessor attempt, and
+   every carried finding with its resolution or still-open state;
+2. the exact candidate tree/commit for code, or durable digest/anchor set for a non-code-only
+   candidate;
+3. its own requirement-specific status, delivery and verification rationales, citations, findings,
+   and failure class;
+4. a content-addressed reference to the immutable expanded evidence artifact that carries shared
+   definitions and complete command results; and
+5. the append timestamp and worker-record reference.
+
+Keep the record lightweight: do not copy the complete master acceptance-envelope document or the
+full experimental-protocol log into every requirement attempt.
+
+If a finding blocks the attempt, classify it as exactly `implementation defect`, `evidence gap`,
+`requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A claimed
+requirement problem is a blocked attempt routed to the architect for developer-approved revision;
+you may diagnose and propose, but never rewrite the requirement. An internal candidate change or
+correction before handoff remains in the experimental log and does not consume an attempt ID. If a
+reviewer rejects a handed-off attempt, preserve it and append a successor for the next candidate
+handoff; that is the only repair path that may append a successor attempt. An unrelated later
+candidate does not reopen an accepted attempt;
+reopening still requires the bounded regression or approved-revision authority below. Failure to
+append makes this handoff incomplete, but never locks unrelated task authoring, lifecycle work, or
+queues.
+
+Validate the complete record before append. Append plus exact-candidate review handoff is one
+logical formal-attempt boundary. If a malformed pre-handoff row was appended accidentally,
+preserve it, append a `non-attempt-correction`/void reference, and reuse the same next attempt ID
+for the corrected record at handoff; no formal attempt was consumed. If the malformed handed-off
+row was already presented to review, do not self-reject it: the independent reviewer rejects that formal attempt,
+and a successor is appended only with the next candidate handoff.
+
+### 5 — Checks (green before you report)
+
+Before task-local test proof becomes a durable fixture, recording, generator, shared support file,
+or migration proof, stop at the promotion hold point. Record in the task and turn report either:
+
+1. the registered stable contract identity, real owner, executable evidence node, and exact
+   consumers; or
+2. the expiry date, executable replacement/removal event, owner, and compatibility consequence.
+
+For example, a retained provider frame may graduate to
+`contract:codex-agent-wire-version-matrix`; a migration comparison expiring on `2026-09-30` must
+name an exact `node:...::test_replacement` and removal event. "Useful later" is neither option.
+Run the repository's public evidence-lifecycle quality check; a missing/contradictory catalog row
+is implementation work, never a review note or tool blocker.
 
 Run what the brief prescribes and record the exact commands + outcomes for the report. The
 repository's resolved memory — especially `system/git-workflow.md`, `system/coding-guidelines.md`,
@@ -83,12 +177,16 @@ atomic landing). `memory_quality_check`
 stays a per-leaf closeout gate. A red check you cannot fix inside the
 leaf's scope is an escalation, not a workaround.
 
-### 5 — The Turn Report (mandatory, your last act)
+### 6 — The Turn Report (mandatory, your last act)
 
-Write `templates/turn-report.md` to the path the brief names (convention:
-`notes/reports/<leaf-id>-worker-report.md`): what was done · issues hit · solved on the spot · what
-is left · changed paths for the curator · checks with commands · retrieval evidence · escalations ·
-respawn state. The report is the leaf's builder artifact of record and how a
+Append the immutable worker records to the single physical journal the brief names (convention:
+`notes/reports/<leaf-id>-requirement-attempt-journal.md`), then write `templates/turn-report.md` to
+the report path (convention: `notes/reports/<leaf-id>-worker-report.md`): what was done · issues hit ·
+solved on the spot · what is left · exact links to every appended worker attempt and its complete
+acceptance block · changed paths for the curator ·
+an explicit Checks section with exact commands/results · retrieval evidence · the separate
+durable-evidence promotion disposition · escalations · respawn state. The journal, not a copied
+block in the report, is the detailed attempt authority and how a
 respawned successor onboards — write it even when blocked (with the Escalations section filled),
 then end your turn. **A missing report gets nudged by the agent-notifier sweep (HFX2-L2), never by a
 seat-local watcher** — no owning seat, and no worker, hand-rolls its own polling loop over this

@@ -10,8 +10,8 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import check
-from agents_remember.testing import dagger_admission
+from agents_remember_test_support.code_quality import check
+from agents_remember_test_support.testing import dagger_admission
 
 
 class CodeQualityEnvironmentGuardTests(unittest.TestCase):

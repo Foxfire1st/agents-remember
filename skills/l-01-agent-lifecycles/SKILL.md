@@ -219,6 +219,101 @@ mounted-UI proof, scheduling/ordering requirements need operation-level proof, a
 requirements need artifact-level proof — evidence of the wrong class is verdict laundering, not
 a pass.
 
+**Requirement compilation precedes task topology.** After intent and scope are established, the
+architect compiles every independently falsifiable obligation into a canonical requirement index
+with a stable ID and explicit version. Clauses that can be violated, reviewed, owned, evidenced, or
+superseded independently are separate requirements. Before any sprint/master/leaf task document is
+created, every ID + version has one self-contained, version-addressed packet using
+`../w-02-light-task-workflow/requirement-packet-template.md`, including the problem, required
+behavior, rationale, scope and exclusions, preservation boundaries, failure/recovery behavior,
+examples, forbidden overreach, expected evidence, authority/provenance, dependencies, and open
+truth gaps. Material state, sequence, ownership, and interaction relationships get diagrams.
+
+A fresh agent cold-reads each packet without the planning transcript and must be able to explain
+what changes, what stays unchanged, the important failure states, and proof of conformance. The
+architect presents the complete corpus for developer approval and creates task topology only after
+that approval; every approved packet records the durable ruling. Masters and leaves carry filtered
+ID + version + canonical-packet links, never
+rewritten requirement contracts. Each leaf owns exactly one primary requirement revision; several
+leaves may implement independently executable manifestations of one revision, while adjacent
+requirements are dependency/preservation context only. A requirement change increments its
+version, cites durable developer approval, invalidates affected acceptance state, and rebriefs
+affected leaves.
+
+**Requirement acceptance is per stable ID and version, never aggregate.** Before dispatch, the owner
+projects the leaf's one owned primary revision, with its stable ID + version, approved packet, and
+durable corpus-ruling citation, plus separately labelled dependency/preservation context into the
+builder brief. Adjacent context is verified as a constraint and cannot be claimed closed by this
+leaf. The builder's handoff contains one acceptance block for the owned primary revision:
+`satisfied`, `blocked`, or `approved-change`; delivery/implementation rationale and citations;
+verification rationale that
+states both the demonstrated behavior and the failure it would catch; verification citations; and
+the exact command/result or durable evidence reference. Code citations name file paths and
+symbols. Non-code work uses the same contract with deliverable paths plus sections/anchors instead
+of invented code fields. A `blocked` or `approved-change` block also explains why the original
+requirement cannot be delivered unchanged, names the changed delivery when one exists, and cites
+the durable developer ruling. General prose or an aggregate "requirements addressed" claim is not
+an acceptance envelope.
+
+The independent reviewer inspects the owned primary packet revision and cited artifacts itself and
+adjudicates that exact manifestation as `accepted` or `rejected`, with its own rationale. Missing
+rationale, an unapproved packet revision, missing or wrong-class
+evidence, invalid citations, or missing developer approval forces rejection of that requirement;
+the overall verdict cannot pass while any requirement is rejected. An accurately reported
+`blocked` row may be accepted as a truthful handoff, but it still requires a BLOCK recommendation
+until the requirement is delivered or becomes an approved change. The durable-evidence
+stable-contract-or-expiry promotion hold point remains a separate review dimension and cannot
+substitute for requirement acceptance evidence.
+
+**Requirement revisions and delivery attempts are separate axes.** The canonical `ID@version`
+states semantic intent and changes only through explicit developer approval. A leaf-local attempt
+ID states what one exact candidate was handed to independent review for one leaf manifestation of
+that revision. The builder advances that ID only when handing a candidate to review, or when a
+reviewer rejection requires a successor handoff. Internal implementation, test, and evidence
+reruns do not mint attempts; preserve them separately as experimental protocol events with the
+candidate identity, command, result, failure cause, repair, and expected proof for the next run.
+
+Before review handoff, the builder appends an immutable worker attempt record to the leaf's
+detailed journal. It binds the revision, manifestation, predecessor and carried findings when
+present, exact candidate tree/commit or appropriate non-code digest/anchors, and its own
+requirement-specific status, rationale, citations, findings, failure class, and a content-addressed
+reference to immutable expanded evidence. The frozen expanded artifact carries shared definitions
+and complete command results; do not duplicate the complete master acceptance envelope or
+experimental-run body inside every attempt. After rejection, the repaired candidate is handed off
+through a successor attempt. No prior worker record is edited or deleted; an unrelated later
+candidate does not reopen an accepted attempt.
+
+Validate the complete worker record before append. Append plus exact-candidate review handoff is
+one logical formal-attempt boundary. A malformed pre-handoff row is preserved, receives an
+append-only `non-attempt-correction`/void reference, and consumes no attempt ID; the corrected row
+uses that same next ID at handoff. A malformed handed-off row is already a formal attempt: the
+independent reviewer rejects it, and the worker may append a successor only at the next review
+handoff. The worker never self-rejects or silently replaces either row.
+
+The independent reviewer appends a separate reviewer record against that exact attempt and exact
+candidate after inspecting the artifacts itself. It chooses `accepted` or `rejected`, supplies its
+own rationale/citations, and classifies every rejection finding as exactly one of `implementation
+defect`, `evidence gap`, `requirement contradiction/overconstraint`, `test/tool defect`, or
+`external blocker`. A requirement contradiction/overconstraint is rejected and routed through the
+architect for developer-approved revision; builders and reviewers may propose a revision but never
+rewrite or approve one. The reviewer does not modify the worker record, and acceptance never floats
+to a later candidate.
+
+Rejection closes that attempt and a repair appends a successor citing the predecessor and findings.
+Accepted attempts remain closed unless an independent reviewer proves a direct regression against
+that exact accepted delivery and the owning manager (architect in a flat run) records a bounded
+invalidation citing the accepted attempt, reviewer record, regressing candidate, and affected set;
+the other trigger is a developer-approved new semantic requirement version and its bounded affected
+set. A worker, reviewer, changed candidate, or summary cannot reopen acceptance unilaterally. Same-reviewer
+delta verification, shrinking findings, and the three-round delegation cap stay in force; an
+architect takeover continues the same attempt lineage.
+
+The detailed per-leaf worker and reviewer records are authority. A master maintains a rebuildable
+summary linking those records and showing attempts, rejection history, current state, and dominant
+open failure class per requirement manifestation. The summary is a disposable observation only:
+it is never a requirement contract, lifecycle/closeout gate, queue authority, or task-authoring
+lock. Missing or stale summary state is rebuilt from leaf journals and cannot block work.
+
 The chair persists the passing or blocking result through
 `task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})` after the
 durable verdict and every route evidence file exist. The control plane, not the chair or manager,

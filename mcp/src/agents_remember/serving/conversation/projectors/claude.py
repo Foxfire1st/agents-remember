@@ -1,6 +1,6 @@
 """Claude active projector: stream-json frames -> items.
 
-Schema authority: the locked stream-json fixtures (2.1.207/2.1.210), the
+Schema authority: the locked stream-json fixtures (2.1.210/2.1.217), the
 adapter's parsed frame surface, and the Anthropic content-block grammar
 (text/thinking/tool_use/tool_result). Assistant messages keep their text and
 thinking blocks; ``tool_use`` blocks become stable-ID tool-call items keyed by

@@ -9,8 +9,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check
-from agents_remember.testing.causal_failures import CAUSAL_REPORT_SCHEMA
+from agents_remember_test_support.code_quality import check
+from agents_remember_test_support.testing.causal_failures import (
+    CAUSAL_REPORT_SCHEMA,
+    FailureClass,
+)
 
 
 class CausalQualityPreflightTests(unittest.TestCase):
@@ -31,14 +34,7 @@ class CausalQualityPreflightTests(unittest.TestCase):
                 if name != "causal-preflight":
                     return check.StepResult(name, 0, command)
                 causal_report.write_text(
-                    json.dumps(
-                        {
-                            "schemaVersion": CAUSAL_REPORT_SCHEMA,
-                            "status": "failed",
-                            "preflights": [{"causeId": "schema:fixture:v1"}],
-                            "blockedGroups": [],
-                        }
-                    ),
+                    json.dumps(_failed_causal_payload()),
                     encoding="utf-8",
                 )
                 return check.StepResult(name, 1, command)
@@ -58,7 +54,7 @@ class CausalQualityPreflightTests(unittest.TestCase):
             causal_report.as_posix(),
         )
 
-    def test_broken_preflight_tool_still_blocks_pytest(self) -> None:
+    def test_broken_preflight_disables_suppression_and_runs_selected_pytest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             commands: list[list[str]] = []
@@ -80,7 +76,40 @@ class CausalQualityPreflightTests(unittest.TestCase):
             )
 
         self.assertEqual(exit_code, 1)
-        self.assertNotIn("pytest", _command_modules(commands))
+        modules = _command_modules(commands)
+        self.assertIn("pytest", modules)
+        pytest_command = commands[modules.index("pytest")]
+        self.assertNotIn("--ar-causal-failure-report", pytest_command)
+
+    def test_success_exit_without_valid_report_also_uses_safe_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            causal_report = root / "invalid-causal-report.json"
+            commands: list[list[str]] = []
+
+            def runner(
+                name: str,
+                command: list[str],
+                cwd: Path,
+                env: Mapping[str, str],
+            ) -> check.StepResult:
+                del cwd, env
+                commands.append(command)
+                if name == "causal-preflight":
+                    causal_report.write_text("{}\n", encoding="utf-8")
+                return check.StepResult(name, 0, command)
+
+            exit_code = check.run_quality_check(
+                _quality_config(root, causal_report),
+                runner=runner,
+                printer=lambda _message: None,
+            )
+
+        self.assertEqual(exit_code, 1)
+        modules = _command_modules(commands)
+        self.assertIn("pytest", modules)
+        pytest_command = commands[modules.index("pytest")]
+        self.assertNotIn("--ar-causal-failure-report", pytest_command)
 
 
 def _quality_config(root: Path, causal_report: Path) -> check.CheckConfig:
@@ -107,6 +136,36 @@ def _quality_config(root: Path, causal_report: Path) -> check.CheckConfig:
 
 def _command_modules(commands: list[list[str]]) -> list[str]:
     return [command[2] for command in commands]
+
+
+def _failed_causal_payload() -> dict[str, object]:
+    cause_id = "schema:fixture:v1"
+    owner = "mcp/tests/fixtures/shared-schema.json"
+    return {
+        "schemaVersion": CAUSAL_REPORT_SCHEMA,
+        "candidate": {"tree": "a" * 40, "environmentId": "b" * 64},
+        "status": "failed",
+        "acceptanceEligible": False,
+        "firstCausalFailure": cause_id,
+        "preflights": [
+            {
+                "causeId": cause_id,
+                "status": "failed",
+                "failureClass": FailureClass.SHARED_DEPENDENCY.value,
+                "evidenceAltitude": "shared-fixture-schema",
+                "owner": owner,
+                "correctiveOwner": owner,
+                "detail": "forced incompatibility",
+                "dependentNodes": [],
+            }
+        ],
+        "blockedGroups": [],
+        "runtimeEvidence": {
+            "pytestExitCode": None,
+            "blockedNodes": [],
+            "independentFailures": [],
+        },
+    }
 
 
 if __name__ == "__main__":  # pragma: no cover

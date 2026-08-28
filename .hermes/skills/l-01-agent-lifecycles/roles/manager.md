@@ -117,8 +117,21 @@ stops belong to the orchestrator via the system-specialist protocol.
   non-shrinking round escalates to the orchestrator immediately, with the full round history
   attached, regardless of the count.
 - `dispatch_agent(task_document_ref=<leaf document>, role="worker", brief=...)` — a **fresh
-  document-bound worker seat**. Compile the complete brief from `../templates/worker-brief.md`;
-  the control plane claims `(leaf document, worker)` and the worker edits inside the leaf
+   document-bound worker seat**. Compile the complete brief from `../templates/worker-brief.md`;
+  enumerate the leaf's one owned primary revision by stable ID + version, with canonical packet
+  reference and required deliverable/verification evidence class. List inherited master and
+  adjacent revisions separately as dependency/preservation constraints. Verify that every cited
+  packet carries that version, is approved, and cites the durable corpus ruling.
+  Missing, duplicate, unstable, unapproved, version-mismatched, or aggregate-only requirement identity makes the brief
+  undispatchable. The worker's turn report must return one acceptance block for the owned primary
+  ID + version and separate preservation-check results for adjacent context; the
+  durable-evidence stable-contract-or-expiry hold point remains a separate brief item. For each
+  exact leaf manifestation, also compile the authoritative leaf journal path, next leaf-local
+  handoff attempt ID, predecessor and carried findings, and candidate identity class. The ID is not
+  advanced at dispatch or by internal implementation/test/evidence reruns; the worker mints it only
+  when handing an exact candidate to review, or after rejection when handing off a successor. The
+  worker must append the immutable candidate-bound attempt before that review handoff.
+  The control plane claims `(leaf document, worker)` and the worker edits inside the leaf
   worktrees the brief names. Before creating the worker, it re-proves the nature-appropriate
   ancestry for code and external memory: super → leaf for organizational, or super → atomic master
   → leaf. A lineage refusal creates no child and mutates no seat; run the ordered `worktree_sync`
@@ -134,16 +147,48 @@ stops belong to the orchestrator via the system-specialist protocol.
   over the worker.
   **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
   agent-notifier sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.
-- **Review artifact vs `task_doc`** — completion vs requirements/steps · checks green ·
-  builder changed-path/code evidence sufficient for the curator coherence pass (the manager's own
+- **Review artifact vs `task_doc`** — first compare the dispatched primary stable-ID + version with
+  the worker's Requirement Acceptance Envelope. Require exactly one row for the owned primary ID,
+  status `satisfied`, `blocked`,
+  or `approved-change`, complete delivery and verification rationales/citations, the failure caught,
+  exact command/result or durable evidence, and durable developer approval for every blocked or
+  changed delivery. Verify that each row is inside a newly appended `worker-delivery-attempt`
+  record bound to the exact revision, leaf manifestation, predecessor/findings, candidate, concise
+  requirement-specific rationale/citations/findings/failure class, and content-addressed expanded
+  evidence anchor; the complete master envelope and experimental-run log remain frozen shared
+  artifacts rather than duplicated per attempt. A
+  missing, edited, reused, or stale attempt makes the handoff incomplete. Then verify completion vs requirements/steps · the explicit Checks section is
+  green · builder changed-path/code evidence is sufficient for the curator coherence pass (the manager's own
   leaf-level review; **this is not an adversarial seam**). A leaf whose deliverable came out **wrong** is **reopened under its own id**
   (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
   genuinely new changes.
+  Require pre-append validation and treat append plus exact-candidate review handoff as one logical
+  formal-attempt boundary. A malformed pre-handoff row is preserved with an append-only
+  `non-attempt-correction`/void reference and consumes no attempt ID; the corrected handoff uses the
+  same next ID. A malformed handed-off row is rejected by the independent reviewer before the
+  worker may append a successor. Never let the worker self-reject or replace a handed-off record.
 - **Dispatch the mandatory independent route review after every stable code-change session.** Build
   the major-route partition from changed architecture/control-plane ownership, governing route
   overviews, and the import/call graph; then dispatch the leaf reviewer chair. Its brief requires
   one independent reviewer sub-agent per affected major route, each reading the changed files and
-  surrounding code, tests, side effects, task requirements, and current onboarding. Require the
+  surrounding code, tests, side effects, task requirements, and current onboarding. Give the chair
+  the exact owned primary stable-ID + version and worker envelope, now contained in the exact
+  worker attempt record. Require one independent `accepted`/`rejected` adjudication for that ID,
+  separately appended against that attempt and candidate with artifact inspection and the reviewer's own
+  rationale; missing rationale, an unapproved packet revision, wrong-class evidence, invalid citations, or missing developer
+  approval forces rejection. The overall verdict cannot pass with a rejected requirement, and an
+  accepted-but-blocked row still produces BLOCK until resolved or approved as changed delivery.
+  Every rejection finding uses exactly one of `implementation defect`, `evidence gap`, `requirement
+  contradiction/overconstraint`, `test/tool defect`, or `external blocker`. Route a requirement
+  problem to the architect for developer-approved revision; neither worker nor reviewer may rewrite
+  it. A pre-adjudication candidate change or repair to a rejected manifestation requires a
+  successor attempt; an unrelated later candidate does not reopen accepted work. Preserve accepted
+  attempts unless the independent reviewer proves a direct regression and this owning manager (architect in a flat run)
+  records bounded invalidation
+  citing the accepted attempt, reviewer record, regressing candidate, and affected set, or an
+  approved new requirement version invalidates the bounded manifestation. A worker, reviewer,
+  candidate change, or summary never reopens acceptance by itself.
+  Require the
   verdict's route-coverage table to account for every partitioned route. A block goes back to the
   same worker; the same route reviewer delta-verifies the repair, and any newly touched route is
   added before a passing verdict. Direct and builder-verified tiers change depth and round
@@ -151,6 +196,13 @@ stops belong to the orchestrator via the system-specialist protocol.
   record them with `task_doc(operation="record_route_review", review={verdict, verdictRef,
   routes:[{route, verdict, evidenceRef}]})`. The plane stamps the current candidate tree; do not
   supply or remember a tree hash. Curator dispatch and closeout refuse if later code invalidates it.
+- **Maintain the rebuildable master Requirement Attempt Summary.** After each adjudication,
+  regenerate or update `notes/reports/<master-id>-requirement-attempt-summary.md` from the
+  authoritative leaf worker/reviewer records. Per exact requirement revision and manifestation,
+  show attempt IDs, rejection history/count, latest adjudicated state, dominant open failure class,
+  and leaf journal references. This summary is a disposable observation only: it never authorizes
+  or blocks task authoring, lifecycle, closeout, integration, or queue operations. If it is missing,
+  stale, or contradictory, the leaf records win and the summary is rebuilt; do not stall work on it.
 - **Curator coherence pass — mandatory, not skippable.** After builder code is ready and the reviewer
   verdict is available, call `worktree_status` for the canonical leaf
   and require its complete task-derived code and external-memory `sourceLineage` to be `current`.
@@ -164,11 +216,15 @@ stops belong to the orchestrator via the system-specialist protocol.
   `../templates/curator-brief.md` carrying the leaf's **landed change set** (code diff over the
   leaf contract's recorded base-to-head range, with paths/counters — pulled from the leaf contract,
   never guessed), the **leaf task doc**, approved design/developer decisions, existing
-  onboarding/entity intent anchors, and **notes/** (builder turn report + reviewer verdict), then
+  onboarding/entity intent anchors, the exact approved stable-ID + version set with every canonical
+  packet and durable corpus-ruling citation, and **notes/** (builder turn report + the reviewer's
+  per-revision adjudication), then
   dispatch a **fresh curator** on the canonical leaf document with role `curator` and the complete
   coherence brief, including the current lineage projection returned by that preflight. The curator
   reconciles existing intent, ruled change intent, and implemented
-  reality; routes each accepted truth to the right onboarding home; and writes onboarding only,
+  reality; routes each independently accepted requirement truth to the right onboarding home;
+  treats rejected or worker-blocked revisions as report blockers rather than current intent; and
+  writes onboarding only,
   returning a coherence report. **Do not run the closeout preview before this pass exists** — the
   `c-12-closeout` skill's missing-onboarding and changed-sidecar checks are this pass's output, not
   something this seat patches inline. Leaf closeout inputs are exactly: **builder code + reviewer
@@ -256,8 +312,12 @@ role file (`roles/reviewer.md`). For an organizational master, scope the accumul
 of its prior leaves already landed on super plus the proposed final leaf as the exact proposed
 final super candidate; for an atomic master, scope the isolated atomic branch. Pass the execution
 nature, exact candidate and scope refs,
-master/leaf task docs, worker turn reports, decision logs, changed paths, resolved
-`system/tools.md` evidence, and carry-over state. The verdict lands at
+  master/leaf task docs, worker turn reports, decision logs, changed paths, resolved
+  `system/tools.md` evidence, carry-over state, and the accumulated worker acceptance envelopes
+  mapped to the exact master and leaf requirement IDs + versions, the authoritative attempt
+  records, and the rebuildable non-gating summary. The reviewer independently
+  adjudicates every in-scope exact attempt; an aggregate completion paragraph or summary row is not master-exit evidence. The
+  verdict lands at
 `notes/reports/<master-id>-master-exit-verdict.md` and attaches to the handover gate as
 `evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"pass|pass-with-notes|block"}]`
 — a verdict over completion vs task docs · `system/tools.md` quality · onboarding-vs-code. **Blocked? → the verdict decomposes into fix leaves** the manager dispatches (loop

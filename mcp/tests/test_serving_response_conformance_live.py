@@ -12,6 +12,7 @@ from unittest import mock
 import httpx
 import uvicorn
 from _control_plane import OPERATOR, FakeControlAdapter, drive_activity, make_harness
+from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import agentic_settings_path
 from agents_remember.models.conversations.opening import (
     OpenConversationOperation,
@@ -181,6 +182,9 @@ class ConversationSuccessConformanceTests(unittest.IsolatedAsyncioTestCase):
         # ``interrupt_http_status`` picks the status off the acknowledgement. That is the leg
         # the shared refusal table got wrong, so it is the leg worth driving.
         await drive_activity(self.harness, "running")
+        self.adapter.interrupt_error = HarnessControlError(
+            "synthetic native refusal for the declared 422 operation body"
+        )
         await self._check(
             "POST",
             base + "/conversation/interrupt",

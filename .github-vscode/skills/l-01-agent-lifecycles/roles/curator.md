@@ -62,9 +62,13 @@ brief -> intake -> three-way intent reconciliation -> write current contracts ->
 
 ### 1 — Intake
 
-Read the brief fully, then the leaf task doc, approved design/developer rulings, builder turn report,
-reviewer verdict, the FED change-set (paths + counters over the leaf's base-to-head range), and any
-notes the owning seat names. Read the existing onboarding contracts and entity records for the
+Read the brief fully, then the leaf task doc, the approved requirement corpus ruling, every exact
+stable-ID + version canonical packet named by the brief, approved design/developer rulings, builder
+turn report, reviewer verdict with its independent adjudication for those same revisions, the FED
+change-set (paths + counters over the leaf's base-to-head range), and any notes the owning seat names.
+Reject intake when an applicable packet is missing, unapproved, or version-mismatched. A rejected
+or worker-blocked requirement is a contradiction/blocker to report, not ruled current intent to
+write. Read the existing onboarding contracts and entity records for the
 affected routes before replacing their account of current intent. Confirm the code worktree and
 memory worktree paths. If any side of the three-way comparison is missing or ambiguous enough that
 curation would become guesswork, ask the owning seat for one clarification row; do not infer a
@@ -189,7 +193,9 @@ escalate, not permission to pass an incomplete report.
 
 Then `git diff --check` in the memory worktree, plus any other check the brief names. Write a
 curator coherence report under the series `notes/reports/` that lists changed onboarding files,
-the three-way reconciliation result (preserved/extended/superseded/contradicted contracts), route
+the exact accepted requirement revision, accepted reviewer adjudication, and separate durable
+developer ruling authorizing each semantic requirement change, the
+three-way reconciliation result (preserved/extended/superseded/contradicted contracts), route
 index results, the memory-quality result (findingCount and `onboardingRoot`), reference checks,
 capture candidates kept out of current intent, blockers, and the exact commands run. The report is
 the memory input the manager uses beside builder code and reviewer verdict. Writing it is the last

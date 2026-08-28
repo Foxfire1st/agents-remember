@@ -78,7 +78,7 @@ from agents_remember.controlplane.records import GateAnchor, GateRecord, create_
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel import atomic_write
 from agents_remember.mcp import server as server_module
-from agents_remember.testing.global_state import preserve_owned_mutable_state
+from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
 from pydantic import ValidationError
 from test_config import settings_payload
 

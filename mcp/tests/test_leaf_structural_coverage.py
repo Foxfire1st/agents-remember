@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 from agents_remember.application import provider_runtime
-from agents_remember.code_quality import layering
 from agents_remember.kernel.coordination_context.models import (
     CoordinationRequest,
     EnclosureResolution,
@@ -37,6 +36,7 @@ from agents_remember.serving.conversation.library.open_service import (
 from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import ContractError, WorktreeContract
+from agents_remember_test_support.code_quality import layering
 
 
 def _layers(extra: str = "") -> str:
@@ -160,7 +160,7 @@ arrives_in = "260731-EFA-L99"
             "mcp/src/agents_remember/errors.py": "",
         },
     )
-    monkeypatch.setattr(layering, "_leaf_landed", lambda _leaf: True)
+    monkeypatch.setattr(layering, "_leaf_landed", lambda _leaf, _project_root: True)
     report = layering.check_layering(root)
     rendered = layering.render(report)
     assert "stale flag" in rendered
@@ -447,7 +447,11 @@ def test_layering_main_guard(tmp_path: Path, monkeypatch) -> None:
     )
     with pytest.raises(SystemExit) as exc:
         runpy.run_path(
-            str(Path("mcp/src/agents_remember/code_quality/layering.py").resolve()),
+            str(
+                Path(
+                    "mcp/test_support/agents_remember_test_support/code_quality/layering.py"
+                ).resolve()
+            ),
             run_name="__main__",
         )
     assert exc.value.code == 0
@@ -646,7 +650,7 @@ def test_leaf_landed_runs_git(tmp_path: Path, monkeypatch) -> None:
     def _boom(*_args, **_kwargs):
         raise OSError("no git")
 
-    monkeypatch.setattr("agents_remember.code_quality.layering.run_git", _boom)
+    monkeypatch.setattr("agents_remember_test_support.code_quality.layering.run_git", _boom)
     assert layering._leaf_landed("260731-EFA-L999", project_root=root) is False
 
 

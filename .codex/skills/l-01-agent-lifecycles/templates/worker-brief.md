@@ -28,6 +28,9 @@ surrounding owners, and likely side effects in your report so the review partiti
 ## Worktrees (your code write area + memory context)
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`)
 - Memory: `<memory-worktree-path>` (read/context for changed-path notes; the curator writes onboarding)
+- Leaf Requirement Attempt Journal: `<notes-reports-path>/<leaf-id>-requirement-attempt-journal.md`
+  (one physical append-only journal; workers append delivery records and independent reviewers
+  append separate adjudication records without changing earlier bytes)
 - Plus your turn report at the path below. Nothing else. NEVER `git commit` — the owning seat
   closes out after reviewing your report, the reviewer verdict, and the curator coherence pass.
 
@@ -46,6 +49,69 @@ surrounding owners, and likely side effects in your report so the review partiti
 Leaf spec: `<leaf-doc-path>` (read it first). <One-paragraph task statement: the bug/feature, the
 files involved, the invariants that must hold, what NOT to touch.>
 
+## Owned primary requirement (exactly one stable-ID + version)
+Repeat this block exactly once for the revision this leaf owns. List inherited master or adjacent
+requirements separately as dependency/preservation constraints; this leaf verifies but does not
+claim to close them. Do not aggregate, renumber, sample, or write "see task doc" in place of the
+primary revision.
+
+- `<stable-requirement-id> @ <version>` — `<short normative label>`
+  - Canonical packet: `<task-relative complete requirement packet; read it in full>`
+  - Approved revision: `<packet state=approved; durable corpus-ruling citation>`
+  - Leaf manifestation: `<leaf-id>/<stable-requirement-id>@<version>`
+  - Next handoff attempt ID: `<leaf-local monotonically ordered id; mint only when a candidate is handed to review>`
+  - Predecessor attempt and carried findings: `<attempt id + finding ids | none for first attempt>`
+  - Exact candidate identity class: `<Git tree/commit | non-code digest + durable anchors>`
+  - Required deliverable evidence class: `<code path + symbol | document path + section/anchor |
+    persisted artifact | mounted UI | operation result | other exact class>`
+  - Required verification evidence class: `<test node/symbol | command/report section | scenario |
+    other exact class>`
+  - Existing developer approval for changed delivery: `<durable ruling citation | N/A>`
+
+Each worker record in the leaf journal must contain one acceptance block for this owned primary ID
+with:
+
+1. status `satisfied`, `blocked`, or `approved-change`;
+2. delivery/implementation rationale;
+3. delivery/implementation citations (code: path + symbol; non-code: path + section/anchor);
+4. verification rationale stating the demonstrated behavior and the failure caught;
+5. test/verification citations;
+6. exact command/result or durable evidence reference;
+7. for `blocked` or `approved-change`: why unchanged delivery is impossible, changed delivery if
+   any, and the durable developer approval/ruling citation.
+
+General prose and an aggregate "requirements addressed" statement do not satisfy this contract.
+An approval-pending blocker is reportable but cannot pass review.
+
+## Adjacent dependency/preservation constraints (not closure claims)
+
+- `<stable-requirement-id>@<version>` — `<dependency | preservation>` — `<packet path>` —
+  `<verification needed to prove this leaf did not violate it>`
+
+Advance a delivery attempt only when an exact candidate is handed to independent review, or after
+a reviewer rejection requires a successor handoff. Internal implementation, test, and evidence
+reruns do not consume attempt IDs. Preserve them in a separate experimental-protocol log with
+candidate identity, exact command, result, failure cause, repair made, and expected proof for the
+next run. Each row is an experimental protocol event, never a worker attempt.
+
+Before review handoff, append one immutable `worker-delivery-attempt` record per exact requirement
+revision and leaf manifestation to the single physical leaf journal named above. Bind the attempt
+ID, predecessor and carried findings, exact candidate, requirement-specific status/rationales/
+citations/findings/failure class, a content-addressed reference to the frozen expanded evidence,
+and append timestamp. The expanded artifact carries shared definitions and complete command
+results; do not duplicate the complete master envelope or experimental-run body inside each
+attempt. Never edit a prior record: repair after reviewer rejection creates a successor attempt.
+An unrelated later candidate does not reopen an accepted attempt. Every
+blocked finding uses exactly one class: `implementation defect`, `evidence gap`, `requirement
+contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A requirement problem is
+reported for architect/developer revision authority; the worker cannot rewrite it.
+
+Validate the complete record before append; append plus exact-candidate review handoff is one
+logical formal-attempt boundary. Preserve an accidentally malformed pre-handoff row with an
+append-only `non-attempt-correction`/void reference, consume no attempt ID, and use the same next ID
+for the corrected handoff. A malformed handed-off row requires independent reviewer rejection;
+the worker cannot self-reject it and appends a successor only at the next candidate handoff.
+
 ## Coding guidelines (read before your first edit)
 `<memory-worktree-path>/system/coding-guidelines.md` — your diff is written against it: file and
 function budgets, responsibility rules, source-comment scope (no task/leaf ids in shipped
@@ -63,6 +129,11 @@ verdict finding, not a style note.
   landing).
   `memory_quality_check` stays a per-leaf closeout gate.
 - `git diff --check` in both worktrees.
+- Separate durable-evidence promotion hold point: for each new/retained fixture, recording, shared support,
+  or proof, record either its registered owner + executable stable contract or its dated
+  expiry/replacement/removal event; run the public lifecycle validator and include the decision and
+  result in the turn report. `N/A` must be explicit when the leaf touches no durable evidence. This
+  hold point does not substitute for any requirement acceptance block.
 
 ## Curator handoff input
 - Changed paths and code-diff summary for the curator coherence pass.
@@ -74,8 +145,9 @@ verdict finding, not a style note.
 
 ## Turn report (mandatory, last act)
 Write `<notes-reports-path>/<leaf-id>-worker-report.md` following
-`skills/l-01-agent-lifecycles/templates/turn-report.md` — including exact check commands +
-outcomes, changed paths for the curator, the retrieval-evidence tally, and the respawn state. If
+`skills/l-01-agent-lifecycles/templates/turn-report.md` — including exact links to every newly
+appended journal attempt, a separate Checks section with exact commands + outcomes,
+changed paths for the curator, the retrieval-evidence tally, and the respawn state. If
 blocked: fill Escalations and stop — escalate to <owning-seat contact>, never to the developer.
 ```
 
@@ -84,6 +156,13 @@ blocked: fill Escalations and stop — escalate to <owning-seat contact>, never 
 **Compiler notes for the spawning seat.**
 
 - Fill every `<placeholder>`; a brief with an unresolved placeholder is not dispatchable.
+- Compile the complete stable-ID + version requirement set from the canonical leaf plus applicable
+  inherited master requirements. Verify every canonical packet matches that version, is approved,
+  and cites the durable corpus ruling. A missing, duplicate, unstable, unapproved,
+  version-mismatched, or prose-only requirement identity makes the brief
+  undispatchable.
+- Mint the next attempt ID from the leaf journal, carry the exact predecessor findings, and require
+  the worker to bind the stable candidate before appending. Never pre-approve or reuse an attempt ID.
 - Verify the provider stack actually answers before naming it; write `NONE (native reads only)`
   when it does not — a worker discovering dead providers mid-leaf wastes its turn.
 - Deliver as an echo-confirmed paste; verify the harness's paste chip (`[Pasted Content N chars]`)

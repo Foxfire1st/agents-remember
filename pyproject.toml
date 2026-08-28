@@ -60,8 +60,9 @@ typeCheckingMode = "basic"
 # worktrees resolve the same environment; do not add checkout-local venvPath/venv declarations.
 executionEnvironments = [
   { root = "mcp/src", extraPaths = ["mcp/src"] },
-  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/tests"] },
-  { root = "scripts", extraPaths = ["mcp/src"] },
+  { root = "mcp/test_support", extraPaths = ["mcp/src", "mcp/test_support"] },
+  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/test_support", "mcp/tests"] },
+  { root = "scripts", extraPaths = ["mcp/src", "mcp/test_support"] },
 ]
 
 [tool.coverage.run]
@@ -75,6 +76,14 @@ branch = true
 # no baseline, allowlist, or per-file exemption. Any file at or above the 1,200-line hard
 # limit in the detector's scope fails the wrapper.
 file_size_armed = true
+# Behavioral release rails follow operational ownership, not whether a module happens to be
+# importable or installed by the development environment. Every tracked top-level Python package
+# must appear in exactly one of these lists; adding an unclassified package fails the quality scope.
+product_package_roots = ["mcp/src/agents_remember"]
+verification_package_roots = [
+  ".dagger/src/agents_remember_quality",
+  "mcp/test_support/agents_remember_test_support",
+]
 
 [tool.radon]
 # Show only functions/classes that are at least mildly complex.
@@ -202,6 +211,10 @@ filterwarnings = [
 # `mcp/tests/test_code_quality_check.py` asserts this list and the suite's actual
 # environment gates stay in step in both directions.
 markers = [
+  # Orthogonal to the evidence-category markers: this inherited selector names one reviewed
+  # architecture surface. It is explicit here so strict collection never depends on another
+  # plugin incidentally registering the same word.
+  "fitness: inherited S1-S4 architecture selector; evidence category remains manifest-owned",
   "ar_run_pi_rpc_smoke: opt in with AR_RUN_PI_RPC_SMOKE=1 -- installs and drives the pinned Pi RPC build (test_pi_rpc_real_smoke.py: 1 class)",
   "ar_run_control_plane_installed: opt in with AR_RUN_CONTROL_PLANE_INSTALLED=1 -- drives installed Codex and Pi runtimes through the control-plane seam (test_harness_control_plane_installed.py: 2 classes)",
   "ar_run_control_installed: opt in with AR_RUN_CONTROL_INSTALLED=1 -- drives installed runtimes through the L3 control routes (test_conversation_control_installed.py: 2 classes)",

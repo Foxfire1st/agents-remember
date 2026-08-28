@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import layering
+from agents_remember_test_support.code_quality import layering
 
 
 def _write_tree(root: Path, files: dict[str, str]) -> None:
@@ -320,14 +320,21 @@ arrives_in = "260731-EFA-L99"
             "mcp/src/agents_remember/errors.py": "",
         },
     )
-    monkeypatch.setattr(layering, "_leaf_landed", lambda leaf: leaf == "260731-EFA-L99")
+    observed_roots: list[Path] = []
+
+    def landed(leaf: str, project_root: Path) -> bool:
+        observed_roots.append(project_root)
+        return leaf == "260731-EFA-L99"
+
+    monkeypatch.setattr(layering, "_leaf_landed", landed)
     report = layering.check_layering(root)
     assert not report.ok
     assert report.stale_present_flags == [("future", "260731-EFA-L99")]
+    assert observed_roots == [root]
 
 
 def test_wrapper_step_is_registered() -> None:
-    check = importlib.import_module("agents_remember.code_quality.check")
+    check = importlib.import_module("agents_remember_test_support.code_quality.check")
     scope = SimpleNamespace(
         coverage_paths=[],
         test_paths=[],

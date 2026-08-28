@@ -43,6 +43,14 @@ below, then stop.
 
 ## Task inputs
 - Leaf task doc: `<leaf-doc-path>` (read it first — objective, requirements, decision log).
+- Approved requirement corpus ruling: `<durable developer approval citation>`.
+- Primary requirement revision: `<stable-id>@<version>` — canonical packet `<packet-path>`.
+- Adjacent preservation/dependency revisions: `<stable-id>@<version> — <packet-path> | none`.
+- Requirement adjudication: `<reviewer-verdict-path>` — attach the reviewer's independent
+  `accepted | rejected` row for every revision above. A rejected or worker-blocked revision is an
+  unresolved blocker to report, never ruled current intent to write into onboarding. Preserve the
+  reviewer's exact failure class; only `requirement contradiction/overconstraint` denotes a
+  semantic contradiction.
 - notes/: `<series-notes-path>` — the builder turn report
   (`notes/reports/<leaf-id>-worker-report.md`), the mandatory route-review verdict, and
   any other task-local notes naming a factual current-state clarification.
@@ -56,7 +64,8 @@ below, then stop.
 
 ### Ruled change intent
 - Developer decisions and approved design notes: `<paths + concise rulings>`.
-- Task requirements that authorize a contract change: `<requirement ids>`.
+- Task requirements that authorize a contract change: `<exact stable-id>@<version> — <canonical
+  packet path>; repeat for each applicable revision`.
 - Explicit non-goals: `<non-goals>`.
 
 ### Implemented reality
@@ -123,6 +132,9 @@ after proving there is no underlying curator-actionable defect.
 3. Rerun the same full quality call until its curator gate is zero; separately disposition every
    source-change candidate and allowed real-commit residual in the coherence report.
 4. Run `git diff --check` in the memory worktree, plus any other check named above.
+5. Map every onboarding contract change to the exact approved requirement revision and the
+   reviewer's accepted adjudication. Preserve blocked/rejected deltas as report blockers; do not
+   promote them into current intent.
 
 A `cit:(...)` wrapped in backticks is read as a QUOTATION of the citation grammar — which is how
 these documents document it — so it is not checked; write a real citation unbackticked.
@@ -137,7 +149,8 @@ curator learns about repairable work.
 
 ## Coherence report (mandatory, last act)
 Write `<notes-reports-path>/<leaf-id>-curator-report.md`: changed onboarding files (with which
-change-set item or notes/ item each one routes to and why); preserved, extended, superseded, and
+change-set item, exact requirement revision, and accepted reviewer row each one routes to and why);
+preserved, extended, superseded, and
 contradicted contracts; route index results; memory-quality `findingCount` and exact
 `onboardingRoot`; reference checks; capture candidates kept out of current intent; blockers; and
 the exact commands run. This report — together with the builder's code and the reviewer's verdict

@@ -10,21 +10,30 @@ from typing import Annotated
 import dagger
 from dagger import Doc, ReturnType, dag, field, function, object_type
 
+from agents_remember_quality.quality_command import (
+    ExpectedCommand,
+    causal_evidence_steps,
+    quality_wrapper_command,
+)
+from agents_remember_quality.retry_evidence_route import (
+    RetryEvidenceContext,
+    run_exact_retry_evidence,
+    run_retry_matrix_evidence,
+)
+
 PLAYWRIGHT_IMAGE = (
     "mcr.microsoft.com/playwright:v1.60.0-noble@"
     "sha256:83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9"
 )
 CODEX_VERSION = "0.147.0"
+RETRY_CACHE_ROOT = "/var/cache/agents-remember-quality-retry"
 
 
-def _candidate_container(
+def _candidate_base(
     source: dagger.Directory,
     repository_bundle: dagger.File,
-    *,
-    attempt_nonce: str,
-    reports: str,
 ) -> dagger.Container:
-    """Build the one pinned candidate environment shared by acceptance and cadence routes."""
+    """Build the deterministic candidate environment shared by every evidence attempt."""
 
     return (
         dag.container()
@@ -36,22 +45,7 @@ def _candidate_container(
         .with_env_variable("TMPDIR", "/tmp/ar-quality")
         .with_env_variable("TMP", "/tmp/ar-quality")
         .with_env_variable("TEMP", "/tmp/ar-quality")
-        .with_env_variable("AR_QUALITY_INVOCATION", "ci")
-        .with_env_variable("AR_QUALITY_NO_RETRY", "1")
-        .with_env_variable("AR_DAGGER_TEST_ATTESTATION", attempt_nonce)
-        .with_env_variable("AR_CODEX_PROBE_MODE", "real")
-        .with_env_variable("AR_CODEX_PROBE_REPORT", f"{reports}/codex-probe.json")
-        .with_env_variable("AR_QUALITY_PROGRESS_REPORT", f"{reports}/quality-progress.json")
-        .with_env_variable("COVERAGE_FILE", f"{reports}/coverage.data")
-        .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality", reports])
-        .with_exec(
-            [
-                "sh",
-                "-c",
-                "umask 077; printf '%s' \"$AR_DAGGER_TEST_ATTESTATION\" "
-                "> /tmp/ar-quality/dagger-test-attestation",
-            ]
-        )
+        .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality"])
         .with_exec(["apt-get", "update"])
         .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
         .with_exec(
@@ -111,6 +105,60 @@ def _candidate_container(
     )
 
 
+def _bind_candidate_attempt(
+    container: dagger.Container,
+    *,
+    attempt_nonce: str,
+    reports: str,
+) -> dagger.Container:
+    """Bind non-deterministic evidence inputs after reusable candidate setup."""
+
+    return (
+        container.with_mounted_cache(
+            RETRY_CACHE_ROOT,
+            dag.cache_volume("ar-quality-retry-v3"),
+            sharing=dagger.CacheSharingMode.LOCKED,
+        )
+        .with_env_variable(
+            "PYTHONPATH",
+            "/workspace/mcp/test_support:/workspace/mcp/src",
+        )
+        .with_env_variable("AR_QUALITY_INVOCATION", "ci")
+        .with_env_variable("AR_QUALITY_RETRY_CACHE", RETRY_CACHE_ROOT)
+        .with_env_variable("AR_DAGGER_TEST_ATTESTATION", attempt_nonce)
+        .with_env_variable("AR_QUALITY_ATTEMPT_NONCE", attempt_nonce)
+        .with_env_variable("AR_CODEX_PROBE_MODE", "real")
+        .with_env_variable("AR_CODEX_PROBE_REPORT", f"{reports}/codex-probe.json")
+        .with_env_variable("AR_QUALITY_PROGRESS_REPORT", f"{reports}/quality-progress.json")
+        .with_env_variable("COVERAGE_FILE", f"{reports}/coverage.data")
+        .with_exec(["mkdir", "-p", reports])
+        .with_exec(
+            [
+                "sh",
+                "-c",
+                "umask 077; printf '%s' \"$AR_DAGGER_TEST_ATTESTATION\" "
+                "> /tmp/ar-quality/dagger-test-attestation",
+            ]
+        )
+    )
+
+
+def _candidate_container(
+    source: dagger.Directory,
+    repository_bundle: dagger.File,
+    *,
+    attempt_nonce: str,
+    reports: str,
+) -> dagger.Container:
+    """Build one reusable candidate base, then bind an exact evidence attempt."""
+
+    return _bind_candidate_attempt(
+        _candidate_base(source, repository_bundle),
+        attempt_nonce=attempt_nonce,
+        reports=reports,
+    )
+
+
 async def _run_dashboard_quality(
     container: dagger.Container,
 ) -> tuple[dagger.Container, int, list[str]]:
@@ -141,6 +189,27 @@ async def _run_dashboard_quality(
         if exit_code != 0:
             break
     return container, exit_code, completed
+
+
+async def _run_expected_commands(
+    container: dagger.Container,
+    commands: tuple[ExpectedCommand, ...],
+    step_codes: dict[str, int],
+) -> tuple[dagger.Container, bool]:
+    """Run a non-accepting route whose deliberate failures are part of its proof."""
+
+    route_ok = all(code == 0 for code in step_codes.values())
+    for step in commands:
+        if not route_ok:
+            break
+        container = await container.with_exec(
+            list(step.command),
+            expect=ReturnType.ANY,
+        ).sync()
+        code = await container.exit_code()
+        step_codes[step.name] = code
+        route_ok = code == step.expected_exit
+    return container, route_ok
 
 
 @object_type
@@ -202,7 +271,6 @@ class AgentsRememberQuality:
             reports=reports,
         )
         container = await container.sync()
-        container = container.with_env_variable("AR_QUALITY_ATTEMPT_NONCE", attempt_nonce)
         exit_code = await container.exit_code()
         completed = ["environment"]
         if exit_code == 0:
@@ -220,28 +288,12 @@ class AgentsRememberQuality:
             exit_code = await container.exit_code()
             completed.append("codex-read-only-probe")
         if exit_code == 0:
-            command = [
-                "/opt/ar-venv/bin/python",
-                "-m",
-                "agents_remember.code_quality.check",
-                "--pytest-report-log",
-                f"{reports}/pytest-events.jsonl",
-                "--pytest-phase-report",
-                f"{reports}/pytest-phases.json",
-                "--causal-failure-report",
-                f"{reports}/causal-failures.json",
-                "--coverage-json",
-                f"{reports}/coverage.json",
-                "--coverage-data",
-                f"{reports}/coverage.data",
-                "--progress-report",
-                f"{reports}/quality-progress.json",
-            ]
-            if mode == "targeted":
-                command.append("--targeted")
-            command += ["--diff-base", diff_base]
-            if memory_cap_bytes > 0:
-                command += ["--memory-cap-bytes", str(memory_cap_bytes)]
+            command = quality_wrapper_command(
+                reports=reports,
+                diff_base=diff_base,
+                mode=mode,
+                memory_cap_bytes=memory_cap_bytes,
+            )
             container = await container.with_exec(command, expect=ReturnType.ANY).sync()
             exit_code = await container.exit_code()
             completed.append("quality-wrapper")
@@ -269,6 +321,129 @@ class AgentsRememberQuality:
             contents=json.dumps(result, indent=2, sort_keys=True) + "\n",
         )
         return QualityResult(reports=container.directory(reports), exit_code=exit_code)
+
+    @function
+    async def retry_evidence(
+        self,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree for non-accepting retry-route evidence."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the candidate commit and its ancestry."),
+        ],
+        diff_base: Annotated[
+            str,
+            Doc("Explicit comparison commit used by both retry attempts."),
+        ],
+        mode: Annotated[
+            str,
+            Doc("Either 'targeted' or 'full'; both attempts use the same population."),
+        ] = "targeted",
+    ) -> QualityResult:
+        """Prove fresh publication then exact reuse across two real Dagger containers."""
+
+        if mode not in {"targeted", "full"}:
+            raise ValueError(f"unknown retry evidence mode: {mode}")
+        if not diff_base.strip():
+            raise ValueError("diff_base must name the explicit retry comparison commit")
+        context = RetryEvidenceContext(
+            source,
+            repository_bundle,
+            diff_base,
+            RETRY_CACHE_ROOT,
+            _candidate_container,
+        )
+        outcome = await run_exact_retry_evidence(
+            context,
+            mode=mode,
+        )
+        return QualityResult(
+            reports=outcome.container.directory("/reports"),
+            exit_code=outcome.exit_code,
+        )
+
+    @function
+    async def retry_matrix_evidence(
+        self,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree for non-accepting retry-matrix evidence."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the candidate commit and its ancestry."),
+        ],
+        diff_base: Annotated[
+            str,
+            Doc("Explicit comparison commit used by every retry-matrix attempt."),
+        ],
+    ) -> QualityResult:
+        """Prove mutation, lane, context, and filtering decisions on the real wrapper."""
+
+        if not diff_base.strip():
+            raise ValueError("diff_base must name the explicit retry comparison commit")
+        context = RetryEvidenceContext(
+            source,
+            repository_bundle,
+            diff_base,
+            RETRY_CACHE_ROOT,
+            _candidate_container,
+        )
+        outcome = await run_retry_matrix_evidence(context)
+        return QualityResult(
+            reports=outcome.container.directory("/reports"),
+            exit_code=outcome.exit_code,
+        )
+
+    @function
+    async def causal_evidence(
+        self,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree for non-accepting causal-route evidence."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the candidate commit and its ancestry."),
+        ],
+    ) -> QualityResult:
+        """Prove exact-node suppression and independent execution on real pytest."""
+
+        reports = "/reports"
+        attempt_nonce = secrets.token_hex(16)
+        container = (
+            _candidate_container(
+                source,
+                repository_bundle,
+                attempt_nonce=attempt_nonce,
+                reports=reports,
+            )
+            .with_env_variable("AR_QUALITY_ATTEMPT_NONCE", attempt_nonce)
+            .with_env_variable("AR_CAUSAL_EVIDENCE_FORCE_DEPENDENT_FAILURE", "1")
+        )
+        container = await container.sync()
+        step_codes: dict[str, int] = {"environment": await container.exit_code()}
+        container, route_ok = await _run_expected_commands(
+            container,
+            causal_evidence_steps(reports),
+            step_codes,
+        )
+        payload = {
+            "schemaVersion": "ar-causal-route-results/v1",
+            "status": "passed" if route_ok else "failed",
+            "acceptanceEligible": False,
+            "stepExitCodes": step_codes,
+        }
+        container = container.with_new_file(
+            f"{reports}/causal-route-results.json",
+            contents=json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        )
+        return QualityResult(
+            reports=container.directory(reports),
+            exit_code=0 if route_ok else 1,
+        )
 
     @function
     async def cadence_evidence(
@@ -307,7 +482,7 @@ class AgentsRememberQuality:
                 [
                     "/opt/ar-venv/bin/python",
                     "-m",
-                    "agents_remember.testing.cadence_runner",
+                    "agents_remember_test_support.testing.cadence_runner",
                     "--project-root",
                     "/workspace",
                     "--trigger",
@@ -339,4 +514,51 @@ class AgentsRememberQuality:
             f"{reports}/cadence-route-results.json",
             contents=json.dumps(result, indent=2, sort_keys=True) + "\n",
         )
+        return QualityResult(reports=container.directory(reports), exit_code=exit_code)
+
+    @function
+    async def route_measurement_evidence(
+        self,
+        source: Annotated[
+            dagger.Directory,
+            Doc("Exact candidate source tree for non-accepting representative measurements."),
+        ],
+        repository_bundle: Annotated[
+            dagger.File,
+            Doc("Git bundle containing the exact candidate commit and ancestry."),
+        ],
+        repetitions: Annotated[
+            int,
+            Doc("Repeated cold/warm pairs for every pure, integration, and durability route."),
+        ] = 3,
+    ) -> QualityResult:
+        """Compare representative cohorts under serial and repository-default xdist."""
+
+        if repetitions < 2:
+            raise ValueError("repetitions must be at least 2 for medians and ranges")
+        reports = "/reports"
+        attempt_nonce = secrets.token_hex(16)
+        container = await _candidate_container(
+            source,
+            repository_bundle,
+            attempt_nonce=attempt_nonce,
+            reports=reports,
+        ).sync()
+        exit_code = await container.exit_code()
+        if exit_code == 0:
+            container = await container.with_exec(
+                [
+                    "/opt/ar-venv/bin/python",
+                    "-m",
+                    "agents_remember_test_support.testing.route_measurement",
+                    "--project-root",
+                    "/workspace",
+                    "--output",
+                    f"{reports}/representative-route-measurement.json",
+                    "--repetitions",
+                    str(repetitions),
+                ],
+                expect=ReturnType.ANY,
+            ).sync()
+            exit_code = await container.exit_code()
         return QualityResult(reports=container.directory(reports), exit_code=exit_code)

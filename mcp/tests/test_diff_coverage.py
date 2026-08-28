@@ -14,7 +14,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import check, diff_coverage
+from agents_remember_test_support.code_quality import check, diff_coverage
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -384,6 +384,22 @@ class MeasurementTests(unittest.TestCase):
             self.assertEqual((result.covered_units, result.total_units), (3, 3))
             self.assertEqual(result.percent, 100.0)
 
+    def test_changed_path_case_matches_casefolded_coverage_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seed = seeded_repository(root)
+            write(root, "pkg/module.py", "VALUE = 1\n")
+
+            result = self.measure(
+                root,
+                seed,
+                {"pkg/Module.py": {"executed_lines": [1]}},
+            )
+
+            self.assertEqual(result.state, "measured")
+            self.assertEqual(result.unmeasured_files, ())
+            self.assertEqual((result.covered_units, result.total_units), (1, 1))
+
     def test_an_uncovered_changed_line_is_named_not_only_counted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -634,7 +650,15 @@ class WrapperIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             seed = seeded_repository(root)
-            write(root, "pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n')
+            write(
+                root,
+                "pyproject.toml",
+                "[tool.pytest.ini_options]\n"
+                'testpaths = ["tests"]\n'
+                "[tool.agents_remember]\n"
+                'product_package_roots = ["pkg"]\n'
+                "verification_package_roots = []\n",
+            )
             write(root, "pkg/module.py", "def first() -> int:\n    return 1\n\n\nX = 2\nY = 3\n")
             git(root, "add", "-A")
             report = coverage_report(

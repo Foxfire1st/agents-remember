@@ -31,6 +31,8 @@ esac
 
 root="$(git rev-parse --show-toplevel)" || exit 1
 cd "$root" || exit 1
+PYTHONPATH="$root/mcp/test_support:$root/mcp/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
 
 # Primary worktree root = parent of the shared (common) git dir. For a linked
 # worktree this resolves to the main clone; for the main clone it resolves to
@@ -83,7 +85,7 @@ generated_copy_checks() {
 }
 
 generated_projection_check() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" generated --name projection --script scripts/sync-projection-types.py || return 1
   echo "[$label] checking generated projection copies..."
   if "$py" scripts/sync-projection-types.py --check; then
@@ -97,7 +99,7 @@ generated_projection_check() {
 generated_check() {
   generated_name=$1
   generated_script=$2
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" generated --name "$generated_name" --script "$generated_script" || return 1
   echo "[$label] checking generated $generated_name copies..."
   if "$py" "$generated_script" --check; then
@@ -109,17 +111,17 @@ generated_check() {
 }
 
 report_wrapper_tier() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" hook-tier --tier "$tier"
 }
 
 report_fixed_step() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" fixed-step --name "$1"
 }
 
 report_untracked_scope() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" untracked
 }
 
@@ -196,7 +198,7 @@ run_fast_checks() {
   fi
   report_fixed_step evidence-lifecycle || return 1
   echo "[$label] evidence lifecycle catalog..."
-  if "$py" -m agents_remember.testing.evidence_lifecycle --project-root .; then
+  if "$py" -m agents_remember_test_support.testing.evidence_lifecycle --project-root .; then
     echo "[$label] result: evidence-lifecycle PASS"
   else
     echo "[$label] result: evidence-lifecycle FAIL" >&2

@@ -30,7 +30,6 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application import orchestration_tools, provider_runtime
-from agents_remember.code_quality import application_boundary
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeRecord
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -50,6 +49,7 @@ from agents_remember.worktrees.modules import abandon
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember_test_support.code_quality import application_boundary
 
 
 def _completed(

@@ -14,7 +14,6 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_evidence_fixture import publish_passing_quality_gate
-from agents_remember.code_quality import check as quality_check
 from agents_remember.worktrees.modules.quality import gate as code_quality_gate
 from agents_remember.worktrees.queue import closeout_staged_quality
 from agents_remember.worktrees.worktree_contract import (
@@ -26,6 +25,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from agents_remember_test_support.code_quality import check as quality_check
 from test_worktree_support import (
     closeout_args,
     git,
@@ -45,7 +45,12 @@ def gate_scope_contract_fixture(root: Path):
     wrapper.parent.mkdir(parents=True, exist_ok=True)
     wrapper.write_text("# wrapper marker\n", encoding="utf-8")
     (code_repo / "pyproject.toml").write_text(
-        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
+        "[tool.pytest.ini_options]\n"
+        'testpaths = ["tests"]\n'
+        "[tool.agents_remember]\n"
+        'product_package_roots = ["pkg"]\n'
+        "verification_package_roots = []\n",
+        encoding="utf-8",
     )
     (code_repo / "pkg").mkdir()
     (code_repo / "pkg" / "__init__.py").write_text("", encoding="utf-8")

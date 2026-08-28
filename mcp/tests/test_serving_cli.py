@@ -31,8 +31,14 @@ from agents_remember.serving.sim import (
     parse_sim_speed,
 )
 from agents_remember.serving.static import dashboard_static_dir
-from agents_remember.testing.global_state import preserve_owned_mutable_state
-from test_serving import FIXTURE_DIR, _build_wire, _config
+from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
+from test_serving import _build_wire, _config
+
+SIM_EVENT_LOG = (
+    Path(__file__).parent
+    / "fixtures/sim/logs/observer/lifecycles/sim-replay-lifecycle/events.jsonl"
+)
+FIXTURE_DIR = SIM_EVENT_LOG.parents[4]
 
 
 class BuildInfoTests(unittest.TestCase):

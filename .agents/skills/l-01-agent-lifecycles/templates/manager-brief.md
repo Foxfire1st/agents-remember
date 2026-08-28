@@ -44,6 +44,29 @@ master's leaf loop to the master-exit seam, then hand over.
 - Worker dispatches: `templates/worker-brief.md`, with each canonical leaf document and role
   `worker`; the control plane claims each `(leaf document, worker)` seat; knob overrides:
   <settings/orchestration notes or none>.
+- Before every worker dispatch, compile the leaf's one owned primary revision: stable ID, version,
+  matching approved canonical packet, durable corpus-approval citation, deliverable evidence
+  class, and verification evidence class. List applicable inherited master revisions separately as
+  dependency/preservation constraints. Missing, duplicate,
+  unstable, unapproved, version-mismatched, or aggregate-only identities make the dispatch invalid. Require the
+  worker report's one-block-for-the-owned-primary-ID-and-version
+  acceptance envelope with `satisfied | blocked | approved-change`, delivery rationale/citations,
+  verification rationale/citations including the failure caught, exact command/result or durable
+  evidence, and approval-backed exception details. Code citations use path + symbol; non-code
+  citations use path + section/anchor.
+- For every leaf manifestation, compile the leaf journal path, next review-handoff attempt ID,
+  predecessor and carried findings, and exact candidate identity class. Dispatch and internal
+  implementation/test/evidence reruns do not advance the ID; preserve those reruns separately as
+  experimental protocol events. Refuse review handoff unless the worker appended an immutable,
+  candidate-bound attempt containing its requirement-specific status, rationale, citations,
+  findings/failure class, and a content-addressed reference to frozen expanded evidence. Do not
+  duplicate the complete master envelope or experimental-run body inside each attempt. Repair to a
+  reviewer-rejected manifestation creates a successor attempt; it never edits its predecessor. An
+  unrelated later candidate does not reopen an accepted attempt.
+  Validate each record before append and treat append plus exact-candidate review handoff as one
+  logical formal-attempt boundary. A malformed pre-handoff row is preserved with an append-only
+  `non-attempt-correction`/void reference and consumes no attempt ID; a malformed handed-off row
+  requires independent reviewer rejection before a successor handoff. The worker never self-rejects.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator coherence pass — never before the curator pass exists.
 - Closeout-door publication: after that chain and a current-lineage proof, call
@@ -67,9 +90,30 @@ master's leaf loop to the master-exit seam, then hand over.
   governing route overviews, and the import/call graph. The reviewer chair fans out one
   independent reviewer per route and returns a verdict with a complete route-coverage table;
   direct/builder-verified tiers may reduce loop machinery, never remove this gate. The reviewer
-  seat must be distinct from the leaf's builder seat, and every requirement verdict must cite
-  evidence of the requirement's class (rendering -> mounted-UI proof, scheduling ->
-  operation-level proof, data model -> artifact-level proof).
+  seat must be distinct from both the leaf's builder seat and the seat that authored the plan.
+  Dispatch the exact same owned primary stable-ID + version and worker envelope to the reviewer.
+  The reviewer independently opens the
+  artifacts and adjudicates that exact attempt and candidate `accepted | rejected` in a separately appended
+  record with its own rationale. Missing rationale, an
+  unapproved packet revision, wrong-class evidence, invalid citations, or missing developer approval forces rejection; any
+  rejected ID blocks the overall verdict. Every requirement verdict must cite evidence of the
+  requirement's class (rendering -> mounted-UI proof, scheduling -> operation-level proof, data
+  model -> artifact-level proof).
+- Classify each rejected finding as exactly `implementation defect`, `evidence gap`, `requirement
+  contradiction/overconstraint`, `test/tool defect`, or `external blocker`. Requirement problems
+  route through the architect for developer-approved revision; worker/reviewer records cannot
+  rewrite them. Accepted attempts stay closed unless the independent reviewer proves direct
+  regression and the owning manager (architect in a flat run) records bounded invalidation citing the accepted attempt, reviewer
+  record, regressing candidate, and affected set, or an approved new version invalidates that
+  manifestation. Repairs cite predecessor findings and use the same reviewer for delta
+  verification; no worker, reviewer, candidate change, or summary reopens acceptance by itself.
+- Maintain `notes/reports/<master-id>-requirement-attempt-summary.md` as a rebuildable projection
+  linking authoritative leaf records and showing attempts, rejection history/count, current state,
+  and dominant open failure class per requirement manifestation. It is never a task, lifecycle,
+  closeout, integration, or queue gate. Missing/stale summary state is rebuilt from leaf journals
+  and cannot block work.
+- The durable-evidence stable-contract-or-expiry hold point is separately mandatory. It cannot
+  substitute for the requirement acceptance envelope, and the envelope cannot waive it.
 - Quality altitude ladder: leaf closeout runs the repository-prescribed change-set-scoped
   acceptance exactly once; leaf integration lands that certified commit without a rerun. The
   repository-prescribed full check runs exactly once per master at its completion boundary:
@@ -110,7 +154,12 @@ master's leaf loop to the master-exit seam, then hand over.
   canonical review document with role `reviewer` and `roles/reviewer.md`. Organizational scope is
   the exact proposed final super candidate containing the master's prior landed contributions plus
   the proposed final leaf; atomic scope is the isolated block branch.
-  Use the scope packet your role file enumerates; then RAISE the gate without blocking —
+  Use the scope packet your role file enumerates, including the exact master/leaf stable-ID +
+  version set and accumulated worker envelopes. Require one independent adjudication per revision;
+  include the exact attempt/candidate records and leaf-journal references; the master summary is
+  context only and cannot substitute for them;
+  then RAISE the gate
+  without blocking —
   `lifecycle_gate(kind="master-handover-approval", evidence_refs=[<verdict>], wait=false)`.
   The control plane derives the master document and privately records the gate. Post the
   master-handover packet with the verdict and master document; the ORCHESTRATOR decides the one

@@ -38,8 +38,6 @@ from agents_remember.benchmarks.runner_modules.commands import (
     repo_has_commit,
     run_git_command,
 )
-from agents_remember.code_quality import check as quality_check
-from agents_remember.code_quality import diff_coverage
 from agents_remember.kernel import git_command as git_command_module
 from agents_remember.kernel import git_facts, git_freshness
 from agents_remember.kernel.coordination_context import cross_repo
@@ -67,6 +65,8 @@ from agents_remember.worktrees.worktree_contract import (
     RepoBranchPlan,
     default_contract,
 )
+from agents_remember_test_support.code_quality import check as quality_check
+from agents_remember_test_support.code_quality import diff_coverage
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 

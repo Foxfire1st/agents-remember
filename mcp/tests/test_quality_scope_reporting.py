@@ -17,10 +17,11 @@ from pathlib import Path
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+MCP_TEST_SUPPORT = Path(__file__).resolve().parents[1] / "test_support"
 sys.path.insert(0, str(MCP_SRC))
 
 from _quality_admission import QUALITY_TEST_ADMISSION
-from agents_remember.code_quality import (
+from agents_remember_test_support.code_quality import (
     check,
     crap_calculator,
     diff_coverage,
@@ -59,6 +60,9 @@ def write_quality_config(root: Path, *, pyright_venv: bool = False) -> None:
                 "branch = true",
                 "[tool.pytest.ini_options]",
                 'testpaths = ["tests"]',
+                "[tool.agents_remember]",
+                'product_package_roots = ["pkg"]',
+                "verification_package_roots = []",
                 "",
             )
         ),
@@ -493,7 +497,7 @@ class UntrackedExposureTests(unittest.TestCase):
             fake_python.write_text(
                 "#!/usr/bin/env sh\n"
                 'if [ "$1" = "-m" ] && '
-                '[ "$2" = "agents_remember.code_quality.scope_reporting" ]; then\n'
+                '[ "$2" = "agents_remember_test_support.code_quality.scope_reporting" ]; then\n'
                 f'  exec {shlex.quote(sys.executable)} "$@"\n'
                 "fi\n"
                 "exit 0\n",
@@ -525,7 +529,7 @@ class UntrackedExposureTests(unittest.TestCase):
             before_cached = digest_text(run_git(root, "diff", "--cached", "--binary").stdout)
             before_stash = digest_text(run_git(root, "stash", "list").stdout)
             environment = dict(os.environ)
-            environment["PYTHONPATH"] = str(MCP_SRC)
+            environment["PYTHONPATH"] = f"{MCP_TEST_SUPPORT}:{MCP_SRC}"
             environment["PATH"] = f"{shim_dir}:{environment.get('PATH', '')}"
 
             completed = subprocess.run(
@@ -709,19 +713,23 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn("./.githooks/_gate.sh targeted", workflow)
         self.assertFalse(
             any(
-                "agents_remember.code_quality.check" in block
+                "agents_remember_test_support.code_quality.check" in block
                 or re.search(r"\bpython\s+-m\s+pytest\b", block)
                 or re.search(r"\bnpm\s+run\s+", block)
                 for block in workflow_run_blocks(workflow)
             )
         )
-        dagger_module = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
+        dagger_main = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn("agents_remember.code_quality.check", dagger_module)
-        self.assertIn('("dashboard-lint", ["npm", "run", "lint"])', dagger_module)
-        self.assertIn('("dashboard-coverage", ["npm", "run", "test:coverage"])', dagger_module)
-        self.assertIn('"--fail-on-flaky-tests"', dagger_module)
+        dagger_command = (
+            REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/quality_command.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("quality_wrapper_command", dagger_main)
+        self.assertIn("agents_remember_test_support.code_quality.check", dagger_command)
+        self.assertIn('("dashboard-lint", ["npm", "run", "lint"])', dagger_main)
+        self.assertIn('("dashboard-coverage", ["npm", "run", "test:coverage"])', dagger_main)
+        self.assertIn('"--fail-on-flaky-tests"', dagger_main)
 
     def test_every_dashboard_ci_rail_uses_the_shared_provenance_path(self) -> None:
         dagger_module = (REPOSITORY_ROOT / ".dagger/src/agents_remember_quality/main.py").read_text(
@@ -751,8 +759,8 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn('"--fail-on-flaky-tests"', dagger_module)
 
         gate = (REPOSITORY_ROOT / ".githooks/_gate.sh").read_text(encoding="utf-8")
-        self.assertIn("agents_remember.code_quality.scope_reporting", gate)
-        self.assertNotIn("agents_remember.code_quality.check", gate)
+        self.assertIn("agents_remember_test_support.code_quality.scope_reporting", gate)
+        self.assertNotIn("agents_remember_test_support.code_quality.check", gate)
         self.assertIn("acceptance is Dagger-only", gate)
 
     def test_vacuous_dashboard_project_is_refused(self) -> None:
