@@ -8,7 +8,7 @@ evidence items; nothing is flattened into guessed semantics and no raw frame is 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
 from agents_remember.models.conversations.content import (
     ConversationContentBlock,
@@ -307,7 +307,7 @@ def _string_parts(value: object) -> list[str]:
     return [part for part in value if isinstance(part, str) and part]
 
 
-ToolPhase: TypeAlias = Literal["completed", "failed", "interrupted"]
+type ToolPhase = Literal["completed", "failed", "interrupted"]
 """Normalized terminal phases a Codex tool item can report."""
 
 _STATUS_PHASES: dict[str, ToolPhase] = {

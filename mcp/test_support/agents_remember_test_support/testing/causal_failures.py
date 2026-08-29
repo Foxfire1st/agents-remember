@@ -112,7 +112,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 def pytest_runtest_makereport(
     item: pytest.Item,
     call: _CallInfo,
-) -> Generator[None, _HookOutcome, None]:
+) -> Generator[None, _HookOutcome]:
     """Classify only an observed failure, never a module import or filename."""
 
     del item

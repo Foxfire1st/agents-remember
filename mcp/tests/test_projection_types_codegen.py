@@ -109,6 +109,8 @@ class ProjectionSchemaGenerationTests(unittest.TestCase):
         models = dict(schema["$defs"])
         models["WorkspaceProjection"] = {"properties": schema["properties"]}
         for model_name, model in models.items():
+            if "properties" not in model:
+                continue
             match = re.search(
                 rf"export interface {re.escape(model_name)}(?: extends [^{{]+)? {{\n(.*?)\n}}",
                 rendered,

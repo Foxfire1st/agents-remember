@@ -48,8 +48,8 @@ copying the harness package and wiring the MCP server.
 
 ## Requirements
 
-- Python **3.11 or newer** (the package declares `requires-python >=3.11`; on a
-  multi-version host, `uvx` selects a compatible interpreter automatically).
+- Python **3.13** (the package declares `requires-python >=3.13,<3.14`; Python
+  3.14 remains outside the supported range until its dependency/runtime audit).
 - an MCP-capable coding harness
 - [uv](https://docs.astral.sh/uv/) (for `uvx`) or pip
 - Git for repository and memory ledger operations (configure `user.name` /
@@ -62,6 +62,33 @@ copying the harness package and wiring the MCP server.
 Claude Code hooks do not require `jq`. Older starter packages used a `jq`
 one-liner to encode hook output; the current starter packages use Python
 renderers and Python hook scripts.
+
+### Canonical Linux/WSL development runtime
+
+Repository development, the MCP registration, detached lifecycle workers, and
+Dagger acceptance use the contract in `scripts/python-runtime-contract.env`.
+The current managed runtime is official source-built CPython 3.13.15. Its
+installer verifies the Python.org source digest and the pinned `python-build`
+definition before compilation; uv installs the frozen project dependencies but
+is forbidden from substituting a managed Python distribution.
+
+From the repository root on Linux or WSL:
+
+```text
+scripts/bootstrap-mcp-venv.sh
+```
+
+To replace an existing development environment explicitly:
+
+```text
+scripts/bootstrap-mcp-venv.sh --replace
+```
+
+The bootstrap writes the venv only to `mcp/.venv`, proves its exact interpreter,
+standard-library extensions, native pidfd APIs, and source-build base prefix,
+then runs the locked dependency compatibility check. It never replaces the
+system Python and installs the interpreter outside the Git repository under the
+Agents Remember data root.
 
 ## Install And Run
 

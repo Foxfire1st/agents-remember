@@ -1,7 +1,7 @@
 [project]
 name = "agents-remember-quality"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.13,<3.14"
 dependencies = ["dagger-io"]
 
 [tool.uv.sources]

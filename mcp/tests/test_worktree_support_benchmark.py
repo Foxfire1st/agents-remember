@@ -23,6 +23,9 @@ from agents_remember.worktrees.modules.onboarding import (
     require_updated_route_overview_content,
     require_updated_sidecar_content,
 )
+from agents_remember.worktrees.modules.onboarding_acceptance import (
+    OnboardingBodyGateEvidence,
+)
 from test_worktree_support import (
     _benchmark_git_subcommands,
     commit_file,
@@ -716,7 +719,18 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
             self.assertIn("metadata/history-only", str(caught.exception))
-            self.assertIn("No content impact:", str(caught.exception))
+            self.assertIn("curator_coherence", str(caught.exception))
+
+    def test_candidate_acceptance_attests_unchanged_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, _sidecar, plan = self._setup(Path(tmp_dir))
+            attested = require_updated_sidecar_content(
+                None,
+                plan,
+                memory_tree=memory_repo,
+                accepted_no_impact=frozenset({"src/app.py"}),
+            )
+            self.assertEqual(attested, ["src/app.py"])
 
     def test_passes_history_only_edit_with_no_impact_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -862,10 +876,27 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
             memory_repo, overviews = self._setup(Path(tmp_dir))
             with self.assertRaises(RuntimeError) as caught:
                 require_updated_route_overview_content(
-                    None, self._plan(overviews), list(self.CHANGED), memory_tree=memory_repo
+                    None,
+                    self._plan(overviews),
+                    list(self.CHANGED),
+                    body_gate=OnboardingBodyGateEvidence(memory_tree=memory_repo),
                 )
             self.assertIn("src/app", str(caught.exception))
-            self.assertIn("No route impact:", str(caught.exception))
+            self.assertIn("curator_coherence", str(caught.exception))
+
+    def test_candidate_acceptance_attests_unchanged_governing_overview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, overviews = self._setup(Path(tmp_dir))
+            attested = require_updated_route_overview_content(
+                None,
+                self._plan(overviews),
+                list(self.CHANGED),
+                body_gate=OnboardingBodyGateEvidence(
+                    memory_tree=memory_repo,
+                    accepted_no_impact=frozenset({"src/app"}),
+                ),
+            )
+            self.assertEqual(attested, ["src/app"])
 
     def test_ancestor_overview_is_reported_not_failed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -876,7 +907,10 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
                 "- 2026-06-10T04:00+02:00 — Documented the route change.\n",
             )
             attested = require_updated_route_overview_content(
-                None, self._plan(overviews), list(self.CHANGED), memory_tree=memory_repo
+                None,
+                self._plan(overviews),
+                list(self.CHANGED),
+                body_gate=OnboardingBodyGateEvidence(memory_tree=memory_repo),
             )
             self.assertEqual(attested, [])
             gate = classify_route_overview_updates(
@@ -894,7 +928,10 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
                 "- 2026-06-10T04:00+02:00 — No route impact: reviewed, file-local fix.\n",
             )
             attested = require_updated_route_overview_content(
-                None, self._plan(overviews), list(self.CHANGED), memory_tree=memory_repo
+                None,
+                self._plan(overviews),
+                list(self.CHANGED),
+                body_gate=OnboardingBodyGateEvidence(memory_tree=memory_repo),
             )
             self.assertEqual(attested, ["src/app"])
 
@@ -904,7 +941,26 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
             self._append(overviews["src/app"], "\nRoute behavior notes.\n")
             with self.assertRaises(RuntimeError) as caught:
                 require_updated_route_overview_content(
-                    None, self._plan(overviews), list(self.CHANGED), memory_tree=memory_repo
+                    None,
+                    self._plan(overviews),
+                    list(self.CHANGED),
+                    body_gate=OnboardingBodyGateEvidence(memory_tree=memory_repo),
+                )
+            self.assertIn("without a new Update History entry", str(caught.exception))
+
+    def test_no_impact_decision_cannot_hide_untraced_overview_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            memory_repo, overviews = self._setup(Path(tmp_dir))
+            self._append(overviews["src/app"], "\nRoute behavior notes.\n")
+            with self.assertRaises(RuntimeError) as caught:
+                require_updated_route_overview_content(
+                    None,
+                    self._plan(overviews),
+                    list(self.CHANGED),
+                    body_gate=OnboardingBodyGateEvidence(
+                        memory_tree=memory_repo,
+                        accepted_no_impact=frozenset({"src/app"}),
+                    ),
                 )
             self.assertIn("without a new Update History entry", str(caught.exception))
 
@@ -913,7 +969,10 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
             memory_repo, overviews = self._setup(Path(tmp_dir))
             with self.assertRaises(RuntimeError) as caught:
                 require_updated_route_overview_content(
-                    None, self._plan(overviews), ["README.md"], memory_tree=memory_repo
+                    None,
+                    self._plan(overviews),
+                    ["README.md"],
+                    body_gate=OnboardingBodyGateEvidence(memory_tree=memory_repo),
                 )
             self.assertIn("have an unmodified", str(caught.exception))
 
@@ -924,6 +983,6 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
                 None,
                 {"required": [], "missing_metadata": []},
                 list(self.CHANGED),
-                memory_tree=memory_repo,
+                body_gate=OnboardingBodyGateEvidence(memory_tree=memory_repo),
             )
             self.assertEqual(attested, [])

@@ -27,6 +27,91 @@ PLAYWRIGHT_IMAGE = (
 )
 CODEX_VERSION = "0.147.0"
 RETRY_CACHE_ROOT = "/var/cache/agents-remember-quality-retry"
+PYTHON_BUILD_CACHE_ROOT = "/var/cache/agents-remember-python"
+RUNTIME_INSTALLER_ROOT = "/opt/agents-remember-runtime-installer"
+RUNTIME_CONTRACT = f"{RUNTIME_INSTALLER_ROOT}/python-runtime-contract.env"
+RUNTIME_CHECKER = f"{RUNTIME_INSTALLER_ROOT}/check-python-runtime.py"
+RUNTIME_INSTALLER = f"{RUNTIME_INSTALLER_ROOT}/install-python-runtime.sh"
+RUNTIME_ROOT = "/opt/agents-remember-python"
+RUNTIME_CURRENT = f"{RUNTIME_ROOT}/current"
+RUNTIME_PYTHON = f"{RUNTIME_CURRENT}/bin/python3.13"
+RUNTIME_UV = f"{RUNTIME_CURRENT}/bin/uv"
+RUNTIME_PROOF = "/opt/agents-remember-python-runtime.json"
+VENV_ROOT = "/opt/ar-venv"
+VENV_PYTHON = f"{VENV_ROOT}/bin/python"
+VENV_PROOF = "/opt/agents-remember-venv-runtime.json"
+
+
+def _canonical_python_base(source: dagger.Directory) -> dagger.Container:
+    """Provision one source-built Python recipe before candidate-specific source."""
+
+    return (
+        dag.container()
+        .from_(PLAYWRIGHT_IMAGE)
+        .with_mounted_cache("/root/.cache/pip", dag.cache_volume("ar-quality-pip-v1"))
+        .with_mounted_cache(
+            PYTHON_BUILD_CACHE_ROOT,
+            dag.cache_volume("ar-python-source-build-v1"),
+        )
+        .with_file(
+            RUNTIME_CONTRACT,
+            source.file("scripts/python-runtime-contract.env"),
+        )
+        .with_file(
+            RUNTIME_CHECKER,
+            source.file("scripts/check-python-runtime.py"),
+        )
+        .with_file(
+            RUNTIME_INSTALLER,
+            source.file("scripts/install-python-runtime.sh"),
+        )
+        .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
+        .with_exec(["apt-get", "update"])
+        .with_exec(
+            [
+                "bash",
+                "-c",
+                f". {RUNTIME_CONTRACT}; apt-get install -y --no-install-recommends "
+                "$AR_PYTHON_APT_BUILD_DEPS",
+            ]
+        )
+        .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
+        .with_exec(
+            [
+                "bash",
+                "-c",
+                f". {RUNTIME_CONTRACT}; "
+                f"bash {RUNTIME_INSTALLER} "
+                f'--prefix "{RUNTIME_ROOT}/cpython-$AR_PYTHON_VERSION" '
+                f"--cache-root {PYTHON_BUILD_CACHE_ROOT} "
+                f"--tooling-root {PYTHON_BUILD_CACHE_ROOT}/tooling; "
+                f"mkdir -p {RUNTIME_ROOT}; cd {RUNTIME_ROOT}; "
+                'ln -s "cpython-$AR_PYTHON_VERSION" current',
+            ]
+        )
+        .with_exec(
+            [
+                "bash",
+                "-c",
+                f". {RUNTIME_CONTRACT}; {RUNTIME_PYTHON} {RUNTIME_CHECKER} "
+                '--expected-version "$AR_PYTHON_VERSION" '
+                f"--expected-base-prefix {RUNTIME_CURRENT} "
+                "--require-linux-pidfd "
+                '--source-url "$AR_PYTHON_SOURCE_URL" '
+                '--source-sha256 "$AR_PYTHON_SOURCE_SHA256" '
+                '--builder-commit "$AR_PYTHON_BUILD_COMMIT" '
+                f"> {RUNTIME_PROOF}",
+            ]
+        )
+        .with_exec(
+            [
+                "bash",
+                "-c",
+                f". {RUNTIME_CONTRACT}; {RUNTIME_PYTHON} -m pip install "
+                '--disable-pip-version-check "uv==$AR_UV_VERSION"',
+            ]
+        )
+    )
 
 
 def _candidate_base(
@@ -36,9 +121,7 @@ def _candidate_base(
     """Build the deterministic candidate environment shared by every evidence attempt."""
 
     return (
-        dag.container()
-        .from_(PLAYWRIGHT_IMAGE)
-        .with_mounted_cache("/root/.cache/pip", dag.cache_volume("ar-quality-pip-v1"))
+        _canonical_python_base(source)
         .with_mounted_cache("/root/.npm", dag.cache_volume("ar-quality-npm-v1"))
         .with_env_variable("HOME", "/tmp/ar-home")
         .with_env_variable("PIP_CACHE_DIR", "/root/.cache/pip")
@@ -46,24 +129,9 @@ def _candidate_base(
         .with_env_variable("TMP", "/tmp/ar-quality")
         .with_env_variable("TEMP", "/tmp/ar-quality")
         .with_exec(["mkdir", "-p", "/tmp/ar-home", "/tmp/ar-quality"])
-        .with_exec(["apt-get", "update"])
-        .with_env_variable("DEBIAN_FRONTEND", "noninteractive")
-        .with_exec(
-            [
-                "apt-get",
-                "install",
-                "-y",
-                "--no-install-recommends",
-                "git",
-                "python3",
-                "python3-pip",
-                "python3-venv",
-            ]
-        )
-        .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
         .with_exec(["npm", "install", "--global", f"@openai/codex@{CODEX_VERSION}"])
         .with_exec(["codex", "--version"])
-        .with_exec(["python3", "-m", "venv", "/opt/ar-venv"])
+        .with_exec([RUNTIME_PYTHON, "-m", "venv", VENV_ROOT])
         .with_directory("/workspace", source)
         .with_file("/tmp/ar-candidate.bundle", repository_bundle)
         .with_workdir("/workspace")
@@ -93,15 +161,28 @@ def _candidate_base(
         )
         .with_exec(
             [
-                "/opt/ar-venv/bin/python",
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "-e",
-                "mcp[dev]",
+                "bash",
+                "-c",
+                f"UV_PROJECT_ENVIRONMENT={VENV_ROOT} {RUNTIME_UV} sync "
+                f"--project /workspace/mcp --python {VENV_PYTHON} "
+                "--no-managed-python --frozen --all-extras",
             ]
         )
+        .with_exec(
+            [
+                "bash",
+                "-c",
+                f". {RUNTIME_CONTRACT}; {VENV_PYTHON} {RUNTIME_CHECKER} "
+                '--expected-version "$AR_PYTHON_VERSION" '
+                f"--expected-base-prefix {RUNTIME_CURRENT} "
+                "--require-linux-pidfd "
+                '--source-url "$AR_PYTHON_SOURCE_URL" '
+                '--source-sha256 "$AR_PYTHON_SOURCE_SHA256" '
+                '--builder-commit "$AR_PYTHON_BUILD_COMMIT" '
+                f"> {VENV_PROOF}",
+            ]
+        )
+        .with_exec([RUNTIME_UV, "pip", "check", "--python", VENV_PYTHON])
     )
 
 
@@ -132,6 +213,8 @@ def _bind_candidate_attempt(
         .with_env_variable("AR_QUALITY_PROGRESS_REPORT", f"{reports}/quality-progress.json")
         .with_env_variable("COVERAGE_FILE", f"{reports}/coverage.data")
         .with_exec(["mkdir", "-p", reports])
+        .with_exec(["cp", RUNTIME_PROOF, f"{reports}/python-runtime.json"])
+        .with_exec(["cp", VENV_PROOF, f"{reports}/python-venv-runtime.json"])
         .with_exec(
             [
                 "sh",

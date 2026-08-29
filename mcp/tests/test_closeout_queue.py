@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import tempfile
 import unittest
@@ -44,6 +43,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from curator_coherence_test_support import write_curator_evidence
 from test_worktree_support import git, init_repo
 
 REPO = "repo-a"
@@ -135,21 +135,6 @@ def _leaf(contract: WorktreeContract, slug: str) -> TaskDocument:
     )
 
 
-def _curator_report() -> str:
-    return """# Curator Memory Quality Checklist
-
-- Status: **ready-for-closeout**
-
-## Summary
-
-| Class | Count | Gate meaning |
-| --- | ---: | --- |
-| Repairable memory findings | 0 | Must reach zero |
-| Missing onboarding | 0 | Must reach zero |
-| Stale route indexes | 0 | Must reach zero |
-"""
-
-
 def _judgment_row(ref: TaskDocumentRef, priority: str) -> str:
     return (
         f"| J-{Path(ref.path).stem}-{priority} | priority | {ref.key} | "
@@ -175,37 +160,6 @@ def _grade(priority: str, candidate: TaskDocumentRef) -> dict[str, Any]:
         "priority": priority,
         "judgmentId": f"J-{Path(candidate.path).stem}-{priority}",
     }
-
-
-def _write_curator_evidence(
-    contract: WorktreeContract,
-    report_text: str | None = None,
-    *,
-    source_candidates: list[dict[str, str]] | None = None,
-) -> None:
-    report = contract.worktree_group / "reports" / "curator-memory-quality.md"
-    report.parent.mkdir(parents=True, exist_ok=True)
-    text = report_text or _curator_report()
-    report.write_text(text, encoding="utf-8")
-    candidates = source_candidates or []
-    assert contract.memory_worktree is not None
-    attestation = {
-        "schema": "ar-curator-memory-quality/v1",
-        "checklistStatus": "ready-for-closeout",
-        "curatorActionableCount": 0,
-        "memoryRepairCount": 0,
-        "missingOnboardingCount": 0,
-        "staleRouteIndexCount": 0,
-        "sourceChangeCandidateCount": len(candidates),
-        "sourceChangeCandidates": candidates,
-        "onboardingRoot": (contract.memory_worktree / "onboarding").resolve().as_posix(),
-        "reportPath": report.resolve().as_posix(),
-        "reportSha256": hashlib.sha256(text.encode()).hexdigest(),
-    }
-    report.with_suffix(".json").write_text(
-        json.dumps(attestation, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
 
 
 class QueueFixture:
@@ -260,10 +214,6 @@ class QueueFixture:
             path="master-b/leaf-b.json",
         )
         self.leaf_refs = {MASTER_A: LEAF_A, MASTER_B: atomic_leaf_ref}
-        self.contracts = {
-            MASTER_A: self._contract("master-a", "LEAF-A", code_base, memory_base),
-            MASTER_B: self._contract("master-b", "LEAF-B", code_base, memory_base),
-        }
         self.master_docs = {
             MASTER_A: _master(
                 MASTER_A,
@@ -331,6 +281,13 @@ class QueueFixture:
             ),
         )
         (self.tasks / "sprint" / "grade.md").write_text("# Grade\n", encoding="utf-8")
+        # Curator coherence binds the exact leaf, master, and sprint topology. Publish all
+        # structural parents before creating either leaf contract so the fixture never asks the
+        # lifecycle API to infer a not-yet-authored task hierarchy.
+        self.contracts = {
+            MASTER_A: self._contract("master-a", "LEAF-A", code_base, memory_base),
+            MASTER_B: self._contract("master-b", "LEAF-B", code_base, memory_base),
+        }
         self.cfg = load_config(self.config_path)
 
     def enable_direct_execution(self) -> None:
@@ -437,13 +394,14 @@ class QueueFixture:
                 f"# {leaf_id}\n",
                 encoding="utf-8",
             )
-            _write_curator_evidence(contract)
         write_task_doc(contract.task_root, _leaf(contract, leaf_id.lower()))
         write_contract(contract.contract_path, contract)
         publish_new_lifecycle_operation_location(
             contract,
             contract_text=contract_publication_text(contract.contract_path, contract),
         )
+        if contract.memory_worktree is not None:
+            write_curator_evidence(contract, caller_ref=SPRINT)
         return contract
 
     def set_priority(self, candidate: TaskDocumentRef, priority: str) -> None:
@@ -493,6 +451,8 @@ class QueueFixture:
         leaf = self.leaf_refs[master]
         if update_priority:
             self.set_priority(leaf, priority)
+        if contract.memory_worktree is not None:
+            write_curator_evidence(contract, caller_ref=SPRINT)
         request = CloseoutDoorRequest.model_validate(
             {
                 "action": "declare",
@@ -508,7 +468,20 @@ class QueueFixture:
             admitted_contract=contract,
         )
         self.contracts[master] = load_contract(contract.contract_path)
-        return self.status()
+        # Door publication captures the current curator authority. Publishing a successor
+        # coherence generation after that boundary would immediately make the door's immutable
+        # memory provenance stale, so rebuild from the exact generation just declared.
+        return self.rebuild()
+
+    def rebuild(self) -> dict[str, Any]:
+        """Recompute the disposable projection after authoritative fixture writes."""
+
+        return closeout_queue_tool(
+            self.cfg,
+            CloseoutQueueRequest(action="rebuild", sprint_task_document_ref=SPRINT),
+            actor=QueueActor(role="orchestrator", task_document_ref=SPRINT),
+            now=NOW,
+        )
 
     def mutate(self, action: CloseoutDoorAction, **values: Any) -> dict[str, Any]:
         if action not in {"defer", "resume", "withdraw"}:

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TypeAlias
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SprintGraphTitles, TaskDocument, build_graph_titles
 
 from .task_doc_route_review import TaskDocError
 
-GraphPublicationDocument: TypeAlias = tuple[TaskDocumentRef, Path, TaskDocument]
+type GraphPublicationDocument = tuple[TaskDocumentRef, Path, TaskDocument]
 
 
 def require_single_graph_document(

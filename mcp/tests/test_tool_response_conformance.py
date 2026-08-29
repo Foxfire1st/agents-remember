@@ -76,6 +76,7 @@ from agents_remember.mcp import tools
 from agents_remember.mcp.tools import memory as memory_payload_tools
 from agents_remember.mcp.tools.base import _tool_payload
 from agents_remember.models.base import FlexibleResponseModel
+from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
 from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.models.structural.agent import (
@@ -112,6 +113,7 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from closeout_input_test_support import ensure_fixture_waiting_door
+from curator_coherence_test_support import write_curator_evidence
 from test_config import settings_payload
 from test_worktree_support import (
     commit_file,
@@ -318,6 +320,13 @@ def _simple_payloads(config) -> dict[str, dict]:
         "closeout_door": tools.closeout_door_payload(
             config,
             CloseoutDoorRequest(
+                action="status",
+                contract_path="/missing/series-contract.md",
+            ),
+        ),
+        "curator_coherence": tools.curator_coherence_payload(
+            config,
+            CuratorCoherenceRequest(
                 action="status",
                 contract_path="/missing/series-contract.md",
             ),
@@ -545,7 +554,15 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     )
     assert payloads["worktree_start"].get("contract_path"), payloads["worktree_start"]
     contract_path = payloads["worktree_start"]["contract_path"]
-    ensure_fixture_waiting_door(load_contract(Path(contract_path)))
+    contract = load_contract(Path(contract_path))
+    contract, _ = ensure_fixture_waiting_door(contract)
+    write_curator_evidence(
+        contract,
+        caller_ref=TaskDocumentRef(
+            repository=REPO,
+            path="lifecycle-fixture-sprint/task.json",
+        ),
+    )
     payloads["worktree_status"] = tools.worktree_status_payload(
         config, TaskRef(repo_id=REPO, contract_path=contract_path)
     )

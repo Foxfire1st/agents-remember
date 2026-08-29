@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -180,7 +179,6 @@ def _sorted_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
-    generated = datetime.now(UTC).replace(microsecond=0).isoformat()
     lines = [
         "# Curator Memory Quality Checklist",
         "",
@@ -188,7 +186,6 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
         f"- Repository: `{_cell(checklist.repo_id)}`",
         f"- Code worktree: `{_cell(checklist.code_root.as_posix())}`",
         f"- Onboarding root: `{_cell(checklist.onboarding_root.as_posix())}`",
-        f"- Generated: `{generated}`",
         "",
         (
             "This file is the current curator worklist. A full contract-scoped "
@@ -232,7 +229,7 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
                 "Rerun the same full contract-scoped `memory_quality_check` after repairs. "
                 "The curator may hand off only when `curatorActionableCount` is zero and this "
                 "report says `ready-for-closeout`; source-change candidates must also be "
-                "explicitly dispositioned in the curator coherence report."
+                "explicitly dispositioned in the structured curator-coherence authority."
             ),
             "",
         ]

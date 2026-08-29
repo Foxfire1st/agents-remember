@@ -193,7 +193,6 @@ from agents_remember.models.conversations.telemetry import (
     RateLimitMetricValue,
     RuntimeFixtureEvidence,
     RuntimeFixtureObservation,
-    T,
     UsageMetricValue,
     operation_fingerprint,
 )
@@ -342,7 +341,6 @@ __all__ = [
     "SubmissionProvenanceBatch",
     "SubmissionReceipt",
     "SubmissionSource",
-    "T",
     "TelemetryCapabilities",
     "TextBlock",
     "TextSubmitBlock",

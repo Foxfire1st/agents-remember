@@ -33,7 +33,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -279,10 +279,7 @@ class DurableRecord(BaseModel):
         return value
 
 
-RecordT = TypeVar("RecordT", bound=BaseModel)
-
-
-def migrate_jsonl_records(
+def migrate_jsonl_records[RecordT: BaseModel](
     log_path: Path,
     ownership: StoreOwnership,
     model: type[RecordT],

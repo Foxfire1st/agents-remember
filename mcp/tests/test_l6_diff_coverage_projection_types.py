@@ -158,6 +158,26 @@ class TestSchemaAllowedAndType:
         with pytest.raises(ProjectionTypeGenerationError, match="state and phase must be enums"):
             _vocabulary_block(schema)
 
+    def test_vocabulary_resolves_a_named_literal_definition_and_rejects_other_refs(
+        self,
+    ) -> None:
+        schema = {
+            "$defs": {
+                "AttentionItem": {
+                    "properties": {"severity": {"$ref": "#/$defs/AttentionSeverity"}}
+                },
+                "AttentionSeverity": {"enum": ["alarm", "warn", "info"], "type": "string"},
+            }
+        }
+        assert _vocabulary(schema, "AttentionItem", "severity", "AttentionSeverity") == (
+            ("alarm", "warn", "info"),
+            "AttentionSeverity",
+        )
+
+        schema["$defs"]["AttentionSeverity"] = {"type": "string"}
+        with pytest.raises(ProjectionTypeGenerationError, match="must be an enum"):
+            _vocabulary(schema, "AttentionItem", "severity", "AttentionSeverity")
+
     def test_render_supplements_mismatch(self) -> None:
         core = workspace_projection_schema()
         served = served_projection_schema()

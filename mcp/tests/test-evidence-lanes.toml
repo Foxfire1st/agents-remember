@@ -237,6 +237,8 @@ integration = [
   "mcp/tests/test_conversation_library_installed.py",
   "mcp/tests/test_conversation_runtime_composition.py",
   "mcp/tests/test_cross_store_lock_order.py",
+  "mcp/tests/test_curator_coherence.py",
+  "mcp/tests/test_curator_coherence_edges.py",
   "mcp/tests/test_dashboard_daemon.py",
   "mcp/tests/test_diff_coverage.py",
   "mcp/tests/test_direct_landing.py",
@@ -246,6 +248,7 @@ integration = [
   "mcp/tests/test_direct_landing_operation_recovery.py",
   "mcp/tests/test_discard_unstarted_l3.py",
   "mcp/tests/test_dispatch_expectation_rows.py",
+  "mcp/tests/test_future_code_candidate.py",
   "mcp/tests/test_gate_replay_window.py",
   "mcp/tests/test_gate_scope.py",
   "mcp/tests/test_gated_integration_runner.py",
@@ -436,6 +439,7 @@ integration = [
   "mcp/tests/test_worktree_support_tests_2.py",
   "mcp/tests/test_worktree_support_tests_3.py",
   "mcp/tests/test_worktree_sync.py",
+  "mcp/tests/test_worker_child_processes.py",
 ]
 
 architecture-fitness = [
@@ -452,6 +456,7 @@ architecture-fitness = [
   "mcp/tests/test_leaf_structural_coverage.py",
   "mcp/tests/test_packaged_assets_and_context_values.py",
   "mcp/tests/test_projection_types_codegen.py",
+  "mcp/tests/test_python_runtime_contract.py",
   "mcp/tests/test_python_test_evidence_firewall.py",
   "mcp/tests/test_quality_evidence_helper_invariants.py",
   "mcp/tests/test_requirement_acceptance_envelope_doctrine.py",

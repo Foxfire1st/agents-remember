@@ -11,6 +11,7 @@ from agents_remember.application.memory_quality.runs import (
     start_quality_run,
 )
 from agents_remember.application.memory_scope import MemoryScope, resolve_memory_scope
+from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.route_index import build_route_indexes
@@ -32,6 +33,10 @@ from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
+)
+from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    curator_coherence_paths,
+    require_current_curator_coherence,
 )
 
 _CAPACITY_GUIDANCE = (
@@ -245,3 +250,34 @@ def _attach_curator_checklist(
     )
     response.pop("reportOnlyFindings", None)
     response.update(checklist)
+    _attach_coherence_readiness(scope, response)
+
+
+def _attach_coherence_readiness(scope: MemoryScope, response: dict[str, object]) -> None:
+    """Join raw memory quality with the same authority validator closeout calls."""
+
+    quality_status = str(response.get("checklistStatus", ""))
+    response["qualityChecklistStatus"] = quality_status
+    response["closeoutReady"] = False
+    if scope.contract is None:
+        raise RuntimeError("contract-scoped curator publication lost its leaf contract")
+    response["coherenceCanonicalPath"] = curator_coherence_paths(
+        scope.contract
+    ).canonical.as_posix()
+    if quality_status != "ready-for-closeout":
+        response["coherenceStatus"] = "not-evaluated-quality-action-required"
+        return
+    try:
+        validated = require_current_curator_coherence(scope.contract)
+    except CuratorCoherenceError as exc:
+        response["ok"] = False
+        response["checklistStatus"] = "coherence-required"
+        response["coherenceStatus"] = exc.status
+        response["guidance"] = (
+            "Memory repairs are complete, but closeout is not ready: publish or refresh the "
+            "exact structured curator-coherence authority with curator_coherence, then validate it."
+        )
+        return
+    response["coherenceStatus"] = "current"
+    response["coherenceRecordDigest"] = validated.record_digest
+    response["closeoutReady"] = True

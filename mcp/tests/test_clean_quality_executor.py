@@ -64,6 +64,12 @@ class CleanQualityExecutorTests(unittest.TestCase):
                     '{"status":"passed","exitCode":0}\n', encoding="utf-8"
                 )
                 (export / "coverage.data").write_bytes(b"\x00coverage")
+                (export / "python-runtime.json").write_text(
+                    '{"schema":"ar-python-runtime-proof/v1"}\n', encoding="utf-8"
+                )
+                (export / "python-venv-runtime.json").write_text(
+                    '{"schema":"ar-python-runtime-proof/v1"}\n', encoding="utf-8"
+                )
                 return subprocess.CompletedProcess(command, 0, stdout="exported\n", stderr="")
 
             result = run_clean_quality(
@@ -105,6 +111,12 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 ).read_bytes(),
                 b"\x00coverage",
             )
+            for proof_name in ("python-runtime.json", "python-venv-runtime.json"):
+                proof = clean_quality_executor.published_report_path(group / "reports", proof_name)
+                self.assertEqual(
+                    json.loads(proof.read_text(encoding="utf-8"))["schema"],
+                    "ar-python-runtime-proof/v1",
+                )
 
             (sandbox / "obsolete").write_text("old", encoding="utf-8")
             run_clean_quality(

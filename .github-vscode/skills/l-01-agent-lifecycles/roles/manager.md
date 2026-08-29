@@ -224,11 +224,20 @@ stops belong to the orchestrator via the system-specialist protocol.
   reconciles existing intent, ruled change intent, and implemented
   reality; routes each independently accepted requirement truth to the right onboarding home;
   treats rejected or worker-blocked revisions as report blockers rather than current intent; and
-  writes onboarding only,
-  returning a coherence report. **Do not run the closeout preview before this pass exists** — the
+  writes onboarding only. It then uses `curator_coherence prepare` to obtain the exact structured
+  quality-attestation candidate set and supplies one agent-owned disposition, rationale, and
+  explicit `code:` / `memory:` / `task:` evidence reference for every returned identity tuple.
+  `publish` atomically selects the one live content-addressed structured authority, renders its
+  digest-bound Markdown projection, and optionally freezes the delivery-attempt snapshot;
+  `validate` proves that authority still matches the exact code tree, memory tree, task topology,
+  attestation, evidence bytes, and expected predecessor. A semantic requirement revision, a worker
+  delivery attempt, and an evidence digest are separate identities; never encode one as a `v2`
+  report filename. **Do not run the closeout preview before this authority validates** — the
   `c-12-closeout` skill's missing-onboarding and changed-sidecar checks are this pass's output, not
   something this seat patches inline. Leaf closeout inputs are exactly: **builder code + reviewer
-  verdict + current source-lineage proof + curator coherence pass**. Closeout and integration still
+  verdict + current source-lineage proof + current curator coherence authority**. Memory preflight
+  and closeout admission consume the same validator; neither may reparse or search historical
+  Markdown reports. Closeout and integration still
   re-prove lineage after their long quality work; the pre-curator proof prevents wasted or stale
   onboarding, while the exit proof closes the later time-of-check/time-of-use window.
 - **Publish closeout-door truth; do not rank the portfolio.** Once the leaf has builder completion,

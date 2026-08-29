@@ -18,6 +18,11 @@ from agents_remember.worktrees.closeout_input import (
     effective_message_arguments,
     require_effective_closeout_plan,
 )
+from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    CuratorCoherenceNoImpact,
+    curator_coherence_no_impact,
+    require_current_curator_coherence,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_series_contract_authority,
@@ -29,7 +34,10 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     require_closeout_mutation_authority,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
-from agents_remember.worktrees.modules.closeout_external import external_closeout_commits
+from agents_remember.worktrees.modules.closeout_external import (
+    ExternalCloseoutEvidence,
+    external_closeout_commits,
+)
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -65,6 +73,10 @@ from agents_remember.worktrees.modules.onboarding import (
     route_overview_metadata_refresh_plan,
     validate_onboarding_refresh_plan,
     validate_route_overview_refresh_plan,
+)
+from agents_remember.worktrees.modules.onboarding_acceptance import (
+    apply_route_no_impact,
+    apply_sidecar_no_impact,
 )
 from agents_remember.worktrees.modules.quality.closeout_memory import run_memory_quality_phase
 from agents_remember.worktrees.modules.quality.gate import (
@@ -280,9 +292,15 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     no onboarding tree to refresh.
     """
     changed_paths = worklist["all"]
+    external_leaf = contract.memory_mode == "external" and contract.kind == "leaf"
+    coherence_no_impact = (
+        curator_coherence_no_impact(require_current_curator_coherence(contract))
+        if external_leaf
+        else CuratorCoherenceNoImpact()
+    )
     metadata_refresh: OnboardingRefreshPlan = (
         onboarding_refresh_plan(contract, changed_paths, working_paths=worklist["working"])
-        if contract.memory_mode == "external" and contract.kind == "leaf"
+        if external_leaf
         else {
             "required": [],
             "missing": [],
@@ -292,7 +310,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
     entity_refresh: EntityFingerprintRefreshPlan = (
         entity_fingerprint_refresh_plan(contract, changed_paths)
-        if contract.memory_mode == "external" and contract.kind == "leaf"
+        if external_leaf
         else {
             "required": [],
             "unsupported": [],
@@ -300,7 +318,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
     route_overview_refresh: RouteOverviewRefreshPlan = (
         route_overview_metadata_refresh_plan(contract, changed_paths)
-        if contract.memory_mode == "external" and contract.kind == "leaf"
+        if external_leaf
         else {
             "required": [],
             "missing_metadata": [],
@@ -308,7 +326,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     )
     route_index_refresh: dict[str, Any] = (
         route_index_refresh_plan_for_context(_closeout_contract_context(contract))
-        if contract.memory_mode == "external" and contract.kind == "leaf"
+        if external_leaf
         else {
             "routes": 0,
             "written": 0,
@@ -317,13 +335,16 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
         }
     )
     sidecar_body_gate: SidecarBodyClassification = (
-        classify_sidecar_updates(
-            _closeout_contract_context(contract),
-            metadata_refresh,
-            memory_tree=contract.memory_worktree,
-            memory_verified_commit=contract_memory_verified_commit(contract),
+        apply_sidecar_no_impact(
+            classify_sidecar_updates(
+                _closeout_contract_context(contract),
+                metadata_refresh,
+                memory_tree=contract.memory_worktree,
+                memory_verified_commit=contract_memory_verified_commit(contract),
+            ),
+            coherence_no_impact.content_sources,
         )
-        if contract.memory_mode == "external" and contract.kind == "leaf"
+        if external_leaf
         else {
             "stale": [],
             "untraced": [],
@@ -331,14 +352,17 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
         }
     )
     route_overview_body_gate: RouteOverviewBodyClassification = (
-        classify_route_overview_updates(
-            _closeout_contract_context(contract),
-            route_overview_refresh,
-            changed_paths,
-            memory_tree=contract.memory_worktree,
-            memory_verified_commit=contract_memory_verified_commit(contract),
+        apply_route_no_impact(
+            classify_route_overview_updates(
+                _closeout_contract_context(contract),
+                route_overview_refresh,
+                changed_paths,
+                memory_tree=contract.memory_worktree,
+                memory_verified_commit=contract_memory_verified_commit(contract),
+            ),
+            coherence_no_impact.source_routes,
         )
-        if contract.memory_mode == "external" and contract.kind == "leaf"
+        if external_leaf
         else {
             "stale": [],
             "untraced": [],
@@ -593,27 +617,44 @@ class _CloseoutAttestations:
     unonboarded_paths: list[str] = field(default_factory=list)
 
 
-def _closeout_attestations(contract, worklist: dict[str, list[str]]) -> _CloseoutAttestations:
+def _closeout_attestations(
+    contract,
+    worklist: dict[str, list[str]],
+    coherence_no_impact: CuratorCoherenceNoImpact,
+) -> _CloseoutAttestations:
     """Validate and classify the onboarding refresh for a closeout that is about to run."""
     if contract.memory_mode != "external" or contract.kind != "leaf":
         return _CloseoutAttestations()
     changed_paths = worklist["all"]
     sidecar_plan = validate_onboarding_refresh_plan(
-        contract, changed_paths, working_paths=worklist["working"]
-    )
-    attested_sidecars = classify_sidecar_updates(
-        contract_context(contract),
-        sidecar_plan,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
-    )["attested_no_impact"]
-    overview_plan = validate_route_overview_refresh_plan(contract, changed_paths)
-    overview_gate = classify_route_overview_updates(
-        contract_context(contract),
-        overview_plan,
+        contract,
         changed_paths,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
+        working_paths=worklist["working"],
+        accepted_no_impact=coherence_no_impact.content_sources,
+    )
+    attested_sidecars = apply_sidecar_no_impact(
+        classify_sidecar_updates(
+            contract_context(contract),
+            sidecar_plan,
+            memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
+        ),
+        coherence_no_impact.content_sources,
+    )["attested_no_impact"]
+    overview_plan = validate_route_overview_refresh_plan(
+        contract,
+        changed_paths,
+        accepted_no_impact=coherence_no_impact.source_routes,
+    )
+    overview_gate = apply_route_no_impact(
+        classify_route_overview_updates(
+            contract_context(contract),
+            overview_plan,
+            changed_paths,
+            memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
+        ),
+        coherence_no_impact.source_routes,
     )
     return _CloseoutAttestations(
         attested_sidecars=attested_sidecars,
@@ -666,12 +707,19 @@ def _memory_quality_before_refresh(contract) -> dict[str, Any]:
     """Run the external-memory citation preflight before the expensive code gate."""
     if contract.memory_mode != "external" or contract.kind != "leaf":
         return {}
+    coherence = require_current_curator_coherence(contract)
     before_checks, _ = worktree_services().memory_quality.check_groups()
-    return run_memory_quality_phase(
+    result = run_memory_quality_phase(
         _closeout_contract_context(contract),
         before_checks,
         unstamped_code_commit=contract.code_base_commit,
     )
+    result["curatorCoherence"] = {
+        "state": "valid",
+        "recordDigest": coherence.record_digest,
+        "deliveryAttempt": coherence.record.deliveryAttempt,
+    }
+    return result
 
 
 @dataclass(frozen=True)
@@ -690,6 +738,7 @@ class _CloseoutQualityFacts:
     code_quality_gate: dict[str, Any]
     memory_quality_before_refresh: dict[str, Any]
     strict_code_quality_required: bool
+    coherence_no_impact: CuratorCoherenceNoImpact
 
 
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
@@ -918,7 +967,10 @@ def _closeout_commit_phase(
                 changed_paths=worklist["all"],
                 working_paths=worklist["working"],
             ),
-            quality.memory_quality_before_refresh,
+            ExternalCloseoutEvidence(
+                memory_quality_before_refresh=quality.memory_quality_before_refresh,
+                coherence_no_impact=quality.coherence_no_impact,
+            ),
         )
     integration_reopen = _completed_integration_reopen(
         contract,
@@ -969,6 +1021,12 @@ def _closeout_quality_facts(
 ) -> _CloseoutQualityFacts:
     """The attestations and reversible memory/code gate facts for one closeout."""
 
+    coherence_no_impact = (
+        curator_coherence_no_impact(require_current_curator_coherence(contract))
+        if contract.memory_mode == "external" and contract.kind == "leaf"
+        else CuratorCoherenceNoImpact()
+    )
+
     if resuming:
         attestations = _CloseoutAttestations()
         code_quality_gate: dict[str, Any] = {
@@ -983,7 +1041,7 @@ def _closeout_quality_facts(
             required_when_missing=requires_integrated_acceptance(contract.repo_name),
         )
     else:
-        attestations = _closeout_attestations(contract, worklist)
+        attestations = _closeout_attestations(contract, worklist, coherence_no_impact)
         code_quality_gate, memory_quality_before_refresh, strict_code_quality_required = (
             _closeout_quality_preflight(contract, args, code_would_commit=code_would_commit)
         )
@@ -992,6 +1050,7 @@ def _closeout_quality_facts(
         code_quality_gate=code_quality_gate,
         memory_quality_before_refresh=memory_quality_before_refresh,
         strict_code_quality_required=strict_code_quality_required,
+        coherence_no_impact=coherence_no_impact,
     )
 
 

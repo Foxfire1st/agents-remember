@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.controlplane.task_publication_lock import task_publication_lock
@@ -30,16 +29,14 @@ from agents_remember.worktrees.queue.closeout_projection_publication import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-T = TypeVar("T")
-
 
 @dataclass(frozen=True)
-class TaskFactPublicationResult(Generic[T]):
+class TaskFactPublicationResult[T]:
     result: T
     projection_effects: tuple[TaskDocProjectionEffect, ...]
 
 
-def publish_task_fact_mutation(
+def publish_task_fact_mutation[T](
     coordination_root: Path,
     repo_id: str,
     *,
@@ -107,7 +104,7 @@ def contract_projection_scopes(
     return tuple(sorted({sprint.ref for sprint in affected}, key=lambda ref: ref.key))
 
 
-def publish_contract_task_facts(
+def publish_contract_task_facts[T](
     contract: WorktreeContract,
     publication: Callable[[], T],
     *,

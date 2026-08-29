@@ -133,13 +133,13 @@ def test_candidate_identity_binds_tree_attempt_and_environment(
         mock.patch.object(
             causal_preflight,
             "_environment_identity",
-            return_value=({"python": "3.12"}, "c" * 64),
+            return_value=({"python": "3.13.15"}, "c" * 64),
         ),
     ):
         identity = causal_preflight.candidate_identity(Path("/tmp/project"))
     assert identity["tree"] == "a" * 40
     assert identity["environmentId"] == "c" * 64
-    assert identity["environment"] == {"python": "3.12"}
+    assert identity["environment"] == {"python": "3.13.15"}
     assert identity["rawInputs"]["qualityAttemptNoncePresent"] is True  # type: ignore[index]
 
     with mock.patch.object(

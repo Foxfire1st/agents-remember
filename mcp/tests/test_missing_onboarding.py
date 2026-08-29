@@ -53,6 +53,26 @@ class MissingOnboardingTests(unittest.TestCase):
             self.assertEqual(result["sourceCount"], 1)
             self.assertEqual(result["missingCount"], 0)
 
+    def test_removed_staged_add_does_not_survive_into_effective_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo, onboarding = initialize_repo(Path(tmp_dir))
+            stale_source = repo / "src" / "stale.py"
+            write_source(stale_source)
+            run_git(repo, ["add", "src/stale.py"])
+            stale_source.unlink()
+            write_source(repo / "src" / "current.py")
+            write_sidecar(onboarding / "src" / "current.py.md", "src/current.py")
+
+            result = check_missing_onboarding(
+                code_repository_root=repo,
+                onboarding_root=onboarding,
+                settings=StorageSettings(mode="memory-repo", default="memory-repo"),
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["sourceCount"], 1)
+            self.assertEqual(result["missingCount"], 0)
+
     def test_excluded_added_file_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             repo, onboarding = initialize_repo(Path(tmp_dir))

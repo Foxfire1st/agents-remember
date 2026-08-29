@@ -7,15 +7,12 @@ name = "agents-remember-mcp"
 version = "3.0.0rc7"
 description = "Model Context Protocol server for Agents Remember."
 readme = "README.md"
-requires-python = ">=3.11"
-# The supported floor and the supported platforms, in the one place a consumer can read
-# them without cloning. `[tool.ruff] target-version` in the repository-root pyproject is
-# pinned to the same floor, and .github/workflows/quality-checks.yml runs the gate on all
-# three interpreters listed here. Windows is supported through WSL, which presents as
-# Linux to the interpreter and therefore has no separate classifier.
+requires-python = ">=3.13,<3.14"
+# The supported minor line and platforms live here so consumers do not need to clone the
+# repository to discover them. Ruff, Pyright, GitHub quality/release, and Dagger all target
+# Python 3.13; managed project runtimes pin the exact 3.13.15 source build. Windows is
+# supported through WSL, which presents as Linux and therefore has no separate classifier.
 classifiers = [
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Operating System :: POSIX :: Linux",
   "Operating System :: MacOS",
@@ -42,8 +39,8 @@ dependencies = [
   # `memory_quality/style/citations/grammars.py` was measured against are listed in that
   # module's `MEASURED_VERSIONS`, and a test fails when these pins stop admitting them.
   #
-  # Wheel coverage checked on PyPI 2026-08-02 rather than assumed, against the three
-  # interpreters and two platforms this project claims below: tree-sitter ships cp310-cp314
+  # Wheel coverage checked on PyPI 2026-08-02 rather than assumed, against Python 3.13 on
+  # the two platforms this project claims below: tree-sitter ships cp310-cp314
   # wheels for manylinux/musllinux x86_64 and aarch64 and for macOS x86_64 and arm64; the
   # three grammars ship abi3 wheels (cp310-abi3, cp39-abi3 for typescript) covering the
   # same set. No source build and no compiler is needed on any supported target.
@@ -55,6 +52,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.3,<2",
   "coverage>=7.14,<8",
   "dagger-io==0.21.8",
   "httpx>=0.27,<1",

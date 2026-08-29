@@ -35,6 +35,14 @@ DEFINITION_RENAMES = {
     "ServingBuildPayload": "ServingBuild",
     "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
 }
+NAMED_VOCABULARIES = (
+    ("LifecycleProjection", "state", "State"),
+    ("LifecycleProjection", "phase", "Phase"),
+    ("AttentionItem", "severity", "AttentionSeverity"),
+    ("AttentionItem", "lane", "AttentionLane"),
+    ("CommitRefNode", "factState", "ProcessFactState"),
+    ("EngineProcessNode", "health", "ProcessHealth"),
+)
 NULL_PRESERVING_MODELS = frozenset({"AgentNotifierHeartbeatPayload"})
 SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
 SCHEMA_REFINEMENT_KEYWORDS = frozenset({"maxItems", "maxLength", "minLength", "minimum", "pattern"})
@@ -105,11 +113,16 @@ def _properties(model: Mapping[str, object], context: str) -> Mapping[str, objec
     return _object(model.get("properties"), f"{context}.properties")
 
 
-def _ref_name(reference: object) -> str:
+def _definition_ref_name(reference: object) -> str:
     prefix = "#/$defs/"
     if not isinstance(reference, str) or not reference.startswith(prefix):
         raise ProjectionTypeGenerationError(f"unsupported schema reference: {reference!r}")
-    return DEFINITION_RENAMES.get(reference.removeprefix(prefix), reference.removeprefix(prefix))
+    return reference.removeprefix(prefix)
+
+
+def _ref_name(reference: object) -> str:
+    name = _definition_ref_name(reference)
+    return DEFINITION_RENAMES.get(name, name)
 
 
 def _nullable_variants(node: Mapping[str, object]) -> list[Mapping[str, object]] | None:
@@ -140,6 +153,39 @@ def _json_literal(value: object) -> str:
 def _enum_values(node: Mapping[str, object]) -> tuple[str, ...] | None:
     raw = node.get("enum")
     return None if raw is None else _strings(raw, "enum")
+
+
+def _property_enum(
+    schema: Mapping[str, object], model_name: str, property_name: str
+) -> tuple[tuple[str, ...] | None, str | None]:
+    """Resolve one direct or PEP 695 named-literal property vocabulary."""
+
+    definitions = _definitions(schema)
+    model = _object(definitions.get(model_name), model_name)
+    prop = _object(
+        _properties(model, model_name).get(property_name), f"{model_name}.{property_name}"
+    )
+    reference = prop.get("$ref")
+    if reference is None:
+        return _enum_values(prop), None
+    definition_name = _definition_ref_name(reference)
+    definition = _object(
+        definitions.get(definition_name),
+        f"{model_name}.{property_name} reference {definition_name}",
+    )
+    return _enum_values(definition), definition_name
+
+
+def _named_vocabulary_definitions(schema: Mapping[str, object]) -> frozenset[str]:
+    """Return enum definitions already emitted by the named vocabulary block."""
+
+    names = {
+        definition_name
+        for model_name, property_name, _label in NAMED_VOCABULARIES
+        for _values, definition_name in [_property_enum(schema, model_name, property_name)]
+        if definition_name is not None
+    }
+    return frozenset(names)
 
 
 def _schema_allowed_keywords(
@@ -392,9 +438,7 @@ def _state_count_field(state: str) -> str:
 
 def _state_partition(schema: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     definitions = _definitions(schema)
-    lifecycle = _object(definitions.get("LifecycleProjection"), "LifecycleProjection")
-    state = _object(_properties(lifecycle, "LifecycleProjection").get("state"), "state")
-    states = _enum_values(state)
+    states, _definition_name = _property_enum(schema, "LifecycleProjection", "state")
     if states is None:
         raise ProjectionTypeGenerationError("LifecycleProjection.state must be an enum")
     metrics = _object(definitions.get("Metrics"), "Metrics")
@@ -417,11 +461,7 @@ def _metric_bucket_fields(metrics: Mapping[str, object]) -> tuple[str, ...]:
 def _vocabulary(
     schema: Mapping[str, object], model_name: str, property_name: str, label: str
 ) -> tuple[tuple[str, ...], str]:
-    model = _object(_definitions(schema).get(model_name), model_name)
-    prop = _object(
-        _properties(model, model_name).get(property_name), f"{model_name}.{property_name}"
-    )
-    values = _enum_values(prop)
+    values, _definition_name = _property_enum(schema, model_name, property_name)
     if values is None:
         raise ProjectionTypeGenerationError(f"{model_name}.{property_name} must be an enum")
     return values, label
@@ -434,11 +474,8 @@ def _tuple_constant(name: str, values: Sequence[str]) -> str:
 
 def _vocabulary_block(schema: Mapping[str, object]) -> tuple[str, dict[tuple[str, ...], str]]:
     live, terminal = _state_partition(schema)
-    definitions = _definitions(schema)
-    lifecycle = _object(definitions.get("LifecycleProjection"), "LifecycleProjection")
-    props = _properties(lifecycle, "LifecycleProjection")
-    state = _enum_values(_object(props.get("state"), "LifecycleProjection.state"))
-    phase = _enum_values(_object(props.get("phase"), "LifecycleProjection.phase"))
+    state, _state_definition = _property_enum(schema, "LifecycleProjection", "state")
+    phase, _phase_definition = _property_enum(schema, "LifecycleProjection", "phase")
     if state is None or phase is None:
         raise ProjectionTypeGenerationError("LifecycleProjection state and phase must be enums")
     named = [
@@ -534,7 +571,10 @@ def render_typescript(schema: Mapping[str, object], served_schema: Mapping[str, 
             f"expected {sorted(expected_supplements)}, got {sorted(supplements)}"
         )
     blocks = [HEADER, vocabulary_block]
+    vocabulary_definitions = _named_vocabulary_definitions(schema)
     for name, raw_model in sorted({**definitions, **supplements}.items()):
+        if name in vocabulary_definitions:
+            continue
         if name == "Metrics":
             blocks.append(METRICS_HELPERS)
         blocks.append(_model_interface(name, _object(raw_model, name), vocabularies))

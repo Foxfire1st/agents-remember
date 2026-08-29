@@ -702,6 +702,10 @@ def test_detached_launcher_uses_native_environment_and_private_process_group(
             "worker_process_fingerprint",
             return_value=process_fingerprint,
         ) as fingerprint,
+        patch.object(
+            lifecycle_operations,
+            "retain_detached_worker_child",
+        ) as retain_child,
         patch.object(lifecycle_operations.subprocess, "Popen", return_value=process) as popen,
     ):
         lifecycle_operations.launch_detached_worker(contract, record)
@@ -719,6 +723,7 @@ def test_detached_launcher_uses_native_environment_and_private_process_group(
     assert bound.workerPid == 9876
     assert bound.workerProcessFingerprint == process_fingerprint
     fingerprint.assert_called_once_with(9876)
+    retain_child.assert_called_once_with(process)
 
 
 def test_input_identity_and_closeout_approval_are_validated_before_launch(tmp_path: Path) -> None:

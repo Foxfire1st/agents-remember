@@ -7,7 +7,6 @@ those variables from ``os.environ`` at import. That strip is correct for fixture
 and stays, but it also meant no test anywhere could observe a call site that failed to
 strip them: the mitigation for the production hazard was installed in the only place
 that could have detected it.
-
 So every redirection test below re-SETS the selectors inside its own scope, defeating
 the conftest strip on purpose. They pass because production strips, not because the
 harness did; delete the conftest lines and these still pass, and delete the ``env=``
@@ -26,6 +25,7 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
@@ -938,6 +938,26 @@ class RunnerArgvTests(unittest.TestCase):
             _init(repo)
             listed = run_git(repo, ["config", "--list"]).stdout
         self.assertIn("core.longpaths=true", listed)
+
+
+class CandidateTreeConcurrencyTests(unittest.TestCase):
+    def test_candidate_tree_isolates_concurrent_observers_with_one_scratch_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            (repo / "untracked.txt").write_text("candidate\n", encoding="utf-8")
+            index = root / "candidate.index"
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                trees = list(
+                    executor.map(lambda _: worktree_candidate_tree(repo, index), range(24))
+                )
+
+            self.assertEqual(len(set(trees)), 1)
+            self.assertFalse(index.exists())
+            self.assertEqual(list(root.glob(f".{index.name}-*")), [])
 
 
 if __name__ == "__main__":

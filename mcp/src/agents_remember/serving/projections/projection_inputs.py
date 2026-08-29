@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
@@ -181,7 +181,6 @@ RepoSurfaceReader = Callable[
     ["McpRuntimeConfig", datetime],
     tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]],
 ]
-NodeT = TypeVar("NodeT", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -430,7 +429,9 @@ class ProjectionInputState:
         ]
 
 
-def _advance_model_age(nodes: list[NodeT], field: str, elapsed: float) -> list[NodeT]:
+def _advance_model_age[NodeT: BaseModel](
+    nodes: list[NodeT], field: str, elapsed: float
+) -> list[NodeT]:
     advanced: list[NodeT] = []
     for node in nodes:
         value = getattr(node, field)

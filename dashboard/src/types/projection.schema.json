@@ -450,13 +450,7 @@
           "type": "string"
         },
         "lane": {
-          "enum": [
-            "repo",
-            "worktree",
-            "lifecycle"
-          ],
-          "title": "Lane",
-          "type": "string"
+          "$ref": "#/$defs/AttentionLane"
         },
         "lifecycleId": {
           "anyOf": [
@@ -495,13 +489,7 @@
           "title": "Repoid"
         },
         "severity": {
-          "enum": [
-            "alarm",
-            "warn",
-            "info"
-          ],
-          "title": "Severity",
-          "type": "string"
+          "$ref": "#/$defs/AttentionSeverity"
         },
         "signalTs": {
           "anyOf": [
@@ -541,6 +529,22 @@
       ],
       "title": "AttentionItem",
       "type": "object"
+    },
+    "AttentionLane": {
+      "enum": [
+        "repo",
+        "worktree",
+        "lifecycle"
+      ],
+      "type": "string"
+    },
+    "AttentionSeverity": {
+      "enum": [
+        "alarm",
+        "warn",
+        "info"
+      ],
+      "type": "string"
     },
     "CloseoutCandidateNode": {
       "additionalProperties": false,
@@ -752,17 +756,8 @@
           "title": "Exists"
         },
         "factState": {
-          "default": "missing",
-          "enum": [
-            "observed",
-            "derived",
-            "planned",
-            "missing",
-            "stale",
-            "not-applicable"
-          ],
-          "title": "Factstate",
-          "type": "string"
+          "$ref": "#/$defs/ProcessFactState",
+          "default": "missing"
         },
         "path": {
           "anyOf": [
@@ -1227,18 +1222,7 @@
           "type": "array"
         },
         "health": {
-          "enum": [
-            "nominal",
-            "running",
-            "blocked",
-            "failed",
-            "stale",
-            "skipped",
-            "unknown",
-            "complete"
-          ],
-          "title": "Health",
-          "type": "string"
+          "$ref": "#/$defs/ProcessHealth"
         },
         "heartbeatAgeSeconds": {
           "anyOf": [
@@ -1660,17 +1644,8 @@
           "title": "Detail"
         },
         "factState": {
-          "default": "planned",
-          "enum": [
-            "observed",
-            "derived",
-            "planned",
-            "missing",
-            "stale",
-            "not-applicable"
-          ],
-          "title": "Factstate",
-          "type": "string"
+          "$ref": "#/$defs/ProcessFactState",
+          "default": "planned"
         },
         "kind": {
           "title": "Kind",
@@ -2229,6 +2204,30 @@
       "title": "Metrics",
       "type": "object"
     },
+    "ProcessFactState": {
+      "enum": [
+        "observed",
+        "derived",
+        "planned",
+        "missing",
+        "stale",
+        "not-applicable"
+      ],
+      "type": "string"
+    },
+    "ProcessHealth": {
+      "enum": [
+        "nominal",
+        "running",
+        "blocked",
+        "failed",
+        "stale",
+        "skipped",
+        "unknown",
+        "complete"
+      ],
+      "type": "string"
+    },
     "ProjectionInvalidationResult": {
       "additionalProperties": false,
       "properties": {
@@ -2409,17 +2408,8 @@
       "description": "One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).\n\nThe boot *sequence* (seed/clone/watcher phases) lives on the owning\n:class:`EngineProcessNode` because provider setup is one progress file per worktree\ngroup; this node is the engine's identity + its current runtime health.",
       "properties": {
         "factState": {
-          "default": "observed",
-          "enum": [
-            "observed",
-            "derived",
-            "planned",
-            "missing",
-            "stale",
-            "not-applicable"
-          ],
-          "title": "Factstate",
-          "type": "string"
+          "$ref": "#/$defs/ProcessFactState",
+          "default": "observed"
         },
         "id": {
           "title": "Id",

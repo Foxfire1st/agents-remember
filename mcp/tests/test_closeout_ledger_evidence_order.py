@@ -343,7 +343,10 @@ def test_resumed_external_output_uses_exact_recovery_tuple_without_refresh(
             ),
             operation_input.effectiveInput,
             VerifiedChange(code_commit, "2026-08-22", []),
-            {},
+            closeout_external.ExternalCloseoutEvidence(
+                memory_quality_before_refresh={},
+                coherence_no_impact=closeout_external.CuratorCoherenceNoImpact(),
+            ),
         )
     refresh.assert_not_called()
     assert outcome.memory_commit == memory_commit

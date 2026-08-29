@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import signal
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,21 @@ from agents_remember.models.lifecycles.termination import WorkerTerminationEvide
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_failure_evidence,
 )
+
+
+def require_linux_worker_runtime() -> None:
+    """Refuse a Linux worker launch before an incompatible runtime can strand it."""
+
+    if sys.platform != "linux":
+        return
+    if not callable(getattr(os, "pidfd_open", None)) or not callable(
+        getattr(signal, "pidfd_send_signal", None)
+    ):
+        raise RuntimeError(
+            "Linux lifecycle workers require native os.pidfd_open and "
+            "signal.pidfd_send_signal; recreate mcp/.venv with "
+            "scripts/bootstrap-mcp-venv.sh --replace"
+        )
 
 
 def worker_process_fingerprint(pid: int) -> str | None:

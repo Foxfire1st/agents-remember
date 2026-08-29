@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
 from agents_remember.kernel import filesystem
@@ -30,29 +31,28 @@ def require_git(repo: Path, args: list[str]) -> str:
 
 
 def worktree_candidate_tree(repo: Path, index_path: Path) -> str:
-    """Hash the full add-all candidate without touching the worktree's real index."""
+    """Hash the full add-all candidate through one invocation-owned Git index."""
+    # The caller selects a scratch namespace; every observation owns its physical index.
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.unlink(missing_ok=True)
-    try:
+    with TemporaryDirectory(prefix=f".{index_path.name}-", dir=index_path.parent) as temporary:
+        isolated_index = Path(temporary) / "index"
         for action, args in (
             ("seed candidate index", ["read-tree", "HEAD"]),
             ("materialize candidate tree", ["add", "-A"]),
         ):
-            result = run_git_with_index(repo, args, index_path)
+            result = run_git_with_index(repo, args, isolated_index)
             if result.returncode != 0:
                 raise RuntimeError(
                     f"could not {action}: "
                     f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
                 )
-        result = run_git_with_index(repo, ["write-tree"], index_path)
+        result = run_git_with_index(repo, ["write-tree"], isolated_index)
         if result.returncode != 0:
             raise RuntimeError(
                 "could not resolve candidate tree: "
                 f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
             )
         return result.stdout.strip()
-    finally:
-        index_path.unlink(missing_ok=True)
 
 
 def current_branch(repo: Path) -> str:

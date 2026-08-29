@@ -15,9 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Protocol, TypeVar
-
-T = TypeVar("T", bound="RedeliverableEntry")
+from typing import Protocol
 
 
 class RedeliverableEntry(Protocol):
@@ -130,7 +128,7 @@ def is_rate_limited(
     return (now - last_attempt).total_seconds() < floor_seconds
 
 
-def redeliverable(
+def redeliverable[T: "RedeliverableEntry"](
     entries: Sequence[T],
     *,
     now: datetime,

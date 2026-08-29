@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -41,12 +41,12 @@ from agents_remember.observer.projection_closeout import (
 )
 from agents_remember.observer.projection_graph import TaskExecutionGraphView
 
-AttentionSeverity: TypeAlias = Literal["alarm", "warn", "info"]
-AttentionLane: TypeAlias = Literal["repo", "worktree", "lifecycle"]
-ProcessFactState: TypeAlias = Literal[
+type AttentionSeverity = Literal["alarm", "warn", "info"]
+type AttentionLane = Literal["repo", "worktree", "lifecycle"]
+type ProcessFactState = Literal[
     "observed", "derived", "planned", "missing", "stale", "not-applicable"
 ]
-ProcessHealth: TypeAlias = Literal[
+type ProcessHealth = Literal[
     "nominal", "running", "blocked", "failed", "stale", "skipped", "unknown", "complete"
 ]
 

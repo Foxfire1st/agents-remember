@@ -1,7 +1,7 @@
 [tool.ruff]
 line-length = 100
-# Match the package's supported Python floor and the lowest CI interpreter.
-target-version = "py311"
+# Match the package's only supported Python minor line.
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -54,7 +54,7 @@ exclude = [
   "dist",
   "node_modules",
 ]
-pythonVersion = "3.11"
+pythonVersion = "3.13"
 typeCheckingMode = "basic"
 # The wrapper supplies its selected interpreter through ``--pythonpath`` so primary and linked
 # worktrees resolve the same environment; do not add checkout-local venvPath/venv declarations.

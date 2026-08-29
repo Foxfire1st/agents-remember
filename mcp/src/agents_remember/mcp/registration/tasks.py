@@ -13,10 +13,12 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.application.worktree_tools import FinalizeTaskDocs
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
 
 from ..tools import (
     closeout_door_payload,
     closeout_queue_payload,
+    curator_coherence_payload,
     lifecycle_finalize_task_payload,
     task_doc_payload,
     task_reopen_payload,
@@ -47,6 +49,25 @@ def _register_closeout_door_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         intent retries converge on the already-published generation. Claiming is intentionally
         absent here: worktree_closeout_apply validates first-ready and owns waiting-to-claimed."""
         return closeout_door_payload(config, request)
+
+
+def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    @server.tool()
+    def curator_coherence(request: CuratorCoherenceRequest) -> dict[str, Any]:
+        """Author, publish, inspect, or validate one leaf's curator-coherence authority.
+        The structured stable manifest selects exactly one live content-addressed record;
+        Markdown is a generated digest-bound projection and is never parsed as authority.
+        `prepare` returns the exact code, memory, task-topology, attestation, predecessor, and
+        source-candidate identities. `publish` requires those unchanged identities plus one
+        curator/architect-authored disposition, rationale, and evidenceRef for every candidate.
+        It rejects missing, extra, duplicate, malformed, or stale judgments, publishes atomically,
+        and may freeze an immutable delivery-attempt snapshot. Evidence references use one explicit
+        authority namespace—`code:`, `memory:`, or `task:`—and the lifecycle records and later
+        revalidates the referenced bytes' digest. A semantic requirement revision, delivery
+        attempt, and content digest are separate fields. `validate` is the same validator
+        used by memory preflight and closeout admission. Historical files are never searched as
+        fallbacks."""
+        return curator_coherence_payload(config, request)
 
 
 def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -216,5 +237,6 @@ def register_task_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_task_reopen_tools(server, config)
     _register_task_finalizer_tools(server, config)
     _register_task_document_tools(server, config)
+    _register_curator_coherence_tools(server, config)
     _register_closeout_door_tools(server, config)
     _register_closeout_queue_tools(server, config)

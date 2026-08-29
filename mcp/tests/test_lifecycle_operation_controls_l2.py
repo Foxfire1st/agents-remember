@@ -631,7 +631,7 @@ def _assert_retained_worker_authority(contract, running, retained) -> None:
     assert [item["action"] for item in legal_operation_controls(contract, retained)] == ["cancel"]
 
 
-def test_cancel_rereads_live_git_after_reconciled_unchanged(tmp_path: Path) -> None:
+def test_cancel_preserves_repaired_candidate_after_reconciled_unchanged(tmp_path: Path) -> None:
     contract, _operation_input, store, record = _dirty_closeout(tmp_path)
     code = record.mutationEvidence["code"]
     assert code.acceptedBefore is not None
@@ -678,17 +678,77 @@ def test_cancel_rereads_live_git_after_reconciled_unchanged(tmp_path: Path) -> N
         "reconcile_closeout_mutations",
         side_effect=reconcile_then_drift,
     ):
+        cancelled = _public_control(config, cancel)
+    assert cancelled["ok"] is True
+    assert (contract.code_worktree / "after-reconcile.txt").read_text() == "drift\n"
+    retained = store.read()
+    assert retained is not None and retained.status == "cancelled"
+    assert retained.cancellationEvidence is not None
+    facts = retained.cancellationEvidence.observed
+    assert facts["codeAcceptedCandidateTree"] != facts["codeObservedCandidateTree"]
+
+
+def test_cancel_refuses_protected_head_change_after_reconciliation(tmp_path: Path) -> None:
+    contract, _operation_input, store, record = _dirty_closeout(tmp_path)
+    code = record.mutationEvidence["code"]
+    assert code.acceptedBefore is not None
+    intent = code.model_copy(
+        update={
+            "state": "mutation-intent",
+            "before": code.acceptedBefore,
+            "expectedOutputTree": code.acceptedBefore.candidateTree,
+        }
+    )
+    store.update(
+        lambda current: current.model_copy(
+            update={"mutationEvidence": {**current.mutationEvidence, "code": intent}}
+        )
+    )
+    original = recovery_module.reconcile_closeout_mutations
+
+    def reconcile_then_commit(current):
+        reconciled = original(current)
+        (contract.code_worktree / "unattributed.txt").write_text("commit\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=contract.code_worktree, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "unattributed concurrent output"],
+            cwd=contract.code_worktree,
+            check=True,
+            capture_output=True,
+        )
+        return reconciled
+
+    current = store.read()
+    assert current is not None
+    config = load_config(Path(current.input.configPath))
+    with mock.patch(
+        "agents_remember.application.worktree_tools.git_worktree_manager.status_result",
+        return_value=WorktreeCommandResult(
+            0,
+            {
+                "contract_path": contract.contract_path.as_posix(),
+                "task_name": contract.task_name,
+            },
+        ),
+    ):
+        status = worktree_status_tool(
+            config,
+            TaskRef(repo_id=contract.repo_name, contract_path=contract.contract_path.as_posix()),
+        )
+    projected = next(row for row in status["lifecycleOperations"] if row["kind"] == "closeout")
+    cancel = next(row for row in projected["legalControls"] if row["action"] == "cancel")
+    with mock.patch.object(
+        recovery_module,
+        "reconcile_closeout_mutations",
+        side_effect=reconcile_then_commit,
+    ):
         refused = _public_control(config, cancel)
     assert refused["ok"] is False
     assert refused["status"] == "lifecycle-cancellation-git-changed"
-    assert refused["nextTool"] == "worktree_operation_control"
-    assert refused["nextArgs"]["action"] == "recover"
+    assert refused["nextAction"] == "developer-decision"
     assert refused["expected"]["leg"] == "code"
     assert refused["observed"]["leg"] == "code"
-    assert refused["expected"] != refused["observed"]
-    retained = store.read()
-    assert retained is not None and retained.status != "cancelled"
-    assert retained.mutationEvidence["code"].state == "reconciled-unchanged"
+    assert refused["expected"]["head"] != refused["observed"]["head"]
 
 
 def test_public_cancel_proves_group_exit_after_leader_exits(tmp_path: Path) -> None:

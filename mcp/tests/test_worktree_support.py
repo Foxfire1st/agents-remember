@@ -56,6 +56,10 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from closeout_input_test_support import MutationEvidenceRecorder
+from curator_coherence_test_support import (
+    write_curator_evidence,
+    write_curator_task_topology,
+)
 
 drift = adopt_baseline.drift
 
@@ -386,6 +390,8 @@ def open_external_contract_fixture(root: Path):
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
+    git(code_repo, "branch", "super", code_base)
+    git(memory_repo, "branch", "super", memory_base)
     contract = default_contract(
         ContractTask(
             name="Commit Approval Thing",
@@ -397,13 +403,13 @@ def open_external_contract_fixture(root: Path):
         leaf=LeafIdentity(worktree_name="commit-approval-thing"),
         code=RepoBranchPlan(
             repo_path=code_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch="ar/commit-approval-thing",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch="ar/commit-approval-thing",
             base_commit=memory_base,
         ),
@@ -419,13 +425,13 @@ def open_external_contract_fixture(root: Path):
         code=RepoBranchPlan(
             repo_path=code_repo,
             source_branch="main",
-            work_branch="main",
+            work_branch="super",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_repo,
             source_branch="main",
-            work_branch="main",
+            work_branch="super",
             base_commit=memory_base,
         ),
     )
@@ -443,7 +449,7 @@ def open_external_contract_fixture(root: Path):
         "-b",
         contract.code_work_branch,
         str(contract.code_worktree),
-        "main",
+        "super",
     )
     git(
         memory_repo,
@@ -452,7 +458,7 @@ def open_external_contract_fixture(root: Path):
         "-b",
         contract.memory_work_branch,
         str(contract.memory_worktree),
-        "main",
+        "super",
     )
     write_contract(contract.contract_path, contract)
     publish_new_lifecycle_operation_location(
@@ -513,6 +519,9 @@ def write_passing_route_review(contract: WorktreeContract) -> None:
             }
         ),
     )
+    if contract.memory_mode == "external" and contract.kind == "leaf":
+        caller_ref = write_curator_task_topology(contract)
+        write_curator_evidence(contract, caller_ref=caller_ref)
 
 
 def claimed_external_contract_fixture(root: Path):
@@ -544,12 +553,14 @@ def _series_parent_fixture(
     code_base = git(code_repo, "rev-parse", "HEAD")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     slug = task_name.lower().replace(" ", "-")
-    code_branch = f"ar/{slug}-master"
-    memory_branch = f"ar/{slug}-master"
+    code_branch = f"ar/{slug}"
+    memory_branch = f"ar/{slug}"
     code_worktree = root / f"{slug}-master-code"
     memory_worktree = root / f"{slug}-master-memory"
-    git(code_repo, "worktree", "add", "-b", code_branch, str(code_worktree), code_base)
-    git(memory_repo, "worktree", "add", "-b", memory_branch, str(memory_worktree), memory_base)
+    git(code_repo, "branch", "super", code_base)
+    git(memory_repo, "branch", "super", memory_base)
+    git(code_repo, "worktree", "add", "-b", code_branch, str(code_worktree), "super")
+    git(memory_repo, "worktree", "add", "-b", memory_branch, str(memory_worktree), "super")
     parent = default_series_contract(
         ContractTask(
             name=task_name,
@@ -560,13 +571,13 @@ def _series_parent_fixture(
         ),
         code=RepoBranchPlan(
             repo_path=code_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch=code_branch,
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch=memory_branch,
             base_commit=memory_base,
         ),
@@ -615,13 +626,13 @@ def committed_range_external_contract_fixture(root: Path):
         code=RepoBranchPlan(
             repo_path=code_master,
             source_branch=parent.code_work_branch,
-            work_branch="ar/committed-range-thing",
+            work_branch="ar/committed-range-thing-leaf",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_master,
             source_branch=parent.memory_work_branch,
-            work_branch="ar/committed-range-thing",
+            work_branch="ar/committed-range-thing-leaf",
             base_commit=memory_base,
         ),
     )
@@ -695,13 +706,13 @@ def closed_external_contract_fixture(
         code=RepoBranchPlan(
             repo_path=code_master,
             source_branch=parent.code_work_branch,
-            work_branch="ar/integrate-thing",
+            work_branch="ar/integrate-thing-leaf",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_master,
             source_branch=parent.memory_work_branch,
-            work_branch="ar/integrate-thing",
+            work_branch="ar/integrate-thing-leaf",
             base_commit=memory_base,
         ),
     )
@@ -826,6 +837,10 @@ def integrated_external_contract_fixture(root: Path):
         integrated_ledger_commit=closed.ledger_commit,
     )
     write_contract(integrated.contract_path, integrated)
+    # This helper returns a candidate intended for a fresh direct-mechanics invocation. The
+    # preceding closeout changed the memory candidate, so publish the exact-current coherence
+    # authority that the shared preflight now requires before returning it.
+    write_passing_route_review(integrated)
     return integrated
 
 

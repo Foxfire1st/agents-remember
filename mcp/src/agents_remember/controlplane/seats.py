@@ -30,7 +30,7 @@ dependency with a second definition of it, and the two would drift.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from agents_remember.errors import SeatOccupancyError
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -109,16 +109,13 @@ class SeatDirectory(Protocol):
     def list(self) -> Sequence[SeatRow]: ...
 
 
-_SeatRowT = TypeVar("_SeatRowT", bound=SeatRow)
-
-
-def _seat_claimants(
-    rows: Sequence[_SeatRowT],
+def _seat_claimants[SeatRowT: SeatRow](
+    rows: Sequence[SeatRowT],
     *,
     document: TaskDocumentRef,
     role: str,
     replacement: bool,
-) -> list[_SeatRowT]:
+) -> list[SeatRowT]:
     return [
         row
         for row in rows
@@ -132,22 +129,22 @@ def _seat_claimants(
     ]
 
 
-def _one_claimant(
-    claimants: Sequence[_SeatRowT],
+def _one_claimant[SeatRowT: SeatRow](
+    claimants: Sequence[SeatRowT],
     *,
     ambiguity: str,
-) -> _SeatRowT | None:
+) -> SeatRowT | None:
     if len(claimants) > 1:
         raise SeatOccupancyError(ambiguity)
     return claimants[0] if claimants else None
 
 
-def current_seat_occupant(
-    rows: Sequence[_SeatRowT],
+def current_seat_occupant[SeatRowT: SeatRow](
+    rows: Sequence[SeatRowT],
     *,
     document: TaskDocumentRef,
     role: str,
-) -> _SeatRowT | None:
+) -> SeatRowT | None:
     """Resolve one canonical seat occupant, preferring its incumbent over one staged heir.
 
     ``replacement_for_task_document_ref`` is the same structural address in a staged state,

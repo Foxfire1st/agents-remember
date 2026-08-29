@@ -198,10 +198,34 @@ row, stale route index, source-change reconciliation candidate, closeout-owned r
 residual, and report-only noteworthy row. It returns the same path plus component counts. The
 curator repairs the zeroable rows, applies `route_index_refresh` only when stale indexes are named,
 and reruns the same full call until `curatorActionableCount=0` and
-`checklistStatus=ready-for-closeout`. Each run replaces the predecessor; do not copy it to a
+`qualityChecklistStatus=ready-for-closeout`. Each run replaces the predecessor; do not copy it to a
 timestamped name. Dirty-source drift and truthful real-commit provenance remain visible but do not
-create an impossible pre-commit gate; the curator dispositions those source-change candidates in
-the durable coherence report.
+create an impossible pre-commit gate. Once the quality worklist is zero, a missing or stale
+coherence authority deliberately changes the combined public result to
+`checklistStatus=coherence-required`, `closeoutReady=false`; that means author the semantic
+judgments through `curator_coherence`, not rerun or rename the checklist.
+
+The curator then uses the one lifecycle-owned coherence API:
+
+1. `curator_coherence(request={"action":"prepare", "contract_path":"<enclosure-contract-path>"})`
+   captures the exact current code tree, memory tree, task-topology fingerprint, attestation digest,
+   predecessor digest, and source-candidate tuples.
+2. The curator supplies exactly one non-invented disposition, rationale, and explicit evidence
+   reference for each returned `(sourceFile, onboardingFile, classification)` tuple. Evidence uses
+   exactly one namespace: `code:<repo-relative-file>`, `memory:<memory-worktree-relative-file>`, or
+   `task:<task-root-relative-file>`; the publisher records its digest.
+3. `publish` repeats every prepared identity, carries the semantic requirement revision and the
+   separate worker delivery attempt, and may freeze an immutable attempt snapshot. The API rejects
+   missing, extra, duplicate, malformed, or raced input and atomically selects one live structured
+   generation.
+4. `validate` proves the same authority that closeout admission and the pre-commit memory preflight
+   consume. Its Markdown is generated projection only. Never hand-edit it, mint `-v2` report names,
+   or make a historical snapshot compete with the stable structured authority.
+
+The checklist and attestation are deterministic: rerunning the full check against the same exact
+inputs preserves their bytes and the coherence authority remains current. If code, memory, quality
+results, or candidate tuples changed, the new attestation intentionally invalidates the old
+generation; prepare and publish the changed candidate instead of bypassing that signal.
 
 The `reports/` directory is outside both Git worktrees. Normal cleanup and abandon remove it with
 the enclosure, so the checklist cannot enter code, memory, or ledger commits. A subset call with
@@ -265,3 +289,5 @@ check.
 9. A curator's full contract-scoped quality run is the one exception to the shared temp-report
    location: it replaces `<worktree-enclosure>/reports/curator-memory-quality.md`, and worktree
    cleanup garbage-collects that reserved directory.
+10. The quality checklist and semantic coherence are separate stages but one closeout-readiness
+    contract: only a current `curator_coherence validate` result yields `closeoutReady=true`.

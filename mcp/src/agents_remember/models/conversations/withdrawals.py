@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field, model_validator
 
@@ -65,7 +65,7 @@ class FailedWithdrawalResponse(WireModel):
     detail: NonEmptyText
 
 
-WithdrawQueueResponse: TypeAlias = Annotated[
+type WithdrawQueueResponse = Annotated[
     WithdrawnQueueResponse | FailedWithdrawalResponse,
     Field(discriminator="outcome"),
 ]

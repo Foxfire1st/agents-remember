@@ -91,6 +91,13 @@ def _patch_external_refresh(stack: ExitStack, contract: WorktreeContract) -> Non
     stack.enter_context(mock.patch.object(closeout_external, "worktree_dirty", return_value=False))
 
 
+def _external_closeout_evidence() -> closeout_external.ExternalCloseoutEvidence:
+    return closeout_external.ExternalCloseoutEvidence(
+        memory_quality_before_refresh={},
+        coherence_no_impact=closeout_external.CuratorCoherenceNoImpact(),
+    )
+
+
 class CloseoutRecoveryTests(unittest.TestCase):
     def test_recovery_refuses_a_copy_that_claims_another_contract_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -508,7 +515,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 args,
                 args.closeout_input,
                 closeout_module.VerifiedChange("a" * 40, "2026-08-14", ["feature.py"]),
-                {},
+                _external_closeout_evidence(),
             )
 
     def test_external_closeout_requires_ledger_and_memory_worktree(self) -> None:
@@ -523,7 +530,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                     args,
                     args.closeout_input,
                     change,
-                    {},
+                    _external_closeout_evidence(),
                 )
             with self.assertRaisesRegex(RuntimeError, "requires a memory worktree"):
                 closeout_external.external_closeout_commits(
@@ -531,7 +538,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                     args,
                     args.closeout_input,
                     change,
-                    {},
+                    _external_closeout_evidence(),
                 )
 
     def test_external_closeout_uses_clean_memory_head_when_no_mapping_exists(self) -> None:
@@ -572,7 +579,7 @@ class CloseoutRecoveryTests(unittest.TestCase):
                 args,
                 args.closeout_input,
                 closeout_module.VerifiedChange("a" * 40, "2026-08-14", ["feature.py"]),
-                {},
+                _external_closeout_evidence(),
             )
 
             self.assertEqual(result.memory_commit, "b" * 40)

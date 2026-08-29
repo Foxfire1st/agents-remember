@@ -103,13 +103,22 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 repo_name="agents-remember",
             )
             write_contract(contract.contract_path, contract)
-            write_passing_route_review(contract)
 
             with (
                 mock.patch.object(
                     closeout_module,
                     "_closeout_attestations",
                     return_value=closeout_module._CloseoutAttestations(),
+                ),
+                mock.patch.object(
+                    closeout_module,
+                    "require_current_curator_coherence",
+                    return_value=mock.sentinel.coherence,
+                ),
+                mock.patch.object(
+                    closeout_module,
+                    "curator_coherence_no_impact",
+                    return_value=closeout_module.CuratorCoherenceNoImpact(),
                 ),
                 mock.patch.object(closeout_module, "_memory_quality_before_refresh") as memory,
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,

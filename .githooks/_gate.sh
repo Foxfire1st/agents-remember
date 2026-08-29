@@ -31,6 +31,13 @@ esac
 
 root="$(git rev-parse --show-toplevel)" || exit 1
 cd "$root" || exit 1
+runtime_contract="$root/scripts/python-runtime-contract.env"
+if [ ! -f "$runtime_contract" ]; then
+  echo "[$label] canonical Python runtime contract is missing: $runtime_contract" >&2
+  exit 1
+fi
+# shellcheck source=../scripts/python-runtime-contract.env
+. "$runtime_contract"
 PYTHONPATH="$root/mcp/test_support:$root/mcp/src${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONPATH
 
@@ -47,6 +54,14 @@ fi
 # venv or system Python can see checkout source through PYTHONPATH while still lacking
 # the package dependencies, so only a complete MCP development environment is valid.
 dev_python_ready() {
+  if [ "$(uname -s)" = "Linux" ]; then
+    "$1" "$root/scripts/check-python-runtime.py" \
+      --expected-version "$AR_PYTHON_VERSION" \
+      --require-linux-pidfd >/dev/null 2>&1 || return 1
+  else
+    "$1" "$root/scripts/check-python-runtime.py" \
+      --expected-version "$AR_PYTHON_VERSION" >/dev/null 2>&1 || return 1
+  fi
   "$1" -c \
     'import pyright, ruff; import agents_remember_test_support.code_quality.scope_reporting' \
     >/dev/null 2>&1
@@ -60,7 +75,7 @@ elif [ -n "$main_root" ] && [ -x "$shared_py" ] && dev_python_ready "$shared_py"
   py="$shared_py"
 else
   echo "[$label] complete MCP dev environment not found at mcp/.venv." >&2
-  echo "[$label] create it and install the package: python3 -m venv mcp/.venv && mcp/.venv/bin/python -m pip install -e 'mcp[dev]'" >&2
+  echo "[$label] Linux/WSL repair: scripts/bootstrap-mcp-venv.sh --replace" >&2
   exit 1
 fi
 

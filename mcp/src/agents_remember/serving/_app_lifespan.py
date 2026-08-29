@@ -5,7 +5,7 @@ import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import partial
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
@@ -53,16 +53,13 @@ if TYPE_CHECKING:
         McpRuntimeConfig,
     )
 
-_Args = ParamSpec("_Args")
-_Result = TypeVar("_Result")
 
-
-async def _to_thread_drained_on_cancel(
-    function: Callable[_Args, _Result],
+async def _to_thread_drained_on_cancel[**Args, Result](
+    function: Callable[Args, Result],
     /,
-    *args: _Args.args,
-    **kwargs: _Args.kwargs,
-) -> _Result:
+    *args: Args.args,
+    **kwargs: Args.kwargs,
+) -> Result:
     """Do not let a cancelled lifespan return while its worker thread still writes."""
     worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
     try:

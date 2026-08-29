@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,7 +58,14 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
         description="Structured readiness attestation paired to the rendered curator checklist.",
     )
     guidance: str | None = Field(default=None, max_length=8192)
-    checklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
+    checklistStatus: (
+        Literal["action-required", "coherence-required", "ready-for-closeout"] | None
+    ) = None
+    qualityChecklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
+    coherenceStatus: str | None = Field(default=None, max_length=256)
+    coherenceCanonicalPath: str | None = Field(default=None, max_length=8192)
+    coherenceRecordDigest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    closeoutReady: bool | None = None
     curatorActionableCount: int | None = Field(default=None, ge=0)
     memoryRepairCount: int | None = Field(default=None, ge=0)
     missingOnboardingCount: int | None = Field(default=None, ge=0)
@@ -101,7 +108,7 @@ class MemoryQualityPollRequest(BaseModel):
     run_id: str
 
 
-MemoryQualityCheckRequest: TypeAlias = Annotated[
+type MemoryQualityCheckRequest = Annotated[
     MemoryQualitySyncRequest | MemoryQualityStartRequest | MemoryQualityPollRequest,
     Field(discriminator="mode"),
 ]

@@ -7,6 +7,7 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from agents_remember.kernel import filesystem
@@ -25,6 +26,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.drift impor
     extract_inline_onboarding_block,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
+from agents_remember.worktrees.modules.git import worktree_candidate_tree
 
 
 @dataclass(frozen=True)
@@ -76,15 +78,28 @@ def check_missing_onboarding(
 
 
 def worktree_added_sources(repo_root: Path) -> list[str]:
-    sources: set[str] = set()
-    for args in (
-        ["diff", "--cached", "--name-status", "--find-renames", "--diff-filter=ACR", "-z"],
-        ["diff", "--name-status", "--find-renames", "--diff-filter=ACR", "-z"],
-    ):
-        sources.update(parse_name_status(require_git(repo_root, args).stdout))
-    untracked = require_git(repo_root, ["ls-files", "--others", "--exclude-standard", "-z"])
-    sources.update(normalize_rel_path(path) for path in split_z(untracked.stdout))
-    return sorted(sources)
+    """Return additions in the full add-all candidate, not either partial index layer."""
+
+    with TemporaryDirectory(prefix="ar-missing-onboarding-") as temporary_directory:
+        candidate_tree = worktree_candidate_tree(
+            repo_root,
+            Path(temporary_directory) / "index",
+        )
+    result = require_git(
+        repo_root,
+        [
+            "diff-tree",
+            "--no-commit-id",
+            "--name-status",
+            "--find-renames",
+            "--diff-filter=ACR",
+            "-r",
+            "-z",
+            "HEAD",
+            candidate_tree,
+        ],
+    )
+    return sorted(set(parse_name_status(result.stdout)))
 
 
 def missing_onboarding_for_source(

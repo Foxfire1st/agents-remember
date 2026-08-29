@@ -6,13 +6,12 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import ValidationError
 
+from agents_remember.errors import CuratorCoherenceError
 from agents_remember.models.closeout.source import (
-    MAX_CLOSEOUT_SOURCE_SHORT_TEXT,
-    MAX_CLOSEOUT_SOURCE_TEXT,
     EvidenceFact,
     SchedulingGrade,
     SchedulingGradeInput,
@@ -24,10 +23,7 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
 
-MAX_QUEUE_SHORT_TEXT = MAX_CLOSEOUT_SOURCE_SHORT_TEXT
-MAX_QUEUE_TEXT = MAX_CLOSEOUT_SOURCE_TEXT
 PRIORITY_RANK = {"critical": 0, "high": 1, "normal": 2, "low": 3}
-MAX_CURATOR_SOURCE_CANDIDATES = 2048
 JUDGMENT_REGISTER_SECTION = "judgment register (canonical judgment authority)"
 PRIORITY_REGISTER_SECTION = "priority register (explicit judgment)"
 # Display headings used when the registers are scaffolded into a sprint document;
@@ -83,159 +79,17 @@ class GradeAuthority:
     priorities: dict[str, PriorityAuthority]
 
 
-class _CuratorSourceCandidate(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    sourceFile: str = Field(max_length=MAX_QUEUE_TEXT)
-    onboardingFile: str = Field(max_length=MAX_QUEUE_TEXT)
-    classification: str = Field(max_length=MAX_QUEUE_SHORT_TEXT)
-
-    @field_validator("sourceFile", "onboardingFile", "classification")
-    @classmethod
-    def _nonblank_candidate_fact(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("curator source-change facts must not be blank")
-        return cleaned
-
-
-class _CuratorDisposition(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    sourceFile: str = Field(max_length=MAX_QUEUE_TEXT)
-    onboardingFile: str = Field(max_length=MAX_QUEUE_TEXT)
-    classification: str = Field(max_length=MAX_QUEUE_SHORT_TEXT)
-    disposition: Literal[
-        "reconciled",
-        "preserved",
-        "extended",
-        "superseded",
-        "contradicted",
-        "no-content-impact",
-        "no-route-impact",
-        "capture-candidate",
-    ]
-    evidence: str = Field(min_length=1, max_length=MAX_QUEUE_TEXT)
-
-
-class _CuratorAttestation(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    schema_: Literal["ar-curator-memory-quality/v1"] = Field(alias="schema")
-    checklistStatus: Literal["action-required", "ready-for-closeout"]
-    curatorActionableCount: int = Field(ge=0)
-    memoryRepairCount: int = Field(ge=0)
-    missingOnboardingCount: int = Field(ge=0)
-    staleRouteIndexCount: int = Field(ge=0)
-    sourceChangeCandidateCount: int = Field(ge=0, le=MAX_CURATOR_SOURCE_CANDIDATES)
-    sourceChangeCandidates: list[_CuratorSourceCandidate] = Field(
-        max_length=MAX_CURATOR_SOURCE_CANDIDATES
-    )
-    onboardingRoot: str = Field(max_length=MAX_QUEUE_TEXT)
-    reportPath: str = Field(max_length=MAX_QUEUE_TEXT)
-    reportSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-    @model_validator(mode="after")
-    def _source_candidates_are_exact_and_unique(self) -> _CuratorAttestation:
-        identities = [
-            (row.sourceFile, row.onboardingFile, row.classification)
-            for row in self.sourceChangeCandidates
-        ]
-        if self.sourceChangeCandidateCount != len(identities):
-            raise ValueError("curator source-change count does not match its candidate list")
-        if len(identities) != len(set(identities)):
-            raise ValueError("curator source-change candidates must be unique")
-        return self
-
-
 def curator_evidence(contract: WorktreeContract) -> list[EvidenceFact]:
-    """Bind the structured zero gate, rendered checklist, and required dispositions."""
+    """Use the same structured canonical validator as memory preflight."""
 
-    path = contract.worktree_group / "reports" / "curator-memory-quality.md"
-    attestation_path = path.with_suffix(".json")
     try:
-        text = path.read_text(encoding="utf-8")
-        attestation = _CuratorAttestation.model_validate_json(
-            attestation_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValidationError) as exc:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-evidence-missing",
-            bounded_queue_failure_detail(
-                exc,
-                stage="queue-curator-evidence",
-                side="report",
-                name="curator-attestation",
-            ),
-        ) from exc
-    expected_report = path.resolve().as_posix()
-    expected_onboarding = _expected_onboarding_root(contract)
-    status_lines = _curator_status_lines(text)
-    _require_curator_attestation(
-        attestation,
-        expected_report=expected_report,
-        expected_onboarding=expected_onboarding,
-        status_lines=status_lines,
-    )
-    _require_curator_report_digest(text, attestation.reportSha256)
-    evidence = [_evidence_fact(path), _evidence_fact(attestation_path)]
-    if attestation.sourceChangeCandidates:
-        evidence.append(_coherence_evidence(contract, attestation.sourceChangeCandidates))
-    return evidence
-
-
-def _expected_onboarding_root(contract: WorktreeContract) -> str:
-    if contract.memory_worktree is None:
-        return ""
-    return (contract.memory_worktree / "onboarding").resolve().as_posix()
-
-
-def _curator_status_lines(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines() if line.startswith("- Status:")]
-
-
-def _require_curator_attestation(
-    attestation: _CuratorAttestation,
-    *,
-    expected_report: str,
-    expected_onboarding: str,
-    status_lines: list[str],
-) -> None:
-    observed = (
-        attestation.schema_,
-        attestation.checklistStatus,
-        attestation.curatorActionableCount,
-        attestation.memoryRepairCount,
-        attestation.missingOnboardingCount,
-        attestation.staleRouteIndexCount,
-        attestation.reportPath,
-        attestation.onboardingRoot,
-        status_lines,
-    )
-    expected = (
-        "ar-curator-memory-quality/v1",
-        "ready-for-closeout",
-        0,
-        0,
-        0,
-        0,
-        expected_report,
-        expected_onboarding,
-        ["- Status: **ready-for-closeout**"],
-    )
-    if observed != expected:
-        raise CloseoutQueueError(
-            "closeout-candidate-memory-not-ready",
-            "structured curator evidence does not prove the exact ready-for-closeout contract",
+        from agents_remember.worktrees.integration.closeout.curator_coherence import (  # noqa: PLC0415 -- breaks the topology/grade import cycle
+            curator_coherence_evidence,
         )
 
-
-def _require_curator_report_digest(text: str, expected_sha256: str) -> None:
-    if hashlib.sha256(text.encode()).hexdigest() != expected_sha256:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-evidence-stale",
-            "curator checklist bytes do not match the structured attestation",
-        )
+        return curator_coherence_evidence(contract)
+    except CuratorCoherenceError as exc:
+        raise CloseoutQueueError(exc.status, exc.detail) from exc
 
 
 def curator_evidence_blockers(
@@ -251,140 +105,6 @@ def curator_evidence_blockers(
     except CloseoutQueueError:
         return ["memory-readiness-evidence-stale"]
     return [] if current == expected else ["memory-readiness-evidence-stale"]
-
-
-def _coherence_evidence(
-    contract: WorktreeContract, candidates: list[_CuratorSourceCandidate]
-) -> EvidenceFact:
-    path = contract.task_root / "notes" / "reports" / f"{contract.leaf_id}-curator-report.md"
-    try:
-        coherence = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-missing",
-            f"source-change candidates require the canonical coherence report: {path}",
-        ) from exc
-    dispositions = _coherence_dispositions(coherence)
-    expected = set(map(_candidate_identity, candidates))
-    observed = set(map(_disposition_identity, dispositions))
-    if len(dispositions) != len(observed) or observed != expected:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-missing",
-            "the canonical disposition table must exactly match every structured source-change candidate",
-        )
-    return _evidence_fact(path)
-
-
-def _candidate_identity(candidate: _CuratorSourceCandidate) -> tuple[str, str, str]:
-    return candidate.sourceFile, candidate.onboardingFile, candidate.classification
-
-
-def _disposition_identity(row: _CuratorDisposition) -> tuple[str, str, str]:
-    return row.sourceFile, row.onboardingFile, row.classification
-
-
-def _coherence_dispositions(text: str) -> list[_CuratorDisposition]:
-    heading = "## Source-change dispositions"
-    lines = text.splitlines()
-    start = _required_section_start(lines, heading)
-    body = _section_body(lines[start + 1 :])
-    expected_header = [
-        "Source file",
-        "Onboarding file",
-        "Classification",
-        "Disposition",
-        "Evidence",
-    ]
-    _require_disposition_header(body, expected_header)
-    _require_markdown_separator(body[1], width=5)
-    return list(map(_curator_disposition, body[2:]))
-
-
-def _require_disposition_header(body: list[str], expected_header: list[str]) -> None:
-    if len(body) < 2:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            "source-change dispositions require the canonical five-column header",
-        )
-    if _split_markdown_row(body[0]) != expected_header:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            "source-change dispositions require the canonical five-column header",
-        )
-
-
-def _required_section_start(lines: list[str], heading: str) -> int:
-    starts = _heading_indices(lines, heading)
-    if len(starts) != 1:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            f"coherence report requires exactly one {heading!r} section",
-        )
-    return starts[0]
-
-
-def _heading_indices(lines: list[str], heading: str) -> list[int]:
-    matches: list[int] = []
-    for index, line in enumerate(lines):
-        if line.strip() == heading:
-            matches.append(index)
-    return matches
-
-
-def _section_body(lines: list[str]) -> list[str]:
-    body: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            return _nonblank_lines(body)
-        body.append(stripped)
-    return _nonblank_lines(body)
-
-
-def _nonblank_lines(lines: list[str]) -> list[str]:
-    return [line for line in lines if line]
-
-
-def _require_markdown_separator(line: str, *, width: int) -> None:
-    separator = _split_markdown_row(line)
-    if (len(separator) == width, _separator_cells_valid(separator)) != (True, True):
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            "source-change dispositions require one rectangular Markdown separator row",
-        )
-
-
-def _separator_cells_valid(cells: list[str]) -> bool:
-    return all(re.fullmatch(r":?-{3,}:?", cell) is not None for cell in cells)
-
-
-def _curator_disposition(line: str) -> _CuratorDisposition:
-    cells = _split_markdown_row(line)
-    if len(cells) != 5:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            "source-change disposition rows must have exactly five cells",
-        )
-    try:
-        return _CuratorDisposition.model_validate(
-            {
-                "sourceFile": cells[0],
-                "onboardingFile": cells[1],
-                "classification": cells[2],
-                "disposition": cells[3],
-                "evidence": cells[4],
-            }
-        )
-    except ValidationError as exc:
-        raise CloseoutQueueError(
-            "closeout-candidate-curator-disposition-invalid",
-            bounded_queue_failure_detail(
-                exc,
-                stage="queue-curator-disposition-validation",
-                side="task-evidence",
-                name="curator-disposition",
-            ),
-        ) from exc
 
 
 def canonical_grade(
@@ -727,6 +447,10 @@ def _require_register_separator(line: str, width: int) -> None:
             "closeout-grade-register-shape-invalid",
             "canonical scheduling register requires one rectangular Markdown separator row",
         )
+
+
+def _separator_cells_valid(cells: list[str]) -> bool:
+    return all(re.fullmatch(r":?-{3,}:?", cell) is not None for cell in cells)
 
 
 def _register_row(line: str, width: int) -> tuple[str, list[str]]:

@@ -6,6 +6,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.lifecycles.termination import LifecycleCancellationEvidence
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
@@ -156,27 +157,43 @@ def _cancellable_closeout_facts(
                     Path(evidence.repository),
                     Path(temporary) / "index",
                 )
-        if snapshot != accepted:
+        accepted_output = _protected_output_facts(accepted)
+        observed_output = _protected_output_facts(snapshot)
+        if observed_output != accepted_output:
             raise LifecycleControlError(
                 "lifecycle-cancellation-git-changed",
-                "live Git state no longer matches the generation's accepted prestate",
-                expected={"leg": leg, **accepted.model_dump(mode="json")},
-                observed={"leg": leg, **snapshot.model_dump(mode="json")},
-                next_action="recover",
+                "a protected Git ref no longer matches the generation's accepted prestate",
+                expected={"leg": leg, **accepted_output},
+                observed={"leg": leg, **observed_output},
+                next_action="developer-decision",
             )
         facts[f"{leg}State"] = evidence.state
         facts[f"{leg}Repository"] = evidence.repository
-        for field in (
-            "headRef",
-            "head",
-            "headTree",
-            "indexTree",
-            "candidateTree",
-            "statusFingerprint",
-            "refLogFingerprint",
-        ):
+        for field in ("headRef", "head", "headTree", "refLogFingerprint"):
             facts[f"{leg}{field[0].upper()}{field[1:]}"] = getattr(snapshot, field)
+        for field in ("indexTree", "candidateTree", "statusFingerprint"):
+            suffix = f"{field[0].upper()}{field[1:]}"
+            facts[f"{leg}Accepted{suffix}"] = getattr(accepted, field)
+            facts[f"{leg}Observed{suffix}"] = getattr(snapshot, field)
     return facts
+
+
+def _protected_output_facts(snapshot: GitMutationSnapshot) -> dict[str, str]:
+    """Return Git identities cancellation must prove unchanged.
+
+    The closeout quality phase is allowed to stage the accepted candidate, and a
+    failed generation may be followed by a repaired working-tree candidate. Those
+    index, candidate, and status changes are successor input, not Git output from
+    the failed generation. Branch identity, HEAD/tree, and reflog identity remain
+    the protected output boundary.
+    """
+
+    return {
+        "headRef": snapshot.headRef,
+        "head": snapshot.head,
+        "headTree": snapshot.headTree,
+        "refLogFingerprint": snapshot.refLogFingerprint,
+    }
 
 
 def unchanged_integration_refs(record: LifecycleOperationRecord) -> dict[str, str]:

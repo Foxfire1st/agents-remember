@@ -59,6 +59,8 @@ EXPORTED_REPORT_NAMES = frozenset(
         "coverage.json",
         "pytest-events.jsonl",
         "pytest-phases.json",
+        "python-runtime.json",
+        "python-venv-runtime.json",
         "quality-progress.json",
     }
 )

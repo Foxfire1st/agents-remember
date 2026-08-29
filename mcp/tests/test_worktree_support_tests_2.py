@@ -199,6 +199,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 + "- 2026-06-12T18:00+02:00 — Reviewed the merged feature change.\n",
                 encoding="utf-8",
             )
+            write_passing_route_review(contract)
             code_head = git(contract.code_worktree, "rev-parse", "HEAD")
             args = Namespace(
                 contract_path=contract.contract_path,

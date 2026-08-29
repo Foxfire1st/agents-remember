@@ -238,7 +238,11 @@ External-memory closeout order is:
 
 Before step 1, require the current passing task-bound route review. Any code edit after review
 invalidates its candidate-tree binding and returns to the same route reviewer(s) before curator or
-closeout work resumes.
+closeout work resumes. For an external-memory leaf, also require `curator_coherence validate`
+against the exact contract. The closeout citation preflight, closeout-door evidence, and public
+memory readiness all consume that same structured validator; none may parse a hand-authored
+Markdown report or search historical filenames. A missing or stale authority returns to
+`prepare`/`publish`, never to a compatibility fallback.
 
 1. run `check_missing_onboarding` against current additions (in the curator chain, this confirms the
    curator's pass already covered them — it is not the cue to author onboarding here)

@@ -475,6 +475,10 @@ class UntrackedExposureTests(unittest.TestCase):
             hook = root / ".githooks/_gate.sh"
             hook.parent.mkdir()
             shutil.copy2(REPOSITORY_ROOT / ".githooks/_gate.sh", hook)
+            shutil.copy2(
+                REPOSITORY_ROOT / "scripts/python-runtime-contract.env",
+                root / "scripts/python-runtime-contract.env",
+            )
             for name in (
                 "sync-projection-types.py",
                 "sync-skills.py",

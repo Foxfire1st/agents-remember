@@ -7,7 +7,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock, get_ident
-from typing import Literal, TypeVar
+from typing import Literal
 
 from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_terminal import (
     TerminalCleanupContractAuthority,
@@ -16,7 +16,6 @@ from agents_remember.worktrees.modules.terminal_validation import require_series
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-T = TypeVar("T")
 AtomicSeriesTerminalOperation = Literal["worktree_cleanup", "worktree_abandon"]
 _CAPABILITY = object()
 
@@ -41,7 +40,7 @@ def require_atomic_series_terminal_release(contract: WorktreeContract) -> None:
     require_series_children_retired(contract)
 
 
-def publish_atomic_series_terminal_under_authority(
+def publish_atomic_series_terminal_under_authority[T](
     contract: WorktreeContract,
     operation: AtomicSeriesTerminalOperation,
     publication: Callable[[AtomicSeriesTerminalPermit], T],

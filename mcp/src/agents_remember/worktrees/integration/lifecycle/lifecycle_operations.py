@@ -91,7 +91,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
 )
 from agents_remember.worktrees.integration.lifecycle.worker import launch as lifecycle_worker_launch
+from agents_remember.worktrees.integration.lifecycle.worker.child_processes import (
+    retain_detached_worker_child,
+)
 from agents_remember.worktrees.integration.lifecycle.worker.termination import (
+    require_linux_worker_runtime,
     worker_process_fingerprint,
 )
 from agents_remember.worktrees.integration.mutation_evidence import (
@@ -879,6 +883,7 @@ def _reconcile_closeout_store(
 def launch_detached_worker(contract: WorktreeContract, record: LifecycleOperationRecord) -> None:
     if record.operationKind == "direct-landing":
         raise RuntimeError("direct landing is synchronous and cannot launch a detached worker")
+    require_linux_worker_runtime()
     reports_root = contract.worktree_group / "reports"
     report = Path(record.reportPath)
     atomic_write_text(report, "")
@@ -916,6 +921,7 @@ def launch_detached_worker(contract: WorktreeContract, record: LifecycleOperatio
             start_new_session=True,
             close_fds=True,
         )
+    retain_detached_worker_child(process)
     fingerprint = worker_process_fingerprint(process.pid)
     if fingerprint is None:
         fallback_fingerprint = fingerprint_payload(

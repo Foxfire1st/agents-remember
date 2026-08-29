@@ -57,7 +57,7 @@ manager, worker, designer, or reviewer work.
 ## The Curator Loop
 
 ```
-brief -> intake -> three-way intent reconciliation -> write current contracts -> indexes/checks -> coherence report -> end
+brief -> intake -> three-way intent reconciliation -> write current contracts -> indexes/checks -> publish + validate authority -> end
 ```
 
 ### 1 — Intake
@@ -73,6 +73,9 @@ affected routes before replacing their account of current intent. Confirm the co
 memory worktree paths. If any side of the three-way comparison is missing or ambiguous enough that
 curation would become guesswork, ask the owning seat for one clarification row; do not infer a
 change set or design authority from transcript memory.
+
+The publication handoff must identify the exact accepted requirement revision, accepted reviewer
+adjudication, and separate durable developer ruling; none is a substitute for another.
 
 Curator dispatch is admitted only after the control plane verifies the leaf's `routeReview` record
 against the exact current candidate tree and its durable evidence files. Treat that record and its
@@ -134,15 +137,16 @@ history; do not leave a later generic block to override pages of stale body pros
 
 The curator may discover a useful incident, opportunity, alternative frame, or forward-learning
 hypothesis while reconciling the system. That observation is **not automatically current intent**.
-Record it in the coherence report as a capture candidate with evidence and confidence, then let the
-owning hierarchy route it through whichever incident, note, strategist, or task-promotion surface
-is actually authorized. Do not create a new register, silently turn novelty into truth, or collapse
-conservative curation and creative scouting into one undifferentiated pass.
+Use the coherence judgment's `capture-candidate` disposition with an explicit evidence reference
+and confidence in the rationale, then let the owning hierarchy route it through whichever incident,
+note, strategist, or task-promotion surface is authorized. Do not create a new register, silently
+turn novelty into truth, or collapse conservative curation and creative scouting into one
+undifferentiated pass.
 
 Do not modify code. Do not edit task docs, gates, lifecycle state, worktree contracts, or closeout
 state. Do not run c-12/c-05 rewiring experiments from this role.
 
-### 4 — Iterate The Checklist, Then Report
+### 4 — Iterate The Checklist, Then Publish
 
 **The curator owns the complete pre-closeout memory worklist.** The intake call already combined
 current-additions coverage, the full leaf-scoped quality suite, drift/source-change candidates, and
@@ -150,8 +154,10 @@ a route-index dry run in one report. Create, update, or repair every onboarding 
 actionable content, citation, shape, history, entity, and index finding it names. When a stale route
 index is listed, apply `route_index_refresh` once with the same contract path. Then rerun the same
 full `memory_quality_check`, reopen the same report path, and continue until
-`curatorActionableCount=0` and `checklistStatus=ready-for-closeout`. Do not emit a completion report
-while the checklist still names curator-owned work.
+`curatorActionableCount=0` and `qualityChecklistStatus=ready-for-closeout`. A combined
+`checklistStatus=coherence-required` at that point is the expected handoff into semantic
+publication, not another repair loop. Do not publish while the checklist still names curator-owned
+work.
 
 The leaf-scoped quality call uses the contract's code-base commit only as temporary comparison
 provenance for unstamped cards. That makes dirty-worktree claim changes visible before closeout; it
@@ -168,7 +174,7 @@ advance fingerprints to an uncommitted tree, or add attestation prose to silence
 governed closeout creates the code commit, refreshes those commit-derived fields once, and then
 runs the hard full quality gate before the memory commit.
 
-Two MCP tools, both scoped to THIS leaf by passing your enclosure contract path — the same
+Three MCP tools, all scoped to THIS leaf by passing your enclosure contract path — the same
 `contract_path` the `worktree_*` verbs take. Your brief names it; it is the leaf's
 `series-contract.md` under the master's `enclosures/<leaf-id>/`:
 
@@ -176,6 +182,7 @@ Two MCP tools, both scoped to THIS leaf by passing your enclosure contract path 
 | --- | --- | --- |
 | `memory_quality_check` | atomically replaces the one enclosure-local checklist with full quality, missing-onboarding, drift, and route-index preview results | `memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>"})` |
 | `route_index_refresh` | applies stale `overview.index.json` files named by that checklist | `route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` |
+| `curator_coherence` | prepares, atomically publishes, and validates the sole structured semantic authority for the exact candidate and quality attestation | `prepare` → `publish` → `validate`, always with this leaf's `contract_path` |
 
 `contract_path` is what points them at your memory worktree. **Without it they resolve the OFFICIAL
 memory repo** — read-only for the first two, but `route_index_refresh` writes, so an unscoped call
@@ -183,29 +190,37 @@ generates indexes into a repository you do not own and leaves it dirty, which bl
 `worktree_start` until a human reverts it. Check `onboardingRoot` in the response: it must be your
 memory worktree. Preview a write first with `dry_run=true` if you want to see the file list.
 
-Read `curatorActionableCount`, `checklistStatus`, the component counts, and the file — not just
-`ok`. Dirty-source drift can keep the full quality `ok` false before a real commit exists; it is
-listed separately as source-change reconciliation work and must be dispositioned in the coherence
-report, while the zeroable curator gate remains exact. The coherence report must include the final
-checklist result, every repair made from it, and any allowed commit-derived residual by exact class
-and count. A number implausible for the change-set is a measurement problem to investigate and
-escalate, not permission to pass an incomplete report.
+Read `curatorActionableCount`, `qualityChecklistStatus`, `checklistStatus`, the component counts,
+and the file — not just `ok`. Dirty-source drift can keep the full quality `ok` false before a real
+commit exists. Once the zeroable quality gate is exact,
+`qualityChecklistStatus=ready-for-closeout` with `checklistStatus=coherence-required` is the normal
+transition into semantic publication.
 
-Then `git diff --check` in the memory worktree, plus any other check the brief names. Write a
-curator coherence report under the series `notes/reports/` that lists changed onboarding files,
-the exact accepted requirement revision, accepted reviewer adjudication, and separate durable
-developer ruling authorizing each semantic requirement change, the
-three-way reconciliation result (preserved/extended/superseded/contradicted contracts), route
-index results, the memory-quality result (findingCount and `onboardingRoot`), reference checks,
-capture candidates kept out of current intent, blockers, and the exact commands run. The report is
-the memory input the manager uses beside builder code and reviewer verdict. Writing it is the last
-act only after the curator-owned worklist is empty; otherwise report a blocker, not completion.
+Then run `git diff --check` in the memory worktree plus any other check the brief names. Call
+`curator_coherence prepare`, write exactly one judgment for every returned
+`(sourceFile, onboardingFile, classification)` tuple, and publish it with the exact accepted
+semantic requirement revision and the separate worker delivery attempt. Never infer or synthesize
+the disposition or rationale. Evidence references use one explicit namespace:
+`code:<repo-relative-file>`, `memory:<memory-worktree-relative-file>`, or
+`task:<task-root-relative-file>`; normally the reconciled onboarding file is
+`memory:onboarding/<onboardingFile>`. The API captures each referenced file's digest, refuses every
+prepared-identity race, atomically selects one content-addressed structured record, generates its
+Markdown projection, and may freeze the attempt snapshot.
+
+Finish with `curator_coherence validate` and return its canonical path,
+record/report/snapshot paths, code and memory candidate trees, attestation digest, report digest,
+and validation result. Do not hand-write, copy, rename, or version a coherence Markdown file. Do
+not treat a same-input quality rerun as a new delivery attempt: its deterministic checklist and
+attestation preserve their bytes. A changed quality input correctly makes the authority stale and
+requires a new prepare/publish cycle. If publication or validation refuses, return that typed
+blocker instead of manufacturing another apparent authority.
 
 ## Comms
 
 - **Structural parent message** (`message_parent`) — ask the current owning manager for missing
   evidence without knowing which runtime occupant currently fills that seat.
-- **Report artifact** — the coherence report is the durable output; do not rely on transcript.
+- **Report artifact** — the structured record and generated projection are the durable output; do
+  not rely on transcript or a parallel hand-authored report.
 - **Completion truth** — terminal/finalizer evidence after the report exists wakes the owner; do
   not write a parallel model completion post.
 - **Escalation** — one rung up to the owning seat. The curator never escalates directly to the
@@ -221,6 +236,6 @@ act only after the curator-owned worklist is empty; otherwise report a blocker, 
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | onboarding surface | native reads/edits in memory worktree · native reads in code worktree · c-02 quality control · c-05 onboarding workflow · local route indexes · shell checks · `message_parent` |
+| tools   | onboarding surface | native reads/edits in memory worktree · native reads in code worktree · c-02 quality control · c-05 onboarding workflow · local route indexes · `curator_coherence` · shell checks · `message_parent` |
 
 Settings.json `orchestration.roles.curator` overrides these, and `orchestration.rolesPerLevel.<level>.curator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

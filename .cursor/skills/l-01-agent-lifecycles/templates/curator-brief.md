@@ -45,6 +45,8 @@ below, then stop.
 - Leaf task doc: `<leaf-doc-path>` (read it first — objective, requirements, decision log).
 - Approved requirement corpus ruling: `<durable developer approval citation>`.
 - Primary requirement revision: `<stable-id>@<version>` — canonical packet `<packet-path>`.
+- Worker delivery attempt: `<attempt-id>` — a candidate handoff identity separate from the
+  semantic requirement revision and from every evidence digest.
 - Adjacent preservation/dependency revisions: `<stable-id>@<version> — <packet-path> | none`.
 - Requirement adjudication: `<reviewer-verdict-path>` — attach the reviewer's independent
   `accepted | rejected` row for every revision above. A rejected or worker-blocked revision is an
@@ -91,8 +93,9 @@ change with no contract impact receives a precise reviewed no-impact entry rathe
 architecture prose.
 
 If the pass reveals an incident, opportunity, or alternate frame, keep it out of current intent
-unless it is already ruled and proven. List it as a capture candidate in the final report; do not
-invent a register or silently promote speculative forward learning into repository truth.
+unless it is already ruled and proven. Use the coherence judgment's `capture-candidate`
+disposition with explicit evidence; do not invent a register or silently promote speculative
+forward learning into repository truth.
 
 ## Tool surface
 - Native reads in the code worktree; native reads/edits in the memory worktree.
@@ -101,9 +104,12 @@ invent a register or silently promote speculative forward learning into reposito
 - `memory_quality_check` for the complete checklist and `route_index_refresh` only to apply stale
   indexes named by it — always with
   `contract_path="<enclosure-contract-path>"`.
+- `curator_coherence` for `prepare` → exact agent-owned judgments → atomic `publish` → `validate`,
+  always with the same contract path.
 - Inbox for one clarification row back to <owning-seat contact> if the fed change set is missing or
   ambiguous — never invent a change set from memory.
-- No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*` tools, no code edits.
+- No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*` tools, no code edits. The bounded
+  `curator_coherence` publication is the sole task-local authority write owned by this role.
 
 ## Self-check (before you report — your output is checked at closeout)
 Own the complete pre-closeout memory worklist. As the final intake action, run the full leaf-scoped
@@ -112,8 +118,9 @@ quality check and open its `reportPath` at
 combines current-additions coverage, full quality, source-change candidates, and route-index drift.
 Repair everything it reports that can be made true from the fed dirty worktree, rerun the same full
 call, and keep iterating until `curatorActionableCount=0` and
-`checklistStatus=ready-for-closeout`. Never create a timestamped copy or a second checklist. Do not
-write the completion report while any curator-owned finding remains.
+`qualityChecklistStatus=ready-for-closeout`. At that point a combined
+`checklistStatus=coherence-required` is the expected transition to publication. Never create a
+timestamped copy or second checklist, and do not publish while any curator-owned finding remains.
 
 The contract-scoped quality call temporarily compares unstamped cards from the leaf's code-base
 commit to the dirty worktree, so changed claims surface before a closeout commit exists. Repair every
@@ -129,12 +136,16 @@ after proving there is no underlying curator-actionable defect.
    content/citation/shape/history/entity finding. Apply
    `route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` only when
    the checklist names stale indexes.
-3. Rerun the same full quality call until its curator gate is zero; separately disposition every
-   source-change candidate and allowed real-commit residual in the coherence report.
+3. Rerun the same full quality call until its curator gate is zero; then call
+   `curator_coherence prepare` and disposition every exact source-change tuple it returns.
 4. Run `git diff --check` in the memory worktree, plus any other check named above.
 5. Map every onboarding contract change to the exact approved requirement revision and the
    reviewer's accepted adjudication. Preserve blocked/rejected deltas as report blockers; do not
    promote them into current intent.
+6. Publish with the exact prepared identities, semantic revision, separate delivery attempt, and
+   one judgment per tuple. Use only `code:`, `memory:`, or `task:` evidence references, then call
+   `validate`. An unchanged full quality rerun preserves deterministic attestation bytes; changed
+   quality input stales the authority and requires a new prepare/publish cycle.
 
 A `cit:(...)` wrapped in backticks is read as a QUOTATION of the citation grammar — which is how
 these documents document it — so it is not checked; write a real citation unbackticked.
@@ -147,16 +158,16 @@ implausible for this change set is a measurement problem to investigate and esca
 to pass incomplete onboarding. Closeout's post-commit rerun is the hard gate, not the first time the
 curator learns about repairable work.
 
-## Coherence report (mandatory, last act)
-Write `<notes-reports-path>/<leaf-id>-curator-report.md`: changed onboarding files (with which
-change-set item, exact requirement revision, and accepted reviewer row each one routes to and why);
-preserved, extended, superseded, and
-contradicted contracts; route index results; memory-quality `findingCount` and exact
-`onboardingRoot`; reference checks; capture candidates kept out of current intent; blockers; and
-the exact commands run. This report — together with the builder's code and the reviewer's verdict
-— is exactly the manager's three closeout inputs.
-Write this only after the curator-owned worklist is empty. If evidence or tooling prevents that,
-send a blocker report instead of a completion report.
+## Structured coherence authority (mandatory, last act)
+Do not write `<leaf-id>-curator-report.md`, `-v2.md`, or any other hand-versioned coherence file.
+`curator_coherence prepare` captures the exact code tree, memory tree, task topology, structured
+quality attestation, predecessor, and candidate list. Supply one semantic disposition, rationale,
+and explicit evidence reference for every returned tuple; normally cite the reconciled onboarding
+as `memory:onboarding/<onboardingFile>`. The tool records evidence digests, atomically selects one
+content-addressed structured record, renders its Markdown projection, and optionally freezes the
+attempt snapshot. Finish with `validate` and report its canonical path, record/report/snapshot
+paths, candidate trees, attestation digest, report digest, and validation result. If evidence or
+tooling prevents publication, send the typed blocker instead of a competing report.
 ```
 
 ---

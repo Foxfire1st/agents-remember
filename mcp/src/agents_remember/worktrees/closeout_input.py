@@ -21,7 +21,10 @@ from agents_remember.models.closeout.input import (
     NotApplicableCloseoutLeg,
     ResolvedCloseoutPlan,
 )
-from agents_remember.worktrees.modules.git import branch_commit, head_commit, require_git
+from agents_remember.worktrees.integration.closeout.future_code_candidate import (
+    capture_future_code_candidate,
+)
+from agents_remember.worktrees.modules.git import branch_commit, require_git
 from agents_remember.worktrees.route_review import code_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -197,13 +200,15 @@ def require_effective_closeout_plan(
 def capture_closeout_candidate(contract: WorktreeContract) -> CloseoutCandidateSnapshot:
     """Capture the exact candidate tree and the ref/tree it would advance."""
     repository = contract.code_repo_path if contract.kind == "series" else contract.code_worktree
-    current_head = (
-        branch_commit(repository, contract.code_work_branch)
-        if contract.kind == "series"
-        else head_commit(repository)
-    )
+    if contract.kind == "leaf":
+        future_code_candidate = capture_future_code_candidate(contract)
+        current_head = future_code_candidate.observedCodeHead
+        candidate_tree = future_code_candidate.codeCandidateTree
+    else:
+        current_head = branch_commit(repository, contract.code_work_branch)
+        candidate_tree = code_candidate_tree(contract)
     return CloseoutCandidateSnapshot(
-        candidate_tree=code_candidate_tree(contract),
+        candidate_tree=candidate_tree,
         head_commit=current_head,
         head_tree=require_git(repository, ["rev-parse", f"{current_head}^{{tree}}"]),
     )

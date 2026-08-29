@@ -98,6 +98,11 @@ class FakeDag:
         return name
 
 
+class FakeSource:
+    def file(self, path: str) -> str:
+        return path
+
+
 def test_agents_remember_quality_module_is_pinned_and_parseable() -> None:
     manifest = json.loads(DAGGER_MANIFEST.read_text(encoding="utf-8"))
     tree = ast.parse(DAGGER_MODULE.read_text(encoding="utf-8"), filename=DAGGER_MODULE.as_posix())
@@ -130,7 +135,7 @@ def test_candidate_setup_precedes_every_attempt_specific_cache_input() -> None:
 
     with patch.object(module, "dag", fake_dag):
         module._candidate_container(
-            object(),
+            FakeSource(),
             object(),
             attempt_nonce=VALID_DAGGER_NONCE,
             reports="/reports/scenario",
@@ -141,17 +146,21 @@ def test_candidate_setup_precedes_every_attempt_specific_cache_input() -> None:
         "repository_bundle",
     )
     operations = fake_dag.container_value.operations
-    install_index = operations.index(
-        (
-            "exec",
-            "/opt/ar-venv/bin/python",
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "-e",
-            "mcp[dev]",
-        )
+    runtime_build_index = next(
+        index
+        for index, operation in enumerate(operations)
+        if operation[0] == "exec"
+        and "install-python-runtime.sh" in " ".join(str(part) for part in operation[1:])
+    )
+    source_index = next(
+        index
+        for index, operation in enumerate(operations)
+        if operation[:2] == ("directory", "/workspace")
+    )
+    install_index = next(
+        index
+        for index, operation in enumerate(operations)
+        if operation[0] == "exec" and "uv sync" in " ".join(str(part) for part in operation[1:])
     )
     late_names = {
         "PYTHONPATH",
@@ -176,6 +185,7 @@ def test_candidate_setup_precedes_every_attempt_specific_cache_input() -> None:
     )
 
     assert len(late_indices) == len(late_names)
+    assert runtime_build_index < source_index < install_index
     assert all(index > install_index for index in late_indices)
     assert retry_cache_index > install_index
     assert all(VALID_DAGGER_NONCE not in operation for operation in operations[:install_index])
@@ -190,10 +200,10 @@ def test_candidate_setup_precedes_every_attempt_specific_cache_input() -> None:
     ) in operations[:install_index]
     assert (
         "exec",
-        "python3",
+        module.RUNTIME_PYTHON,
         "-m",
         "venv",
-        "/opt/ar-venv",
+        module.VENV_ROOT,
     ) in operations[:install_index]
 
 
@@ -317,7 +327,7 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
     ):
         result = asyncio.run(
             module.AgentsRememberQuality().quality(
-                object(),
+                FakeSource(),
                 object(),
                 mode="targeted",
                 diff_base="a" * 40,
@@ -376,7 +386,7 @@ def test_dagger_cadence_evidence_is_a_separate_non_accepting_graph() -> None:
     ):
         result = asyncio.run(
             module.AgentsRememberQuality().cadence_evidence(
-                object(),
+                FakeSource(),
                 object(),
                 trigger="scheduled",
             )
@@ -418,7 +428,7 @@ def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() ->
 
     with patch.object(module, "dag", fake_dag):
         asyncio.run(
-            module.AgentsRememberQuality().quality(object(), object(), diff_base="base-commit")
+            module.AgentsRememberQuality().quality(FakeSource(), object(), diff_base="base-commit")
         )
 
     wrapper = next(
@@ -447,7 +457,7 @@ def test_dagger_quality_stops_at_the_first_failed_dashboard_rail() -> None:
     with patch.object(module, "dag", fake_dag):
         result = asyncio.run(
             module.AgentsRememberQuality().quality(
-                object(), object(), mode="full", diff_base="base-commit"
+                FakeSource(), object(), mode="full", diff_base="base-commit"
             )
         )
 
@@ -472,7 +482,7 @@ def test_dagger_quality_exports_failure_at_the_exact_completed_boundary(
 
     with patch.object(module, "dag", fake_dag):
         result = asyncio.run(
-            module.AgentsRememberQuality().quality(object(), object(), diff_base="base-commit")
+            module.AgentsRememberQuality().quality(FakeSource(), object(), diff_base="base-commit")
         )
 
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])

@@ -20,7 +20,7 @@ from agents_remember.memory_quality.curator_checklist import report_path_for
 from agents_remember.memory_quality.style.citations import source_index_cache
 from agents_remember.worktrees.git_worktree_manager import contract_context
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,7 @@ class MemoryScope:
     cache_authority: source_index_cache.ManagedCacheAuthority | None = None
     unstamped_code_commit: str | None = None
     curator_report_path: Path | None = None
+    contract: WorktreeContract | None = None
 
 
 def resolve_memory_scope(
@@ -140,4 +141,5 @@ def resolve_leaf_memory_scope(
         ),
         unstamped_code_commit=contract.code_base_commit,
         curator_report_path=report_path_for(contract.worktree_group),
+        contract=contract,
     )

@@ -30,7 +30,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -169,9 +169,6 @@ class _AttachMasterPayload(_Payload):
 
 class _DetachMasterPayload(_Payload):
     pass
-
-
-_PayloadT = TypeVar("_PayloadT", bound=_Payload)
 
 
 @dataclass(frozen=True)
@@ -443,7 +440,9 @@ def validate_completed_master_row(task_root: Path, ref: SubTaskRef) -> None:
 # --- payload + sprint context -------------------------------------------------
 
 
-def _parse_payload(model: type[_PayloadT], fields: dict[str, Any], operation: str) -> _PayloadT:
+def _parse_payload[PayloadT: _Payload](
+    model: type[PayloadT], fields: dict[str, Any], operation: str
+) -> PayloadT:
     try:
         return model.model_validate(fields)
     except ValidationError as exc:

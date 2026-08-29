@@ -12,6 +12,9 @@ node_modules/
 .ruff_cache/
 .coverage
 uv.lock
+# The MCP runtime is an application as well as a published package. Its canonical
+# development, Dagger, CI, and release environments all consume one frozen lock.
+!mcp/uv.lock
 mcp/tests/fixtures/sim-rich/
 .dashboard-pastes/
 /.deepsec/

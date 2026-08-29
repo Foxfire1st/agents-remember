@@ -89,7 +89,7 @@ That repo contains the live onboarding layer, so you can inspect how by-path mem
 
 Before the Quickstart, make sure the host has:
 
-- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.11+** — the agent runs the MCP server with `uvx`, which picks a compatible interpreter.
+- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.13** — the package supports `>=3.13,<3.14`; repository development uses the verified source-built 3.13.15 contract documented in the MCP README.
 - **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
 - **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
 

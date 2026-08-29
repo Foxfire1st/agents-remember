@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
@@ -69,8 +68,8 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
-TerminalItems: TypeAlias = dict[str, dict[str, object]]
-AbandonOutputs: TypeAlias = tuple[
+type TerminalItems = dict[str, dict[str, object]]
+type AbandonOutputs = tuple[
     dict[str, object],
     TerminalItems,
     TerminalItems,

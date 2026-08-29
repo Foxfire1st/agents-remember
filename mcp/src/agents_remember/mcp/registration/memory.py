@@ -72,8 +72,14 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         operational checklist at `<worktree enclosure>/reports/curator-memory-quality.md` and its
         structured, report-digest-bound `.json` attestation; subset and unscoped calls write
         neither. ok=false means findings exist (e.g. dirty-source
-        drift), not that the tool failed. `curatorActionableCount` is the repair loop gate; final
-        commit stamps remain closeout-owned. The request is exactly one discriminated mode:
+        drift), not that the tool failed. `curatorActionableCount` and
+        `qualityChecklistStatus` are the onboarding-repair loop gate. Once the raw checklist is
+        `ready-for-closeout`, combined `checklistStatus=coherence-required` means the caller must
+        prepare, publish, and validate the exact structured `curator_coherence` authority;
+        `closeoutReady=true` is impossible until that same validator accepts it. Checklist and
+        attestation rendering are deterministic, so a same-input rerun preserves the published
+        authority; changed inputs stale it and require republishing. Final commit stamps remain
+        closeout-owned. The request is exactly one discriminated mode:
         `sync` and `start` carry repository plus optional scope/check/detail fields, while
         `poll` carries only repository plus run id. A saturated unique start returns
         `capacity-reached` without launching work. A poll returns the identical result;

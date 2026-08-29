@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TypeVar, cast, get_args
+from typing import cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
@@ -86,8 +86,6 @@ DEFAULT_CLOSEOUT_STATUS: CloseoutStatus = "not-started"
 DEFAULT_INTEGRATION_STATUS: IntegrationStatus = "not-started"
 DEFAULT_CLEANUP_STATUS: CleanupStatus = "pending"
 
-_Cell = TypeVar("_Cell", bound=str)
-
 
 class ContractError(AgentsRememberError):
     """Raised when a worktree contract cannot be parsed or validated."""
@@ -104,13 +102,13 @@ def _scalar(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _vocabulary_cell(
+def _vocabulary_cell[Cell: str](
     raw: str,
-    vocabulary: frozenset[_Cell],
+    vocabulary: frozenset[Cell],
     field_name: str,
-    fallback: _Cell,
+    fallback: Cell,
     quarantined: list[str],
-) -> _Cell:
+) -> Cell:
     """One parsed front-matter cell, narrowed onto the vocabulary it must belong to.
 
     Total on purpose. The contract file is untrusted input -- hand-edited, written by an
@@ -136,7 +134,7 @@ def _vocabulary_cell(
     if not value:
         return fallback
     if value in vocabulary:
-        return cast(_Cell, value)
+        return cast(Cell, value)
     quarantined.append(f"{field_name}={value!r} read as {fallback!r}")
     return fallback
 

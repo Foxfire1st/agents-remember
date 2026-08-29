@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, cast
 
 from agents_remember.errors import (
     AuthorityError,
@@ -91,7 +91,6 @@ ConfiguredContractAdmission = ConfiguredContractAccepted | ConfiguredContractRef
 TerminalConfiguredContractAdmission = (
     ConfiguredContractAccepted | TerminalConfiguredContractAccepted | ConfiguredContractRefused
 )
-ConfiguredContractOperationResult = TypeVar("ConfiguredContractOperationResult")
 
 
 def admit_configured_contract(
@@ -312,7 +311,7 @@ def configured_contract_reread_refusal(
     )
 
 
-def execute_configured_contract_operation(
+def execute_configured_contract_operation[ConfiguredContractOperationResult](
     accepted: ConfiguredContractAccepted,
     execute: Callable[[], ConfiguredContractOperationResult],
 ) -> ConfiguredContractOperationResult | ConfiguredContractRefused:

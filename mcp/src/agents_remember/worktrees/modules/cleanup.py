@@ -4,7 +4,7 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Literal
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
@@ -50,9 +50,9 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
-TerminalItems: TypeAlias = dict[str, dict[str, object]]
+type TerminalItems = dict[str, dict[str, object]]
 ENCLOSURE_REPORTS_DIRECTORY = "reports"
-CleanupOutputs: TypeAlias = tuple[
+type CleanupOutputs = tuple[
     dict[str, object],
     TerminalItems,
     TerminalItems,

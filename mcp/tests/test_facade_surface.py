@@ -140,7 +140,11 @@ REMOVED_FACADE_NAMES: dict[str, frozenset[str]] = {
 
 
 def base_top_level_names(path: str, source: str | None = None) -> list[str]:
-    """Every top-level class, function, constant, and type alias at the base commit."""
+    """Every top-level class, function, constant, and type alias at the base commit.
+
+    Module-local type parameters are implementation scaffolding rather than facade
+    members. Consumer-import checks below still fail if any repository code imports one.
+    """
     if source is None:
         completed = subprocess.run(
             ["git", "show", f"{BASE_COMMIT}:{path}"],
@@ -156,6 +160,13 @@ def base_top_level_names(path: str, source: str | None = None) -> list[str]:
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             names.append(node.name)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id in {"ParamSpec", "TypeVar", "TypeVarTuple"}
+            ):
+                continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
                 if isinstance(target, ast.Name):
@@ -190,6 +201,14 @@ class FacadeSurfaceTests(unittest.TestCase):
             "class K:\n    ...\ndef f() -> None:\n    ...\nx = 1\ny: int = 2\na, b = (1, 2)\n",
         )
         self.assertEqual(names, ["K", "f", "x", "y"])
+
+    def test_base_name_extraction_ignores_module_local_type_parameters(self) -> None:
+        path = FACADES[0][1]
+        names = base_top_level_names(
+            path,
+            'T = TypeVar("T")\nP = ParamSpec("P")\nTs = TypeVarTuple("Ts")\nAlias = list[T]\n',
+        )
+        self.assertEqual(names, ["Alias"])
 
     def test_every_base_top_level_name_is_importable_from_its_facade(self) -> None:
         for module, path in FACADES:

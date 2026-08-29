@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
 
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
@@ -32,8 +31,6 @@ from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
-T = TypeVar("T")
-
 
 @dataclass(frozen=True)
 class _AtomicLandingFacts:
@@ -41,7 +38,9 @@ class _AtomicLandingFacts:
     sprint_ref: TaskDocumentRef | None
 
 
-def publish_closeout_under_authority(contract: WorktreeContract, publication: Callable[[], T]) -> T:
+def publish_closeout_under_authority[T](
+    contract: WorktreeContract, publication: Callable[[], T]
+) -> T:
     """Re-prove atomic completion before closeout publication.
 
     Closeout does not move a protected integration ref, so it must not acquire
@@ -59,7 +58,7 @@ def publish_closeout_under_authority(contract: WorktreeContract, publication: Ca
     return publication()
 
 
-def publish_series_integration_under_authority(
+def publish_series_integration_under_authority[T](
     contract: WorktreeContract,
     publication: Callable[[], T],
 ) -> T:

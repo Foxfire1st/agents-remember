@@ -260,7 +260,18 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
             {path.name for path in expected.parent.iterdir()},
             {expected.name, expected.with_suffix(".json").name},
         )
-        self.assertIn(second["checklistStatus"], {"action-required", "ready-for-closeout"})
+        self.assertIn(
+            second["checklistStatus"],
+            {"action-required", "coherence-required", "ready-for-closeout"},
+        )
+        self.assertIn(
+            second["qualityChecklistStatus"],
+            {"action-required", "ready-for-closeout"},
+        )
+        self.assertEqual(
+            second["closeoutReady"],
+            second["checklistStatus"] == "ready-for-closeout",
+        )
         self.assertEqual(
             second["curatorActionableCount"],
             second["memoryRepairCount"]

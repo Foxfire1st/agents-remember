@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, TypeAlias
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -120,7 +120,7 @@ class FlexibleToolResponse(FlexibleResponseEnvelope):
     operation: str
 
 
-ResponseEnvelope: TypeAlias = ResponseModel | FlexibleResponseEnvelope
+type ResponseEnvelope = ResponseModel | FlexibleResponseEnvelope
 """The two envelope families every registered tool response belongs to.
 
 The strict/flexible split is about ``extra``, not about the envelope: both families

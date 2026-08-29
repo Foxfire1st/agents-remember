@@ -91,6 +91,34 @@ class RouteIndexCensusError(AgentsRememberError):
     """A validated repository could not provide one authoritative source census."""
 
 
+class FutureCodeCandidateError(AgentsRememberError):
+    """A future-code candidate could not be captured or is no longer current."""
+
+    def __init__(self, status: str, detail: str) -> None:
+        self.status = status
+        super().__init__(detail)
+
+
+class CuratorCoherenceError(AgentsRememberError):
+    """The leaf's structured curator-coherence authority is absent, stale, or invalid."""
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        expected: Mapping[str, object] | None = None,
+        observed: Mapping[str, object] | None = None,
+        next_action: str = "curator_coherence",
+    ) -> None:
+        self.status = status
+        self.detail = detail
+        self.expected = dict(expected or {})
+        self.observed = dict(observed or {})
+        self.next_action = next_action
+        super().__init__(detail)
+
+
 class CitationCacheError(AgentsRememberError):
     """A citation cache authority, capacity, or lifecycle lease was invalid."""
 
