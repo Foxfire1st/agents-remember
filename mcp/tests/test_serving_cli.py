@@ -19,6 +19,7 @@ from agents_remember.serving.build_info import (
     ServingBuild,
     _git_worktree_dirty,
     resolve_serving_build,
+    runtime_source_digest,
 )
 from agents_remember.serving.delta import diff_projection
 from agents_remember.serving.projections.projection_store import project_and_write
@@ -52,6 +53,9 @@ class BuildInfoTests(unittest.TestCase):
         payload = _build_wire(build)
         self.assertEqual(payload["commit"], build.commit)
         self.assertEqual(payload["bootedAt"], build.booted_at)
+        self.assertEqual(payload["sourceDigest"], build.source_digest)
+        self.assertEqual(payload["pythonExecutable"], build.python_executable)
+        self.assertEqual(payload["packageRoot"], build.package_root)
         # Rewritten: this used to index ``dashboardBuild`` unconditionally, which only held
         # while the fingerprint sidecar was committed alongside the bundle. Both are now
         # generated at release time, so the stamp is present-or-omitted, never fabricated.
@@ -60,13 +64,15 @@ class BuildInfoTests(unittest.TestCase):
         else:
             self.assertEqual(payload["dashboardBuild"], build.dashboard_build)
 
-    def test_off_checkout_serves_version_only(self) -> None:
+    def test_off_checkout_omits_unprovable_checkout_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build = resolve_serving_build(anchor=Path(tmp))
         self.assertIsNone(build.commit)
         self.assertNotIn("commit", _build_wire(build))  # never a faked hash
         self.assertFalse(build.dirty)
         self.assertNotIn("dirty", _build_wire(build))  # the wheel path stays clean
+        self.assertNotIn("sourceDigest", _build_wire(build))
+        self.assertEqual(_build_wire(build)["packageRoot"], Path(tmp).resolve().as_posix())
 
     def test_payload_shape_is_camel_case(self) -> None:
         build = ServingBuild(
@@ -84,6 +90,29 @@ class BuildInfoTests(unittest.TestCase):
                 "dashboardBuild": "dashboard-123",
             },
         )
+
+    def test_source_digest_distinguishes_equal_version_artifacts_without_path_noise(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as first_tmp,
+            tempfile.TemporaryDirectory() as second_tmp,
+        ):
+            first = Path(first_tmp)
+            second = Path(second_tmp)
+            for root in (first, second):
+                (root / "nested").mkdir()
+                (root / "nested" / "tool.py").write_text("VALUE = 1\n", encoding="utf-8")
+                (root / "nested" / "__pycache__").mkdir()
+                (root / "nested" / "__pycache__" / "tool.pyc").write_bytes(b"cache noise")
+
+            baseline = runtime_source_digest(first)
+            self.assertEqual(baseline, runtime_source_digest(second))
+
+            (second / "nested" / "tool.py").write_text("VALUE = 2\n", encoding="utf-8")
+            self.assertNotEqual(baseline, runtime_source_digest(second))
+
+    def test_source_digest_returns_unknown_when_the_tree_is_unreadable(self) -> None:
+        with mock.patch.object(Path, "rglob", side_effect=OSError("unreadable")):
+            self.assertIsNone(runtime_source_digest(Path("/unreadable-package")))
 
     def test_dirty_flag_is_additive_on_the_payload(self) -> None:
         clean = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")

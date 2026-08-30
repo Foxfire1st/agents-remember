@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.memory import (
     MemoryQualityCheckRequest,
     MemoryQualityPollRequest,
@@ -46,7 +47,10 @@ class RegistrationWiringTests1(RegistrationWiringTests):
             "server_info", "agents_remember.mcp.registration.core.server_info_payload"
         )
 
-        self.assertEqual(recorder.args, (self.config,))
+        self.assertEqual(recorder.args[:1], (self.config,))
+        self.assertEqual(len(recorder.args), 2)
+        self.assertIsInstance(recorder.args[1], ServingBuildPayload)
+        self.assertIsNotNone(recorder.args[1].sourceDigest)
 
     def test_context_packet_defaults_to_providers_only(self) -> None:
         """The docstring's "optionally provider status, drift and freshness": providers are

@@ -507,6 +507,9 @@ export interface ServingBuild {
   commit?: string;
   dashboardBuild?: string;
   dirty?: boolean;
+  packageRoot?: string;
+  pythonExecutable?: string;
+  sourceDigest?: string;
   version: string;
 }
 

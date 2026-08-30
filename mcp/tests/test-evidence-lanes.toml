@@ -362,6 +362,7 @@ integration = [
   "mcp/tests/test_provider_store_durability.py",
   "mcp/tests/test_provider_workflow_integration.py",
   "mcp/tests/test_provider_worktree_routing.py",
+  "mcp/tests/test_public_surface_conformance.py",
   "mcp/tests/test_pytest_bootstrap_boundaries.py",
   "mcp/tests/test_quality_retry_proof.py",
   "mcp/tests/test_quality_subprocess_environment.py",

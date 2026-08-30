@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agents_remember.controlplane.durable_store import declare_process_role
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.control_plane_identity_migration import (
     migrate_control_plane_identity_logs,
 )
@@ -23,6 +25,12 @@ def initialize_mcp_application(config: McpRuntimeConfig) -> None:
         config.coordination_root, include_agent_notifier_signals=False
     )
     install_ambient(AmbientLifecycle(EventStore(observer_root(config))))
+
+
+def mcp_serving_build_payload() -> ServingBuildPayload:
+    """Return the application-owned boot identity exposed by the MCP adapter."""
+
+    return process_serving_build().payload()
 
 
 def declare_mcp_process() -> None:

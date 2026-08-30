@@ -99,6 +99,7 @@ from agents_remember.observer import (
 )
 from agents_remember.observer.ambient import AmbientTiming
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
+from agents_remember.serving.build_info import ServingBuild
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
@@ -316,7 +317,17 @@ def _simple_payloads(config) -> dict[str, dict]:
         )
     return {
         "ping": tools.ping_payload(),
-        "server_info": tools.server_info_payload(config),
+        "server_info": tools.server_info_payload(
+            config,
+            ServingBuild(
+                version="test",
+                commit="abc1234",
+                booted_at="2026-08-25T00:00:00Z",
+                source_digest="sha256:" + "a" * 64,
+                python_executable="/runtime/bin/python",
+                package_root="/runtime/agents_remember",
+            ).payload(),
+        ),
         "closeout_door": tools.closeout_door_payload(
             config,
             CloseoutDoorRequest(

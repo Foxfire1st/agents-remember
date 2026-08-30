@@ -64,6 +64,7 @@ from agents_remember.mcp.tools import (
 )
 from agents_remember.mcp.tools import core as core_tools
 from agents_remember.providers.settings import lifecycle_settings_from_config
+from agents_remember.serving.build_info import ServingBuild
 from test_config import settings_payload
 from test_provider_current_state import ready_status_payload
 
@@ -107,7 +108,15 @@ class McpToolTests(unittest.TestCase):
             write_json(path, settings_payload(root))
             config = load_config(path)
 
-            payload = server_info_payload(config)
+            build = ServingBuild(
+                version=SERVER_VERSION,
+                commit="abc1234",
+                booted_at="2026-08-25T00:00:00Z",
+                source_digest="sha256:" + "a" * 64,
+                python_executable="/runtime/bin/python",
+                package_root="/runtime/agents_remember",
+            )
+            payload = server_info_payload(config, build.payload())
 
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["server"], "agents-remember")
@@ -127,6 +136,17 @@ class McpToolTests(unittest.TestCase):
                 list(PUBLIC_TOOLS),
             )
             self.assertEqual(payload["reservedTools"], [])
+            self.assertEqual(
+                payload["servingBuild"],
+                {
+                    "version": SERVER_VERSION,
+                    "bootedAt": "2026-08-25T00:00:00Z",
+                    "sourceDigest": "sha256:" + "a" * 64,
+                    "pythonExecutable": "/runtime/bin/python",
+                    "packageRoot": "/runtime/agents_remember",
+                    "commit": "abc1234",
+                },
+            )
 
     def test_server_constructs_with_context_packet_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

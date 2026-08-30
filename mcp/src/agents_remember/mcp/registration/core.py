@@ -4,8 +4,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.runtime.startup import mcp_serving_build_payload
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.core import ServingBuildPayload
 
 from ..tools import (
     context_packet_payload,
@@ -20,12 +22,14 @@ from ..tools import (
 
 def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register the core tools, split by what the caller is trying to find out."""
-    _register_identity_tools(server, config)
+    _register_identity_tools(server, config, mcp_serving_build_payload())
     _register_orientation_tools(server, config)
     _register_installation_tools(server, config)
 
 
-def _register_identity_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_identity_tools(
+    server: FastMCP, config: McpRuntimeConfig, serving_build: ServingBuildPayload
+) -> None:
     """What this server is and how it was configured."""
 
     @server.tool()
@@ -36,9 +40,10 @@ def _register_identity_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def server_info() -> dict[str, Any]:
         """Report the resolved configuration: coordination/workspace/transcript roots, allowed
-        repo ids, allowed provider ids, and the full tool list. Read-only; reflects the settings
-        loaded at startup (settings-file edits need a harness restart to take effect)."""
-        return server_info_payload(config)
+        repo ids, allowed provider ids, full tool list, and the boot-resolved package identity.
+        Read-only; reflects the settings and exact runtime loaded at startup (settings-file or
+        package changes need a harness restart to take effect)."""
+        return server_info_payload(config, serving_build)
 
 
 def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

@@ -114,7 +114,7 @@ from agents_remember.serving._app_terminal_routes import (
     _write_paste_image,
 )
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
-from agents_remember.serving.build_info import resolve_serving_build
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.conversation.authorization import LocalOperatorAuthorizationResolver
@@ -224,7 +224,7 @@ def _build_serving_runtime(
         liveness_config=liveness_config,
         liveness_sweeper=liveness_sweeper,
         # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
-        build=resolve_serving_build(),
+        build=process_serving_build(),
         # The deterministic agent-notifier sweep runs on its own decoupled cadence
         # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
         # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
