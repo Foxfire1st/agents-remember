@@ -1,7 +1,8 @@
 """Tests for the shared hosted-session opener (``serving.terminal_opener``, slice L2).
 
-The opener is the ONE spawn path both the dashboard route and the agent-facing ``spawn_agent_session``
-MCP tool compose over. These tests drive it against a fake host (records the ``ensure`` call, no real
+The opener is the ONE spawn path both the dashboard route and the internal
+``spawn_agent_session`` primitive behind public ``dispatch_agent`` compose over. These tests drive
+it against a fake host (records the ``ensure`` call, no real
 tmux) + a real JSON catalog, asserting the leaf-claim / provenance / env-seed behaviour that both call
 paths inherit.
 """

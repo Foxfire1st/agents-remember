@@ -14,8 +14,9 @@ do-it-all role did design, features, and fixes; the roles now diversify, and des
 **through the architect, which wears this hat** — at the front of the pipeline AND mid-flight
 (most leaves of a live series are designed mid-flight). It is the `tasks/AGENTS.md` collaboration
 doctrine (meta-questioning, reframe-before-execution, evidence-first) given a distinct, optimized
-shape as a job. Nothing here assumes a master exists yet — producing one is the point. Operations
-creates or switches this optional chat from the sprint plane; task-document context supplies its
+shape as a job. Nothing here assumes a master exists yet — producing one is the point. The
+architect creates or switches this optional chat through one `dispatch_agent` call on the canonical
+sprint document with role `designer` and a complete brief; task-document context supplies its
 identity without a synthetic leaf.
 
 The designer shares the orchestrator's **bird's-eye toolkit** — route indexes, onboarding, the
@@ -95,6 +96,11 @@ absorbs architect, orchestrator, manager, worker, strategist, or reviewer work.
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
+| dispatch | target-only role; ambient takeover target | This hat/seat has no `dispatch_agent` caller authority; the architect is the ordinary plane-hosted caller, while an identity-free developer launcher may target the sprint designer only for an explicit task-seat takeover |
 | tools   | bird's-eye toolkit | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · `message_parent` |
 
-Settings.json `orchestration.roles.designer` overrides these, and `orchestration.rolesPerLevel.<level>.designer` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
+Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
+`promptKeywords`) participate in Settings.json `orchestration.roles.designer` and
+`orchestration.rolesPerLevel.<level>.designer` overrides (role-file defaults < settings < level
+override; manual: `docs/reference/harnesses.md`). `dispatch` and `tools` are structural
+authority/capability descriptions, never settings keys; unknown orchestration keys fail loud.

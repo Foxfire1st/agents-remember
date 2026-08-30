@@ -383,6 +383,11 @@ state without exposing its private correlation.
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
+| dispatch | plane-hosted caller; ambient takeover target | The orchestrator is the ordinary plane-hosted caller that creates this master seat; this manager may create only its direct worker/reviewer/curator children, while an identity-free launcher may target it only for an explicit task-seat takeover |
 | tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `dispatch_agent` · `retire_child` (your own master's worker/reviewer/curator seats only) · `message_parent`/`message_child` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` |
 
-Settings.json `orchestration.roles.manager` overrides these, and `orchestration.rolesPerLevel.<level>.manager` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
+Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
+`promptKeywords`) participate in Settings.json `orchestration.roles.manager` and
+`orchestration.rolesPerLevel.<level>.manager` overrides (role-file defaults < settings < level
+override; manual: `docs/reference/harnesses.md`). `dispatch` and `tools` are structural
+authority/capability descriptions, never settings keys; unknown orchestration keys fail loud.

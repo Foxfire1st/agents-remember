@@ -33,10 +33,42 @@ FORBIDDEN_AGENT_INSTRUCTIONS = (
     "qualified leaf",
     "coordination leaf",
 )
+CALLER_FACING_ROOTS = (
+    REPOSITORY_ROOT / "skills",
+    REPOSITORY_ROOT / "agents-md-files",
+    REPOSITORY_ROOT / "docs",
+    REPOSITORY_ROOT / "scripts/harness",
+)
+CALLER_FACING_FILES = (
+    REPOSITORY_ROOT / "AGENTS.md",
+    REPOSITORY_ROOT / "README.md",
+    REPOSITORY_ROOT / ".pi/extensions/agents-remember-start.ts",
+)
+ROLE_DISPATCH_CONTEXTS = {
+    "architect.md": "ambient-bootstrap target; plane-hosted caller after startup",
+    "orchestrator.md": "plane-hosted caller; ambient takeover target",
+    "manager.md": "plane-hosted caller; ambient takeover target",
+    "strategist.md": "target-only role; ambient takeover target",
+    "worker.md": "target-only role; ambient takeover target",
+    "reviewer.md": "target-only role; ambient takeover target",
+    "curator.md": "target-only role; ambient takeover target",
+    "designer.md": "target-only role; ambient takeover target",
+    "system-specialist.md": "target-only role; ambient takeover target",
+}
 
 
 def _agent_instruction_files(root: Path) -> list[Path]:
     return sorted((*root.joinpath("roles").glob("*.md"), *root.joinpath("templates").glob("*.md")))
+
+
+def _caller_facing_instruction_files() -> list[Path]:
+    discovered = {
+        path
+        for root in CALLER_FACING_ROOTS
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix in {".md", ".txt"}
+    }
+    return sorted(discovered | set(CALLER_FACING_FILES))
 
 
 @pytest.mark.parametrize("skill_root", [CANONICAL_SKILL, PACKAGED_SKILL])
@@ -62,6 +94,71 @@ def test_packaged_agent_doctrine_is_the_canonical_skill_exactly() -> None:
     }
 
     assert packaged == canonical
+
+
+def test_caller_facing_instructions_never_advertise_internal_spawn_primitive() -> None:
+    offenders = [
+        path.relative_to(REPOSITORY_ROOT).as_posix()
+        for path in _caller_facing_instruction_files()
+        if "spawn_agent_session" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
+
+
+@pytest.mark.parametrize(("role_file", "caller_context"), ROLE_DISPATCH_CONTEXTS.items())
+def test_every_role_tool_table_states_its_dispatch_caller_context(
+    role_file: str, caller_context: str
+) -> None:
+    text = _doctrine(f"roles/{role_file}")
+    assert f"| dispatch | {caller_context}" in text
+    assert "`dispatch_agent`" in text
+    assert "`dispatch` and `tools` are structural authority/capability descriptions" in text
+    assert "never settings keys" in text
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        SOURCE_SKILL / "SKILL.md",
+        REPOSITORY_ROOT / "AGENTS.md",
+        REPOSITORY_ROOT / "agents-md-files/coordinator/AGENTS.md",
+        REPOSITORY_ROOT / "scripts/harness/shared/session-start-directive.md",
+        REPOSITORY_ROOT / "scripts/harness/shared/workspace-directive.md",
+        REPOSITORY_ROOT / "skills/c-13-install-and-onboard/SKILL.md",
+    ),
+)
+def test_launcher_doctrine_separates_ordinary_bootstrap_from_explicit_takeover(path: Path) -> None:
+    text = " ".join(path.read_text(encoding="utf-8").split()).casefold()
+    assert "ordinary" in text, path.relative_to(REPOSITORY_ROOT)
+    assert "task-seat takeover" in text, path.relative_to(REPOSITORY_ROOT)
+
+
+def test_takeover_doctrine_makes_lineage_conflicts_resumable() -> None:
+    text = _doctrine("SKILL.md")
+    assert "source-lineage-stale" in text
+    assert "source-lineage-unavailable" in text
+    assert "resumable reconciliation phase" in text
+    assert "advertised continuation" in text
+    assert "semantic truth" in text
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        SOURCE_SKILL / "SKILL.md",
+        SOURCE_SKILL / "templates/architect-brief.md",
+        REPOSITORY_ROOT / "agents-md-files/coordinator/AGENTS.md",
+        REPOSITORY_ROOT / "skills/c-13-install-and-onboard/SKILL.md",
+        REPOSITORY_ROOT / "docs/reference/mcp-tools.md",
+        REPOSITORY_ROOT / "scripts/harness/shared/session-start-directive.md",
+        REPOSITORY_ROOT / "mcp/src/agents_remember/mcp/registration/sessions.py",
+    ),
+)
+def test_launcher_doctrine_carries_the_complete_caller_kind_contract(path: Path) -> None:
+    text = " ".join(path.read_text(encoding="utf-8").split()).casefold()
+    for required in ("dispatch_agent", "plane", "ambient", "brief"):
+        assert required in text, f"{path.relative_to(REPOSITORY_ROOT)}: {required}"
+    assert "fallback" in text or "falls back" in text or "never becomes an ambient retry" in text
 
 
 def _doctrine(path: str) -> str:

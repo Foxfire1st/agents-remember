@@ -21,13 +21,20 @@ lifecycle, and no role reads another role's file.
    to you.
 3. **Else** (a developer opened this session) → you are the developer-facing **free chat** — a
    launcher, not a role seat (ruled 2026-07-09). Research-only questions are answered inline with
-   no role taken. The moment the ask is role-shaped (a sprint, a task, any durable change), do NOT
-   assume the architect role in this chat: resolve the target sprint, then open that sprint in
-   Operations and use its role control to **create or switch to the architect chat bound to the
-   sprint document**. The dashboard and control plane choose the runtime occupant and inject the
-   role; this launcher never handles a session id. The architect profile — harness/model/effort —
-   comes from `orchestration.roles.architect` in settings. The resulting architect runs
-   `roles/architect.md` and owns that sprint's developer conversation.
+   no role taken. For ordinary role-shaped work (a sprint, a task, any durable change that is not
+   an explicit task-seat takeover), do NOT assume the architect role in this chat: resolve the
+   target sprint, compile one complete brief
+   from `templates/architect-brief.md`, and call
+   `dispatch_agent(task_document_ref=<canonical sprint document>, role="architect",
+   brief=<compiled brief>)` once. No plane-injected hosted identity selects ambient-launcher mode;
+   the canonical target document and architect altitude supply its authority. The launcher never
+   submits caller identity or handles a session id. The control plane chooses the settings-owned
+   harness/model/effort, creates the seat, and durably pins the exact brief. On `dispatched` or
+   `dispatch-queued`, switch the developer conversation to the canonical `(sprint document,
+   architect)` chat and stop role work here; both results mean the brief is durable, so never send
+   a second brief. The resulting architect runs `roles/architect.md`. An explicit
+   developer-declared task-seat takeover is the bounded exception below: it dispatches the named
+   role on that role's canonical task document instead of first creating an architect.
    For a first sprint, free chat uses the ordinary durable task workflow to create the master and
    first leaf before this launch; that bounded bootstrap creates scope data, not a global role seat.
 
@@ -54,20 +61,34 @@ or build hats (the hat-collapse rule). A spawned role seat never wears another r
 
 When the developer says *"you are the orchestrator/manager/worker for task X"* (or equivalent),
 that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks,
-dispatch, or implementation, open the named task document in Operations and switch to or create
-the role at its canonical altitude: sprint for architect/orchestrator/optional sprint roles,
-master for manager, leaf for worker/reviewer/curator.
+dispatch, or implementation, resolve the named task document and converge on that role's canonical
+seat at its canonical altitude: sprint for architect/orchestrator/optional sprint roles, master for
+manager, leaf for worker/reviewer/curator. `dispatch_agent` reuses a viable occupant or its durable
+queued brief for the same `(task document, role)`; takeover never means manually replacing a live
+incumbent. Only the lifecycle-owned transaction may retire one generation that it has positively
+proved failed.
 
 Operational checklist:
 
 1. Resolve the canonical JSON-primary task document and the role being claimed.
-2. Use the Operations role switch/create control; do not call a terminal attach primitive and do
-   not read, request, paste, or retain a session/lifecycle/agent id.
+2. Compile the role's complete canonical brief and call `dispatch_agent` once with that document,
+   role, and brief. An identity-free developer chat uses ambient-launcher mode; it does not submit
+   caller identity, call a terminal attach/session primitive, or read, request, paste, or retain a
+   session/lifecycle/agent id. Repeating the exact call after an advertised recovery is idempotent:
+   it reconciles the canonical seat and pinned brief instead of creating a duplicate.
 3. If desired, call `rename_self(label=...)` after the hosted role chat is active.
 4. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
 
-If the role control cannot establish that document+role binding, record the structural blocker and
-ask for the missing document or role authority. Do not improvise an exact-id attachment.
+If `dispatch_agent` cannot establish that document+role binding, record the structural blocker.
+For `source-lineage-stale` or `source-lineage-unavailable`, follow the refusal's ordered,
+contract-addressed `worktree_sync` recovery and retry the same document+role. A retained merge
+conflict is a resumable reconciliation phase: resolve mechanically derivable conflicts, run the
+advertised continuation, and then retry dispatch. That retry converges on any viable existing
+occupant or durable queued brief; never clear either one merely to make the retry look fresh.
+Escalate only when the conflicting changes encode a semantic truth that current requirements and
+evidence cannot resolve. For other structural
+refusals, ask for the missing document or role authority. Never improvise an exact-id attachment or
+ask for branch, occupant, session, lifecycle, or agent ids.
 
 ## Developer Clarification Triage
 
@@ -405,12 +426,26 @@ For ordinary spawned seats, settings are the sole developer-controlled spend sur
 `dispatch_agent` callers declare the canonical task document, role, brief, and optional label;
 they never declare harness/model/effort or direct launch/session spend controls.
 
-### Hosted role dispatch is one structural transaction
+### `dispatch_agent` has two disjoint caller kinds
 
-Every role that dispatches another hosted role calls `dispatch_agent` once with the child's real
-task document, role, and complete brief. The control plane performs the internal transaction:
+| Caller kind | Recognition | Authority | Forbidden shortcut |
+| --- | --- | --- | --- |
+| Plane-hosted seat | Plane-injected hosted identity is present | Current seat plus direct-child scope policy | Treating a plane authorization failure as ambient |
+| Ambient launcher | Plane-injected hosted identity is absent | Canonical target-document resolution plus target role-altitude validation; there is no parent seat | Fabricating caller identity or using ambient mode as an in-hierarchy escape |
 
-1. authorize the direct-child relationship from the caller's ambient document+role seat;
+The public request is identical in both modes: canonical target document, target role, complete
+brief, and optional label. Caller kind comes only from process context; the request never chooses
+it. Both modes use the same settings resolution, internal seat creation, readiness proof, exact
+brief pinning, rollback, and canonical `(task document, role)` publication. A stale, invalid,
+mismatched, unbound, or unauthorized plane identity remains a plane refusal and never falls back.
+
+### Role dispatch is one structural transaction
+
+Every launcher or role that dispatches a hosted role calls `dispatch_agent` once with the target's
+real task document, role, and complete brief. The control plane performs the internal transaction:
+
+1. select caller kind from process identity, then either authorize the plane seat's direct-child
+   relationship or validate the ambient launcher's target document and role altitude;
 2. resolve source lineage from that canonical task document before process creation: an
    organizational leaf requires super → leaf, while an atomic path requires super → master → leaf,
    for code and external memory when enabled; a manager's admission proves its nature-appropriate
@@ -422,10 +457,13 @@ task document, role, and complete brief. The control plane performs the internal
 6. return only structural status (`dispatched` or `dispatch-queued`) and delivery state.
 
 A `source-lineage-stale` or `source-lineage-unavailable` result means no child process was created.
-Use its ordered, contract-addressed `worktree_sync` recovery, then dispatch the same document+role
-again. Never ask for branch commit ids or occupant ids: task identity is the input and the control
-plane owns the Git proof. This early refusal prevents a fresh seat from reading stale code or stale
-onboarding before anyone notices the master or leaf fell behind its parent.
+Use its ordered, contract-addressed `worktree_sync` recovery, resolve any retained mechanically
+derivable merge conflict through the advertised continuation, then dispatch the same document+role
+again. A conflict requiring a genuinely semantic ruling follows the ordinary escalation path; it
+is not silently converted into abandonment. Never ask for branch commit ids or occupant ids: task
+identity is the input and the control plane owns the Git proof. This early refusal prevents a fresh
+seat from reading stale code or stale onboarding before anyone notices the master or leaf fell
+behind its parent.
 
 The model never receives the spawned occupant's runtime id and never calls readiness, exact inbox,
 attach, or raw retire operations. A queued brief is already durable and follows the ordinary

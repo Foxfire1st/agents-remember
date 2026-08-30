@@ -1,6 +1,6 @@
-"""Tests for the agent-facing ``spawn_agent_session`` MCP tool + the serving paste endpoint.
+"""Tests for the internal ``spawn_agent_session`` primitive + serving paste endpoint.
 
-The tool composes the EXISTING session primitives (opener + leaf claim + log-confirmed paste + submit).
+Public callers use ``dispatch_agent``; this primitive composes the existing opener and seat claim.
 These tests inject a fake host + fake paster + a fake ``which`` so the composition is exercised without a
 real tmux server, and drive the ``POST /api/terminal/{session}/paste`` endpoint through ``TestClient``.
 """
@@ -460,9 +460,12 @@ class SpawnAgentSessionTests(unittest.TestCase):
                 )
                 self.assertFalse(payload["ok"])
                 self.assertEqual(payload["status"], "brief-delivery-separate")
-                self.assertIn("hosted_session_readiness", payload["detail"])
-                self.assertIn("message_kind='dispatch-brief'", payload["detail"])
-                self.assertIn("adapterDeliveryState", payload["detail"])
+                self.assertIn("public dispatch_agent", payload["detail"])
+                self.assertIn("canonical task document", payload["detail"])
+                self.assertIn("complete brief", payload["detail"])
+                self.assertNotIn("hosted_session_readiness", payload["detail"])
+                self.assertNotIn("message_kind='dispatch-brief'", payload["detail"])
+                self.assertNotIn("adapterDeliveryState", payload["detail"])
                 self.assertEqual(self.host.ensured, [])
                 self.assertEqual(paster.calls, [])
 

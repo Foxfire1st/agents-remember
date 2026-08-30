@@ -227,8 +227,8 @@ def _open_terminal_response(
 ) -> Response:
     # Mode B2 opener: the dashboard *spawns + owns* a
     # session, then the WebSocket above attaches to it. The task-seat claim + ensure + upsert
-    # composition lives in the shared `open_terminal_session` so this route and the agent-facing
-    # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
+    # composition lives in the shared `open_terminal_session` so this route and the internal
+    # `spawn_agent_session` primitive behind public `dispatch_agent` use ONE opener.
     config = runtime.config
     try:
         resolved_launch = resolve_terminal_open_selection(

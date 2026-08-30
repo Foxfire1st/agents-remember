@@ -13,7 +13,11 @@ parameterize).
 
 A **harness** is a TUI coding agent the framework can launch into a hosted
 tmux session — via the dashboard's launch buttons or the agent-facing structural
-`dispatch_agent` tool (one plane-owned opener; no parallel agent launch path).
+`dispatch_agent` tool (one public spawn surface; no parallel agent launch path).
+Plane-hosted callers use injected seat identity and direct-child scope. An
+identity-free developer launcher uses canonical target-document resolution plus
+role-altitude validation to create the first architect seat. The request shape
+is identical and a plane refusal never falls back to ambient.
 Each harness is described by an entry with:
 
 | Field | Meaning |
@@ -180,9 +184,10 @@ config) refuses instead of creating two authorities. Example: `["--dangerously-s
 
 The private dispatch order is explicit: **launch (argv → settings session commands) → readiness
 on the plane-owned occupant → one durable exact-pinned `dispatch-brief` (keywords first)**.
-`dispatch_agent` exposes only the structural seat and delivery state. Launch success is
-`spawned-unbriefed`; a launched-only or not-ready seat is not
-active work. Brief delivery is accepted only when the durable row reports
+`spawned-unbriefed` is an internal transaction phase, not a public success result or a caller
+workflow. `dispatch_agent` exposes only the structural seat and delivery state after the exact
+brief is durable. A launched-only or not-ready seat is not active work. Brief delivery is accepted
+only when the durable row reports
 `deliveryState=delivered` and `deliveryDetail=harness-log-confirmed`. A failed attempt leaves that
 same row pending for recovery; it does not create a duplicate brief or replacement session.
 

@@ -597,12 +597,11 @@ def _caller_spend_override_refusal(
         return None
     fields = ", ".join(removed)
     detail = (
-        "spawn_agent_session no longer accepts caller-selected spend fields "
-        f"({fields}) for ordinary agent-driven spawns. Configure harness/model/effort and "
+        "the internal spawn_agent_session primitive does not accept caller-selected spend fields "
+        f"({fields}). Public role callers use dispatch_agent; configure harness/model/effort and "
         "launch/session spend controls in agentic settings under orchestration.roles, "
-        "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses; call "
-        "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, task_document_ref, label, env, and "
-        "provenance only, with context omitted and submit=false."
+        "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses. Internal "
+        "dispatch invokes this primitive only after those settings are resolved."
     )
     return spawn_refusal(
         "spend-override-unsupported",
@@ -620,11 +619,9 @@ def _brief_delivery_separate_refusal(
     if context is None and not submit:
         return None
     detail = (
-        "brief delivery is separate: call spawn_agent_session without context and with submit=false; "
-        "then call hosted_session_readiness(session_id=<returned session>, wait_seconds=<bound>); "
-        "only after status='ready', post one operator_inbox entry with the exact agent_id, "
-        "message_kind='dispatch-brief', and deliver_to_hosted=true; treat the seat as briefed only "
-        "when deliveryState='delivered' and adapterDeliveryState is accepted or queued."
+        "brief delivery is owned by public dispatch_agent as one transaction; the internal "
+        "spawn_agent_session primitive accepts no brief. Call dispatch_agent once with the "
+        "canonical task document, target role, and complete brief."
     )
     return spawn_refusal("brief-delivery-separate", None, kind, detail=detail)
 

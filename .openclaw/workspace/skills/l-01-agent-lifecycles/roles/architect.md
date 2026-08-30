@@ -10,12 +10,15 @@ drawing-board rounds, and the pace at which developer decisions are presented. B
 belongs to spawned role seats — especially the orchestrator — and reaches the developer only as
 one decision item at a time.
 
-This seat normally ARRIVES by sprint-bound spawn (ruled 2026-07-09): the developer's first free
-chat is a launcher, not a role seat — it resolves the sprint and spawns the architect into its own
-chat with the settings-owned profile (`orchestration.roles.architect`), so the architect always
-starts clean with immutable repository+sprint provenance and never inherits an ambiguous
-harness/model/effort. A session that finds itself doing sprint-scale work without having been
-spawned as that sprint's architect spawns one rather than assuming the role.
+This seat normally ARRIVES through one ambient-launcher `dispatch_agent` call (ruled 2026-07-09):
+the developer's first free chat is a launcher, not a role seat. It resolves the sprint, compiles
+`../templates/architect-brief.md`, and dispatches that exact brief on the canonical sprint document
+with role `architect`. The control plane selects `orchestration.roles.architect`, creates the seat,
+and durably pins the brief before the launcher hands over, so the architect starts with immutable
+repository+sprint provenance and never inherits ambiguous harness/model/effort. The launcher has no
+plane identity and no caller field. Once this seat exists, its own child dispatches are plane-hosted
+and structurally scoped; a plane refusal never falls back to ambient. A session doing sprint-scale
+work without this binding dispatches the sprint's architect rather than assuming the role.
 
 ## Spool-Up (the chain is self-driving)
 
@@ -350,6 +353,11 @@ developer or the configured distinct decider; the architect does not approve its
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
+| dispatch | ambient-bootstrap target; plane-hosted caller after startup | For ordinary role-shaped work the identity-free launcher targets this architect on the canonical sprint; once hosted, the architect may create only structurally authorized sprint children, with no plane-to-ambient fallback |
 | tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · `message_parent`/`message_child` · gates for developer hand-offs · `dispatch_agent` |
 
-Settings.json `orchestration.roles.architect` overrides these, and `orchestration.rolesPerLevel.<level>.architect` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
+Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
+`promptKeywords`) participate in Settings.json `orchestration.roles.architect` and
+`orchestration.rolesPerLevel.<level>.architect` overrides (role-file defaults < settings < level
+override; manual: `docs/reference/harnesses.md`). `dispatch` and `tools` are structural
+authority/capability descriptions, never settings keys; unknown orchestration keys fail loud.

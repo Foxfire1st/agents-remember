@@ -133,7 +133,7 @@ That is the normal first-run path. `skills_install()` remains available as a
 maintenance/manual MCP tool, but the starter packages already provide the
 initial skills and harness files.
 
-After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and launches a sprint-bound architect after the durable sprint and first leaf exist; spawned backend seats follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and, for ordinary role-shaped work after the durable sprint and first leaf exist, compiles the canonical architect brief and calls `dispatch_agent` once on that sprint document. An explicit developer-declared task-seat takeover instead targets the named role on its canonical task document. The identity-free launcher hands over after the exact brief is durable; later plane-hosted seats use the same tool under structural child-scope authority. Spawned backend seats follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Run The Dashboard
 

@@ -89,7 +89,7 @@ VALID_SPAWN_AGENT_SESSION_STATUSES: frozenset[SpawnAgentSessionStatus] = frozens
 
 
 class SpawnAgentSessionResponse(ToolResponse):
-    """``spawn_agent_session``: create and bind a hosted seat without delivering its brief."""
+    """Internal ``spawn_agent_session`` result; public callers use ``dispatch_agent``."""
 
     operation: Literal["spawn_agent_session"] = "spawn_agent_session"
     status: SpawnAgentSessionStatus

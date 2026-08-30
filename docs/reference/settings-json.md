@@ -358,6 +358,12 @@ with every parameter, vocabulary, and refusal is
    with an explicitly unproven outcome rather than entering an impossible proof retry loop.
    Session-command application by itself does not prove brief delivery.
 
+These settings are consumed by the same public `dispatch_agent` transaction for both caller kinds.
+A plane-hosted seat is authorized from injected identity and direct-child scope; an identity-free
+developer launcher is authorized by canonical target-document resolution and target role altitude.
+The request does not carry caller identity or a mode selector, and a plane refusal never falls back
+to ambient. Harness/model/effort remain settings-owned in both modes.
+
 Inside the private control plane, hosted role dispatch uses an exact runtime correlation through
 three states: create returns `spawned-unbriefed`; readiness advances that occupant to
 harness-ready; one durable exact-pinned `dispatch-brief` starts the briefed-by deadline row. This

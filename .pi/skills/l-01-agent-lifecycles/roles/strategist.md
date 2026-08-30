@@ -244,6 +244,11 @@ Everything else — `task_doc`, `worktree_*`, `lifecycle_*`, `gate_*`, `dispatch
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
+| dispatch | target-only role; ambient takeover target | This seat has no `dispatch_agent` caller authority; the architect is the ordinary plane-hosted caller, while an identity-free developer launcher may target the sprint strategist only for an explicit task-seat takeover |
 | tools   | read-only analysis surface | `read_ar_files` · `grepai_*` · `cgc_*` · `context_packet` · `drift_check` · notes-draft write · `message_parent` |
 
-Settings.json `orchestration.roles.strategist` overrides these, and `orchestration.rolesPerLevel.<level>.strategist` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
+Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
+`promptKeywords`) participate in Settings.json `orchestration.roles.strategist` and
+`orchestration.rolesPerLevel.<level>.strategist` overrides (role-file defaults < settings < level
+override; manual: `docs/reference/harnesses.md`). `dispatch` and `tools` are structural
+authority/capability descriptions, never settings keys; unknown orchestration keys fail loud.

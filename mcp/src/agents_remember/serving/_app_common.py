@@ -294,10 +294,10 @@ class TerminalAttachTaskRequest(BaseModel):
 class TerminalRetireRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}/retire``: the retire authority check.
 
-    ``actor_session`` is the RETIRING seat's own catalog session id (self-declared, mirroring
-    ``spawn_agent_session``'s ``spawned_by_session`` provenance -- there is no ambient "who am I"
-    session-id resolution in this codebase). ``reason`` is a free-form human-readable justification,
-    always recorded in the retirement provenance.
+    ``actor_session`` is the RETIRING seat's own catalog session id (self-declared, mirroring the
+    internal ``spawn_agent_session`` primitive's ``spawned_by_session`` provenance -- this trusted
+    dashboard administration route does not use ambient caller resolution). ``reason`` is a
+    free-form human-readable justification, always recorded in the retirement provenance.
     """
 
     actor_session: str = Field(alias="actorSession")

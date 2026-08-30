@@ -31,7 +31,7 @@ surrounding procedure. See the [Skills reference](skills.md).
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `dispatch_agent` | Atomically create or replace one authorized child seat, wait for plane-owned readiness, and persist the exact initial brief internally. | `task_document_ref`, `role`, `brief` |
+| `dispatch_agent` | Create or replace one canonical role seat and durably pin its exact initial brief. Plane-hosted callers use injected seat identity plus direct-child scope; identity-free developer launchers use target-document resolution plus role-altitude validation. | `task_document_ref`, `role`, `brief`, optional `label` |
 | `message_parent` | Send one durable whole-message submission to the caller's structurally current parent. | `ask`, `response`, optional agent-visible `message_kind` |
 | `message_child` | Send one durable whole-message submission to an authorized structurally current child. | `task_document_ref`, `role`, `ask`, `response`, optional agent-visible `message_kind` |
 | `retire_child` | Retire an authorized child seat without exposing its occupant address. | `task_document_ref`, `role`, `reason` |
@@ -45,6 +45,14 @@ Runtime session, lifecycle, inbox-row, adapter, vendor, and gate identifiers are
 control-plane correlations. The plane may use exact addressing internally for the initial brief,
 delivery, recovery, diagnostics, and trusted dashboard administration, but those operations are
 not registered as agent MCP tools and must not appear in role briefs or handoffs.
+
+`dispatch_agent` is the only public spawn verb and its two caller kinds are disjoint. Presence of
+plane-injected hosted identity selects structural child authorization; absence selects the ambient
+launcher, which has no parent seat and must address a canonical task document at the target role's
+altitude. The request never supplies caller identity or selects a mode. Both modes share settings,
+internal creation/readiness, exact brief pinning, rollback, and canonical seat publication. A
+plane authorization failure remains a refusal and never retries as ambient. `dispatched` and
+`dispatch-queued` both mean the brief is durable; callers do not poll readiness or send it again.
 
 ## Install & scaffolding
 

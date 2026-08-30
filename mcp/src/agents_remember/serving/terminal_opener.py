@@ -1,13 +1,14 @@
-"""The shared hosted-session opener: one spawn path for the dashboard route and the MCP tool.
+"""The shared hosted-session opener: one spawn path for dashboard and internal dispatch.
 
-Slice L2 (agent-facing dispatch) extracts the opener composition that used to live inline in
-``app.py``'s ``POST /api/terminal/{session}`` handler so the FastAPI route AND the agent-facing
-``spawn_agent_session`` MCP tool spawn through the *same* function -- the invariant is **no parallel
-spawn path**. It mirrors ``terminal_task_assignment.assign_terminal_session_to_task``: a serving-layer
-policy helper both call paths reuse instead of duplicating the task-seat claim + ensure + upsert sequence.
+Slice L2 extracts the opener composition that used to live inline in ``app.py``'s
+``POST /api/terminal/{session}`` handler so the FastAPI route and the internal
+``spawn_agent_session`` primitive used by public ``dispatch_agent`` share the *same* function --
+the invariant is **no parallel spawn path**. It mirrors
+``terminal_task_assignment.assign_terminal_session_to_task``: a serving-layer policy helper both
+call paths reuse instead of duplicating the task-seat claim + ensure + upsert sequence.
 
 The opener is transport-agnostic. It returns a small :class:`OpenTerminalResult`; ``app.py`` maps it to
-an HTTP ``JSONResponse`` (200 / 409 / 400) and the MCP tool maps it to a validated tool payload. The
+an HTTP ``JSONResponse`` (200 / 409 / 400) and internal dispatch maps it to a validated payload. The
 structural-seat uniqueness check stays **server-arbitrated**: a taken seat returns ``seat-taken`` and the
 caller surfaces it, never overrides it.
 

@@ -7,13 +7,25 @@ agent** (the `AR_SPAWN_ROLE` env var is set, or the first message is a role
 brief) follows its brief — the brief is its session start, and the rest of this
 section is not addressed to it. A **developer-facing session** is the **free
 chat** — a launcher, not a role seat (ruled 2026-07-09): it answers
-research-only questions inline, and for any role-shaped work it resolves the
-target sprint and spawns the **architect** into its own sprint-bound chat with
-the settings-owned profile (`spawn_agent_session`, `AR_SPAWN_ROLE=architect`,
-and a leaf reference in that sprint) instead of assuming the role itself. The
-spawned architect enters
+research-only questions inline, and for ordinary role-shaped work it resolves the
+target sprint, compiles the complete canonical
+`skills/l-01-agent-lifecycles/templates/architect-brief.md`, and calls
+`dispatch_agent(task_document_ref=<sprint document>, role="architect",
+brief=<compiled brief>)` once instead of assuming the role itself. Absence of
+plane-injected hosted identity selects this ambient-launcher mode; the target
+document and architect altitude supply authority. The control plane selects the
+settings-owned profile, creates the seat, and durably pins the exact brief. The
+launcher never supplies caller identity, never calls a session primitive, and
+never turns a plane refusal into an ambient retry. A plane refusal never falls
+back to ambient. The spawned architect enters
 `skills/l-01-agent-lifecycles/roles/architect.md` and owns the developer
-conversation from there.
+conversation from there. `dispatched` and `dispatch-queued` both mean the brief
+is durable; use the canonical `(sprint document, architect)` chat and do not send
+a second brief.
+
+An explicit developer-declared task-seat takeover is the bounded exception: it
+uses the same ambient `dispatch_agent` transaction for the named role on that
+role's canonical task document, following the lifecycle skill's takeover contract.
 
 For a first sprint, free chat first uses the durable task workflow to create the
 master and its first leaf; this bounded bootstrap supplies immutable scope data

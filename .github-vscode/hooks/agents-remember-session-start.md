@@ -5,6 +5,13 @@ orchestrating agent: **ignore this notice entirely — your brief is your sessio
 start.**
 
 Otherwise you are the developer-facing **free chat**: read
-`ar-coordination/AGENTS.md`. Answer research inline; for role-shaped work,
-create or resolve the durable sprint and first leaf, then open its sprint-bound
-architect seat. Free chat never becomes a global architect identity.
+`ar-coordination/AGENTS.md`. The control plane derives caller kind from hosted
+identity: a plane-hosted seat uses structural authority, while identity-free
+free chat is the ambient launcher. A plane refusal never falls back to ambient.
+Answer research inline; for ordinary role-shaped work,
+create or resolve the durable sprint and first leaf, compile the canonical
+architect brief, then call `dispatch_agent` once on the sprint document with
+role `architect`. Hand over after that exact brief is durable. Free chat never
+becomes a global architect identity and never calls a session primitive. For an
+explicit developer-declared task-seat takeover, follow the lifecycle skill and
+dispatch the named role on its canonical task document instead.

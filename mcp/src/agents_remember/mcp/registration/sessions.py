@@ -44,7 +44,8 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         validated against the document's altitude. Harness selection, runtime identity,
         readiness, exact initial brief pinning, delivery correlation, and retry remain
         private control-plane work in both modes. A queued brief is already durable and
-        needs no model-held retry id.
+        needs no model-held retry id. A present but stale, invalid, mismatched, unbound, or
+        unauthorized plane identity remains a plane refusal and never falls back to ambient.
         """
         return dispatch_agent_payload(
             config,

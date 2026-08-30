@@ -47,8 +47,8 @@ exception):
 
 0. **Task-seat takeover:** if the developer declared this chat the orchestrator for a named task,
    first run `../SKILL.md`'s Developer-Declared Task-Seat Takeover checklist: open the sprint task
-   document, select or create its `orchestrator` role chat in Operations, and verify that
-   `(sprint document, orchestrator)` seat in the catalog/dashboard row.
+   document, converge on its canonical `orchestrator` role chat through `dispatch_agent`, and
+   verify that `(sprint document, orchestrator)` seat in the catalog/dashboard row.
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the architect/developer relay — and **say it back**.
@@ -584,6 +584,11 @@ task, fill small blanks, escalate real deltas).
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
+| dispatch | plane-hosted caller; ambient takeover target | The architect is the ordinary plane-hosted caller that creates this sprint seat; this orchestrator may create only direct managers/system-specialists, while an identity-free launcher may target it only for an explicit task-seat takeover |
 | tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `dispatch_agent` · `retire_child` (direct manager/system-specialist seats) · worktree/C-11 |
 
-Settings.json `orchestration.roles.orchestrator` overrides these, and `orchestration.rolesPerLevel.<level>.orchestrator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
+Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
+`promptKeywords`) participate in Settings.json `orchestration.roles.orchestrator` and
+`orchestration.rolesPerLevel.<level>.orchestrator` overrides (role-file defaults < settings < level
+override; manual: `docs/reference/harnesses.md`). `dispatch` and `tools` are structural
+authority/capability descriptions, never settings keys; unknown orchestration keys fail loud.

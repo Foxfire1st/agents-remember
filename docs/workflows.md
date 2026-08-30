@@ -3,8 +3,14 @@
 Sessions route by role through the **`l-01-agent-lifecycles`** skill — one lifecycle per agent
 type, selected by exactly three conditions: a spawn-role environment variable runs that role's
 lifecycle, otherwise a fresh-session role brief as the first message runs that role, otherwise the
-session is developer-facing **free chat**. Free chat resolves the durable sprint and first leaf,
-then launches that sprint's bound **architect** lifecycle. The architect's phase axis is request →
+session is developer-facing **free chat**. For ordinary role-shaped work, free chat resolves the
+durable sprint and first leaf, compiles the canonical architect brief, and calls `dispatch_agent`
+once on that sprint document with role `architect`. An explicit developer-declared task-seat
+takeover instead targets the named role on its canonical task document. With no plane identity
+this is ambient-launcher mode: target-document and
+role-altitude validation replace parent-seat scope. The exact brief is durable before handoff.
+Later hosted seats use the same tool with plane identity and direct-child scope; a plane refusal
+never falls back to ambient. The architect's phase axis is request →
 trust-checkpoint → reframe-research → decide → build → close. The job type
 (bug / feature / triage / research) is a lens during reframe-research, not a gate.
 The only task-format decision is the architect lifecycle's build-mode step.

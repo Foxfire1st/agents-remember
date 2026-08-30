@@ -90,8 +90,8 @@ class TerminalCatalogEntry:
     # the live slot. This is the same document identity, never a second address namespace.
     replacement_for_task_document_ref: TaskDocumentRef | None = None
     # Spawned-by provenance (L2 agent dispatch): the spawning session id + lifecycle id when this row
-    # was created by the ``spawn_agent_session`` tool (an orchestrator spawning a manager, a manager
-    # spawning a worker). Written only when set, so a
+    # was created by the internal ``spawn_agent_session`` primitive behind public
+    # ``dispatch_agent``. Written only when set, so a
     # hand-opened or dashboard-opened row reads both back as ``None``. The dashboard reads these to
     # render the orchestration tree (spawner -> spawned edges) once that surface lands.
     spawned_by_session: str | None = None

@@ -152,7 +152,7 @@ preference):
 4. **Harness preference + role knobs** (`orchestration.spawn.harness`,
    per-role `orchestration.roles.<role>`, per-level
    `orchestration.rolesPerLevel.<level>.<role>`) - which installed harness
-   `spawn_agent_session` uses when no role/level knob supplies one, per-role
+   the public `dispatch_agent` transaction selects when no role/level knob supplies one, per-role
    harness/model/effort settings, and per-LEVEL settings
    (leaf|master|portfolio) for tiered economics (e.g. a cheap leaf reviewer,
    a smarter master-seam reviewer). Harness values must be known ids: the
@@ -174,6 +174,19 @@ preference):
    spend/endpoint env keys directly; settings are the spend surface. Default:
    detection-gated (the first detected harness). The full spawn-surface manual is
    `docs/reference/harnesses.md`.
+
+Verify the installed instructions teach one public spawn transaction and its two disjoint caller
+kinds:
+
+| Caller kind | Recognition | Authority | Required behavior |
+| --- | --- | --- | --- |
+| Plane-hosted seat | Plane-injected hosted identity is present | Current role seat plus direct-child scope | Call `dispatch_agent` with the canonical child document, target role, and complete brief |
+| Ambient launcher | Plane-injected hosted identity is absent | Canonical target-document resolution plus target role-altitude validation | Ordinary bootstrap: compile the canonical architect brief and call `dispatch_agent` once on the sprint document. Explicit task-seat takeover: compile the claimed role's complete brief and call the same tool once on that role's canonical task document. |
+
+The request never supplies caller identity or selects a mode. Both rows consume the same
+settings-owned harness/model/effort, internal readiness, exact brief pinning, rollback, and
+canonical seat publication. A plane refusal remains a refusal and never falls back to ambient.
+The internal session-creation primitive is not installed caller guidance.
 
 If the developer wants to skip the interview, confirm the seeded defaults
 apply and continue; tell them the file can be edited any time (picked up
