@@ -18,6 +18,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceRequest,
     CuratorSourceCandidate,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.integration.closeout import (
     curator_coherence as coherence,
@@ -58,6 +59,25 @@ def _judgment(candidate: CuratorSourceCandidate, evidence: str) -> CuratorCohere
     )
 
 
+def _pair(tmp_path: Path | None = None) -> MemoryCandidatePairIdentity:
+    root = tmp_path or Path("/candidate")
+    return MemoryCandidatePairIdentity(
+        repoId="repo",
+        contractPath=(root / "contract.md").as_posix(),
+        contractDigest="1" * 64,
+        codeRoot=(root / "code").as_posix(),
+        memoryRoot=(root / "memory").as_posix(),
+        codeSourceBranch="master",
+        codeWorkBranch="leaf",
+        codeBaseCommit="2" * 40,
+        memorySourceBranch="master",
+        memoryWorkBranch="leaf",
+        memoryBaseCommit="3" * 40,
+        onboardingRoot=(root / "memory" / "onboarding").as_posix(),
+        ledgerPath=(root / "memory" / "memory.md").as_posix(),
+    )
+
+
 def _request(**updates: object) -> CuratorCoherenceRequest:
     fields: dict[str, object] = {
         "action": "publish",
@@ -82,6 +102,7 @@ def _request(**updates: object) -> CuratorCoherenceRequest:
 
 def _observation(candidates: list[CuratorSourceCandidate]) -> Any:
     return _value(
+        pair_identity=_pair(),
         code_candidate_tree="a" * 40,
         memory_candidate_tree="b" * 40,
         task_topology_fingerprint="c" * 64,
@@ -211,6 +232,7 @@ def test_memory_quality_attestation_is_byte_stable_for_identical_input(
         repo_id="repo",
         code_root=tmp_path / "code",
         onboarding_root=tmp_path / "memory" / "onboarding",
+        pair_identity=_pair(tmp_path),
         quality={"findingCount": 0},
         repair_findings=[],
         commit_owned_findings=[],
@@ -258,6 +280,7 @@ def test_public_tool_publishes_one_live_authority_and_ignores_historical_markdow
     published = curator_coherence_payload(fixture.cfg, request)
     assert published["ok"] is True
     assert published["state"] == "published"
+    assert prepared["pairIdentity"] == published["pairIdentity"]
     assert published["semanticRequirementRevision"] == "MCAR-R02@v1"
     assert published["deliveryAttempt"] == "A002"
     assert Path(str(published["snapshotPath"])).is_file()
@@ -265,6 +288,7 @@ def test_public_tool_publishes_one_live_authority_and_ignores_historical_markdow
     assert Path(str(published["canonicalPath"])) == paths.canonical
     assert Path(str(published["recordPath"])).is_file()
     assert Path(str(published["reportPath"])).is_file()
+    assert "Pair contract digest" in Path(str(published["reportPath"])).read_text(encoding="utf-8")
     assert list(paths.generations.iterdir())
 
     legacy = contract.task_root / "notes" / "reports"
@@ -282,6 +306,7 @@ def test_public_tool_publishes_one_live_authority_and_ignores_historical_markdow
         ),
     )
     assert validated["state"] == "valid"
+    assert validated["pairIdentity"] == published["pairIdentity"]
     assert validated["recordDigest"] == published["recordDigest"]
 
     generation_count = len(list(paths.generations.iterdir()))
@@ -380,11 +405,15 @@ def test_closeout_memory_preflight_calls_the_same_validator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contract = _value(memory_mode="external", kind="leaf", code_base_commit="a" * 40)
-    validated = _value(record_digest="b" * 64, record=_value(deliveryAttempt="A003"))
+    validated = _value(
+        coherence_record_digest="b" * 64,
+        delivery_attempt="A003",
+        pair_identity=None,
+    )
     require_calls: list[object] = []
     monkeypatch.setattr(
         closeout,
-        "require_current_curator_coherence",
+        "accepted_closeout_memory_pair",
         lambda observed: require_calls.append(observed) or validated,
     )
     monkeypatch.setattr(

@@ -18,6 +18,24 @@ def render_curator_coherence(record: CuratorCoherenceRecord) -> str:
         "",
         f"- Semantic requirement revision: `{_text(record.semanticRequirementRevision)}`",
         f"- Worker delivery attempt: `{_text(record.deliveryAttempt)}`",
+        f"- Pair contract: `{_text(record.pairIdentity.contractPath)}`",
+        f"- Pair contract digest: `{record.pairIdentity.contractDigest}`",
+        f"- Code root: `{_text(record.pairIdentity.codeRoot)}`",
+        f"- Memory root: `{_text(record.pairIdentity.memoryRoot)}`",
+        (
+            "- Code branches/base: "
+            f"`{_text(record.pairIdentity.codeSourceBranch)}` -> "
+            f"`{_text(record.pairIdentity.codeWorkBranch)}` @ "
+            f"`{record.pairIdentity.codeBaseCommit}`"
+        ),
+        (
+            "- Memory branches/base: "
+            f"`{_text(record.pairIdentity.memorySourceBranch)}` -> "
+            f"`{_text(record.pairIdentity.memoryWorkBranch)}` @ "
+            f"`{record.pairIdentity.memoryBaseCommit}`"
+        ),
+        f"- Onboarding root: `{_text(record.pairIdentity.onboardingRoot)}`",
+        f"- Ledger path: `{_text(record.pairIdentity.ledgerPath)}`",
         f"- Code candidate tree: `{record.codeCandidateTree}`",
         f"- Memory candidate tree: `{record.memoryCandidateTree}`",
         f"- Task topology fingerprint: `{record.taskTopologyFingerprint}`",

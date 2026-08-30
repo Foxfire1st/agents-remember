@@ -13,6 +13,7 @@ from agents_remember.models.closeout.input import (
     CloseoutInvalidField,
     ResolvedCloseoutPlan,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.quality import QualityGateResult
 
@@ -267,11 +268,21 @@ class WorktreeSyncResponse(WorktreeCommandResponse):
     manualRepair: dict[str, object] | None = None
 
 
-class WorktreeCloseoutPreviewResponse(WorktreeCommandResponse):
+class _WorktreeCloseoutResponse(WorktreeCommandResponse):
+    pairIdentity: MemoryCandidatePairIdentity | None = None
+    pairStatus: str | None = Field(default=None, max_length=256)
+    pairField: str | None = Field(default=None, max_length=256)
+    expected: dict[str, Any] | None = Field(default=None, max_length=32)
+    observed: dict[str, Any] | None = Field(default=None, max_length=32)
+    nextAction: str | None = Field(default=None, max_length=8192)
+    nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
+
+
+class WorktreeCloseoutPreviewResponse(_WorktreeCloseoutResponse):
     operation: Literal["worktree_closeout_preview"] = "worktree_closeout_preview"
 
 
-class WorktreeCloseoutApplyResponse(WorktreeCommandResponse):
+class WorktreeCloseoutApplyResponse(_WorktreeCloseoutResponse):
     operation: Literal["worktree_closeout_apply"] = "worktree_closeout_apply"
     lifecycleOperation: LifecycleOperationProjection | None = None
 

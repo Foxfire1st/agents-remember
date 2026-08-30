@@ -10,6 +10,7 @@ catch) the typed members of this family rather than bare ``ValueError`` /
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal
 
 
@@ -117,6 +118,94 @@ class CuratorCoherenceError(AgentsRememberError):
         self.observed = dict(observed or {})
         self.next_action = next_action
         super().__init__(detail)
+
+    def response_fields(self) -> dict[str, object]:
+        """Project the bounded refusal facts without duplicating error-family logic."""
+
+        result: dict[str, object] = {
+            "status": self.status,
+            "detail": self.detail,
+            "nextAction": self.next_action,
+        }
+        if self.expected:
+            result["expected"] = self.expected
+        if self.observed:
+            result["observed"] = self.observed
+        return result
+
+
+@dataclass(frozen=True)
+class MemoryCandidatePairFailure:
+    """Bounded public context for one exact-pair refusal."""
+
+    field: str
+    contract_path: str
+    expected: Mapping[str, object] | None = None
+    observed: Mapping[str, object] | None = None
+    next_action: str = "developer-decision"
+    next_args: Mapping[str, object] | None = None
+
+
+class MemoryCandidatePairError(AgentsRememberError):
+    """An exact contract-owned code/memory pair is absent, stale, or contradictory."""
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        failure: MemoryCandidatePairFailure,
+    ) -> None:
+        self.status = status
+        self.field = failure.field
+        self.detail = detail
+        self.contract_path = failure.contract_path
+        self.expected = dict(failure.expected or {})
+        self.observed = dict(failure.observed or {})
+        self.next_action = failure.next_action
+        self.next_args = dict(failure.next_args or {})
+        super().__init__(detail)
+
+    def response_fields(self) -> dict[str, object]:
+        """Project the one canonical public shape for an exact-pair refusal."""
+
+        result: dict[str, object] = {
+            "pairStatus": self.status,
+            "pairField": self.field,
+            "contractPath": self.contract_path,
+            "detail": self.detail,
+            "nextAction": self.next_action,
+        }
+        if self.expected:
+            result["expected"] = self.expected
+        if self.observed:
+            result["observed"] = self.observed
+        if self.next_args:
+            result["nextArgs"] = self.next_args
+        return result
+
+
+class CuratorCoherencePairError(CuratorCoherenceError):
+    """A curator-coherence refusal caused by the shared exact-pair validator."""
+
+    def __init__(self, error: MemoryCandidatePairError) -> None:
+        self.pair_error = error
+        super().__init__(
+            error.status,
+            error.detail,
+            expected=error.expected,
+            observed=error.observed,
+            next_action=error.next_action,
+        )
+
+    def response_fields(self) -> dict[str, object]:
+        result = {
+            **super().response_fields(),
+            "pairField": self.pair_error.field,
+        }
+        if self.pair_error.next_args:
+            result["nextArgs"] = self.pair_error.next_args
+        return result
 
 
 class CitationCacheError(AgentsRememberError):

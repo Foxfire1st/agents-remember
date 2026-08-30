@@ -96,6 +96,8 @@ TerminalConfiguredContractAdmission = (
 def admit_configured_contract(
     config: McpRuntimeConfig,
     contract_path: str | Path,
+    *,
+    require_candidate_identity: bool = True,
 ) -> ConfiguredContractAdmission:
     """Resolve, read, and cross-check one configured current task contract."""
 
@@ -149,7 +151,11 @@ def admit_configured_contract(
         )
 
     try:
-        require_configured_contract_repositories(contract, config.config_path.as_posix())
+        require_configured_contract_repositories(
+            contract,
+            config.config_path.as_posix(),
+            require_candidate_identity=require_candidate_identity,
+        )
     except ConfiguredContractAuthorityError as error:
         return configured_authority_refusal(
             ConfiguredContractAccepted(confined, contract, location), error

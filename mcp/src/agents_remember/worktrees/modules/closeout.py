@@ -13,6 +13,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.observer.events import now_iso
 from agents_remember.worktrees.closeout_input import (
     effective_message_arguments,
@@ -20,8 +21,15 @@ from agents_remember.worktrees.closeout_input import (
 )
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     CuratorCoherenceNoImpact,
-    curator_coherence_no_impact,
-    require_current_curator_coherence,
+)
+from agents_remember.worktrees.integration.closeout.integration_reopen import (
+    completed_integration_reopen,
+    preview_integration_reopen,
+)
+from agents_remember.worktrees.integration.closeout.memory_candidate_pairing import (
+    accepted_closeout_memory_pair,
+    memory_candidate_pair_payload,
+    resolve_closeout_memory_pair,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
@@ -44,8 +52,6 @@ from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
     commit_date,
     committed_changed_paths,
-    head_commit,
-    is_ancestor,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -195,82 +201,11 @@ def _format_expected_heads(expected: set[str]) -> str:
     return ", ".join(sorted(expected))
 
 
-def _commit_missing_from_source(repo, commit: str, source_branch: str) -> bool:
-    return bool(commit) and not is_ancestor(repo, commit, source_branch)
-
-
-def _preview_integration_reopen(
-    contract,
-    *,
-    code_dirty: bool,
-    memory_would_commit: bool,
-) -> dict[str, object]:
-    if contract.integration_status != "completed":
-        return {"would_reopen": False, "reason": "integration is not completed"}
-    code_head = (
-        branch_commit(contract.code_repo_path, contract.code_work_branch)
-        if contract.kind == "series"
-        else head_commit(contract.code_worktree)
-    )
-    code_unlanded = code_dirty or (
-        code_head != contract.code_commit
-        and _commit_missing_from_source(
-            contract.code_repo_path, code_head, contract.code_source_branch
-        )
-    )
-    would_reopen = code_unlanded or memory_would_commit
-    return {
-        "would_reopen": would_reopen,
-        "code_would_reopen": code_unlanded,
-        "memory_would_reopen": memory_would_commit,
-        "reason": "completed integration would be reopened after closeout"
-        if would_reopen
-        else "no new unlanded code or memory content is expected",
-    }
-
-
-def _completed_integration_reopen(
-    contract,
-    *,
-    code_commit: str,
-    memory_content_commit: str,
-    ledger_commit: str,
-) -> dict[str, object]:
-    if contract.integration_status != "completed":
-        return {"reopened": False, "reason": "integration is not completed"}
-    code_changed = code_commit != contract.code_commit
-    code_unlanded = code_changed and _commit_missing_from_source(
-        contract.code_repo_path, code_commit, contract.code_source_branch
-    )
-    memory_content_changed = (
-        contract.memory_mode == "external"
-        and bool(memory_content_commit)
-        and memory_content_commit != contract.memory_content_commit
-    )
-    memory_unlanded = False
-    if memory_content_changed and contract.memory_repo_path is not None:
-        memory_unlanded = _commit_missing_from_source(
-            contract.memory_repo_path, ledger_commit, contract.memory_source_branch
-        )
-    reopened = code_unlanded or memory_unlanded
-    return {
-        "reopened": reopened,
-        "code_unlanded": code_unlanded,
-        "memory_unlanded": memory_unlanded,
-        "previous_code_commit": contract.code_commit,
-        "previous_memory_content_commit": contract.memory_content_commit,
-        "previous_ledger_commit": contract.ledger_commit,
-        "reason": "new closeout commit is not on the recorded source branch"
-        if reopened
-        else "no new unlanded code or memory content commit",
-    }
-
-
 @dataclass(frozen=True)
 class _MemoryRefreshPreview:
     """What external-memory closeout would refresh, and what the body gates make of it.
 
-    Six values computed by one step and consumed by one caller. They are grouped rather
+    Related values computed by one step and consumed by one caller. They are grouped rather
     than returned as a tuple because the caller reads them by name, and grouped rather
     than left inline because the six ``contract.memory_mode == "external"`` conditionals
     that produce them were 66 of ``closeout_preview_payload``'s 153 lines.
@@ -282,6 +217,7 @@ class _MemoryRefreshPreview:
     route_indexes: dict[str, Any]
     sidecar_body_gate: SidecarBodyClassification
     route_overview_body_gate: RouteOverviewBodyClassification
+    pair_identity: MemoryCandidatePairIdentity | None
 
 
 def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _MemoryRefreshPreview:
@@ -293,11 +229,8 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     """
     changed_paths = worklist["all"]
     external_leaf = contract.memory_mode == "external" and contract.kind == "leaf"
-    coherence_no_impact = (
-        curator_coherence_no_impact(require_current_curator_coherence(contract))
-        if external_leaf
-        else CuratorCoherenceNoImpact()
-    )
+    pair_evidence = accepted_closeout_memory_pair(contract)
+    coherence_no_impact = pair_evidence.no_impact
     metadata_refresh: OnboardingRefreshPlan = (
         onboarding_refresh_plan(contract, changed_paths, working_paths=worklist["working"])
         if external_leaf
@@ -377,6 +310,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
         route_indexes=route_index_refresh,
         sidecar_body_gate=sidecar_body_gate,
         route_overview_body_gate=route_overview_body_gate,
+        pair_identity=pair_evidence.pair_identity,
     )
 
 
@@ -434,8 +368,9 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "attested_no_impact"
         ],
         "route_index_refresh": refresh.route_indexes,
+        **memory_candidate_pair_payload(refresh.pair_identity),
         "code_quality_gate": code_quality_gate,
-        "integration_reopen": _preview_integration_reopen(
+        "integration_reopen": preview_integration_reopen(
             contract, code_dirty=code_dirty, memory_would_commit=memory_would_commit
         ),
         "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract, args)),
@@ -707,7 +642,7 @@ def _memory_quality_before_refresh(contract) -> dict[str, Any]:
     """Run the external-memory citation preflight before the expensive code gate."""
     if contract.memory_mode != "external" or contract.kind != "leaf":
         return {}
-    coherence = require_current_curator_coherence(contract)
+    pair_evidence = accepted_closeout_memory_pair(contract)
     before_checks, _ = worktree_services().memory_quality.check_groups()
     result = run_memory_quality_phase(
         _closeout_contract_context(contract),
@@ -716,8 +651,9 @@ def _memory_quality_before_refresh(contract) -> dict[str, Any]:
     )
     result["curatorCoherence"] = {
         "state": "valid",
-        "recordDigest": coherence.record_digest,
-        "deliveryAttempt": coherence.record.deliveryAttempt,
+        "recordDigest": pair_evidence.coherence_record_digest,
+        "deliveryAttempt": pair_evidence.delivery_attempt,
+        **memory_candidate_pair_payload(pair_evidence.pair_identity),
     }
     return result
 
@@ -730,6 +666,7 @@ class _CloseoutResultFacts:
     code_quality_gate: dict[str, Any]
     integration_reopen: dict[str, Any]
     gate_guard: CloseoutGuard | None
+    pair_identity: MemoryCandidatePairIdentity | None
 
 
 @dataclass(frozen=True)
@@ -739,6 +676,7 @@ class _CloseoutQualityFacts:
     memory_quality_before_refresh: dict[str, Any]
     strict_code_quality_required: bool
     coherence_no_impact: CuratorCoherenceNoImpact
+    pair_identity: MemoryCandidatePairIdentity | None
 
 
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
@@ -749,6 +687,7 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
         and (not commits.memoryContentCommit or not commits.ledgerCommit)
     ):
         return None
+    pair_identity = resolve_closeout_memory_pair(contract)
     if contract.closeout_status == "completed":
         if (
             contract.code_commit != commits.codeCommit
@@ -760,7 +699,12 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             )
         return WorktreeCommandResult(
             0,
-            {"state": "already-closed", "recovered": True, **status_payload(contract)},
+            {
+                "state": "already-closed",
+                "recovered": True,
+                **status_payload(contract),
+                **memory_candidate_pair_payload(pair_identity),
+            },
         )
     approval_note = _closeout_approval_note(args)
 
@@ -773,7 +717,7 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
         else:
             require_ordinary_worktree(current, operation="worktree_closeout")
         memory = prove_closeout_recovery_commits(current, commits)
-        integration_reopen = _completed_integration_reopen(
+        integration_reopen = completed_integration_reopen(
             current,
             code_commit=commits.codeCommit,
             memory_content_commit=commits.memoryContentCommit,
@@ -810,6 +754,7 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             },
             integration_reopen=integration_reopen,
             gate_guard=_closeout_gate_guard(contract, args),
+            pair_identity=pair_identity,
         ),
     )
     payload["recovered"] = True
@@ -838,6 +783,7 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "route_overviews_stamped_without_body_review": attestations.stamped_overviews,
         "route_index_refresh": memory.route_index_refresh,
         "memory_quality": memory.memory_quality,
+        **memory_candidate_pair_payload(facts.pair_identity),
         "code_quality_gate": facts.code_quality_gate,
         "integration_reopen": facts.integration_reopen,
         "closeout_gate": _closeout_gate_payload(facts.gate_guard),
@@ -972,7 +918,7 @@ def _closeout_commit_phase(
                 coherence_no_impact=quality.coherence_no_impact,
             ),
         )
-    integration_reopen = _completed_integration_reopen(
+    integration_reopen = completed_integration_reopen(
         contract,
         code_commit=code_commit,
         memory_content_commit=memory.memory_commit,
@@ -1021,11 +967,8 @@ def _closeout_quality_facts(
 ) -> _CloseoutQualityFacts:
     """The attestations and reversible memory/code gate facts for one closeout."""
 
-    coherence_no_impact = (
-        curator_coherence_no_impact(require_current_curator_coherence(contract))
-        if contract.memory_mode == "external" and contract.kind == "leaf"
-        else CuratorCoherenceNoImpact()
-    )
+    pair_evidence = accepted_closeout_memory_pair(contract)
+    coherence_no_impact = pair_evidence.no_impact
 
     if resuming:
         attestations = _CloseoutAttestations()
@@ -1051,6 +994,7 @@ def _closeout_quality_facts(
         memory_quality_before_refresh=memory_quality_before_refresh,
         strict_code_quality_required=strict_code_quality_required,
         coherence_no_impact=coherence_no_impact,
+        pair_identity=pair_evidence.pair_identity,
     )
 
 
@@ -1139,6 +1083,7 @@ def closeout_result(
                 code_quality_gate=quality.code_quality_gate,
                 integration_reopen=committed.integration_reopen,
                 gate_guard=committed.gate_guard,
+                pair_identity=quality.pair_identity,
             ),
         ),
     )

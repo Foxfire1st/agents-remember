@@ -16,7 +16,13 @@ from agents_remember.application.lifecycle.configured_contract_admission import 
     ConfiguredContractRefused,
 )
 from agents_remember.application.memory_quality import controller
-from agents_remember.errors import CuratorCoherenceError, FutureCodeCandidateError
+from agents_remember.errors import (
+    CuratorCoherenceError,
+    CuratorCoherencePairError,
+    FutureCodeCandidateError,
+    MemoryCandidatePairError,
+    MemoryCandidatePairFailure,
+)
 from agents_remember.mcp.registration import tasks as task_registration
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
@@ -28,6 +34,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorQualityAttestation,
     CuratorSourceCandidate,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
@@ -54,6 +61,24 @@ def _source(name: str = "a.py") -> CuratorSourceCandidate:
     )
 
 
+def _pair() -> MemoryCandidatePairIdentity:
+    return MemoryCandidatePairIdentity(
+        repoId="repo",
+        contractPath="/coordination/tasks/repo/task/enclosures/l1/series-contract.md",
+        contractDigest="9" * 64,
+        codeRoot="/code/worktree",
+        memoryRoot="/memory/worktree",
+        codeSourceBranch="super",
+        codeWorkBranch="leaf-code",
+        codeBaseCommit="a" * 40,
+        memorySourceBranch="memory-super",
+        memoryWorkBranch="leaf-memory",
+        memoryBaseCommit="b" * 40,
+        onboardingRoot="/memory/worktree/onboarding",
+        ledgerPath="/memory/worktree/ledger.jsonl",
+    )
+
+
 def _recorded(candidate: CuratorSourceCandidate) -> CuratorCoherenceRecordedJudgment:
     return CuratorCoherenceRecordedJudgment(
         **candidate.model_dump(mode="json"),
@@ -72,6 +97,7 @@ def _record_fields() -> dict[str, object]:
         "taskDocumentRef": {"repository": "repo", "path": "master/leaf.json"},
         "semanticRequirementRevision": "R1@v1",
         "deliveryAttempt": "A001",
+        "pairIdentity": _pair().model_dump(mode="json"),
         "codeCandidateTree": "a" * 40,
         "memoryCandidateTree": "b" * 40,
         "taskTopologyFingerprint": "c" * 64,
@@ -100,6 +126,7 @@ def _attestation(
             "staleRouteIndexCount": 0,
             "sourceChangeCandidateCount": len(selected),
             "sourceChangeCandidates": [item.model_dump(mode="json") for item in selected],
+            "pairIdentity": _pair().model_dump(mode="json"),
             "onboardingRoot": "/memory/onboarding",
             "reportPath": "/reports/curator-memory-quality.md",
             "reportSha256": "e" * 64,
@@ -112,6 +139,7 @@ def _observation(tmp_path: Path, *, candidate_ref: TaskDocumentRef | None = None
         candidate=_value(
             ref=candidate_ref or TaskDocumentRef(repository="repo", path="master/leaf.json")
         ),
+        pair_identity=_pair(),
         code_candidate_tree="a" * 40,
         memory_candidate_tree="b" * 40,
         task_topology_fingerprint="c" * 64,
@@ -242,7 +270,11 @@ def test_application_projects_domain_and_post_execution_refusals(
 ) -> None:
     request = CuratorCoherenceRequest(action="status", contract_path="/coordination/contract.md")
     accepted = _value(contract=object())
-    monkeypatch.setattr(application, "admit_configured_contract", lambda *_args: accepted)
+    monkeypatch.setattr(
+        application,
+        "admit_configured_contract",
+        lambda *_args, **_kwargs: accepted,
+    )
     monkeypatch.setattr(
         application,
         "execute_configured_contract_operation",
@@ -252,19 +284,28 @@ def test_application_projects_domain_and_post_execution_refusals(
         application,
         "curator_coherence_action",
         lambda *_args: (_ for _ in ()).throw(
-            CuratorCoherenceError(
-                "curator-coherence-stale",
-                "stale",
-                expected={"candidate": "old"},
-                observed={"candidate": "new"},
-                next_action="prepare",
+            CuratorCoherencePairError(
+                MemoryCandidatePairError(
+                    "curator-coherence-stale",
+                    "stale",
+                    failure=MemoryCandidatePairFailure(
+                        field="pairIdentity",
+                        contract_path="/coordination/contract.md",
+                        expected={"candidate": "old"},
+                        observed={"candidate": "new"},
+                        next_action="prepare",
+                        next_args={"contract_path": "/coordination/contract.md"},
+                    ),
+                )
             )
         ),
     )
     result = application.curator_coherence_tool(cast(Any, object()), request)
     assert result["status"] == "curator-coherence-stale"
+    assert result["pairField"] == "pairIdentity"
     assert result["expected"] == {"candidate": "old"}
     assert result["observed"] == {"candidate": "new"}
+    assert result["nextArgs"] == {"contract_path": "/coordination/contract.md"}
 
     expected_only = application._domain_refusal(
         request,
@@ -365,8 +406,34 @@ def test_registered_curator_tool_delegates_to_the_public_payload(
 def test_source_capture_translates_future_and_generic_candidate_failures(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    contract = _value(kind="leaf", memory_mode="external", memory_worktree=tmp_path / "memory")
+    contract = _value(
+        kind="leaf",
+        memory_mode="external",
+        memory_worktree=tmp_path / "memory",
+        contract_path=tmp_path / "contract.md",
+        repo_name="repo",
+    )
     monkeypatch.setattr(coherence, "_task_context", lambda _contract: (None, None, None, None))
+    pair_error = MemoryCandidatePairError(
+        "memory-candidate-pair-stale",
+        "pair changed",
+        failure=MemoryCandidatePairFailure(
+            field="pairIdentity",
+            contract_path="/contract",
+        ),
+    )
+    monkeypatch.setattr(
+        coherence,
+        "resolve_memory_candidate_pair",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(pair_error),
+    )
+    with pytest.raises(CuratorCoherencePairError) as pair_refusal:
+        coherence.observe_curator_coherence_source(contract)
+    assert pair_refusal.value.status == "memory-candidate-pair-stale"
+
+    monkeypatch.setattr(
+        coherence, "resolve_memory_candidate_pair", lambda *_args, **_kwargs: _pair()
+    )
     monkeypatch.setattr(
         coherence,
         "capture_future_code_candidate",
@@ -487,9 +554,10 @@ def test_attestation_topology_and_path_boundaries_fail_with_typed_refusals(
     report = contract.worktree_group / "reports" / coherence.QUALITY_REPORT_NAME
     attestation = contract.worktree_group / "reports" / coherence.QUALITY_ATTESTATION_NAME
     attestation_bytes = attestation.read_bytes()
+    pair_identity = CuratorQualityAttestation.model_validate_json(attestation_bytes).pairIdentity
     attestation.unlink()
     with pytest.raises(CuratorCoherenceError) as raised:
-        coherence._quality_attestation(contract, attestation, report)
+        coherence._quality_attestation(contract, attestation, report, pair_identity)
     assert raised.value.status == "curator-coherence-attestation-unreadable"
     attestation.write_bytes(attestation_bytes)
 
@@ -498,7 +566,7 @@ def test_attestation_topology_and_path_boundaries_fail_with_typed_refusals(
     not_ready["curatorActionableCount"] = 1
     attestation.write_text(json.dumps(not_ready), encoding="utf-8")
     with pytest.raises(CuratorCoherenceError) as raised:
-        coherence._quality_attestation(contract, attestation, report)
+        coherence._quality_attestation(contract, attestation, report, pair_identity)
     assert raised.value.status == "curator-coherence-memory-not-ready"
     attestation.write_bytes(attestation_bytes)
 
@@ -537,6 +605,23 @@ def test_attestation_topology_and_path_boundaries_fail_with_typed_refusals(
     with pytest.raises(CuratorCoherenceError) as raised:
         coherence._task_context(empty_contract)
     assert raised.value.status == "task-document-invalid"
+
+
+def test_attestation_rejects_a_different_code_memory_pair(tmp_path: Path) -> None:
+    fixture = QueueFixture(tmp_path)
+    contract = fixture.contracts[MASTER_A]
+    report = contract.worktree_group / "reports" / coherence.QUALITY_REPORT_NAME
+    attestation = contract.worktree_group / "reports" / coherence.QUALITY_ATTESTATION_NAME
+    attestation_bytes = attestation.read_bytes()
+    pair_identity = CuratorQualityAttestation.model_validate_json(attestation_bytes).pairIdentity
+    wrong_pair = json.loads(attestation_bytes)
+    wrong_pair["pairIdentity"]["contractDigest"] = "0" * 64
+    attestation.write_text(json.dumps(wrong_pair), encoding="utf-8")
+
+    with pytest.raises(CuratorCoherenceError) as raised:
+        coherence._quality_attestation(contract, attestation, report, pair_identity)
+
+    assert raised.value.status == "curator-coherence-memory-not-ready"
 
 
 def test_applicability_and_path_boundaries_fail_with_typed_refusals(tmp_path: Path) -> None:

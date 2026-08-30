@@ -6,16 +6,38 @@ import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+from agents_remember.application import memory_scope as memory_scope_module
 from agents_remember.application.memory_quality import controller, runs
 from agents_remember.application.memory_scope import MemoryScope, MemoryScopeIdentity
+from agents_remember.errors import MemoryCandidatePairError, MemoryCandidatePairFailure
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
 )
+
+
+def _pair() -> MemoryCandidatePairIdentity:
+    return MemoryCandidatePairIdentity(
+        repoId="canonical-repo",
+        contractPath="/contract",
+        contractDigest="9" * 64,
+        codeRoot="/code",
+        memoryRoot="/memory",
+        codeSourceBranch="super",
+        codeWorkBranch="ar/leaf",
+        codeBaseCommit="a" * 40,
+        memorySourceBranch="super",
+        memoryWorkBranch="ar/leaf",
+        memoryBaseCommit="b" * 40,
+        onboardingRoot="/memory/onboarding",
+        ledgerPath="/memory/memory.md",
+    )
 
 
 def _identity(
@@ -211,6 +233,23 @@ class MemoryQualityControllerTests(unittest.TestCase):
             context=mock.Mock(),
             curator_report_path=Path("/enclosure/reports/curator-memory-quality.md"),
         )
+        pair = _pair()
+        self.candidate_scope = MemoryScope(
+            repo_id="canonical-repo",
+            identity=MemoryScopeIdentity(
+                authority="leaf",
+                authority_path=pair.contractPath,
+                code_root=pair.codeRoot,
+                onboarding_root=pair.onboardingRoot,
+                pair_identity=pair,
+            ),
+            code_root=Path(pair.codeRoot),
+            onboarding_root=Path(pair.onboardingRoot),
+            context=mock.Mock(),
+            curator_report_path=Path("/enclosure/reports/curator-memory-quality.md"),
+            contract=mock.Mock(),
+            pair_identity=pair,
+        )
 
     def test_reordered_duplicate_checks_and_path_spellings_share_one_run(self) -> None:
         first_check, second_check = AVAILABLE_CHECKS[:2]
@@ -226,7 +265,11 @@ class MemoryQualityControllerTests(unittest.TestCase):
 
         try:
             with (
-                mock.patch.object(controller, "resolve_memory_scope", return_value=self.scope),
+                mock.patch.object(
+                    controller,
+                    "resolve_memory_candidate_scope",
+                    return_value=self.candidate_scope,
+                ),
                 mock.patch.object(controller, "_execute_memory_quality", side_effect=execute),
             ):
                 first = controller.start_memory_quality_request(
@@ -251,6 +294,8 @@ class MemoryQualityControllerTests(unittest.TestCase):
             self.assertEqual(first["status"], "started")
             self.assertEqual(second["status"], "running")
             self.assertEqual(first["runId"], second["runId"])
+            self.assertEqual(first["scopeAuthority"], "leaf-candidate")
+            self.assertEqual(first["pairIdentity"], _pair().model_dump(mode="json"))
             self.assertEqual(launches, 1)
         finally:
             release.set()
@@ -341,6 +386,7 @@ class MemoryQualityControllerTests(unittest.TestCase):
 
     def test_capacity_is_a_normal_typed_response_without_run_id(self) -> None:
         execution = controller.MemoryQualityExecution(
+            config=mock.Mock(),
             scope=self.scope,
             checks=tuple(sorted(AVAILABLE_CHECKS)),
             detail_limit=50,
@@ -362,6 +408,82 @@ class MemoryQualityControllerTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("runId", result)
         self.assertNotIn("8", str(result))
+
+    def test_start_pair_refusal_is_typed_before_registry_admission(self) -> None:
+        error = MemoryCandidatePairError(
+            "memory-candidate-pair-path-unavailable",
+            "memory worktree is gone",
+            failure=MemoryCandidatePairFailure(
+                field="memoryRoot",
+                contract_path="/contract",
+            ),
+        )
+        with (
+            mock.patch.object(controller, "_resolve_execution", side_effect=error),
+            mock.patch.object(controller, "start_quality_run") as admit,
+        ):
+            result = controller.start_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityStartRequest(
+                    mode="start",
+                    repo_id="canonical-repo",
+                    contract_path="/contract",
+                ),
+            )
+        self.assertEqual(result["pairStatus"], error.status)
+        admit.assert_not_called()
+
+    def test_pair_change_during_derived_evidence_refuses_before_curator_publication(self) -> None:
+        pair = _pair()
+        error = MemoryCandidatePairError(
+            "memory-candidate-pair-stale",
+            "candidate pair changed while memory quality was running",
+            failure=MemoryCandidatePairFailure(
+                field="pairIdentity",
+                contract_path=pair.contractPath,
+                next_action="worktree_sync",
+            ),
+        )
+        execution = controller.MemoryQualityExecution(
+            config=mock.Mock(),
+            scope=self.candidate_scope,
+            checks=tuple(sorted(AVAILABLE_CHECKS)),
+            detail_limit=50,
+            publish_curator_report=True,
+        )
+        with (
+            mock.patch.object(
+                controller,
+                "revalidate_memory_candidate_scope",
+                side_effect=[self.candidate_scope, self.candidate_scope, error],
+            ),
+            mock.patch.object(
+                controller,
+                "run_memory_quality_check",
+                return_value={"ok": True, "checks": {}, "findings": []},
+            ) as scan,
+            mock.patch.object(
+                controller,
+                "check_missing_onboarding",
+                return_value=mock.Mock(findings=[]),
+            ),
+            mock.patch.object(
+                controller,
+                "build_route_indexes",
+                return_value=mock.Mock(stale_indexes=[]),
+            ),
+            mock.patch.object(
+                controller,
+                "split_commit_owned_findings",
+                return_value=([], []),
+            ),
+            mock.patch.object(controller, "write_curator_checklist") as publish,
+        ):
+            result = controller._execute_or_refuse(execution)
+        scan.assert_called_once()
+        publish.assert_not_called()
+        self.assertEqual(result["status"], "scope-refused")
+        self.assertEqual(result["pairStatus"], "memory-candidate-pair-stale")
 
     def test_wrong_repo_and_unknown_poll_have_the_same_non_disclosing_shape(self) -> None:
         runs._registry["known"] = runs._QualityRun(
@@ -385,6 +507,240 @@ class MemoryQualityControllerTests(unittest.TestCase):
         self.assertEqual(unknown["status"], "run-not-found")
         self.assertNotIn("secret", str(wrong))
         self.assertEqual(set(wrong) - {"runId"}, set(unknown) - {"runId"})
+
+    def test_candidate_poll_requires_and_revalidates_the_exact_contract_path(self) -> None:
+        pair = _pair()
+        runs._registry["candidate"] = runs._QualityRun(
+            run_id="candidate",
+            identity=runs.QualityRunIdentity(
+                repo_id="canonical-repo",
+                scope=self.candidate_scope.identity,
+                checks=("check",),
+                detail_limit=50,
+                publish_curator_report=False,
+            ),
+            status="completed",
+            completed_at=time.monotonic(),
+            result={
+                "ok": True,
+                "operation": "memory_quality_check",
+                "scopeAuthority": "leaf-candidate",
+                "acceptanceEligible": True,
+                "contractPath": pair.contractPath,
+                "pairIdentity": pair.model_dump(mode="json"),
+            },
+        )
+        with (
+            mock.patch.object(
+                controller,
+                "require_repo",
+                return_value=mock.Mock(repo_id="canonical-repo"),
+            ),
+            mock.patch.object(
+                controller,
+                "resolve_memory_candidate_scope",
+                return_value=self.candidate_scope,
+            ) as resolve_candidate,
+        ):
+            omitted = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="canonical-repo",
+                    run_id="candidate",
+                ),
+            )
+            wrong = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="canonical-repo",
+                    run_id="candidate",
+                    contract_path="/other-contract",
+                ),
+            )
+            exact = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="canonical-repo",
+                    run_id="candidate",
+                    contract_path=pair.contractPath,
+                ),
+            )
+        self.assertEqual(omitted["status"], "scope-refused")
+        self.assertEqual(wrong["status"], "scope-refused")
+        self.assertEqual(exact["status"], "completed")
+        self.assertEqual(exact["pairIdentity"], pair.model_dump(mode="json"))
+        resolve_candidate.assert_called_once_with(
+            mock.ANY,
+            repo_id="canonical-repo",
+            contract_path=pair.contractPath,
+        )
+
+    def test_candidate_poll_rejects_a_changed_pair_and_preserves_run_identity(self) -> None:
+        pair = _pair()
+        runs._registry["stale"] = runs._QualityRun(
+            run_id="stale",
+            identity=runs.QualityRunIdentity(
+                repo_id="canonical-repo",
+                scope=self.candidate_scope.identity,
+                checks=("check",),
+                detail_limit=50,
+                publish_curator_report=False,
+            ),
+            status="completed",
+            completed_at=time.monotonic(),
+            result={"ok": True},
+        )
+        changed_pair = pair.model_copy(update={"contractDigest": "8" * 64})
+        changed_scope = replace(self.candidate_scope, pair_identity=changed_pair)
+        with (
+            mock.patch.object(
+                controller,
+                "require_repo",
+                return_value=mock.Mock(repo_id="canonical-repo"),
+            ),
+            mock.patch.object(
+                controller,
+                "resolve_memory_candidate_scope",
+                return_value=changed_scope,
+            ),
+        ):
+            result = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="canonical-repo",
+                    run_id="stale",
+                    contract_path=pair.contractPath,
+                ),
+            )
+        self.assertEqual(result["status"], "scope-refused")
+        self.assertEqual(result["pairStatus"], "memory-candidate-pair-stale")
+        self.assertEqual(result["runId"], "stale")
+
+    def test_official_running_and_failed_polls_use_total_non_candidate_shapes(self) -> None:
+        identity = _identity("official", repo_id="canonical-repo")
+        cases: tuple[tuple[str, runs.QualityRunStatus, str | None], ...] = (
+            ("running", "running", None),
+            ("failed", "failed", "boom"),
+        )
+        for run_id, status, error in cases:
+            runs._registry[run_id] = runs._QualityRun(
+                run_id=run_id,
+                identity=identity,
+                status=status,
+                error=error,
+            )
+        with mock.patch.object(
+            controller,
+            "require_repo",
+            return_value=mock.Mock(repo_id="canonical-repo"),
+        ):
+            running = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(mode="poll", repo_id="canonical-repo", run_id="running"),
+            )
+            failed = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(mode="poll", repo_id="canonical-repo", run_id="failed"),
+            )
+        self.assertEqual(running["status"], "running")
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual(failed["error"], "boom")
+        self.assertFalse(running["acceptanceEligible"])
+
+    def test_curator_publication_requires_a_pair_after_final_revalidation(self) -> None:
+        payload: dict[str, object] = {"checks": {}, "findings": []}
+        with (
+            mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])),
+            mock.patch.object(
+                controller,
+                "check_missing_onboarding",
+                return_value=mock.Mock(findings=[]),
+            ),
+            mock.patch.object(
+                controller,
+                "build_route_indexes",
+                return_value=mock.Mock(stale_indexes=[]),
+            ),
+            mock.patch.object(
+                controller,
+                "revalidate_memory_candidate_scope",
+                return_value=self.scope,
+            ),
+            self.assertRaisesRegex(RuntimeError, "no exact code/memory pair identity"),
+        ):
+            controller._attach_curator_checklist(mock.Mock(), self.scope, payload, {})
+
+    def test_candidate_scope_revalidation_rejects_changed_identity(self) -> None:
+        pair = _pair()
+        changed_pair = pair.model_copy(update={"contractDigest": "7" * 64})
+        changed_scope = replace(self.candidate_scope, pair_identity=changed_pair)
+        with (
+            mock.patch.object(
+                memory_scope_module,
+                "resolve_memory_candidate_scope",
+                return_value=changed_scope,
+            ),
+            self.assertRaises(MemoryCandidatePairError) as raised,
+        ):
+            memory_scope_module.revalidate_memory_candidate_scope(mock.Mock(), self.candidate_scope)
+        self.assertEqual(raised.exception.status, "memory-candidate-pair-stale")
+        self.assertEqual(
+            raised.exception.expected,
+            {"pairIdentity": pair.model_dump(mode="json")},
+        )
+
+    def test_async_pair_refusal_is_not_relabelled_as_completed(self) -> None:
+        pair = _pair()
+        runs._registry["refused"] = runs._QualityRun(
+            run_id="refused",
+            identity=runs.QualityRunIdentity(
+                repo_id="canonical-repo",
+                scope=self.candidate_scope.identity,
+                checks=("check",),
+                detail_limit=50,
+                publish_curator_report=False,
+            ),
+            status="completed",
+            completed_at=time.monotonic(),
+            result={
+                "ok": False,
+                "operation": "memory_quality_check",
+                "repoId": "canonical-repo",
+                "status": "scope-refused",
+                "pairStatus": "memory-candidate-pair-stale",
+                "pairField": "pairIdentity",
+                "contractPath": pair.contractPath,
+                "detail": "candidate changed during scanning",
+                "nextAction": "worktree_sync",
+            },
+        )
+        with (
+            mock.patch.object(
+                controller,
+                "require_repo",
+                return_value=mock.Mock(repo_id="canonical-repo"),
+            ),
+            mock.patch.object(
+                controller,
+                "resolve_memory_candidate_scope",
+                return_value=self.candidate_scope,
+            ),
+        ):
+            result = controller.poll_memory_quality_request(
+                mock.Mock(),
+                MemoryQualityPollRequest(
+                    mode="poll",
+                    repo_id="canonical-repo",
+                    run_id="refused",
+                    contract_path=pair.contractPath,
+                ),
+            )
+        self.assertEqual(result["status"], "scope-refused")
+        self.assertEqual(result["pairStatus"], "memory-candidate-pair-stale")
 
     def test_unknown_checks_refuse_before_scope_resolution_or_registry_admission(self) -> None:
         with (

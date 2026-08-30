@@ -37,6 +37,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence i
 )
 from agents_remember.worktrees.modules import closeout as closeout_mod
 from agents_remember.worktrees.modules import integrate as integrate_mod
+from closeout_input_test_support import ensure_fixture_waiting_door
 from test_direct_landing import _series_fixture
 from test_lifecycle_operations import _contract
 
@@ -63,7 +64,7 @@ def _byte_tree(root: Path) -> dict[str, bytes]:
 
 
 def _fixture(tmp_path: Path):
-    contract = _contract(tmp_path)
+    contract, _ = ensure_fixture_waiting_door(_contract(tmp_path))
     config = replace(
         load_config(tmp_path / "settings.json"),
         direct_execution_enabled=True,
@@ -328,6 +329,62 @@ def test_real_admission_classifies_expected_failures_and_leaves_unexpected_fault
     location = admit_configured_contract(config, contract.contract_path)
     assert isinstance(location, ConfiguredContractRefused)
     assert location.reason == "location-invalid"
+
+
+def test_candidate_repository_identity_is_strict_on_both_external_leaf_sides() -> None:
+    contract = mock.Mock(
+        code_worktree=Path("/candidate-code"),
+        memory_mode="external",
+        kind="leaf",
+        memory_worktree=Path("/candidate-memory"),
+    )
+    configured = mock.Mock()
+    code_identity = Path("/code-repository")
+    memory_identity = Path("/memory-repository")
+    configured_authority = mock.patch.object(
+        authority_mod,
+        "_require_configured_repository_authority",
+        return_value=(configured, code_identity),
+    )
+    memory_authority = mock.patch.object(
+        authority_mod,
+        "_require_external_memory_repository_authority",
+        return_value=memory_identity,
+    )
+
+    with (
+        configured_authority,
+        memory_authority,
+        mock.patch.object(
+            authority_mod,
+            "repository_identity",
+            return_value=Path("/foreign-code-repository"),
+        ),
+        pytest.raises(ConfiguredContractAuthorityError) as code,
+    ):
+        authority_mod.require_configured_contract_repositories(contract, "/config.json")
+    assert (code.value.side, code.value.name) == ("code", "candidate")
+
+    with (
+        mock.patch.object(
+            authority_mod,
+            "_require_configured_repository_authority",
+            return_value=(configured, code_identity),
+        ),
+        mock.patch.object(
+            authority_mod,
+            "_require_external_memory_repository_authority",
+            return_value=memory_identity,
+        ),
+        mock.patch.object(
+            authority_mod,
+            "repository_identity",
+            side_effect=[code_identity, Path("/foreign-memory-repository")],
+        ),
+        pytest.raises(ConfiguredContractAuthorityError) as memory,
+    ):
+        authority_mod.require_configured_contract_repositories(contract, "/config.json")
+    assert (memory.value.side, memory.value.name) == ("memory", "candidate")
 
 
 @pytest.mark.parametrize(

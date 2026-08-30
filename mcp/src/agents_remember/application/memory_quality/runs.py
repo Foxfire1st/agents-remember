@@ -48,6 +48,7 @@ class QualityRunAdmission:
 class QualityRunSnapshot:
     status: QualityRunStatus
     run_id: str
+    identity: QualityRunIdentity
     result: Mapping[str, object] | None = None
     error: str | None = None
 
@@ -114,6 +115,7 @@ def poll_quality_run(repo_id: str, run_id: str) -> QualityRunSnapshot | None:
         return QualityRunSnapshot(
             status=run.status,
             run_id=run.run_id,
+            identity=run.identity,
             result=None if run.result is None else dict(run.result),
             error=run.error,
         )

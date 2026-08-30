@@ -7,6 +7,7 @@ from typing import Any
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
 from agents_remember.application.task_docs.task_ref import TaskRef
+from agents_remember.errors import CuratorCoherenceError, MemoryCandidatePairError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
@@ -39,8 +40,13 @@ from agents_remember.worktrees.closeout_input import (
     raw_closeout_messages,
     resolve_closeout_plan,
 )
+from agents_remember.worktrees.integration.closeout.memory_candidate_pairing import (
+    memory_candidate_pair_payload,
+    resolve_closeout_memory_pair,
+)
 from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
+    prevalidate_closeout_operation_admission,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
     LifecycleControlCommand,
@@ -538,7 +544,11 @@ def _start_closeout_operation(
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(
+        config,
+        contract_path,
+        require_candidate_identity=False,
+    )
     address = LifecycleOperationPublicAddress("worktree_closeout_apply", "closeout")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
@@ -550,25 +560,38 @@ def _start_closeout_operation(
     corrected_arguments = corrected_closeout_arguments(
         confined.as_posix(), intent_note="<developer intent>"
     )
+    admission = CloseoutOperationAdmission(
+        config_path=config.config_path.as_posix(),
+        contract_path=confined,
+        messages=raw_closeout_messages(
+            code=messages.code,
+            memory=messages.memory,
+            ledger=messages.ledger,
+        ),
+        approval_note=approval.intent_note,
+        gate_policy=_gate_policy_snapshot(config),
+        corrected_call=CloseoutCorrectedCall(
+            tool="worktree_closeout_apply",
+            arguments=corrected_arguments,
+        ),
+    )
+    try:
+        # Input intent is the outermost public boundary.  Reuse the canonical
+        # admission normalizer here so blank enabled-leg messages refuse before
+        # candidate authority or another lifecycle can influence the result.
+        # The lease-owned start repeats this check against current state.
+        prevalidate_closeout_operation_admission(configured.contract, admission)
+    except CloseoutInputError as error:
+        return _start_operation_refusal(config, confined, address, error)
+    try:
+        pair_identity = resolve_closeout_memory_pair(configured.contract)
+    except MemoryCandidatePairError as error:
+        return _memory_candidate_pair_refusal(address.operation, error)
     try:
         execution = execute_configured_contract_operation(
             configured,
             lambda: start_or_observe_closeout_operation(
-                CloseoutOperationAdmission(
-                    config_path=config.config_path.as_posix(),
-                    contract_path=confined,
-                    messages=raw_closeout_messages(
-                        code=messages.code,
-                        memory=messages.memory,
-                        ledger=messages.ledger,
-                    ),
-                    approval_note=approval.intent_note,
-                    gate_policy=_gate_policy_snapshot(config),
-                    corrected_call=CloseoutCorrectedCall(
-                        tool="worktree_closeout_apply",
-                        arguments=corrected_arguments,
-                    ),
-                ),
+                admission,
                 configured.contract,
             ),
         )
@@ -589,7 +612,10 @@ def _start_closeout_operation(
             operation=address.operation,
             address=address,
         )
-    return _operation_acknowledgement("worktree_closeout_apply", execution)
+    return {
+        **_operation_acknowledgement("worktree_closeout_apply", execution),
+        **memory_candidate_pair_payload(pair_identity),
+    }
 
 
 def worktree_integrate_tool(
@@ -1055,7 +1081,11 @@ def _worktree_closeout(
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
 ) -> dict[str, Any]:
-    configured = admit_configured_contract(config, contract_path)
+    configured = admit_configured_contract(
+        config,
+        contract_path,
+        require_candidate_identity=False,
+    )
     address = LifecycleOperationPublicAddress(operation, "closeout")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
@@ -1084,10 +1114,30 @@ def _worktree_closeout(
         dry_run=approval.dry_run,
         gate_policy=config.orchestration.gate_policy,
     )
-    return _worktree_result(
-        operation,
-        git_worktree_manager.closeout_result(args, configured.contract),
-    )
+    try:
+        result = git_worktree_manager.closeout_result(args, configured.contract)
+    except CuratorCoherenceError as error:
+        return {
+            "ok": False,
+            "operation": operation,
+            "state": "refused",
+            "contractPath": confined_contract.as_posix(),
+            **error.response_fields(),
+        }
+    return _worktree_result(operation, result)
+
+
+def _memory_candidate_pair_refusal(
+    operation: str,
+    error: MemoryCandidatePairError,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "operation": operation,
+        "state": "refused",
+        "status": error.status,
+        **error.response_fields(),
+    }
 
 
 def _normalize_worktree_closeout(

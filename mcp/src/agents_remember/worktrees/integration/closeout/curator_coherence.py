@@ -9,7 +9,12 @@ from tempfile import TemporaryDirectory
 
 from pydantic import ValidationError
 
-from agents_remember.errors import CuratorCoherenceError, FutureCodeCandidateError
+from agents_remember.errors import (
+    CuratorCoherenceError,
+    CuratorCoherencePairError,
+    FutureCodeCandidateError,
+    MemoryCandidatePairError,
+)
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
@@ -17,6 +22,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorQualityAttestation,
     CuratorSourceCandidate,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
@@ -25,6 +31,9 @@ from agents_remember.tasks.document_refs import (
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.worktrees.integration.closeout.future_code_candidate import (
     capture_future_code_candidate,
+)
+from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.queue.closeout_projection_members import (
@@ -55,6 +64,7 @@ class CuratorCoherencePaths:
 @dataclass(frozen=True)
 class CuratorCoherenceObservation:
     candidate: ResolvedTaskDocument
+    pair_identity: MemoryCandidatePairIdentity
     code_candidate_tree: str
     memory_candidate_tree: str
     task_topology_fingerprint: str
@@ -123,6 +133,14 @@ def observe_curator_coherence_source(
     """Capture every identity a publication must freeze and later re-prove."""
 
     _require_leaf_external_memory(contract)
+    try:
+        pair_identity = resolve_memory_candidate_pair(
+            contract,
+            requested_contract_path=contract.contract_path,
+            requested_repo_id=contract.repo_name,
+        )
+    except MemoryCandidatePairError as exc:
+        raise CuratorCoherencePairError(exc) from exc
     candidate, master, sprint, graph = _task_context(contract)
     try:
         code_tree = capture_future_code_candidate(contract).codeCandidateTree
@@ -137,7 +155,12 @@ def observe_curator_coherence_source(
         ) from exc
     attestation_path = contract.worktree_group / "reports" / QUALITY_ATTESTATION_NAME
     report_path = contract.worktree_group / "reports" / QUALITY_REPORT_NAME
-    attestation, attestation_digest = _quality_attestation(contract, attestation_path, report_path)
+    attestation, attestation_digest = _quality_attestation(
+        contract,
+        attestation_path,
+        report_path,
+        pair_identity,
+    )
     topology_fingerprint = candidate_task_topology_fingerprint(
         sprint,
         master,
@@ -146,6 +169,7 @@ def observe_curator_coherence_source(
     )
     return CuratorCoherenceObservation(
         candidate=candidate,
+        pair_identity=pair_identity,
         code_candidate_tree=code_tree,
         memory_candidate_tree=memory_tree,
         task_topology_fingerprint=topology_fingerprint,
@@ -267,6 +291,7 @@ def require_current_curator_coherence(
     validated = load_curator_coherence_authority(contract)
     record = validated.record
     observed = {
+        "pairIdentity": observation.pair_identity.model_dump(mode="json"),
         "codeCandidateTree": observation.code_candidate_tree,
         "memoryCandidateTree": observation.memory_candidate_tree,
         "taskTopologyFingerprint": observation.task_topology_fingerprint,
@@ -276,6 +301,7 @@ def require_current_curator_coherence(
         ],
     }
     expected = {
+        "pairIdentity": record.pairIdentity.model_dump(mode="json"),
         "codeCandidateTree": record.codeCandidateTree,
         "memoryCandidateTree": record.memoryCandidateTree,
         "taskTopologyFingerprint": record.taskTopologyFingerprint,
@@ -309,6 +335,7 @@ def _quality_attestation(
     contract: WorktreeContract,
     attestation_path: Path,
     report_path: Path,
+    pair_identity: MemoryCandidatePairIdentity,
 ) -> tuple[CuratorQualityAttestation, str]:
     assert contract.memory_worktree is not None
     try:
@@ -332,6 +359,7 @@ def _quality_attestation(
         expected_onboarding,
         expected_report,
         _digest(report_bytes),
+        pair_identity,
     )
     observed_ready = (
         attestation.checklistStatus,
@@ -342,6 +370,7 @@ def _quality_attestation(
         attestation.onboardingRoot,
         attestation.reportPath,
         attestation.reportSha256,
+        attestation.pairIdentity,
     )
     if observed_ready != expected_ready:
         raise CuratorCoherenceError(

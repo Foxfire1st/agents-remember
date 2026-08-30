@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.declared_caller import DeclaredCaller
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 Digest = str
@@ -60,6 +61,7 @@ class CuratorQualityAttestation(_StrictModel):
     sourceChangeCandidates: list[CuratorSourceCandidate] = Field(
         max_length=MAX_CURATOR_SOURCE_CANDIDATES
     )
+    pairIdentity: MemoryCandidatePairIdentity
     onboardingRoot: str = Field(min_length=1, max_length=8192)
     reportPath: str = Field(min_length=1, max_length=8192)
     reportSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
@@ -112,6 +114,7 @@ class CuratorCoherenceRecord(_StrictModel):
     taskDocumentRef: TaskDocumentRef
     semanticRequirementRevision: str = Field(min_length=1, max_length=1024)
     deliveryAttempt: str = Field(min_length=1, max_length=256)
+    pairIdentity: MemoryCandidatePairIdentity
     codeCandidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     memoryCandidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     taskTopologyFingerprint: Digest = Field(pattern=r"^[0-9a-f]{64}$")
@@ -238,6 +241,7 @@ class CuratorCoherenceResponse(ToolResponse):
     snapshotPath: str | None = Field(default=None, max_length=8192)
     semanticRequirementRevision: str | None = Field(default=None, max_length=1024)
     deliveryAttempt: str | None = Field(default=None, max_length=256)
+    pairIdentity: MemoryCandidatePairIdentity | None = None
     codeCandidateTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     memoryCandidateTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     taskTopologyFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -254,9 +258,11 @@ class CuratorCoherenceResponse(ToolResponse):
     validationResult: CuratorCoherenceValidationResult | None = None
     status: str | None = Field(default=None, max_length=256)
     detail: str | None = Field(default=None, max_length=8192)
+    pairField: str | None = Field(default=None, max_length=256)
     expected: dict[str, Any] | None = Field(default=None, max_length=32)
     observed: dict[str, Any] | None = Field(default=None, max_length=32)
     nextAction: str | None = Field(default=None, max_length=8192)
+    nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
     def _failure_shape_is_coherent(self) -> Self:

@@ -46,11 +46,15 @@ from agents_remember.mcp.tools import (
 from agents_remember.memory_quality.check import DRIFT_CHECK_NAME
 from agents_remember.memory_quality.curator_checklist import split_commit_owned_findings
 from agents_remember.models.memory import MemoryQualitySyncRequest
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     write_contract,
 )
@@ -130,6 +134,10 @@ def _enclosure(root: Path) -> _Enclosure:
         "main",
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
 
     # The leaf's own code: a file and a whole route, committed on the leaf branch only, so a
     # check measured against the repository rather than this worktree cannot see either.
@@ -237,6 +245,17 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
         self.assertEqual(payload["onboardingRoot"], self.enclosure.leaf_onboarding.as_posix())
         self.assertEqual(payload["checks"][DRIFT_CHECK_NAME]["checkedCount"], 3)
+        self.assertEqual(payload["scopeAuthority"], "leaf-candidate")
+        self.assertTrue(payload["acceptanceEligible"])
+        self.assertEqual(payload["contractPath"], Path(self.contract_path).resolve().as_posix())
+        self.assertEqual(
+            payload["pairIdentity"]["codeRoot"],
+            self.enclosure.contract.code_worktree.as_posix(),
+        )
+        self.assertEqual(
+            payload["pairIdentity"]["memoryRoot"],
+            self.enclosure.leaf_onboarding.parent.as_posix(),
+        )
         self.assertTrue(payload["ok"])
 
     def test_full_contract_check_replaces_one_enclosure_local_curator_report(self) -> None:
@@ -260,6 +279,8 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
             {path.name for path in expected.parent.iterdir()},
             {expected.name, expected.with_suffix(".json").name},
         )
+        attestation = json.loads(expected.with_suffix(".json").read_text(encoding="utf-8"))
+        self.assertEqual(attestation["pairIdentity"], second["pairIdentity"])
         self.assertIn(
             second["checklistStatus"],
             {"action-required", "coherence-required", "ready-for-closeout"},
@@ -328,6 +349,9 @@ class MemoryQualityCheckReadsTheNamedTreeTests(EnclosureScopeTestCase):
 
         self.assertEqual(payload["onboardingRoot"], self.enclosure.official_onboarding.as_posix())
         self.assertEqual(payload["checks"][DRIFT_CHECK_NAME]["checkedCount"], 1)
+        self.assertEqual(payload["scopeAuthority"], "official-diagnostic")
+        self.assertFalse(payload["acceptanceEligible"])
+        self.assertNotIn("pairIdentity", payload)
 
     def test_a_contract_scoped_check_uses_the_leaf_base_for_unstamped_claims(self) -> None:
         with patch(
@@ -436,18 +460,20 @@ class RefusalTests(EnclosureScopeTestCase):
             str(memory_worktree),
         )
 
-        with self.assertRaises(ValueError) as raised:
-            memory_quality_check_payload(
-                self.config,
-                MemoryQualitySyncRequest(
-                    mode="sync",
-                    repo_id=REPO,
-                    contract_path=self.contract_path,
-                ),
-            )
+        payload = memory_quality_check_payload(
+            self.config,
+            MemoryQualitySyncRequest(
+                mode="sync",
+                repo_id=REPO,
+                contract_path=self.contract_path,
+            ),
+        )
 
-        self.assertIn("has no onboarding tree at", str(raised.exception))
-        self.assertNotIn("memory-repos", str(raised.exception))
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "scope-refused")
+        self.assertEqual(payload["pairStatus"], "memory-candidate-pair-path-unavailable")
+        self.assertEqual(payload["pairField"], "memoryRoot")
+        self.assertNotIn("memory-repos", str(payload["detail"]))
 
     def test_an_internal_memory_contract_has_no_leaf_memory_tree_to_check(self) -> None:
         internal = self.enclosure.contract.contract_path.parent / "internal-contract.md"

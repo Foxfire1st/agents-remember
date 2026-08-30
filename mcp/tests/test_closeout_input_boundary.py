@@ -11,6 +11,11 @@ from unittest import mock
 import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.lifecycle import lifecycle_operation_worker
+from agents_remember.errors import (
+    CuratorCoherenceError,
+    MemoryCandidatePairError,
+    MemoryCandidatePairFailure,
+)
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.closeout.input import CloseoutCorrectedCall
 from agents_remember.models.lifecycles.mutation_evidence import CloseoutMutationLeg
@@ -210,7 +215,7 @@ def test_preview_apply_and_duplicate_fingerprints_share_one_normalized_input(
             return_value={"ok": True},
         ),
     ):
-        worktree_tools.worktree_closeout_apply_tool(
+        first_apply = worktree_tools.worktree_closeout_apply_tool(
             config,
             contract.contract_path.as_posix(),
             messages,
@@ -242,8 +247,13 @@ def test_preview_apply_and_duplicate_fingerprints_share_one_normalized_input(
     assert isinstance(record.input, CloseoutOperationInput)
     assert record.input.effectiveInput == preview_input
     assert record.fingerprint
+    assert first_apply["pairIdentity"]["contractPath"] == (
+        contract.contract_path.resolve().as_posix()
+    )
+    assert first_apply["pairIdentity"]["codeRoot"] == contract.code_worktree.resolve().as_posix()
     assert invalid["status"] == "closeout-input-invalid"
-    assert start.call_count == 3
+    # Invalid commit input is rejected before an operation can be started or observed.
+    assert start.call_count == 2
     launcher.assert_called_once()
 
 
@@ -279,6 +289,84 @@ def test_invalid_apply_after_selection_changes_no_authority_or_git_fact(tmp_path
     assert _bytes_under(fixture.coord) == before_coordination
     assert _git_facts(contract.code_worktree) == before_code
     assert _git_facts(contract.memory_worktree) == before_memory
+
+
+def test_preview_translates_curator_coherence_refusal_at_its_shared_boundary(
+    tmp_path: Path,
+) -> None:
+    fixture = _selected_fixture(tmp_path, memory_mode="external")
+    contract = fixture.contracts[MASTER_A]
+    error = CuratorCoherenceError(
+        "curator-coherence-authority-stale",
+        "coherence authority belongs to an older candidate",
+        next_action="prepare",
+    )
+    with mock.patch.object(
+        worktree_tools.git_worktree_manager,
+        "closeout_result",
+        side_effect=error,
+    ):
+        result = worktree_tools.worktree_closeout_preview_tool(
+            load_config(fixture.config_path),
+            contract.contract_path.as_posix(),
+            worktree_tools.CloseoutCommitMessages(
+                code="code",
+                memory="memory",
+                ledger="ledger",
+            ),
+        )
+    assert result["status"] == error.status
+    assert result["state"] == "refused"
+    assert result["nextAction"] == "prepare"
+
+
+def test_apply_pair_refusal_names_field_and_exact_repair_route(tmp_path: Path) -> None:
+    fixture = _selected_fixture(tmp_path, memory_mode="external")
+    contract = fixture.contracts[MASTER_A]
+    config = load_config(fixture.config_path)
+    error = MemoryCandidatePairError(
+        "memory-candidate-pair-base-stale",
+        "the recorded code base no longer equals its source branch",
+        failure=MemoryCandidatePairFailure(
+            field="codeBaseCommit",
+            contract_path=contract.contract_path.resolve().as_posix(),
+            expected={"baseCommit": contract.code_base_commit},
+            observed={"sourceCommit": "f" * 40},
+            next_action="worktree_sync",
+            next_args={
+                "contract_path": contract.contract_path.resolve().as_posix(),
+                "dry_run": True,
+            },
+        ),
+    )
+
+    with (
+        mock.patch.object(
+            worktree_tools,
+            "resolve_closeout_memory_pair",
+            side_effect=error,
+        ),
+        mock.patch.object(worktree_tools, "start_or_observe_closeout_operation") as start,
+    ):
+        refused = worktree_tools.worktree_closeout_apply_tool(
+            config,
+            contract.contract_path.as_posix(),
+            worktree_tools.CloseoutCommitMessages(
+                code="code",
+                memory="memory",
+                ledger="ledger",
+            ),
+            worktree_tools.CloseoutApproval(intent_note="approved"),
+        )
+
+    assert refused["status"] == "memory-candidate-pair-base-stale"
+    assert refused["pairField"] == "codeBaseCommit"
+    assert refused["nextAction"] == "worktree_sync"
+    assert refused["nextArgs"] == {
+        "contract_path": contract.contract_path.resolve().as_posix(),
+        "dry_run": True,
+    }
+    start.assert_not_called()
 
 
 @pytest.mark.parametrize("drift", ["dirty-to-clean", "clean-to-dirty"])

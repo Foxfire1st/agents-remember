@@ -94,6 +94,8 @@ def reread_configured_contract(
 def require_configured_contract_repositories(
     contract: WorktreeContract,
     config_path: str,
+    *,
+    require_candidate_identity: bool = True,
 ) -> None:
     """Bind a task contract to repository identities selected by MCP authority."""
 
@@ -101,9 +103,10 @@ def require_configured_contract_repositories(
         contract,
         config_path,
     )
-    candidate_code_identity = repository_identity(contract.code_worktree)
-    if candidate_code_identity != code_identity:
-        raise ConfiguredContractAuthorityError(side="code", name="candidate")
+    if require_candidate_identity:
+        candidate_code_identity = repository_identity(contract.code_worktree)
+        if candidate_code_identity != code_identity:
+            raise ConfiguredContractAuthorityError(side="code", name="candidate")
     if contract.memory_mode != "external":
         return
     memory_identity = _require_external_memory_repository_authority(
@@ -111,9 +114,13 @@ def require_configured_contract_repositories(
         configured,
         code_identity,
     )
-    if contract.kind == "leaf" and (
-        contract.memory_worktree is None
-        or repository_identity(contract.memory_worktree) != memory_identity
+    if (
+        require_candidate_identity
+        and contract.kind == "leaf"
+        and (
+            contract.memory_worktree is None
+            or repository_identity(contract.memory_worktree) != memory_identity
+        )
     ):
         raise ConfiguredContractAuthorityError(side="memory", name="candidate")
 

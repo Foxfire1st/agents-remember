@@ -1062,6 +1062,20 @@ class WorktreeSupport1(WorktreeSupportTests):
                 self.assertEqual(run_authorized_closeout_mechanics(args), 0)
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["state"], "would-closeout")
+            self.assertIsNotNone(contract.memory_worktree)
+            assert contract.memory_worktree is not None
+            self.assertEqual(
+                payload["pairIdentity"]["contractPath"],
+                contract.contract_path.resolve().as_posix(),
+            )
+            self.assertEqual(
+                payload["pairIdentity"]["codeRoot"],
+                contract.code_worktree.resolve().as_posix(),
+            )
+            self.assertEqual(
+                payload["pairIdentity"]["memoryRoot"],
+                contract.memory_worktree.resolve().as_posix(),
+            )
             self.assertEqual(payload["phase"], "commit-approval-pending")
             self.assertEqual(payload["nextOperation"], "request_commit_approval")
             self.assertEqual(payload["nextTool"], "worktree_closeout_apply")

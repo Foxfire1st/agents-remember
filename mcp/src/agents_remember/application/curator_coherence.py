@@ -22,7 +22,11 @@ def curator_coherence_tool(
 ) -> dict[str, object]:
     """Resolve one exact leaf contract and execute its single coherence authority API."""
 
-    configured = admit_configured_contract(config, request.contract_path)
+    configured = admit_configured_contract(
+        config,
+        request.contract_path,
+        require_candidate_identity=False,
+    )
     if isinstance(configured, ConfiguredContractRefused):
         return _configured_refusal(request, configured)
     try:
@@ -48,14 +52,8 @@ def _domain_refusal(
         "state": "refused",
         "summary": error.detail,
         "contractPath": request.contract_path,
-        "status": error.status,
-        "detail": error.detail,
-        "nextAction": error.next_action,
+        **error.response_fields(),
     }
-    if error.expected:
-        result["expected"] = error.expected
-    if error.observed:
-        result["observed"] = error.observed
     return result
 
 

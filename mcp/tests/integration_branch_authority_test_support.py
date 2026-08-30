@@ -105,6 +105,7 @@ def _closed_external_leaf_worktrees(
     memory_worktree.parent.mkdir(parents=True, exist_ok=True)
     _git(fixture.code_repo, "worktree", "add", code_worktree.as_posix(), "leaf")
     _git(memory_repo, "worktree", "add", memory_worktree.as_posix(), "leaf")
+    (memory_worktree / "onboarding").mkdir()
     (code_worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
     _git(code_worktree, "add", "candidate.txt")
     _git(code_worktree, "commit", "-m", "closed code")

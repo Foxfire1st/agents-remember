@@ -330,6 +330,7 @@ integration = [
   "mcp/tests/test_memory_citation_source_index_cross.py",
   "mcp/tests/test_memory_citation_source_index_namespace.py",
   "mcp/tests/test_memory_citation_source_index_publication_1.py",
+  "mcp/tests/test_memory_candidate_pair.py",
   "mcp/tests/test_memory_document_shape.py",
   "mcp/tests/test_memory_quality.py",
   "mcp/tests/test_memory_tool_enclosure_scope.py",

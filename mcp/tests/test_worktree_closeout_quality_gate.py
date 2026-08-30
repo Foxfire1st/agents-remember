@@ -112,13 +112,11 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     closeout_module,
-                    "require_current_curator_coherence",
-                    return_value=mock.sentinel.coherence,
-                ),
-                mock.patch.object(
-                    closeout_module,
-                    "curator_coherence_no_impact",
-                    return_value=closeout_module.CuratorCoherenceNoImpact(),
+                    "accepted_closeout_memory_pair",
+                    return_value=mock.Mock(
+                        no_impact=closeout_module.CuratorCoherenceNoImpact(),
+                        pair_identity=None,
+                    ),
                 ),
                 mock.patch.object(closeout_module, "_memory_quality_before_refresh") as memory,
                 mock.patch.object(closeout_module, "_claim_closeout_gate") as claim,
@@ -189,6 +187,21 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             self.assertEqual(recovered.payload["state"], "closed")
             self.assertTrue(recovered.payload["recovered"])
+            pair_identity = recovered.payload["pairIdentity"]
+            self.assertIsInstance(pair_identity, dict)
+            assert isinstance(pair_identity, dict)
+            self.assertEqual(
+                pair_identity["contractPath"],
+                contract.contract_path.resolve().as_posix(),
+            )
+            self.assertEqual(
+                pair_identity["codeRoot"],
+                contract.code_worktree.resolve().as_posix(),
+            )
+            self.assertEqual(
+                pair_identity["memoryRoot"],
+                contract.memory_worktree.resolve().as_posix(),
+            )
             self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), code_head)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
             self.assertEqual(contract.ledger_path.read_bytes(), ledger_after_first)

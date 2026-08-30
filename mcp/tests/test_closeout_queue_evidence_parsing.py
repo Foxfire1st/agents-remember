@@ -15,6 +15,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorQualityAttestation,
     CuratorSourceCandidate,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.integration.closeout import curator_coherence
 from agents_remember.worktrees.integration.closeout.curator_coherence_render import (
@@ -47,6 +48,24 @@ def _judgment() -> CuratorCoherenceRecordedJudgment:
     )
 
 
+def _pair() -> MemoryCandidatePairIdentity:
+    return MemoryCandidatePairIdentity(
+        repoId="repo",
+        contractPath="/coordination/tasks/repo/task/enclosures/l1/series-contract.md",
+        contractDigest="1" * 64,
+        codeRoot="/group/code",
+        memoryRoot="/group/memory",
+        codeSourceBranch="master",
+        codeWorkBranch="leaf",
+        codeBaseCommit="2" * 40,
+        memorySourceBranch="master",
+        memoryWorkBranch="leaf",
+        memoryBaseCommit="3" * 40,
+        onboardingRoot="/group/memory/onboarding",
+        ledgerPath="/group/memory/memory.md",
+    )
+
+
 def _record() -> CuratorCoherenceRecord:
     return CuratorCoherenceRecord(
         leafId="L1",
@@ -54,6 +73,7 @@ def _record() -> CuratorCoherenceRecord:
         taskDocumentRef=TaskDocumentRef(repository="repo", path="task/01_leaf.json"),
         semanticRequirementRevision="R1@v1",
         deliveryAttempt="A003",
+        pairIdentity=_pair(),
         codeCandidateTree="a" * 40,
         memoryCandidateTree="b" * 40,
         taskTopologyFingerprint="c" * 64,
@@ -79,6 +99,7 @@ def test_structured_attestation_and_record_require_exact_unique_identity_sets() 
         "staleRouteIndexCount": 0,
         "sourceChangeCandidateCount": 1,
         "sourceChangeCandidates": [_candidate().model_dump(mode="json")],
+        "pairIdentity": _pair().model_dump(mode="json"),
         "onboardingRoot": "/memory/onboarding",
         "reportPath": "/group/reports/curator-memory-quality.md",
         "reportSha256": "1" * 64,

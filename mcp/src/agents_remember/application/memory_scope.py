@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NoReturn
 
-from agents_remember.errors import AuthorityError
+from agents_remember.application.lifecycle.configured_contract_admission import (
+    ConfiguredContractRefused,
+    admit_configured_contract,
+    project_configured_contract_refusal,
+)
+from agents_remember.errors import (
+    AuthorityError,
+    MemoryCandidatePairError,
+    MemoryCandidatePairFailure,
+)
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import (
@@ -18,7 +27,11 @@ from agents_remember.kernel.coordination_context_resolver import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory_quality.curator_checklist import report_path_for
 from agents_remember.memory_quality.style.citations import source_index_cache
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.worktrees.git_worktree_manager import contract_context
+from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -32,6 +45,7 @@ class MemoryScopeIdentity:
     code_root: str
     onboarding_root: str
     unstamped_code_commit: str | None = None
+    pair_identity: MemoryCandidatePairIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +61,7 @@ class MemoryScope:
     unstamped_code_commit: str | None = None
     curator_report_path: Path | None = None
     contract: WorktreeContract | None = None
+    pair_identity: MemoryCandidatePairIdentity | None = None
 
 
 def resolve_memory_scope(
@@ -113,10 +128,82 @@ def resolve_leaf_memory_scope(
             f"{contract.memory_mode!r}), so it has no memory tree of its own to check; drop "
             "contract_path to check the official memory repo deliberately"
         )
+    return _leaf_scope(repo, contract)
+
+
+def resolve_memory_candidate_scope(
+    config: McpRuntimeConfig,
+    *,
+    repo_id: str,
+    contract_path: str,
+) -> MemoryScope:
+    """Resolve one acceptance-eligible pair through configured leaf authority."""
+
+    repo = require_repo(config, repo_id)
+    configured = admit_configured_contract(
+        config,
+        contract_path,
+        # The configured boundary still binds repository roots and enclosure
+        # ownership; the shared pair validator owns live candidate identity.
+        require_candidate_identity=False,
+    )
+    if isinstance(configured, ConfiguredContractRefused):
+        _raise_configured_pair_refusal(configured, requested_contract_path=contract_path)
+    pair = resolve_memory_candidate_pair(
+        configured.contract,
+        requested_contract_path=contract_path,
+        requested_repo_id=repo.repo_id,
+    )
+    return _leaf_scope(repo, configured.contract, pair_identity=pair)
+
+
+def revalidate_memory_candidate_scope(
+    config: McpRuntimeConfig,
+    scope: MemoryScope,
+) -> MemoryScope:
+    """Reread the same contract-addressed pair and reject any changed identity."""
+
+    pair = scope.pair_identity
+    if pair is None:
+        return scope
+    current = resolve_memory_candidate_scope(
+        config,
+        repo_id=scope.repo_id,
+        contract_path=pair.contractPath,
+    )
+    if current.pair_identity != pair:
+        raise MemoryCandidatePairError(
+            "memory-candidate-pair-stale",
+            "the exact contract-addressed code/memory pair changed after admission",
+            failure=MemoryCandidatePairFailure(
+                field="pairIdentity",
+                contract_path=pair.contractPath,
+                expected={"pairIdentity": pair.model_dump(mode="json")},
+                observed={
+                    "pairIdentity": (
+                        None
+                        if current.pair_identity is None
+                        else current.pair_identity.model_dump(mode="json")
+                    )
+                },
+                next_action="worktree_sync",
+                next_args={"contract_path": pair.contractPath, "dry_run": True},
+            ),
+        )
+    return current
+
+
+def _leaf_scope(
+    repo: RepositoryScope,
+    contract: WorktreeContract,
+    *,
+    pair_identity: MemoryCandidatePairIdentity | None = None,
+) -> MemoryScope:
+    assert contract.memory_worktree is not None
     onboarding_root = contract.memory_worktree / "onboarding"
     if not onboarding_root.is_dir():
         raise ValueError(
-            f"contract {path.as_posix()} names memory worktree "
+            f"contract {contract.contract_path.as_posix()} names memory worktree "
             f"{contract.memory_worktree.as_posix()}, which has no onboarding tree at "
             f"{onboarding_root.as_posix()}; the worktree was removed or never opened"
         )
@@ -124,10 +211,11 @@ def resolve_leaf_memory_scope(
         repo_id=repo.repo_id,
         identity=MemoryScopeIdentity(
             authority="leaf",
-            authority_path=path.as_posix(),
+            authority_path=contract.contract_path.as_posix(),
             code_root=contract.code_worktree.resolve().as_posix(),
             onboarding_root=onboarding_root.resolve().as_posix(),
             unstamped_code_commit=contract.code_base_commit,
+            pair_identity=pair_identity,
         ),
         code_root=contract.code_worktree,
         onboarding_root=onboarding_root,
@@ -142,4 +230,39 @@ def resolve_leaf_memory_scope(
         unstamped_code_commit=contract.code_base_commit,
         curator_report_path=report_path_for(contract.worktree_group),
         contract=contract,
+        pair_identity=pair_identity,
     )
+
+
+def _raise_configured_pair_refusal(
+    refusal: ConfiguredContractRefused,
+    *,
+    requested_contract_path: str,
+) -> NoReturn:
+    projected = project_configured_contract_refusal(
+        refusal,
+        operation="memory_quality_check",
+    )
+    # The canonical projector owns this public schema. Missing required fields are an
+    # implementation defect and must remain loud instead of being reconstructed here.
+    raise MemoryCandidatePairError(
+        projected["status"],
+        projected["detail"],
+        failure=MemoryCandidatePairFailure(
+            field="contractPath",
+            contract_path=requested_contract_path,
+            expected=projected["expected"],
+            observed=projected["observed"],
+            next_action=projected["nextAction"],
+            next_args=projected.get("nextArgs"),
+        ),
+    )
+
+
+__all__ = [
+    "MemoryScope",
+    "MemoryScopeIdentity",
+    "resolve_memory_candidate_scope",
+    "resolve_memory_scope",
+    "revalidate_memory_candidate_scope",
+]

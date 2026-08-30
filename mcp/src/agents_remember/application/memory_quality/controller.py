@@ -3,15 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
+    QualityRunSnapshot,
     poll_quality_run,
     start_quality_run,
 )
-from agents_remember.application.memory_scope import MemoryScope, resolve_memory_scope
-from agents_remember.errors import CuratorCoherenceError
+from agents_remember.application.memory_scope import (
+    MemoryScope,
+    MemoryScopeIdentity,
+    resolve_memory_candidate_scope,
+    resolve_memory_scope,
+    revalidate_memory_candidate_scope,
+)
+from agents_remember.errors import (
+    CuratorCoherenceError,
+    MemoryCandidatePairError,
+    MemoryCandidatePairFailure,
+)
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.route_index import build_route_indexes
@@ -45,7 +57,8 @@ _CAPACITY_GUIDANCE = (
 )
 _RUN_NOT_FOUND_GUIDANCE = (
     "The run was evicted, belongs to another repository, or the server restarted; "
-    "submit a new start request."
+    "submit a new start request with the original contract_path for a worktree candidate. "
+    "Repository id alone is not candidate-pair authority."
 )
 
 
@@ -53,6 +66,7 @@ _RUN_NOT_FOUND_GUIDANCE = (
 class MemoryQualityExecution:
     """One canonical execution and the result-affecting publication decision."""
 
+    config: McpRuntimeConfig
     scope: MemoryScope
     checks: tuple[str, ...]
     detail_limit: int
@@ -75,7 +89,11 @@ def run_memory_quality_request(
 ) -> dict[str, object]:
     """Resolve and synchronously execute one explicit sync request."""
 
-    return _execute_memory_quality(_resolve_execution(config, request))
+    try:
+        execution = _resolve_execution(config, request)
+    except MemoryCandidatePairError as error:
+        return _pair_refusal(request.repo_id, error)
+    return _execute_or_refuse(execution)
 
 
 def start_memory_quality_request(
@@ -84,10 +102,13 @@ def start_memory_quality_request(
 ) -> dict[str, object]:
     """Resolve and admit one explicit async-start request."""
 
-    execution = _resolve_execution(config, request)
+    try:
+        execution = _resolve_execution(config, request)
+    except MemoryCandidatePairError as error:
+        return _pair_refusal(request.repo_id, error)
     admission = start_quality_run(
         execution.identity,
-        lambda: _execute_memory_quality(execution),
+        lambda: _execute_or_refuse(execution),
     )
     if admission.state == "capacity-reached":
         return {
@@ -96,6 +117,7 @@ def start_memory_quality_request(
             "repoId": execution.scope.repo_id,
             "status": "capacity-reached",
             "guidance": _CAPACITY_GUIDANCE,
+            **_scope_projection(execution.scope.identity),
         }
     if admission.run_id is None:
         raise RuntimeError("memory-quality admission did not retain its run identity")
@@ -105,6 +127,7 @@ def start_memory_quality_request(
         "repoId": execution.scope.repo_id,
         "status": admission.state,
         "runId": admission.run_id,
+        **_scope_projection(execution.scope.identity),
     }
 
 
@@ -125,27 +148,135 @@ def poll_memory_quality_request(
             "runId": request.run_id,
             "guidance": _RUN_NOT_FOUND_GUIDANCE,
         }
-    if snapshot.status == "running":
-        return {
-            "ok": True,
-            "operation": "memory_quality_check",
-            "repoId": repo_id,
-            "status": "running",
-            "runId": snapshot.run_id,
-        }
+    scope_identity = snapshot.identity.scope
+    mismatch = _poll_scope_mismatch(request, scope_identity)
+    if mismatch is not None:
+        return mismatch
+    if scope_identity.pair_identity is not None:
+        try:
+            current = resolve_memory_candidate_scope(
+                config,
+                repo_id=repo_id,
+                contract_path=scope_identity.pair_identity.contractPath,
+            )
+            if current.pair_identity != scope_identity.pair_identity:
+                raise MemoryCandidatePairError(
+                    "memory-candidate-pair-stale",
+                    "the polled result belongs to a code/memory pair that is no longer current",
+                    failure=MemoryCandidatePairFailure(
+                        field="pairIdentity",
+                        contract_path=scope_identity.pair_identity.contractPath,
+                        expected={
+                            "pairIdentity": scope_identity.pair_identity.model_dump(mode="json")
+                        },
+                        observed={
+                            "pairIdentity": (
+                                None
+                                if current.pair_identity is None
+                                else current.pair_identity.model_dump(mode="json")
+                            )
+                        },
+                        next_action="worktree_sync",
+                        next_args={
+                            "contract_path": scope_identity.pair_identity.contractPath,
+                            "dry_run": True,
+                        },
+                    ),
+                )
+        except MemoryCandidatePairError as error:
+            return {
+                **_pair_refusal(repo_id, error),
+                "runId": snapshot.run_id,
+            }
+    if snapshot.status != "completed":
+        return _unfinished_poll_payload(repo_id, snapshot, scope_identity)
+    result = dict(snapshot.result or {})
+    if result.get("status") == "scope-refused":
+        return {**result, "runId": snapshot.run_id}
+    return {**result, "status": "completed", "runId": snapshot.run_id}
+
+
+def _unfinished_poll_payload(
+    repo_id: str,
+    snapshot: QualityRunSnapshot,
+    scope_identity: MemoryScopeIdentity,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "ok": True,
+        "operation": "memory_quality_check",
+        "repoId": repo_id,
+        "status": snapshot.status,
+        "runId": snapshot.run_id,
+        **_scope_projection(scope_identity),
+    }
     if snapshot.status == "failed":
+        result["error"] = snapshot.error
+    return result
+
+
+def _execute_or_refuse(execution: MemoryQualityExecution) -> dict[str, object]:
+    try:
+        return _execute_memory_quality(execution)
+    except MemoryCandidatePairError as error:
+        return _pair_refusal(execution.scope.repo_id, error)
+
+
+def _pair_refusal(repo_id: str, error: MemoryCandidatePairError) -> dict[str, object]:
+    result: dict[str, object] = {
+        "ok": False,
+        "operation": "memory_quality_check",
+        "repoId": repo_id,
+        "status": "scope-refused",
+        **error.response_fields(),
+    }
+    result["status"] = "scope-refused"
+    return result
+
+
+def _scope_projection(identity: MemoryScopeIdentity) -> dict[str, object]:
+    pair = identity.pair_identity
+    if pair is None:
         return {
-            "ok": True,
-            "operation": "memory_quality_check",
-            "repoId": repo_id,
-            "status": "failed",
-            "runId": snapshot.run_id,
-            "error": snapshot.error,
+            "scopeAuthority": "official-diagnostic",
+            "acceptanceEligible": False,
         }
     return {
-        **dict(snapshot.result or {}),
-        "status": "completed",
-        "runId": snapshot.run_id,
+        "scopeAuthority": "leaf-candidate",
+        "acceptanceEligible": True,
+        "contractPath": pair.contractPath,
+        "pairIdentity": pair.model_dump(mode="json"),
+    }
+
+
+def _poll_scope_mismatch(
+    request: MemoryQualityPollRequest,
+    identity: MemoryScopeIdentity,
+) -> dict[str, object] | None:
+    pair = identity.pair_identity
+    requested = request.contract_path
+    if pair is None and requested is None:
+        return None
+    if (
+        pair is not None
+        and requested is not None
+        and Path(requested).resolve() == Path(pair.contractPath).resolve()
+    ):
+        return None
+    contract_path = pair.contractPath if pair is not None else str(requested or "")
+    error = MemoryCandidatePairError(
+        "memory-candidate-pair-poll-scope-mismatch",
+        "poll must repeat the exact scope of the admitted memory-quality run",
+        failure=MemoryCandidatePairFailure(
+            field="contractPath",
+            contract_path=contract_path,
+            expected={"contractPath": None if pair is None else pair.contractPath},
+            observed={"contractPath": requested},
+            next_action="memory_quality_check",
+        ),
+    )
+    return {
+        **_pair_refusal(request.repo_id, error),
+        "runId": request.run_id,
     }
 
 
@@ -154,12 +285,17 @@ def _resolve_execution(
     request: MemoryQualitySyncRequest | MemoryQualityStartRequest,
 ) -> MemoryQualityExecution:
     checks = tuple(sorted(set(normalize_checks(request.checks, include_integrity=True))))
-    scope = resolve_memory_scope(
-        config,
-        repo_id=request.repo_id,
-        contract_path=request.contract_path,
+    scope = (
+        resolve_memory_scope(config, repo_id=request.repo_id, contract_path=None)
+        if request.contract_path is None
+        else resolve_memory_candidate_scope(
+            config,
+            repo_id=request.repo_id,
+            contract_path=request.contract_path,
+        )
     )
     return MemoryQualityExecution(
+        config=config,
         scope=scope,
         checks=checks,
         detail_limit=request.detail_limit,
@@ -168,7 +304,7 @@ def _resolve_execution(
 
 
 def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, object]:
-    scope = execution.scope
+    scope = revalidate_memory_candidate_scope(execution.config, execution.scope)
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=execution.checks,
@@ -183,19 +319,22 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         ),
         include_report_only_findings=execution.publish_curator_report,
     )
+    scope = revalidate_memory_candidate_scope(execution.config, scope)
     response: dict[str, object] = {
         "operation": "memory_quality_check",
         "repoId": scope.repo_id,
         "onboardingRoot": scope.onboarding_root.as_posix(),
+        **_scope_projection(scope.identity),
         **payload,
     }
     if not execution.publish_curator_report:
         return response
-    _attach_curator_checklist(scope, payload, response)
+    _attach_curator_checklist(execution.config, scope, payload, response)
     return response
 
 
 def _attach_curator_checklist(
+    config: McpRuntimeConfig,
     scope: MemoryScope,
     payload: dict[str, Any],
     response: dict[str, object],
@@ -231,14 +370,18 @@ def _attach_curator_checklist(
         storage=scope.context.storage,
         dry_run=True,
     )
+    scope = revalidate_memory_candidate_scope(config, scope)
     if scope.curator_report_path is None:
         raise RuntimeError("curator publication has no enclosure-local report path")
+    if scope.pair_identity is None:
+        raise RuntimeError("curator publication has no exact code/memory pair identity")
     checklist = write_curator_checklist(
         CuratorChecklist(
             report_path=scope.curator_report_path,
             repo_id=scope.repo_id,
             code_root=scope.code_root,
             onboarding_root=scope.onboarding_root,
+            pair_identity=scope.pair_identity,
             quality=payload,
             repair_findings=repair_findings,
             commit_owned_findings=commit_owned_findings,

@@ -81,10 +81,12 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         authority; changed inputs stale it and require republishing. Final commit stamps remain
         closeout-owned. The request is exactly one discriminated mode:
         `sync` and `start` carry repository plus optional scope/check/detail fields, while
-        `poll` carries only repository plus run id. A saturated unique start returns
-        `capacity-reached` without launching work. A poll returns the identical result;
-        `run-not-found` means the run was evicted, belongs to another repository, or the server
-        restarted, so submit a new start request."""
+        `poll` carries repository, run id, and the same contract path for a candidate run.
+        Repository-only calls are explicitly official diagnostics and cannot become candidate
+        acceptance. A saturated unique start returns `capacity-reached` without launching work.
+        A poll returns the identical pair-bound result; `run-not-found` means the run was evicted,
+        belongs to another repository, or the server restarted, so submit a new start request
+        with the original contract path for a candidate run."""
         if isinstance(request, MemoryQualityPollRequest):
             return memory_quality_check_poll_payload(config, request)
         if isinstance(request, MemoryQualityStartRequest):

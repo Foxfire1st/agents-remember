@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
 from agents_remember.models.drift import DriftStatus
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 
 
 class DriftCheckResponse(ToolResponse):
@@ -41,6 +42,7 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
             "failed",
             "run-not-found",
             "capacity-reached",
+            "scope-refused",
         ]
         | None
     ) = None
@@ -73,6 +75,17 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
     closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
     noteworthyFindingCount: int | None = Field(default=None, ge=0)
+    scopeAuthority: Literal["official-diagnostic", "leaf-candidate"] | None = None
+    acceptanceEligible: bool | None = None
+    contractPath: str | None = Field(default=None, max_length=8192)
+    pairIdentity: MemoryCandidatePairIdentity | None = None
+    pairStatus: str | None = Field(default=None, max_length=256)
+    pairField: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+    expected: dict[str, Any] | None = Field(default=None, max_length=32)
+    observed: dict[str, Any] | None = Field(default=None, max_length=32)
+    nextAction: str | None = Field(default=None, max_length=8192)
+    nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
 
 
 class _MemoryQualityExecutionRequest(BaseModel):
@@ -99,13 +112,14 @@ class MemoryQualityStartRequest(_MemoryQualityExecutionRequest):
 
 
 class MemoryQualityPollRequest(BaseModel):
-    """Poll one repository-owned asynchronous memory-quality request."""
+    """Poll one repository-owned run through the same admitted scope."""
 
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["poll"]
     repo_id: str
     run_id: str
+    contract_path: str | None = None
 
 
 type MemoryQualityCheckRequest = Annotated[

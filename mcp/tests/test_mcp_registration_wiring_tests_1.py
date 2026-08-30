@@ -352,6 +352,7 @@ class RegistrationWiringTests1(RegistrationWiringTests):
                     "mode": "poll",
                     "repo_id": "agents-remember",
                     "run_id": "abc123",
+                    "contract_path": "/coord/leaf.md",
                 }
             },
         )
@@ -363,6 +364,7 @@ class RegistrationWiringTests1(RegistrationWiringTests):
                     mode="poll",
                     repo_id="agents-remember",
                     run_id="abc123",
+                    contract_path="/coord/leaf.md",
                 ),
             ),
         )
@@ -401,7 +403,6 @@ class RegistrationWiringTests1(RegistrationWiringTests):
         for field, value in (
             ("checks", []),
             ("detail_limit", 50),
-            ("contract_path", None),
         ):
             with self.subTest(field=field), self.assertRaises(ValidationError):
                 adapter.validate_python(
@@ -412,6 +413,15 @@ class RegistrationWiringTests1(RegistrationWiringTests):
                         field: value,
                     }
                 )
+        candidate_poll = adapter.validate_python(
+            {
+                "mode": "poll",
+                "repo_id": "agents-remember",
+                "run_id": "run-1",
+                "contract_path": "/coord/leaf.md",
+            }
+        )
+        self.assertEqual(candidate_poll.contract_path, "/coord/leaf.md")
 
     def test_memory_quality_tool_schema_exposes_the_three_request_modes(self) -> None:
         tools = {tool.name: tool for tool in asyncio.run(self.server.list_tools())}

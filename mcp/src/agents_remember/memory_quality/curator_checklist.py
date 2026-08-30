@@ -19,6 +19,7 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     ACTIONABLE_CLASSIFICATIONS,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 
 REPORT_DIRECTORY_NAME = "reports"
 REPORT_FILE_NAME = "curator-memory-quality.md"
@@ -32,6 +33,7 @@ class CuratorChecklist:
     repo_id: str
     code_root: Path
     onboarding_root: Path
+    pair_identity: MemoryCandidatePairIdentity
     quality: dict[str, Any]
     repair_findings: list[dict[str, Any]]
     commit_owned_findings: list[dict[str, Any]]
@@ -135,6 +137,7 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
             }
             for row in source_candidates
         ],
+        "pairIdentity": checklist.pair_identity.model_dump(mode="json"),
         "onboardingRoot": onboarding_root.as_posix(),
         "reportPath": report_path.as_posix(),
         "reportSha256": hashlib.sha256(report.encode("utf-8")).hexdigest(),
@@ -186,6 +189,8 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
         f"- Repository: `{_cell(checklist.repo_id)}`",
         f"- Code worktree: `{_cell(checklist.code_root.as_posix())}`",
         f"- Onboarding root: `{_cell(checklist.onboarding_root.as_posix())}`",
+        f"- Pair contract: `{_cell(checklist.pair_identity.contractPath)}`",
+        f"- Pair digest: `{checklist.pair_identity.contractDigest}`",
         "",
         (
             "This file is the current curator worklist. A full contract-scoped "

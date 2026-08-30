@@ -22,6 +22,9 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.integration.closeout.curator_coherence_publication import (
     curator_coherence_action,
 )
+from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
@@ -116,6 +119,12 @@ def write_curator_evidence(
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(text, encoding="utf-8")
     assert contract.memory_worktree is not None
+    (contract.memory_worktree / "onboarding").mkdir(parents=True, exist_ok=True)
+    pair = resolve_memory_candidate_pair(
+        contract,
+        requested_contract_path=contract.contract_path,
+        requested_repo_id=contract.repo_name,
+    )
     attestation = {
         "schema": "ar-curator-memory-quality/v1",
         "checklistStatus": "ready-for-closeout",
@@ -125,6 +134,7 @@ def write_curator_evidence(
         "staleRouteIndexCount": 0,
         "sourceChangeCandidateCount": len(candidates),
         "sourceChangeCandidates": candidates,
+        "pairIdentity": pair.model_dump(mode="json"),
         "onboardingRoot": (contract.memory_worktree / "onboarding").resolve().as_posix(),
         "reportPath": report.resolve().as_posix(),
         "reportSha256": hashlib.sha256(text.encode()).hexdigest(),
