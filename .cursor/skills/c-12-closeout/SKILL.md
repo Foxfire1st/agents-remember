@@ -320,7 +320,11 @@ task plus immediate parent row.
 ## Sanctioned Branch-Direct Landing
 
 `direct_landing` is not a direct-checkout closeout path. It is the policy-gated,
-branch-addressed counterpart for a code commit that already exists at the exact series branch HEAD.
+branch-addressed counterpart for a **leaf delivered without its own worktree enclosure**, where a
+code commit already exists at the exact series branch HEAD. A series contract is necessary address
+authority for this route; it is not by itself evidence that an operation is direct execution.
+Ordinary master/series closeout and the later master-to-parent `worktree_integrate` edge are not
+branch-direct leaf delivery and must work while `directExecutionEnabled` is false.
 The tool verifies that code commit and gated candidate tree, requires explicit nonblank memory and
 ledger messages for enabled legs, and validates the complete effective input before acquiring
 landing authority.

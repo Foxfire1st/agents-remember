@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from agents_remember.models.lifecycles.operation import IntegrationPublicationIntent
+from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
+from agents_remember.models.lifecycles.operation import (
+    IntegrationPublicationIntent,
+    LifecycleOperationRecord,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     located_lifecycle_operation_store,
 )
@@ -59,39 +63,81 @@ def classify_integration_door_authority(
     contract: WorktreeContract,
     publication: IntegrationPublicationIntent | None,
 ) -> IntegrationDoorAuthorityEvidence:
-    """Classify current door+journal authority without consulting queue state."""
+    """Classify current door+journal authority without consulting queue state.
 
-    if publication is not None and not publication.doorGenerationId:
-        return IntegrationDoorAuthorityEvidence("not-applicable", {}, {})
+    A leaf integration must inherit one exact claimed closeout/direct-landing
+    source.  An ordinary series integration is the aggregation boundary above
+    those leaf claims, so it has no source door of its own.  Its journal records
+    that absence explicitly as ``not-applicable``; the direct-execution policy
+    gate does not participate in this classification.
+    """
+
+    not_applicable = _not_applicable_authority(contract, publication)
+    if not_applicable is not None:
+        return not_applicable
     door = contract.closeout_door
-    source = None
-    if (
-        door is not None
-        and door.disposition == "claimed"
-        and door.operationKind
-        in {
-            "closeout",
-            "direct-landing",
-        }
-    ):
-        source = located_lifecycle_operation_store(contract, door.operationKind).read()
+    source = _claimed_source_operation(contract, door)
     observed = _observed_source(door=door, source=source)
     if publication is None:
-        expected: dict[str, object] = {
-            "disposition": "claimed",
-            "sourceOperationStatus": "completed",
-            "sourceGenerationDisposition": "active",
-        }
-        valid = bool(
-            door is not None
-            and source is not None
-            and source_operation_matches(contract, door, source)
-        )
-        return IntegrationDoorAuthorityEvidence(
-            "claimed" if valid else "preclaim-refused",
-            expected,
-            observed,
-        )
+        return _fresh_claim_authority(contract, door, source, observed)
+    return _journaled_claim_authority(publication, observed)
+
+
+def _not_applicable_authority(
+    contract: WorktreeContract,
+    publication: IntegrationPublicationIntent | None,
+) -> IntegrationDoorAuthorityEvidence | None:
+    # Preserve an already-journaled no-door operation exactly as the recovery
+    # protocol recorded it.  This is retained operation authority, not admission
+    # for a new branch-direct delivery; fresh operations are classified below.
+    if publication is not None and not publication.doorGenerationId:
+        return IntegrationDoorAuthorityEvidence("not-applicable", {}, {})
+    fresh_series = (
+        publication is None and contract.kind == "series" and contract.closeout_door is None
+    )
+    if fresh_series:
+        return _series_without_door_authority(contract)
+    return None
+
+
+def _claimed_source_operation(
+    contract: WorktreeContract,
+    door: CloseoutDoorGeneration | None,
+) -> LifecycleOperationRecord | None:
+    if (
+        door is None
+        or door.disposition != "claimed"
+        or door.operationKind not in {"closeout", "direct-landing"}
+    ):
+        return None
+    return located_lifecycle_operation_store(contract, door.operationKind).read()
+
+
+def _fresh_claim_authority(
+    contract: WorktreeContract,
+    door: CloseoutDoorGeneration | None,
+    source: LifecycleOperationRecord | None,
+    observed: dict[str, object],
+) -> IntegrationDoorAuthorityEvidence:
+    expected: dict[str, object] = {
+        "disposition": "claimed",
+        "sourceOperationStatus": "completed",
+        "sourceGenerationDisposition": "active",
+    }
+    valid = bool(
+        door is not None and source is not None and source_operation_matches(contract, door, source)
+    )
+    return IntegrationDoorAuthorityEvidence(
+        "claimed" if valid else "preclaim-refused",
+        expected,
+        observed,
+    )
+
+
+def _journaled_claim_authority(
+    publication: IntegrationPublicationIntent,
+    observed: dict[str, object],
+) -> IntegrationDoorAuthorityEvidence:
     expected = {
         "sprintTaskDocument": publication.sprintTaskDocument,
         "candidateTaskDocument": publication.candidateTaskDocument,
@@ -115,6 +161,27 @@ def classify_integration_door_authority(
     )
 
 
+def _series_without_door_authority(
+    contract: WorktreeContract,
+) -> IntegrationDoorAuthorityEvidence:
+    expected: dict[str, object] = {
+        "contractKind": "series",
+        "closeoutDoor": "absent",
+    }
+    observed: dict[str, object] = {
+        "contractKind": contract.kind,
+        "closeoutDoor": (
+            "absent" if contract.closeout_door is None else contract.closeout_door.disposition
+        ),
+    }
+    valid = contract.kind == "series" and contract.closeout_door is None
+    return IntegrationDoorAuthorityEvidence(
+        "not-applicable" if valid else "preclaim-refused",
+        expected,
+        observed,
+    )
+
+
 def integration_door_decision_payload(
     evidence: IntegrationDoorAuthorityEvidence,
 ) -> dict[str, object]:
@@ -131,22 +198,48 @@ def integration_door_decision_payload(
     }
 
 
-def _observed_source(*, door, source) -> dict[str, object]:
-    return {
-        "sprintTaskDocument": door.sprintTaskDocumentRef.key if door is not None else "",
-        "candidateTaskDocument": door.taskDocumentRef.key if door is not None else "",
-        "disposition": door.disposition if door is not None else "missing",
-        "doorGenerationId": door.generationId if door is not None else "",
-        "sourceOperationKind": source.operationKind if source is not None else None,
-        "sourceOperationGeneration": source.generation if source is not None else None,
-        "sourceOperationFingerprint": source.fingerprint if source is not None else "",
-        "sourceOperationKey": source.operationKey if source is not None else "",
-        "sourceJournalSha256": source_journal_sha256(source) if source is not None else "",
-        "sourceOperationStatus": source.status if source is not None else "missing",
-        "sourceGenerationDisposition": (
-            source.generationDisposition if source is not None else "missing"
-        ),
-    }
+def _observed_source(
+    *,
+    door: CloseoutDoorGeneration | None,
+    source: LifecycleOperationRecord | None,
+) -> dict[str, object]:
+    door_evidence = (
+        {
+            "sprintTaskDocument": "",
+            "candidateTaskDocument": "",
+            "disposition": "missing",
+            "doorGenerationId": "",
+        }
+        if door is None
+        else {
+            "sprintTaskDocument": door.sprintTaskDocumentRef.key,
+            "candidateTaskDocument": door.taskDocumentRef.key,
+            "disposition": door.disposition,
+            "doorGenerationId": door.generationId,
+        }
+    )
+    source_evidence = (
+        {
+            "sourceOperationKind": None,
+            "sourceOperationGeneration": None,
+            "sourceOperationFingerprint": "",
+            "sourceOperationKey": "",
+            "sourceJournalSha256": "",
+            "sourceOperationStatus": "missing",
+            "sourceGenerationDisposition": "missing",
+        }
+        if source is None
+        else {
+            "sourceOperationKind": source.operationKind,
+            "sourceOperationGeneration": source.generation,
+            "sourceOperationFingerprint": source.fingerprint,
+            "sourceOperationKey": source.operationKey,
+            "sourceJournalSha256": source_journal_sha256(source),
+            "sourceOperationStatus": source.status,
+            "sourceGenerationDisposition": source.generationDisposition,
+        }
+    )
+    return {**door_evidence, **source_evidence}
 
 
 def _source_cells(evidence: dict[str, object]) -> dict[str, object]:

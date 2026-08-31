@@ -79,6 +79,7 @@ unit-regression = [
   "mcp/tests/test_inbox_rebinding_mechanics.py",
   "mcp/tests/test_injector.py",
   "mcp/tests/test_install_runtime.py",
+  "mcp/tests/test_integration_publication_fence.py",
   "mcp/tests/test_interaction_retention.py",
   "mcp/tests/test_judgment_demolition.py",
   "mcp/tests/test_l23_notifier_batch_edges.py",

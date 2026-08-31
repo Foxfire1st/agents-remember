@@ -20,7 +20,7 @@ meant the guard on this rule had to carry a matching blind spot -- an argv compo
 a helper is invisible at the spawn -- and a sanctioned exception is still a second
 owner. The builder is gone; ``work_dir`` and ``core.longpaths=true`` below are the two
 things this runner had to grow to take its commands. What keeps the count at one now is
-``code_quality/single_owner.py``, which reports the *construction* of a git argv
+``mcp/test_support/agents_remember_test_support/code_quality/single_owner.py``, which reports the *construction* of a git argv
 anywhere in the package rather than only a spawn it can see the argv of.
 """
 

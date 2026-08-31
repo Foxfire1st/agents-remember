@@ -152,7 +152,10 @@ class CitationGrammarTests(unittest.TestCase):
         self.assertEqual(spans, [])
 
     def test_a_line_anchor_inside_the_file_is_not_reported(self) -> None:
-        source = '"""see ``code_quality/citations.py:5`` for the grammar."""\n'
+        source = (
+            '"""see ``mcp/test_support/agents_remember_test_support/'
+            'code_quality/citations.py:5`` for the grammar."""\n'
+        )
         offenders = citations.module_citation_offenders(
             source,
             ast.parse(source),

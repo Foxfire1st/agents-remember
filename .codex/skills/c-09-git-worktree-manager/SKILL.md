@@ -343,6 +343,15 @@ portfolio-gate approval recorded in the planner master) — the developer hand-o
 the super PR/carry-over gate per the `l-01-agent-lifecycles` loop/orchestrator doctrine. A raised
 durable `integration-approval` gate still awaits the developer.
 
+An ordinary master/series integration has no leaf closeout door of its own: its integration journal
+records source-door authority as `not-applicable`. That is an explicit series lifecycle state, not
+the policy-gated branch-direct leaf route. It therefore does not consult or require
+`directExecutionEnabled`. If a series contract does carry a direct-landing door, integration must
+still prove that exact claimed door and its source journal; absence is never inferred by ignoring a
+present or stale door. Leaf integration continues to require its exact claimed closeout source.
+That last rule governs admission of a new leaf integration; an already-journaled no-door operation
+remains recoverable under its retained journal identity and is not reclassified as direct execution.
+
 On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun. When no gate addresses the integrating master but open `master-handover-approval` gates exist elsewhere, integrate still proceeds and its result carries a `handover_gate_warning` naming them — treat it as a spelling check on the raised gate's `enclosure`.
 
 Run `worktree_integrate(..., dry_run=true)` first. For subordinate accepted-series integrations,

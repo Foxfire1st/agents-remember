@@ -58,9 +58,11 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         """Verify one series code commit and durably serialize its memory + ledger writes.
 
         The direct landing is the branch-addressed counterpart of the worktree closeout
-        commit phase for sanctioned direct execution: it binds the task-root series
-        contract (series-contract.md), verifies the exact code commit is the current
-        series branch HEAD, commits external-memory content, and prepends the
+        commit phase for a sanctioned leaf implemented without a leaf worktree enclosure.
+        It is not ordinary master/series closeout or master-to-parent integration, and
+        those routes never require directExecutionEnabled. Direct landing binds the
+        task-root series contract (series-contract.md), verifies the exact code commit is
+        the current series branch HEAD, commits external-memory content, and prepends the
         code-to-memory ledger row with the same ledger semantics as the worktree path.
         Message intent is normalized before lane authority. Apply persists one synchronous
         direct-landing lifecycle generation before memory or ledger mutation, records Git

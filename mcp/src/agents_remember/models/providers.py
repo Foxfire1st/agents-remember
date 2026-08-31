@@ -101,7 +101,8 @@ class ProviderStatusResponse(ToolResponse):
     # again at the `_tool_payload` re-validation: any run where the daemon HAD sampled a
     # metrics row or an index-state row raised ValidationError on the way to the wire.
     # Declaring them is the same repair L4 made for nextStep/agentNotifierBanner -- what this
-    # package emits, this package declares -- and `code_quality/wire_contract.py` is the
+    # package emits, this package declares -- and
+    # `mcp/test_support/agents_remember_test_support/code_quality/wire_contract.py` is the
     # check that keeps the injection from coming back.
     metrics: dict[str, Any] | None = Field(
         default=None,

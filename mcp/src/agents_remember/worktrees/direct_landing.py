@@ -9,6 +9,12 @@ semantics as the worktree path. Input is normalized before the integration
 authority lock. Apply records a durable direct-landing generation before the
 first memory or ledger mutation.
 
+This is specifically the delivery route for a leaf implemented without its own
+worktree enclosure. It is not master/series closeout and it is not the ordinary
+``worktree_integrate`` edge that lands an already closed master into its parent
+branch. Those lifecycle edges do not become direct execution merely because
+their contract kind is ``series``.
+
 The gate stays strictly pre-commit: pass the staged ``candidate_tree`` that the
 owner already gated through the Dagger module's ``--source``/``--repository-bundle``
 contract, and the landing verifies the branch HEAD tree equals it before any
@@ -145,7 +151,7 @@ def direct_landing(
 
 
 def require_direct_landing_enabled(config: McpRuntimeConfig) -> None:
-    """Refuse disabled direct execution before inspecting a contract address."""
+    """Refuse the branch-addressed leaf route before inspecting its contract."""
 
     if not config.direct_execution_enabled:
         raise DirectLandingError(
