@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -35,10 +35,20 @@ from agents_remember.worktrees.modules.quality.published_manifest import (
     REPORT_SET_MANIFEST,
     PublishedQualityManifest,
     load_published_quality_manifest,
+    require_real_directory_or_missing,
+    require_real_file_or_missing,
+)
+from agents_remember.worktrees.modules.quality.report_publication_paths import (
+    preflight_report_destination,
+    remove_legacy_report_projection,
+    report_tree_inventory,
+)
+from agents_remember.worktrees.modules.quality.result_artifacts import (
+    validate_result_artifact_references,
 )
 
 DAGGER_VERSION = "v0.21.8"
-CODEX_VERSION = "0.147.0"
+CODEX_VERSION = "0.151.0"
 PLAYWRIGHT_IMAGE = (
     "mcr.microsoft.com/playwright:v1.60.0-noble@"
     "sha256:83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9"
@@ -51,6 +61,9 @@ DAGGER_PROGRESS_TRUNCATION = "[older Dagger output truncated]\n"
 REPORT_GENERATIONS_DIRECTORY = ".quality-report-generations"
 EXPORTED_REPORT_NAMES = frozenset(
     {
+        "ambient-role-chat-e2e/run-1.json",
+        "ambient-role-chat-e2e/run-2.json",
+        "ambient-role-chat-e2e/summary.json",
         "causal-failures.json",
         "causal-failures.md",
         "clean-quality-results.json",
@@ -63,6 +76,12 @@ EXPORTED_REPORT_NAMES = frozenset(
         "python-venv-runtime.json",
         "quality-progress.json",
     }
+)
+EXPORTED_REPORT_DIRECTORIES = frozenset(
+    parent.as_posix()
+    for name in EXPORTED_REPORT_NAMES
+    for parent in (Path(name).parent,)
+    if parent != Path(".")
 )
 
 CommandRunner = Callable[[list[str], Path, Mapping[str, str]], subprocess.CompletedProcess[str]]
@@ -296,34 +315,94 @@ def _publish_reports(
     if re.fullmatch(r"[0-9a-f]{40,64}", candidate_tree) is None:
         raise RuntimeError("Dagger publication candidate tree is invalid")
     _exported_pipeline_exit(source)
-    exported_names = {report.name for report in source.iterdir() if report.is_file()}
-    unexpected = exported_names - EXPORTED_REPORT_NAMES
+    exported_names = _validated_export_inventory(source)
+    require_real_directory_or_missing(destination, purpose="quality report destination")
+    destination.mkdir(parents=True, exist_ok=True)
+    require_real_directory_or_missing(destination, purpose="quality report destination")
+    files = _report_file_records(source, exported_names)
+    generation = _generation_digest(candidate_tree, files)
+    generations = destination / REPORT_GENERATIONS_DIRECTORY
+    require_real_directory_or_missing(generations, purpose="quality generation directory")
+    generations.mkdir(parents=True, exist_ok=True)
+    generation_root = generations / generation
+    previous_generation = _published_generation_or_none(destination)
+    _preflight_report_destination(destination, generation_root)
+    _ensure_generation(source, generation_root, files)
+    manifest: dict[str, object] = {
+        "schemaVersion": QUALITY_MANIFEST_SCHEMA_VERSION,
+        "generation": generation,
+        "candidateTree": candidate_tree,
+        "files": files,
+    }
+    if attestation is not None:
+        manifest["attestation"] = dict(attestation)
+    _preflight_report_destination(destination, generation_root)
+    _prune_report_generations(
+        generations,
+        generation,
+        protected=(() if previous_generation is None else (previous_generation,)),
+    )
+    _remove_legacy_report_projection(destination)
+    _preflight_report_destination(destination, generation_root)
+    atomic_write_text(
+        destination / REPORT_SET_MANIFEST,
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+    )
+    return manifest
+
+
+def _validated_export_inventory(source: Path) -> set[str]:
+    exported_names, exported_directories, irregular = report_tree_inventory(source)
+    unexpected = (
+        (exported_names - EXPORTED_REPORT_NAMES)
+        | (exported_directories - EXPORTED_REPORT_DIRECTORIES)
+        | irregular
+    )
     if unexpected:
         names = ", ".join(sorted(unexpected))
-        raise RuntimeError(f"Dagger exported unexpected report files: {names}")
-    destination.mkdir(parents=True, exist_ok=True)
-    files = {
+        raise RuntimeError(f"Dagger exported unexpected report files or directories: {names}")
+    validate_result_artifact_references(source, exported_names)
+    return exported_names
+
+
+def _report_file_records(source: Path, exported_names: set[str]) -> dict[str, dict[str, object]]:
+    return {
         name: {
             "sha256": hashlib.sha256((source / name).read_bytes()).hexdigest(),
             "size": (source / name).stat().st_size,
         }
         for name in sorted(exported_names)
     }
-    generation = hashlib.sha256(
+
+
+def _generation_digest(candidate_tree: str, files: Mapping[str, object]) -> str:
+    return hashlib.sha256(
         json.dumps(
             {"candidateTree": candidate_tree, "files": files},
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    generations = destination / REPORT_GENERATIONS_DIRECTORY
-    generations.mkdir(parents=True, exist_ok=True)
-    generation_root = generations / generation
-    if not generation_root.is_dir():
-        staged = Path(tempfile.mkdtemp(prefix=f".{generation}.", dir=generations))
+
+
+def _ensure_generation(
+    source: Path,
+    generation_root: Path,
+    files: dict[str, dict[str, object]],
+) -> None:
+    require_real_directory_or_missing(generation_root, purpose="quality generation")
+    if not generation_root.exists():
+        staged = Path(
+            tempfile.mkdtemp(
+                prefix=f".{generation_root.name}.",
+                dir=generation_root.parent,
+            )
+        )
         try:
-            for name in sorted(exported_names):
-                shutil.copyfile(source / name, staged / name)
+            for name in sorted(files):
+                target = staged / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source / name, target)
             _validate_generation(staged, files)
             try:
                 staged.rename(generation_root)
@@ -334,25 +413,34 @@ def _publish_reports(
             raise
     else:
         _validate_generation(generation_root, files)
-    manifest: dict[str, object] = {
-        "schemaVersion": QUALITY_MANIFEST_SCHEMA_VERSION,
-        "generation": generation,
-        "candidateTree": candidate_tree,
-        "files": files,
-    }
-    if attestation is not None:
-        manifest["attestation"] = dict(attestation)
-    atomic_write_text(
-        destination / REPORT_SET_MANIFEST,
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+
+
+def _preflight_report_destination(destination: Path, generation_root: Path) -> None:
+    preflight_report_destination(
+        destination,
+        generation_root,
+        generations_directory=REPORT_GENERATIONS_DIRECTORY,
+        exported_files=EXPORTED_REPORT_NAMES,
+        exported_directories=EXPORTED_REPORT_DIRECTORIES,
     )
-    # The former top-level copies were not a coherent publication surface. Remove
-    # them only after the pointer commits; live quality-progress.json may be created
-    # again by _write_current, but durable result readers use the manifest helper.
-    for legacy_name in EXPORTED_REPORT_NAMES:
-        (destination / legacy_name).unlink(missing_ok=True)
-    _prune_report_generations(generations, generation)
-    return manifest
+
+
+def _published_generation_or_none(destination: Path) -> str | None:
+    """Return the exact prior live generation without guessing another authority."""
+
+    pointer = destination / REPORT_SET_MANIFEST
+    require_real_file_or_missing(pointer, purpose="quality report pointer")
+    if not pointer.exists():
+        return None
+    return load_published_quality_manifest(destination).generation
+
+
+def _remove_legacy_report_projection(destination: Path) -> None:
+    remove_legacy_report_projection(
+        destination,
+        exported_files=EXPORTED_REPORT_NAMES,
+        exported_directories=EXPORTED_REPORT_DIRECTORIES,
+    )
 
 
 def published_report_path(destination: Path, name: str) -> Path:
@@ -450,6 +538,16 @@ def require_published_quality_evidence(
 
 
 def _validate_generation(root: Path, files: dict[str, dict[str, object]]) -> None:
+    actual_files, actual_directories, irregular = report_tree_inventory(root)
+    expected_files = set(files)
+    expected_directories = {
+        parent.as_posix()
+        for name in expected_files
+        for parent in (Path(name).parent,)
+        if parent != Path(".")
+    }
+    if irregular or actual_files != expected_files or actual_directories != expected_directories:
+        raise RuntimeError("Dagger report generation contains an undeclared path")
     for name, record in files.items():
         payload = (root / name).read_bytes()
         if (
@@ -459,17 +557,23 @@ def _validate_generation(root: Path, files: dict[str, dict[str, object]]) -> Non
             raise RuntimeError(f"Dagger report generation copy failed verification: {name}")
 
 
-def _prune_report_generations(generations: Path, current: str) -> None:
+def _prune_report_generations(
+    generations: Path,
+    current: str,
+    *,
+    protected: Collection[str] = (),
+) -> None:
+    candidates = [
+        path for path in generations.iterdir() if re.fullmatch(r"[0-9a-f]{64}", path.name)
+    ]
+    for path in candidates:
+        require_real_directory_or_missing(path, purpose="published quality generation")
     completed = sorted(
-        (
-            path
-            for path in generations.iterdir()
-            if path.is_dir() and re.fullmatch(r"[0-9a-f]{64}", path.name)
-        ),
+        candidates,
         key=lambda path: path.stat().st_mtime_ns,
         reverse=True,
     )
-    keep = {current, *(path.name for path in completed[:2])}
+    keep = {current, *protected, *(path.name for path in completed[:2])}
     for path in completed:
         if path.name not in keep:
             shutil.rmtree(path)

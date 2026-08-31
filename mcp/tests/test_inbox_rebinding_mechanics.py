@@ -68,6 +68,9 @@ class _Topology:
     def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
         return {LEAF_REF: MASTER_REF, MASTER_REF: SPRINT_REF, SPRINT_REF: None}[ref]
 
+    def altitude(self, ref: TaskDocumentRef) -> str:
+        return {LEAF_REF: "leaf", MASTER_REF: "master", SPRINT_REF: "sprint"}[ref]
+
 
 class TransitionIdempotenceTests(unittest.TestCase):
     """Terminal transitions are idempotent: the second call appends nothing (level-triggered
@@ -609,6 +612,7 @@ class LoopModeTests(unittest.IsolatedAsyncioTestCase):
             runtime = SimpleNamespace(
                 config=SimpleNamespace(coordination_root=root),
                 observer_root=root / "logs" / "observer",
+                liveness_sweeper=SimpleNamespace(refresh=lambda: ()),
             )
 
             async def fake_sleep(_seconds: float) -> None:
@@ -644,6 +648,7 @@ class LoopModeTests(unittest.IsolatedAsyncioTestCase):
                 heartbeat_store=AgentNotifierHeartbeatStore(root / "logs" / "observer"),
                 observer_root=root / "logs" / "observer",
                 liveness_clock=lambda: NOW,
+                liveness_sweeper=SimpleNamespace(refresh=lambda: ()),
                 register_inbox_execution_evidence=None,
             )
 

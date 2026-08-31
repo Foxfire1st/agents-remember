@@ -16,7 +16,7 @@ import { useDashboard } from '../../data/store';
 import type { AgentPickupNode, TaskDocNode } from '../../types/projection';
 import { RailBody, type BulkTarget, type RailRowProps } from './sessionRailParts';
 
-// The session rail: the document+role hierarchy — sprint roles, a manager on each master row,
+// The session rail: the document+role hierarchy — sprint roles, manager and reviewer master seats,
 // and worker/reviewer/curator seats below each leaf — plus per-master completed folders, fleet
 // attention, gate badges,
 // the two-state brief column, the poll-health banner, and the bus-summary footer.
@@ -90,6 +90,7 @@ function rolesRowCount(model: RailModel, openDoneFolders: Record<string, boolean
       (sum, master) =>
         sum +
         Number(master.manager !== undefined) +
+        Number(master.reviewer !== undefined) +
         master.clusters.reduce((clusterSum, cluster) => clusterSum + cluster.seats.length, 0) +
         ((openDoneFolders[master.key] ?? false) ? master.completed.length : 0),
       0,

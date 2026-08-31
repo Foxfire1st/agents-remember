@@ -32,7 +32,7 @@ role brief and never performs architect/developer-facing hat-collapse.
 
 ## Hosted Role Dispatch
 
-Every manager or system-specialist dispatch below means the shared structural transaction in
+Every manager, system-specialist, or super-exit reviewer dispatch below means the shared structural transaction in
 `../SKILL.md`: call `dispatch_agent` once with the direct child's canonical master/sprint document,
 role, and complete brief. The control plane owns readiness and exact initial brief pinning. A
 `dispatch-queued` result remains durable for standard retry; never request or retain its occupant
@@ -116,9 +116,9 @@ repeat this checkpoint.
 When a `degradation-alert` lands in your inbox, keep portfolio attention on observation and
 delegation. Do not become the fixer.
 
-1. Dispatch the **system-specialist** with `dispatch_agent` on this sprint document,
-   `env={"AR_SPAWN_ROLE": "system-specialist"}`, the degradation event id/payload, current metrics
-   and provider log paths, and a report path under the active master's `notes/reports/` folder (or
+1. Dispatch the **system-specialist** with `dispatch_agent` on this sprint document, role
+   `system-specialist`, and a complete brief carrying the degradation event id/payload, current
+   metrics and provider log paths, and a report path under the active master's `notes/reports/` folder (or
    an orchestrator-designated reports folder when no master owns the incident).
 2. Require the specialist to investigate first and write the report before any remediation.
 3. Read the report. If the issue is fixable in session, send the specialist one explicit fix order.
@@ -469,8 +469,9 @@ approval, recorded in the planner master's decision log); a durable `integration
 when one is raised, still awaits the developer — the kind stays human-pinned as-built. The
 architect presents the developer review ONCE, at the **fully integrated super branch on the
 PR/carry-over gate**. When
-the DAG drains, spawn the super-exit adversarial reviewer (`roles/reviewer.md`, spawned with
-`env={"AR_SPAWN_ROLE": "reviewer"}`) over the whole super branch; attach its verdict as judge
+the DAG drains, dispatch the super-exit adversarial reviewer (`roles/reviewer.md`) with
+`dispatch_agent` on this sprint document, role `reviewer`, and a complete whole-super brief; attach
+its verdict as judge
 evidence (`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"…"}]`).
 The handover to the architect **MUST offer a REVIEWABLE ENVIRONMENT** — for agents-remember: the
 dashboard running on the super branch — because the developer review is **visible-behavior-first** (a
@@ -584,8 +585,8 @@ task, fill small blanks, escalate real deltas).
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| dispatch | plane-hosted caller; ambient takeover target | The architect is the ordinary plane-hosted caller that creates this sprint seat; this orchestrator may create only direct managers/system-specialists, while an identity-free launcher may target it only for an explicit task-seat takeover |
-| tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `dispatch_agent` · `retire_child` (direct manager/system-specialist seats) · worktree/C-11 |
+| dispatch | plane-hosted caller; ambient takeover target | The architect is the ordinary plane-hosted caller that creates this sprint seat; this orchestrator may create direct managers/system-specialists and its same-sprint super-exit reviewer, while an identity-free launcher may target it only for an explicit task-seat takeover |
+| tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `dispatch_agent` · `retire_child` (direct manager/system-specialist/reviewer seats) · worktree/C-11 |
 
 Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
 `promptKeywords`) participate in Settings.json `orchestration.roles.orchestrator` and

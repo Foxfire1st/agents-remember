@@ -39,9 +39,11 @@ lifecycle, and no role reads another role's file.
    first leaf before this launch; that bounded bootstrap creates scope data, not a global role seat.
 
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
-value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
-session **whose brief never arrives** announces itself on the inbox and waits — it never
-improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
+value** (no matching `roles/<value>.md`) is malformed hosted identity and fails closed — it never
+falls through to a pasted brief or free-chat routing. A role env without the matching
+plane-injected hosted-session identity fails closed for the same reason. A valid role-env session
+**whose brief never arrives** announces itself on the inbox and waits — it never improvises a
+task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
 backend takeover chair — the developer still talks to the **architect**, not the orchestrator.
 The spool-up chain is fixed and self-driving (ruled 2026-07-09): free chat spawns the
 **architect for the resolved sprint**; the architect spawns the **orchestrator** for that sprint's
@@ -63,7 +65,8 @@ When the developer says *"you are the orchestrator/manager/worker for task X"* (
 that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks,
 dispatch, or implementation, resolve the named task document and converge on that role's canonical
 seat at its canonical altitude: sprint for architect/orchestrator/optional sprint roles, master for
-manager, leaf for worker/reviewer/curator. `dispatch_agent` reuses a viable occupant or its durable
+manager, leaf for worker/curator, and leaf/master/sprint for a reviewer according to the exact
+review seam. `dispatch_agent` reuses a viable occupant or its durable
 queued brief for the same `(task document, role)`; takeover never means manually replacing a live
 incumbent. Only the lifecycle-owned transaction may retire one generation that it has positively
 proved failed.
@@ -181,8 +184,10 @@ system-owned. **A spawned role that never touches mutating AR tools simply never
 lifecycle — that is correct, not a violation.** A spawned role runs its **own** lifecycle when it
 runs one; it never adopts its spawner's. The session↔task-seat association is the catalog binding
 made at dispatch: canonical task document plus role, not lifecycle adoption. Sprint roles bind to
-the sprint document, managers to master documents, and workers/reviewers/curators to leaf
-documents. Different roles may coexist on one document; only a second live occupant of the same
+the sprint document, managers to master documents, workers/curators to leaf documents, and
+reviewers bind to the exact leaf, master, or sprint document whose review seam they adjudicate.
+The plane stamps that reviewer's canonical parent document+role; it never derives the parent from
+an occupant id. Different roles may coexist on one document; only a second live occupant of the same
 `(task document, role)` seat collides.
 
 **Notify-and-stop is safe by design (HFX2-L1..L4, landed):** ending a turn on

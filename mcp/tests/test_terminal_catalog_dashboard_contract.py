@@ -34,4 +34,4 @@ def test_dashboard_full_catalog_mirror_matches_server_aliases_bidirectionally() 
 
     assert sorted(server - dashboard) == []
     assert sorted(dashboard - server) == []
-    assert len(server) == 66
+    assert len(server) == 68

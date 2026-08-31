@@ -40,7 +40,7 @@ class StructuralDispatchRecoveryTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        self.sprint, _master, _leaf = write_structural_topology(self.root)
+        self.sprint, self.master, self.leaf = write_structural_topology(self.root)
         write_structural_settings(self.root)
         self.config = structural_config(self.root)
         self.catalog = TerminalCatalog(terminal_catalog_path(self.root))
@@ -233,6 +233,58 @@ class StructuralDispatchRecoveryTests(unittest.TestCase):
         self.assertEqual(result["status"], "dispatch-reconciliation-refused")
         self.assertIn("could not be retired", result["detail"])
         retire.assert_called_once_with("failed")
+
+    def test_live_reviewer_from_another_parent_is_not_reused_or_retired(self) -> None:
+        occupant = mock.Mock(
+            status="running",
+            structural_parent_task_document_ref=self.sprint,
+            structural_parent_role="architect",
+        )
+        catalog = mock.Mock()
+        catalog.get.return_value = occupant
+        retire = mock.Mock()
+        transaction = dispatch_transaction.DispatchTransaction(
+            document=self.sprint,
+            role="reviewer",
+            catalog=catalog,
+            inbox_store=mock.Mock(),
+            admitted_spawn=mock.Mock(),
+            retry_spawn=mock.Mock(),
+            brief_spawned=mock.Mock(),
+            retire_generation=retire,
+            expected_structural_parent=(self.sprint, "orchestrator"),
+        )
+
+        with mock.patch.object(dispatch_transaction, "reconcile_dispatch_evidence") as reconcile:
+            result = dispatch_transaction._reconcile_existing_dispatch(
+                transaction,
+                owner_id="plan-reviewer",
+            )
+
+        assert result is not None
+        self.assertEqual(result["status"], "structural-parent-conflict")
+        self.assertIn("retire it before dispatching", result["detail"])
+        reconcile.assert_not_called()
+        retire.assert_not_called()
+
+    def test_unstamped_legacy_leaf_reviewer_keeps_its_only_possible_manager_parent(self) -> None:
+        occupant = mock.Mock(
+            structural_parent_task_document_ref=None,
+            structural_parent_role=None,
+        )
+        transaction = dispatch_transaction.DispatchTransaction(
+            document=self.leaf,
+            role="reviewer",
+            catalog=mock.Mock(),
+            inbox_store=mock.Mock(),
+            admitted_spawn=mock.Mock(),
+            retry_spawn=mock.Mock(),
+            brief_spawned=mock.Mock(),
+            retire_generation=mock.Mock(),
+            expected_structural_parent=(self.master, "manager"),
+        )
+
+        self.assertIsNone(dispatch_transaction._structural_parent_conflict(transaction, occupant))
 
     def test_receipt_repair_disappearance_and_legacy_occupancy_refuse(self) -> None:
         runtime = dispatch_transaction.DispatchEvidenceRuntime(

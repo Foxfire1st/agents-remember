@@ -148,10 +148,9 @@ class HarnessControlWriteCompletionTests(unittest.TestCase):
 
 class HarnessControlClientRetrySafetyTests(unittest.TestCase):
     def test_refused_control_socket_yields_honest_note_and_unlinks_stale_socket(self) -> None:
-        # A controlled runner that exited uncleanly leaves a stale socket that
-        # refuses (ECONNREFUSED). The client must render a designed lifecycle note WITHOUT the raw
-        # "[Errno 111] Connection refused" surprise, and unlink the stale socket so the next attempt
-        # sees the absent (ENOENT) case cleanly.
+        # A control socket path can outlive its listener after an unclean runner exit. The client
+        # must report only what the refusal proves -- no runner is listening -- without guessing
+        # that the underlying hosted process exited, and then unlink the stale socket.
         import errno as _errno  # noqa: PLC0415
         import tempfile  # noqa: PLC0415
 
@@ -172,7 +171,8 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             ):
                 request_control(_Entry(control_endpoint=stale), "stop")
             message = str(raised.exception)
-            self.assertIn("already exited", message)
+            self.assertIn("no runner is listening", message)
+            self.assertNotIn("already exited", message)
             self.assertNotIn("Errno", message)
             self.assertNotIn("Connection refused", message)
             self.assertFalse(raised.exception.may_have_sent)

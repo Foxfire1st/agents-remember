@@ -6,6 +6,7 @@ import type {
 } from '../types/projection';
 import { sessionHasPendingInteraction, sessionSeatRole, type OpenSession } from './sessions';
 import { seatVisualState } from './stateGrammar';
+import { reviewerParentMatches } from './reviewerContext';
 import { isOrchestrationDoc, masterCommandNames, pathDir } from './taskHierarchy';
 import { qualifiedLeafKey, taskDocumentRefForDoc } from './taskIdentity';
 import type { TaskDocumentRef } from '../types/terminalCatalog';
@@ -42,6 +43,7 @@ const SPRINT_RANK: Record<string, number> = {
   strategist: 2,
   designer: 3,
   'system-specialist': 4,
+  reviewer: 5,
 };
 const SPRINT_ROLES = new Set(Object.keys(SPRINT_RANK));
 const LEAF_ROLES = new Set(['worker', 'reviewer', 'curator']);
@@ -96,6 +98,7 @@ export interface RailMasterSection {
   label: string;
   taskDocumentRef: TaskDocumentRef;
   manager?: OpenSession;
+  reviewer?: OpenSession;
   clusters: RailLeafCluster[];
   completed: OpenSession[];
 }
@@ -122,6 +125,7 @@ interface MasterAccumulator {
   doc: TaskDocNode;
   ref: TaskDocumentRef;
   manager?: OpenSession;
+  reviewer?: OpenSession;
   leaf: Map<string, LeafAccumulator>;
   completed: OpenSession[];
 }
@@ -185,6 +189,7 @@ function materializeMaster(acc: MasterAccumulator): RailMasterSection {
     label: acc.doc.title || acc.doc.id,
     taskDocumentRef: acc.ref,
     ...(acc.manager ? { manager: acc.manager } : {}),
+    ...(acc.reviewer ? { reviewer: acc.reviewer } : {}),
     clusters: [...acc.leaf.values()]
       .sort((left, right) => left.doc.docPath.localeCompare(right.doc.docPath))
       .map((leaf) => ({
@@ -237,16 +242,22 @@ function attachSprintSeat(
   ref: TaskDocumentRef,
   role: string,
   sprints: SprintAccumulator[],
+  unattached: OpenSession[],
   completedUnattached: OpenSession[],
 ): boolean {
   if (!isOrchestrationDoc(doc) || !SPRINT_ROLES.has(role)) return false;
+  if (role === 'reviewer' && !reviewerParentMatches(session, 'sprint', ref)) {
+    appendDetached(session, unattached, completedUnattached);
+    return true;
+  }
   const sprint = sprints.find((item) => documentKey(item.ref) === documentKey(ref));
-  if (!sprint || session.status === 'landed') completedUnattached.push(session);
+  if (!sprint) appendDetached(session, unattached, completedUnattached);
+  else if (session.status === 'landed') completedUnattached.push(session);
   else sprint.seats.push(session);
   return true;
 }
 
-function attachManagerSeat(
+function attachMasterSeat(
   session: OpenSession,
   doc: TaskDocNode,
   ref: TaskDocumentRef,
@@ -255,13 +266,32 @@ function attachManagerSeat(
   unattached: OpenSession[],
   completedUnattached: OpenSession[],
 ): boolean {
-  if (doc.kind !== 'master' || isOrchestrationDoc(doc) || role !== 'manager') return false;
+  if (
+    doc.kind !== 'master' ||
+    isOrchestrationDoc(doc) ||
+    (role !== 'manager' && role !== 'reviewer')
+  )
+    return false;
   const master = mastersByPath.get(ref.path);
   if (!master) appendDetached(session, unattached, completedUnattached);
-  else if (session.status === 'landed') master.completed.push(session);
-  else if (!master.manager) master.manager = session;
-  else unattached.push(session);
+  else placeMasterSeat(master, session, ref, role, unattached, completedUnattached);
   return true;
+}
+
+function placeMasterSeat(
+  master: MasterAccumulator,
+  session: OpenSession,
+  ref: TaskDocumentRef,
+  role: string,
+  unattached: OpenSession[],
+  completedUnattached: OpenSession[],
+): void {
+  if (role === 'reviewer' && !reviewerParentMatches(session, 'master', ref))
+    appendDetached(session, unattached, completedUnattached);
+  else if (session.status === 'landed') master.completed.push(session);
+  else if (role === 'manager' && !master.manager) master.manager = session;
+  else if (role === 'reviewer' && !master.reviewer) master.reviewer = session;
+  else unattached.push(session);
 }
 
 function attachLeafSeat(
@@ -276,6 +306,8 @@ function attachLeafSeat(
   if (doc.kind === 'master' || !LEAF_ROLES.has(role)) return false;
   const master = masterForLeaf(doc, mastersByPath);
   if (!master) appendDetached(session, unattached, completedUnattached);
+  else if (role === 'reviewer' && !reviewerParentMatches(session, 'leaf', ref, master.ref))
+    appendDetached(session, unattached, completedUnattached);
   else if (session.status === 'landed') master.completed.push(session);
   else {
     const key = documentKey(ref);
@@ -296,9 +328,12 @@ function attachSession(
   const doc = ref ? accumulators.docsByKey.get(documentKey(ref)) : undefined;
   if (!ref || !doc) return appendDetached(session, unattached, completedUnattached);
   const role = sessionSeatRole(session);
-  if (attachSprintSeat(session, doc, ref, role, accumulators.sprints, completedUnattached)) return;
   if (
-    attachManagerSeat(
+    attachSprintSeat(session, doc, ref, role, accumulators.sprints, unattached, completedUnattached)
+  )
+    return;
+  if (
+    attachMasterSeat(
       session,
       doc,
       ref,
@@ -329,7 +364,8 @@ function materializeRailSections(
   sprints: SprintAccumulator[],
 ): Pick<RailModel, 'sprints' | 'masters'> {
   const visibleMasters = [...mastersByPath.values()].filter(
-    (master) => master.manager || master.leaf.size > 0 || master.completed.length > 0,
+    (master) =>
+      master.manager || master.reviewer || master.leaf.size > 0 || master.completed.length > 0,
   );
   const masterSprint = new Map<string, SprintAccumulator>();
   for (const master of visibleMasters) {
@@ -391,6 +427,7 @@ export function railCycleOrder(model: RailModel): string[] {
   const ids: string[] = [];
   const appendMaster = (master: RailMasterSection) => {
     if (master.manager) ids.push(master.manager.id);
+    if (master.reviewer) ids.push(master.reviewer.id);
     for (const cluster of master.clusters) for (const seat of cluster.seats) ids.push(seat.id);
   };
   for (const sprint of model.sprints) {
@@ -526,6 +563,7 @@ export function masterAttentionBadge(
 ): { glyph: string; count: number; kind: 'needsInput' | 'failed' } | null {
   const memberIds = new Set<string>([
     ...(master.manager ? [master.manager.id] : []),
+    ...(master.reviewer ? [master.reviewer.id] : []),
     ...master.clusters.flatMap((cluster) => cluster.seats.map((seat) => seat.id)),
   ]);
   const needsInput = rollup.needsInput.filter((id) => memberIds.has(id)).length;

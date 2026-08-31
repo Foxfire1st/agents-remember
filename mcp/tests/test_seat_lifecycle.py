@@ -219,6 +219,43 @@ class RetirePolicyMatrixTests(unittest.TestCase):
         target = SeatRef("rev-1", LEAF_A1, "reviewer")
         check_retire_authority(actor, target, self.topology)  # must not raise
 
+    def test_manager_retires_its_same_master_exit_reviewer(self) -> None:
+        actor = SeatRef("mgr", MASTER_A, "manager")
+        target = SeatRef("master-reviewer", MASTER_A, "reviewer")
+        check_retire_authority(actor, target, self.topology)  # must not raise
+
+    def test_architect_retires_only_its_same_sprint_plan_reviewer(self) -> None:
+        actor = SeatRef("architect", SPRINT, "architect")
+        check_retire_authority(
+            actor,
+            SeatRef(
+                "plan-reviewer",
+                SPRINT,
+                "reviewer",
+                structural_parent_task_document_ref=SPRINT,
+                structural_parent_role="architect",
+            ),
+            self.topology,
+        )
+        with self.assertRaisesRegex(RetirePolicyError, "same-sprint plan-review"):
+            check_retire_authority(
+                actor,
+                SeatRef(
+                    "super-reviewer",
+                    SPRINT,
+                    "reviewer",
+                    structural_parent_task_document_ref=SPRINT,
+                    structural_parent_role="orchestrator",
+                ),
+                self.topology,
+            )
+        with self.assertRaisesRegex(RetirePolicyError, "same-sprint plan-review"):
+            check_retire_authority(
+                actor,
+                SeatRef("leaf-reviewer", LEAF_A1, "reviewer"),
+                self.topology,
+            )
+
     def test_manager_refused_against_other_masters_worker(self) -> None:
         actor = SeatRef("mgr", MASTER_A, "manager")
         target = SeatRef("worker-1", LEAF_B2, "worker")

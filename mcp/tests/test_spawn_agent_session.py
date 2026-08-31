@@ -89,6 +89,8 @@ _SPAWNED_BY_FIELDS = {
     "spawned_by_session": "session_id",
     "spawned_by_lifecycle": "lifecycle_id",
     "spawned_by_kind": "caller_kind",
+    "structural_parent_task_document_ref": "structural_parent_task_document_ref",
+    "structural_parent_role": "structural_parent_role",
 }
 
 
@@ -566,6 +568,58 @@ class SpawnAgentSessionTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.spawned_by_kind, "ambient")
         self.assertIsNone(row.spawned_by_session)
+
+    def test_spawn_records_structural_reviewer_parent_as_a_separate_address(self) -> None:
+        parent = TaskDocumentRef(repository="repo", path="master/task.json")
+        path = agentic_settings_path(self.tmp)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "orchestration": {
+                        "roles": {
+                            "reviewer": {
+                                "harness": "claude",
+                                "model": "claude-fable-5",
+                                "effort": "max",
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = self._spawn(
+            task_document_ref=LEAF_REF,
+            env={"AR_SPAWN_ROLE": "reviewer"},
+            spawned_by_kind="plane",
+            structural_parent_task_document_ref=parent,
+            structural_parent_role="manager",
+        )
+
+        self.assertEqual(payload["structuralParentTaskDocumentRef"], parent.model_dump())
+        self.assertEqual(payload["structuralParentRole"], "manager")
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertEqual(row.structural_parent_task_document_ref, parent)
+        self.assertEqual(row.structural_parent_role, "manager")
+        self.assertEqual(
+            row.to_json()["structuralParentTaskDocumentRef"],
+            parent.model_dump(by_alias=True),
+        )
+
+    def test_spawn_refuses_forged_structural_parent_before_host_creation(self) -> None:
+        parent = TaskDocumentRef(repository="repo", path="master/task.json")
+        payload = self._spawn(
+            task_document_ref=LEAF_REF,
+            env={"AR_SPAWN_ROLE": "worker"},
+            spawned_by_kind="plane",
+            structural_parent_task_document_ref=parent,
+            structural_parent_role="manager",
+        )
+
+        self.assertEqual(payload["status"], "task-binding-invalid")
+        self.assertEqual(self.host.ensured, [])
 
 
 class SpawnKnobApplicationTests(unittest.TestCase):

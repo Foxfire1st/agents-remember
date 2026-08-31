@@ -10,6 +10,7 @@ SOURCE_SUFFIXES = frozenset({".py", ".pyi"})
 TASK_DATE_PROOF = re.compile(r"(?:^|[_-])(?:baseline|\d{6})(?:[_\-.]|$)")
 POLICY_MANIFESTS = frozenset({"mcp/tests/test-evidence-lanes.toml"})
 LIFECYCLE_CATALOG_PATH = "mcp/tests/evidence-lifecycle.toml"
+PERMANENT_E2E_SUPPORT_ROOTS = (Path("scripts/e2e_harness"),)
 
 
 def governed_artifact_paths(
@@ -49,6 +50,10 @@ def governed_artifact_paths(
         if path.suffix.lower() not in SOURCE_SUFFIXES and path.stat().st_size >= large_fixture_bytes
     )
     governed.update(path for path in POLICY_MANIFESTS if (root / path).is_file())
+    for support_root in PERMANENT_E2E_SUPPORT_ROOTS:
+        governed.update(
+            _relative(root, path) for path in (root / support_root).glob("*.py") if path.is_file()
+        )
     return governed
 
 

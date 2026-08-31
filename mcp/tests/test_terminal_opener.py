@@ -26,6 +26,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
+from agents_remember.serving import task_binding
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
@@ -51,6 +52,7 @@ _DAEMON_PACKAGE_ROOT = str(
 )
 LEAF_REF = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
 MASTER_REF = TaskDocumentRef(repository="repo", path="master/task.json")
+SPRINT_REF = TaskDocumentRef(repository="repo", path="sprint/task.json")
 
 
 def _write_task_tree(root: Path) -> None:
@@ -158,6 +160,8 @@ _PROVENANCE_FIELDS = frozenset(
         "replacement_for_task_document_ref",
         "spawned_by_session",
         "spawned_by_lifecycle",
+        "structural_parent_task_document_ref",
+        "structural_parent_role",
         "spawn_level",
         "spawn_level_source",
     }
@@ -390,6 +394,42 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertIsNone(hand_opened.spawn_role)
         self.assertNotIn("spawnRole", hand_opened.to_json())
 
+    def test_reopened_reviewer_generation_adopts_the_new_plane_parent(self) -> None:
+        self._open(
+            session_id="reviewer",
+            task_document_ref=SPRINT_REF,
+            env={"AR_SPAWN_ROLE": "reviewer"},
+            structural_parent_task_document_ref=SPRINT_REF,
+            structural_parent_role="architect",
+        )
+        self.host.known.discard("ar-reviewer")
+
+        reopened = self._open(
+            session_id="reviewer",
+            task_document_ref=SPRINT_REF,
+            env={"AR_SPAWN_ROLE": "reviewer"},
+            structural_parent_task_document_ref=SPRINT_REF,
+            structural_parent_role="orchestrator",
+        )
+
+        self.assertEqual(reopened.status, "opened")
+        entry = self.catalog.get("reviewer")
+        assert entry is not None
+        self.assertEqual(entry.structural_parent_task_document_ref, SPRINT_REF)
+        self.assertEqual(entry.structural_parent_role, "orchestrator")
+
+    def test_new_reviewer_without_plane_stamped_parent_fails_before_spawn(self) -> None:
+        for index, document in enumerate((LEAF_REF, MASTER_REF, SPRINT_REF)):
+            with self.subTest(document=document.key):
+                result = self._open(
+                    session_id=f"reviewer-{index}",
+                    task_document_ref=document,
+                    env={"AR_SPAWN_ROLE": "reviewer"},
+                )
+                self.assertEqual(result.status, "task-binding-invalid")
+                self.assertIn("requires an explicit structural parent", result.detail or "")
+        self.assertEqual(self.host.ensured, [])
+
     def test_seat_taken_surfaces_owner_without_spawning(self) -> None:
         self.catalog.upsert(
             _running_chat("owner-1", task_document_ref=LEAF_REF, spawn_role="worker")
@@ -416,6 +456,8 @@ class OpenTerminalSessionTests(unittest.TestCase):
             session_id="reviewer",
             task_document_ref=LEAF_REF,
             env={"AR_SPAWN_ROLE": "reviewer"},
+            structural_parent_task_document_ref=MASTER_REF,
+            structural_parent_role="manager",
         )
         self.assertEqual(reviewer.status, "opened")
 
@@ -449,10 +491,19 @@ class OpenTerminalSessionTests(unittest.TestCase):
             ("reviewer", "reviewer"),
             ("manager", "manager"),
         ):
+            reviewer_parent = (
+                {
+                    "structural_parent_task_document_ref": MASTER_REF,
+                    "structural_parent_role": "manager",
+                }
+                if role == "reviewer"
+                else {}
+            )
             result = self._open(
                 session_id=session_id,
                 task_document_ref=MASTER_REF if role == "manager" else LEAF_REF,
                 env={"AR_SPAWN_ROLE": role},
+                **reviewer_parent,
             )
             self.assertEqual(result.status, "opened")
 
@@ -776,6 +827,59 @@ class KnobApplicationTests(unittest.TestCase):
         result = self._open(harness="hermes", harnesses=(hermes,), env={"AR_SPAWN_EFFORT": "high"})
         self.assertEqual(result.status, "opened")
         self.assertEqual(_runner_config(self.host).argv, ("hermes",))
+
+    def test_shared_task_binding_refuses_conflicting_and_invalid_parent_claims(self) -> None:
+        topology = mock.Mock()
+        conflicting = task_binding.TaskBindingRequest(
+            task_document_ref=LEAF_REF,
+            replacement_for_task_document_ref=LEAF_REF,
+            seat_role="worker",
+        )
+        self.assertEqual(
+            task_binding._binding_refusal(topology, conflicting),
+            task_binding.TaskBindingRefusal("task-binding-invalid"),
+        )
+
+        incomplete = task_binding.TaskBindingRequest(
+            task_document_ref=LEAF_REF,
+            replacement_for_task_document_ref=None,
+            seat_role="reviewer",
+            structural_parent_task_document_ref=MASTER_REF,
+        )
+        with self.assertRaisesRegex(
+            task_binding.TaskDocumentRefError,
+            "must be supplied together",
+        ):
+            task_binding._validate_structural_parent(topology, incomplete, LEAF_REF)
+
+        topology.altitude.return_value = "leaf"
+        topology.parent.return_value = None
+        missing_parent = task_binding.TaskBindingRequest(
+            task_document_ref=LEAF_REF,
+            replacement_for_task_document_ref=None,
+            seat_role="reviewer",
+            structural_parent_task_document_ref=MASTER_REF,
+            structural_parent_role="manager",
+        )
+        with self.assertRaisesRegex(
+            task_binding.TaskDocumentRefError,
+            "has no parent",
+        ):
+            task_binding._validate_structural_parent(topology, missing_parent, LEAF_REF)
+
+        topology.altitude.return_value = "master"
+        mismatched = task_binding.TaskBindingRequest(
+            task_document_ref=MASTER_REF,
+            replacement_for_task_document_ref=None,
+            seat_role="reviewer",
+            structural_parent_task_document_ref=SPRINT_REF,
+            structural_parent_role="architect",
+        )
+        with self.assertRaisesRegex(
+            task_binding.TaskDocumentRefError,
+            "does not own",
+        ):
+            task_binding._validate_structural_parent(topology, mismatched, MASTER_REF)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from agents_remember_test_support.testing.evidence_governance import (
 )
 
 CATALOG_PATH = Path(LIFECYCLE_CATALOG_PATH)
-CATALOG_SCHEMA = "ar-test-evidence-lifecycle/v2"
+CATALOG_SCHEMA = "ar-test-evidence-lifecycle/v3"
 CONTRACT_REFERENCE_PREFIX = "contract:"
 NODE_REFERENCE_PREFIX = "node:"
 
@@ -86,6 +86,7 @@ class EvidenceLifetime(StrEnum):
 
 class ConsumerScope(StrEnum):
     EXACT = "exact"
+    EXACT_SOURCE = "exact-source"
     ALL_TESTS = "all-tests"
 
 
@@ -281,13 +282,15 @@ def _metadata_from(
         raise ValueError(f"unknown fields: {sorted(unknown)}")
     consumer_scope = ConsumerScope(_required_text(raw, "consumer_scope"))
     raw_consumers = raw.get("consumers")
-    if consumer_scope is ConsumerScope.EXACT:
+    if consumer_scope in {ConsumerScope.EXACT, ConsumerScope.EXACT_SOURCE}:
         if (
             not isinstance(raw_consumers, list)
             or not raw_consumers
             or not all(isinstance(value, str) and value.strip() for value in raw_consumers)
         ):
-            raise TypeError("exact consumer_scope requires a non-empty consumers string list")
+            raise TypeError(
+                "exact and exact-source consumer_scope require a non-empty consumers string list"
+            )
         consumers = tuple(raw_consumers)
     else:
         if raw_consumers not in (None, []):
@@ -367,7 +370,12 @@ def _validate_path_and_consumers(
     missing_consumers = [value for value in item.consumers if not (root / value).is_file()]
     if missing_consumers:
         findings.append(f"{item.path}: missing consumers {missing_consumers}")
-    observed = {path.as_posix() for path in facts.observed_test_consumers(Path(item.path))}
+    observed_paths = (
+        facts.observed_source_consumers(Path(item.path))
+        if item.consumer_scope is ConsumerScope.EXACT_SOURCE
+        else facts.observed_test_consumers(Path(item.path))
+    )
+    observed = {path.as_posix() for path in observed_paths}
     declared = set(item.consumers)
     if observed != declared:
         missing = sorted(observed - declared)

@@ -70,6 +70,24 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 (export / "python-venv-runtime.json").write_text(
                     '{"schema":"ar-python-runtime-proof/v1"}\n', encoding="utf-8"
                 )
+                e2e = export / "ambient-role-chat-e2e"
+                e2e.mkdir()
+                (e2e / "summary.json").write_text(
+                    '{"schema":"ar-ambient-role-chat-e2e-summary/v1","status":"passed"}\n',
+                    encoding="utf-8",
+                )
+                for run in (1, 2):
+                    (e2e / f"run-{run}.json").write_text(
+                        json.dumps(
+                            {
+                                "schema": "ar-ambient-role-chat-e2e-run/v1",
+                                "status": "passed",
+                                "run": run,
+                            }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
                 return subprocess.CompletedProcess(command, 0, stdout="exported\n", stderr="")
 
             result = run_clean_quality(
@@ -95,7 +113,7 @@ class CleanQualityExecutorTests(unittest.TestCase):
             )
             manifest = json.loads((sandbox / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["daggerVersion"], "v0.21.8")
-            self.assertEqual(manifest["codexVersion"], "0.147.0")
+            self.assertEqual(manifest["codexVersion"], "0.151.0")
             self.assertEqual(len(manifest["bundleSha256"]), 64)
             bundle = sandbox / "candidate.bundle"
             self.assertTrue(bundle.is_file())
@@ -117,6 +135,13 @@ class CleanQualityExecutorTests(unittest.TestCase):
                     json.loads(proof.read_text(encoding="utf-8"))["schema"],
                     "ar-python-runtime-proof/v1",
                 )
+            e2e_summary = clean_quality_executor.published_report_path(
+                group / "reports", "ambient-role-chat-e2e/summary.json"
+            )
+            self.assertEqual(
+                json.loads(e2e_summary.read_text(encoding="utf-8"))["status"],
+                "passed",
+            )
 
             (sandbox / "obsolete").write_text("old", encoding="utf-8")
             run_clean_quality(
@@ -287,6 +312,20 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 durable.read_text(encoding="utf-8"), '{"status":"passed","exitCode":0}\n'
             )
 
+            (export / "closeout-operation.json").unlink()
+            nested = export / "ambient-role-chat-e2e"
+            nested.mkdir()
+            (nested / "run-3.json").write_text("forged", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "unexpected report files"):
+                clean_quality_executor._publish_reports(
+                    export,
+                    reports,
+                    candidate_tree=CANDIDATE_TREE,
+                )
+            self.assertEqual(
+                durable.read_text(encoding="utf-8"), '{"status":"passed","exitCode":0}\n'
+            )
+
     def test_report_generation_pointer_never_exposes_a_partial_copy(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             root = Path(tmp)
@@ -358,9 +397,9 @@ class CleanQualityExecutorTests(unittest.TestCase):
                 mock.patch.object(
                     clean_quality_executor,
                     "_prune_report_generations",
-                    side_effect=OSError("crash after pointer"),
+                    side_effect=OSError("crash before pointer"),
                 ),
-                self.assertRaisesRegex(OSError, "crash after pointer"),
+                self.assertRaisesRegex(OSError, "crash before pointer"),
             ):
                 clean_quality_executor._publish_reports(
                     new,
@@ -370,12 +409,7 @@ class CleanQualityExecutorTests(unittest.TestCase):
             selected = clean_quality_executor.published_report_path(
                 reports, "clean-quality-results.json"
             )
-            self.assertIn('"attempt":"new"', selected.read_text(encoding="utf-8"))
-            causal = clean_quality_executor.published_report_path(reports, "causal-failures.json")
-            self.assertIn(
-                "python-causal-failures/v1",
-                causal.read_text(encoding="utf-8"),
-            )
+            self.assertIn('"attempt":"old"', selected.read_text(encoding="utf-8"))
 
     def test_competing_report_publisher_reuses_the_complete_generation(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
@@ -436,6 +470,18 @@ class CleanQualityExecutorTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "report is incomplete"):
                 clean_quality_executor.published_report_path(reports, "result.json")
+
+            traversal_manifest = {
+                "schemaVersion": "2.0",
+                "generation": generation,
+                "candidateTree": CANDIDATE_TREE,
+                "files": {"../result.json": {"sha256": "0" * 64, "size": 1}},
+            }
+            manifest_path.write_text(json.dumps(traversal_manifest), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "no complete Dagger report"):
+                clean_quality_executor.published_report_path(reports, "../result.json")
+
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             generation_root = (
                 reports / clean_quality_executor.REPORT_GENERATIONS_DIRECTORY / generation

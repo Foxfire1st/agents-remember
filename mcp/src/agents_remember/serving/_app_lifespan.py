@@ -165,8 +165,17 @@ async def _agent_notifier_loop(runtime: _ServingRuntime) -> None:
             if not settings.agent_notifier.enabled:
                 await asyncio.sleep(settings.agent_notifier.interval_seconds)
                 continue
+            # Notifier predicates depend on current control/turn boundaries. Dashboard HTTP
+            # clients also refresh this catalog, but delivery correctness must not depend on a
+            # browser polling ``/api/terminal/sessions``. Refresh through the one liveness owner
+            # immediately before each headless notifier sweep.
+            await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
             ctx = _agent_notifier_context(runtime, settings=settings)
-            await asyncio.to_thread(run_agent_notifier_sweep, ctx, now=runtime.liveness_clock())
+            await _to_thread_drained_on_cancel(
+                run_agent_notifier_sweep,
+                ctx,
+                now=runtime.liveness_clock(),
+            )
         except Exception:
             logger.exception("agent-notifier sweep failed; retrying next interval")
         await asyncio.sleep(settings.agent_notifier.interval_seconds)

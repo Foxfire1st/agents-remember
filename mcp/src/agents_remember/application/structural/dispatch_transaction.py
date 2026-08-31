@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from agents_remember.application.structural.outcomes import (
@@ -12,12 +13,13 @@ from agents_remember.application.structural.outcomes import (
 )
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.errors import StructuralDispatchError
+from agents_remember.errors import StructuralDispatchError, StructuralDispatchLockError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.structural_dispatch import (
     dispatch_brief_status,
     dispatch_brief_viable,
+    exclusive_structural_dispatch_lock,
     pinned_dispatch_brief,
 )
 from agents_remember.serving.terminal_catalog import (
@@ -42,6 +44,7 @@ class DispatchTransaction:
     retry_spawn: SpawnAttempt
     brief_spawned: BriefSpawned
     retire_generation: RetireGeneration
+    expected_structural_parent: tuple[TaskDocumentRef, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +93,32 @@ def execute_dispatch_transaction(transaction: DispatchTransaction) -> dict[str, 
     )
 
 
+def execute_serialized_dispatch(
+    coordination_root: Path,
+    transaction: DispatchTransaction,
+) -> dict[str, Any]:
+    """Serialize and execute one canonical-seat dispatch through the transaction owner."""
+
+    try:
+        with exclusive_structural_dispatch_lock(
+            coordination_root,
+            transaction.document,
+            transaction.role,
+        ):
+            return execute_dispatch_transaction(transaction)
+    except StructuralDispatchLockError as exc:
+        return structural_payload(
+            StructuralOutcome(
+                "dispatch_agent",
+                False,
+                "dispatch-serialization-refused",
+                transaction.document,
+                transaction.role,
+                str(exc),
+            )
+        )
+
+
 def _reconcile_existing_dispatch(
     transaction: DispatchTransaction,
     *,
@@ -100,6 +129,9 @@ def _reconcile_existing_dispatch(
     occupant = transaction.catalog.get(owner_id)
     if occupant is None or occupant.status != "running":
         return None
+    parent_conflict = _structural_parent_conflict(transaction, occupant)
+    if parent_conflict is not None:
+        return parent_conflict
     try:
         outcome = reconcile_dispatch_evidence(_evidence_runtime(transaction), owner_id=owner_id)
     except (OSError, ValueError) as exc:
@@ -112,6 +144,50 @@ def _reconcile_existing_dispatch(
             "failed dispatch generation could not be retired",
         )
     return None
+
+
+def _structural_parent_conflict(
+    transaction: DispatchTransaction,
+    occupant: TerminalCatalogEntry,
+) -> dict[str, Any] | None:
+    """Refuse cross-seam reuse of one live polymorphic reviewer seat."""
+
+    expected = transaction.expected_structural_parent
+    if expected is None:
+        return None
+    actual = (
+        occupant.structural_parent_task_document_ref,
+        occupant.structural_parent_role,
+    )
+    if actual == expected:
+        return None
+    # V2 catalog rows predate polymorphic reviewer parent stamps and could only represent
+    # leaf reviewers. Preserve that one deterministic live-seat meaning while those ephemeral
+    # rows drain; no master/sprint parent is guessed.
+    if (
+        actual == (None, None)
+        and transaction.role == "reviewer"
+        and expected[0] != transaction.document
+        and expected[1] == "manager"
+    ):
+        return None
+    actual_text = (
+        "unstamped legacy parent"
+        if actual == (None, None)
+        else f"{actual[0].key if actual[0] is not None else '<missing>'} as {actual[1]!r}"
+    )
+    return structural_payload(
+        StructuralOutcome(
+            "dispatch_agent",
+            False,
+            "structural-parent-conflict",
+            transaction.document,
+            transaction.role,
+            "the current reviewer generation belongs to "
+            f"{actual_text}; retire it before dispatching this review from "
+            f"{expected[0].key} as {expected[1]!r}",
+        )
+    )
 
 
 def _evidence_runtime(transaction: DispatchTransaction) -> DispatchEvidenceRuntime:

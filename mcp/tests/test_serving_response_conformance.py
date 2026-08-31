@@ -676,8 +676,8 @@ class ValidatedRouteHazardTests(unittest.TestCase):
     the other 59 they are validated at runtime -- and a payload that gains a key, loses a
     required one or changes a type is answered as **HTTP 500**, not passed through as it was
     before these routes declared a model. On ``/api/harnesses`` that is three required keys
-    written by one function. On ``/api/terminal/sessions`` it is a 66-key body assembled by
-    hand from a 56-optional-field dataclass that is actively grown, and a leaf that adds a
+    written by one function. On ``/api/terminal/sessions`` it is a 68-key body assembled by
+    hand from a 58-optional-field dataclass that is actively grown, and a leaf that adds a
     field to ``to_json`` and forgets ``TerminalCatalogEntryWire`` takes the cockpit's session
     list down rather than degrading it.
 
@@ -738,7 +738,7 @@ class ValidatedRouteHazardTests(unittest.TestCase):
         self.assertEqual(sorted(emitted - declared), [])
         self.assertEqual(sorted(declared - emitted), [])
         # Pinned, because the scan reading zero keys would satisfy the equality above.
-        self.assertEqual(len(emitted), 66)
+        self.assertEqual(len(emitted), 68)
 
 
 class RouteWalkerTests(unittest.TestCase):

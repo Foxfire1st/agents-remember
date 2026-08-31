@@ -97,6 +97,11 @@ class TerminalCatalogEntry:
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
     spawned_by_kind: str | None = None
+    # Plane-owned structural parent address. This is distinct from spawn ancestry: it records the
+    # canonical document+role seat that owns a reviewer manifestation when the reviewer role can
+    # validly live at more than one altitude. Occupant ids remain correlation-only.
+    structural_parent_task_document_ref: TaskDocumentRef | None = None
+    structural_parent_role: str | None = None
     # The l-01 role this session was spawned AS (``AR_SPAWN_ROLE`` seeded into the spawn env by the
     # dispatching seat -- orchestrator/strategist/manager/worker/reviewer/designer), recorded at first
     # spawn so the Chats command tree (L14) can group command chats without re-reading tmux env.
@@ -214,6 +219,10 @@ class TerminalCatalogEntry:
             spawned_by_session=_optional_str(data, "spawnedBySession"),
             spawned_by_lifecycle=_optional_str(data, "spawnedByLifecycle"),
             spawned_by_kind=_optional_str(data, "spawnedByKind"),
+            structural_parent_task_document_ref=_optional_task_document_ref(
+                data, "structuralParentTaskDocumentRef"
+            ),
+            structural_parent_role=_optional_str(data, "structuralParentRole"),
             spawn_role=spawn_role,
             launch_args=_string_tuple(data.get("launchArgs")),
             prompt_keywords=_string_tuple(data.get("promptKeywords")),
@@ -302,6 +311,10 @@ class TerminalCatalogEntry:
                     "spawnedBySession": self.spawned_by_session,
                     "spawnedByLifecycle": self.spawned_by_lifecycle,
                     "spawnedByKind": self.spawned_by_kind,
+                    "structuralParentTaskDocumentRef": _optional_task_document_ref_json(
+                        self.structural_parent_task_document_ref
+                    ),
+                    "structuralParentRole": self.structural_parent_role,
                     "spawnRole": self.spawn_role,
                     "launchArgs": _optional_list(self.launch_args),
                     "promptKeywords": _optional_list(self.prompt_keywords),
@@ -398,6 +411,10 @@ class TerminalCatalogEntry:
             seat_role=seat_role,
             replacement_for_task_document_ref=None,
             dispatch_brief_entry_id=(self.dispatch_brief_entry_id if same_address else None),
+            structural_parent_task_document_ref=(
+                self.structural_parent_task_document_ref if same_address else None
+            ),
+            structural_parent_role=self.structural_parent_role if same_address else None,
         )
 
     def with_retirement(

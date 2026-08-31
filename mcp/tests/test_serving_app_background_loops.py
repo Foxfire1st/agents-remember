@@ -266,6 +266,59 @@ class AgentNotifierLoopTests(unittest.IsolatedAsyncioTestCase):
         self.tmp = Path(self._dir.name)
         self.addCleanup(self._dir.cleanup)
 
+    async def test_each_notifier_pass_refreshes_liveness_before_evaluating_predicates(
+        self,
+    ) -> None:
+        _write_agent_notifier_settings(self.tmp, enabled=True, interval_seconds=0.01)
+        runtime = _runtime(self.tmp)
+        order: list[str] = []
+
+        with (
+            mock.patch.object(
+                runtime.liveness_sweeper,
+                "refresh",
+                side_effect=lambda: order.append("liveness"),
+            ),
+            mock.patch.object(
+                lifespan_module,
+                "run_agent_notifier_sweep",
+                side_effect=lambda *_args, **_kwargs: order.append("notifier"),
+            ),
+        ):
+            await _run_until(
+                _agent_notifier_loop(runtime),
+                lambda: "notifier" in order,
+                what="liveness refresh followed by notifier evaluation",
+            )
+
+        self.assertEqual(order[:2], ["liveness", "notifier"])
+
+    async def test_cancellation_drains_an_inflight_liveness_refresh_before_returning(
+        self,
+    ) -> None:
+        _write_agent_notifier_settings(self.tmp, enabled=True, interval_seconds=0.01)
+        runtime = _runtime(self.tmp)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def refresh() -> None:
+            entered.set()
+            self.assertTrue(
+                release.wait(timeout=5),
+                "test did not release the in-flight catalog refresh",
+            )
+
+        with mock.patch.object(runtime.liveness_sweeper, "refresh", side_effect=refresh):
+            task = asyncio.create_task(_agent_notifier_loop(runtime))
+            await _until(entered.is_set, what="the liveness refresh to enter its worker thread")
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
     async def test_disabled_agent_notifier_never_sweeps_and_enabling_it_needs_no_restart(
         self,
     ) -> None:

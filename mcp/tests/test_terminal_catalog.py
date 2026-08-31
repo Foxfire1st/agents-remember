@@ -213,10 +213,13 @@ class TerminalCatalogTests(unittest.TestCase):
 
     def test_dispatch_binding_fields_round_trip(self) -> None:
         leaf = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
+        master = TaskDocumentRef(repository="repo", path="master/task.json")
         self.catalog.upsert(
             replace(
                 _entry("a", kind="harness"),
                 replacement_for_task_document_ref=leaf,
+                structural_parent_task_document_ref=master,
+                structural_parent_role="manager",
                 dispatch_brief_entry_id="dispatch-brief-1",
                 session_log_entry_id="brief-1",
                 session_log_path=Path("/tmp/session.jsonl"),
@@ -226,10 +229,14 @@ class TerminalCatalogTests(unittest.TestCase):
         entry = self.catalog.get("a")
         assert entry is not None
         self.assertEqual(entry.replacement_for_task_document_ref, leaf)
+        self.assertEqual(entry.structural_parent_task_document_ref, master)
+        self.assertEqual(entry.structural_parent_role, "manager")
         self.assertEqual(entry.dispatch_brief_entry_id, "dispatch-brief-1")
         self.assertEqual(entry.session_log_entry_id, "brief-1")
         self.assertEqual(entry.session_log_path, Path("/tmp/session.jsonl"))
         self.assertEqual(entry.to_json()["replacementForTaskDocumentRef"], leaf.model_dump())
+        self.assertEqual(entry.to_json()["structuralParentTaskDocumentRef"], master.model_dump())
+        self.assertEqual(entry.to_json()["structuralParentRole"], "manager")
         self.assertEqual(entry.to_json()["dispatchBriefEntryId"], "dispatch-brief-1")
         self.assertEqual(entry.to_json()["sessionLogEntryId"], "brief-1")
 
@@ -263,6 +270,26 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(promoted.task_document_ref, leaf)
         self.assertEqual(promoted.seat_role, "worker")
         self.assertIsNone(promoted.replacement_for_task_document_ref)
+
+    def test_task_rebinding_drops_a_reviewer_parent_that_belongs_to_the_old_address(self) -> None:
+        leaf = TaskDocumentRef(repository="repo", path="master/leaf-1.json")
+        other = TaskDocumentRef(repository="repo", path="master/leaf-2.json")
+        master = TaskDocumentRef(repository="repo", path="master/task.json")
+        reviewer = replace(
+            _entry("reviewer", kind="harness"),
+            task_document_ref=leaf,
+            seat_role="reviewer",
+            structural_parent_task_document_ref=master,
+            structural_parent_role="manager",
+        )
+
+        same = reviewer.with_task_binding(leaf, "reviewer")
+        moved = reviewer.with_task_binding(other, "reviewer")
+
+        self.assertEqual(same.structural_parent_task_document_ref, master)
+        self.assertEqual(same.structural_parent_role, "manager")
+        self.assertIsNone(moved.structural_parent_task_document_ref)
+        self.assertIsNone(moved.structural_parent_role)
 
     def test_control_metadata_round_trips_additively_and_legacy_rows_remain_unset(self) -> None:
         self.catalog.upsert(

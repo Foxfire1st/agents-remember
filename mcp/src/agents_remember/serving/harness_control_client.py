@@ -518,23 +518,20 @@ def _encode_control_request(  # pragma: no cover
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/harness_control_client.py:518).
 def _connect_unavailable_detail(endpoint: Path, exc: BaseException) -> str:  # pragma: no cover
-    """Map a control-socket connect failure to an honest lifecycle note (no raw errno surprise).
+    """Map a control-socket connect failure without inventing process-liveness evidence.
 
-    A controlled runner that already exited leaves either an absent socket
-    (``ENOENT``) or, on an unclean exit, a stale socket file with nothing listening
-    (``ECONNREFUSED`` — the ``[Errno 111] Connection refused`` banner). Both mean
-    the same designed thing: there is no live control endpoint to stop. The stale socket is unlinked
-    best-effort so the next attempt reads the absent (``ENOENT``) case cleanly rather than repeating
-    the refused surprise.
+    ``ENOENT`` is also the ordinary race while a newly spawned runner creates its endpoint, so the
+    socket alone cannot prove that the process exited. A refused stale socket is unlinked best-effort
+    so a later observation sees the clean absent-endpoint state.
     """
 
     error_number = getattr(exc, "errno", None)
     if error_number == errno.ECONNREFUSED:
         with contextlib.suppress(OSError):
             endpoint.unlink()
-        return "the controlled runner already exited (stale control socket, nothing listening)"
+        return "the control socket exists but no runner is listening"
     if error_number == errno.ENOENT:
-        return "the controlled runner already exited (control socket absent)"
+        return "the control socket is not present"
     if isinstance(exc, TimeoutError):
         return "the control endpoint did not accept a connection within the timeout"
     return "the control endpoint could not be reached"

@@ -117,6 +117,7 @@ def _starter_registrations() -> tuple[StarterRegistration, ...]:
         or not all(isinstance(value, str) for value in codex_args)
     ):
         raise AssertionError("Codex starter has malformed agents-remember command/args")
+    assert codex.get("env_vars") == ["AR_HOSTED_SESSION_ID", "AR_SPAWN_ROLE"]
 
     hermes_text = REPOSITORY_ROOT.joinpath(".hermes/config.yaml").read_text(encoding="utf-8")
     hermes_mcp = _yaml_mapping_block(hermes_text, "mcp_servers")
@@ -495,6 +496,27 @@ class PublicSurfaceFailureTests(unittest.TestCase):
         dispatch.description = "Dispatch one role brief."
         with self.assertRaisesRegex(PublicSurfaceViolation, "omits caller-boundary facts"):
             validate_public_surface(tools)
+
+    def test_consumer_dispatch_validator_refuses_wrong_name_and_non_object_schema(self) -> None:
+        _tools, dispatch, schema = self._schema_candidate()
+        with self.assertRaisesRegex(
+            PublicSurfaceViolation,
+            "must name dispatch_agent",
+        ):
+            public_surface.validate_dispatch_advertisement(
+                name="spawn_agent_session",
+                description=dispatch.description,
+                input_schema=schema,
+            )
+        with self.assertRaisesRegex(
+            PublicSurfaceViolation,
+            "input schema must be an object",
+        ):
+            public_surface.validate_dispatch_advertisement(
+                name="dispatch_agent",
+                description=dispatch.description,
+                input_schema=[],
+            )
 
     def test_live_order_drift_is_rejected(self) -> None:
         tools = self._listed_tools()

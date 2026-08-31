@@ -30,6 +30,7 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.hosted_readiness import (
     HostedReadinessHost,
     HostedReadinessResult,
+    ReadinessWait,
     hosted_session_identity,
     hosted_session_readiness,
 )
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
     )
 
 DISPATCH_BRIEF_KIND = "dispatch-brief"
+DISPATCH_BRIEF_READINESS_WAIT_SECONDS = 10.0
+"""Bound the one-call spawn-to-brief handshake without turning it into an external retry loop."""
 ReadinessCheck = Callable[[TerminalCatalogPort, HostedReadinessHost, str], HostedReadinessResult]
 
 
@@ -70,12 +73,22 @@ def _readiness_check(
     host: HostedReadinessHost,
     session_id: str,
 ) -> HostedReadinessResult:
-    return hosted_session_readiness(catalog, host, session_id=session_id)
+    return hosted_session_readiness(
+        catalog,
+        host,
+        session_id=session_id,
+        wait=ReadinessWait(seconds=DISPATCH_BRIEF_READINESS_WAIT_SECONDS),
+    )
 
 
 @dataclass(frozen=True)
 class DispatchBriefGate:
-    """Exact-session protocol readiness gate; terminal input mode has no authority."""
+    """Exact-session protocol readiness gate; terminal input mode has no authority.
+
+    The default gate waits only for the bounded spawn-to-bridge startup window. If that window
+    expires, the already-durable exact-pinned brief remains pending for the normal notifier retry;
+    callers never perform a second readiness or delivery operation.
+    """
 
     readiness: ReadinessCheck = _readiness_check
 

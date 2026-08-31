@@ -280,6 +280,35 @@ class RepositoryDependencyFacts:
         consumers.update(self.literal_test_consumers(relative))
         return frozenset(consumers)
 
+    def observed_source_consumers(self, path: Path) -> frozenset[Path]:
+        """Derive every repository source consumer, including script-local imports."""
+
+        relative = path if not path.is_absolute() else path.relative_to(self.project_root)
+        consumers = set(self._direct_literal_referrers(relative))
+        pending = [relative]
+        expanded: set[Path] = set()
+        while pending:
+            current = pending.pop()
+            if current in expanded:
+                continue
+            expanded.add(current)
+            for importer in self._direct_source_importers(current):
+                if importer not in consumers:
+                    consumers.add(importer)
+                    pending.append(importer)
+        consumers.discard(relative)
+        return frozenset(consumers)
+
+    def _direct_source_importers(self, path: Path) -> frozenset[Path]:
+        module = self.modules.get(path) or module_for_path(path, self.import_roots)
+        if module is not None:
+            return frozenset(self.importers.get(module, ()))
+        return frozenset(
+            candidate
+            for candidate in self.python_paths
+            if candidate.parent == path.parent and path.stem in self.imports.get(candidate, ())
+        )
+
     def import_test_consumers(self, path: Path) -> frozenset[Path]:
         module = self.modules.get(path) or module_for_path(path, self.import_roots)
         if module is None:

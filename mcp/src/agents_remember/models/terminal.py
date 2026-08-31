@@ -106,6 +106,8 @@ class SpawnAgentSessionResponse(ToolResponse):
     spawnedBySession: str | None = None
     spawnedByLifecycle: str | None = None
     spawnedByKind: Literal["plane", "ambient", "unattributed"] | None = None
+    structuralParentTaskDocumentRef: TaskDocumentRef | None = None
+    structuralParentRole: str | None = None
     # The AR_SPAWN_ROLE recorded on the catalog row (L14: the Chats command-tree grouping key).
     spawnRole: str | None = None
     # The RESOLVED dispatch level (leaf|master|portfolio) and whether the dispatcher supplied it

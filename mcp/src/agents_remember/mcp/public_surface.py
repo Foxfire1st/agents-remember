@@ -195,17 +195,33 @@ def _validated_live_names(live_tools: Sequence[AdvertisedTool]) -> tuple[str, ..
     return names
 
 
-def _validated_dispatch_schema(live_tools: Sequence[AdvertisedTool]) -> Mapping[str, Any]:
-    dispatch = next(tool for tool in live_tools if tool.name == "dispatch_agent")
-    description = dispatch.description or ""
-    missing_facts = [fact for fact in _DESCRIPTION_FACTS if fact not in description]
+def validate_dispatch_advertisement(
+    *,
+    name: str,
+    description: object,
+    input_schema: object,
+) -> str:
+    """Validate one consumer-observed dispatch advertisement and return its schema digest.
+
+    Full MCP-surface validation and real-client acceptance need the same dispatch contract, but a
+    client may expose only the one tool it selected from a deferred tool-search namespace.  Keep
+    that shared contract here rather than letting each consumer reimplement a weaker schema check.
+    """
+
+    if name != "dispatch_agent":
+        raise PublicSurfaceViolation("dispatch advertisement must name dispatch_agent")
+    rendered_description = description if isinstance(description, str) else ""
+    missing_facts = [fact for fact in _DESCRIPTION_FACTS if fact not in rendered_description]
     if missing_facts:
         raise PublicSurfaceViolation(
             "dispatch_agent description omits caller-boundary facts: " + ", ".join(missing_facts)
         )
-    schema = dict(dispatch.inputSchema)
+    if not isinstance(input_schema, Mapping):
+        raise PublicSurfaceViolation("dispatch_agent input schema must be an object")
+    schema = dict(input_schema)
     _validate_dispatch_schema(schema)
-    return schema
+    encoded = json.dumps(schema, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 def validate_public_surface(live_tools: Sequence[AdvertisedTool]) -> PublicSurfaceEvidence:
@@ -213,10 +229,13 @@ def validate_public_surface(live_tools: Sequence[AdvertisedTool]) -> PublicSurfa
 
     _validate_inventory_authorities()
     names = _validated_live_names(live_tools)
-    schema = _validated_dispatch_schema(live_tools)
-    encoded = json.dumps(schema, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    dispatch = next(tool for tool in live_tools if tool.name == "dispatch_agent")
     return PublicSurfaceEvidence(
         tool_names=names,
-        dispatch_schema_digest=f"sha256:{hashlib.sha256(encoded).hexdigest()}",
+        dispatch_schema_digest=validate_dispatch_advertisement(
+            name=dispatch.name,
+            description=dispatch.description,
+            input_schema=dispatch.inputSchema,
+        ),
         dispatch_response_model=DispatchAgentResponse.__name__,
     )

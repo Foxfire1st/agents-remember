@@ -49,6 +49,12 @@ def resolve_ambient_caller(
     session_id = process_env.get(HOSTED_SESSION_ENV, "").strip()
     if session_id:
         return None
+    role = process_env.get("AR_SPAWN_ROLE", "").strip()
+    if role:
+        raise AmbientSeatError(
+            "ambient-seat-incomplete",
+            "AR_SPAWN_ROLE is present without the plane-injected hosted-seat identity",
+        )
     return AmbientCaller()
 
 
@@ -82,7 +88,12 @@ def resolve_ambient_seat(
             "ambient-seat-invalid", "structural agent operations require a hosted harness seat"
         )
     role = process_env.get("AR_SPAWN_ROLE", "").strip()
-    if role and role != entry.binding_role:
+    if not role:
+        raise AmbientSeatError(
+            "ambient-seat-incomplete",
+            "the plane-injected hosted-seat identity has no process role",
+        )
+    if role != entry.binding_role:
         raise AmbientSeatError(
             "ambient-seat-mismatch",
             "the process role does not match the catalog's structural seat role",

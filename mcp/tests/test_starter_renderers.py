@@ -208,6 +208,10 @@ def assert_command_rendering(case: dict[str, Any], workspace: Path) -> None:
         assert data["mcp_servers"]["agents-remember"]["args"][-1] == (
             f"{workspace_posix}/.codex/mcp/agents-remember-settings.json"
         )
+        assert data["mcp_servers"]["agents-remember"]["env_vars"] == [
+            "AR_HOSTED_SESSION_ID",
+            "AR_SPAWN_ROLE",
+        ]
     elif case["name"] == "claude":
         data = json.loads((workspace / ".claude/settings.json").read_text(encoding="utf-8"))
         hook = data["hooks"]["SessionStart"][0]["hooks"][0]

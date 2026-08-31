@@ -50,6 +50,8 @@ export interface OpenSession {
   retiredEdge?: string;
   spawnedBySession?: string;
   spawnedByLifecycle?: string;
+  structuralParentTaskDocumentRef?: TaskDocumentRef;
+  structuralParentRole?: string;
   spawnedLabel?: string;
   /** The RESOLVED dispatch level (leaf|master|portfolio) + explicit-vs-default provenance. */
   spawnLevel?: string;
@@ -196,7 +198,10 @@ export function attachSeatRole(
   session: Pick<OpenSession, "kind" | "seatRole" | "spawnRole">,
 ): string | undefined {
   if (session.kind === "terminal") return "terminal";
-  return session.spawnRole ?? (session.seatRole && session.seatRole !== "chat" ? session.seatRole : undefined);
+  return (
+    session.spawnRole ??
+    (session.seatRole && session.seatRole !== "chat" ? session.seatRole : undefined)
+  );
 }
 
 function clearLifecycle(session: OpenSession): OpenSession {
@@ -215,9 +220,7 @@ function sameTaskDocument(
   left: TaskDocumentRef | null | undefined,
   right: TaskDocumentRef | null | undefined,
 ): boolean {
-  return Boolean(
-    left && right && left.repository === right.repository && left.path === right.path,
-  );
+  return Boolean(left && right && left.repository === right.repository && left.path === right.path);
 }
 
 function inferOrdinal(label: string): number | null {
@@ -295,9 +298,7 @@ function addSessionState(set: SessionStoreSet): Pick<SessionState, "add"> {
         };
         const sessions = [
           ...state.sessions.map((session) =>
-            lifecycleId && session.lifecycleId === lifecycleId
-              ? clearLifecycle(session)
-              : session,
+            lifecycleId && session.lifecycleId === lifecycleId ? clearLifecycle(session) : session,
           ),
           next,
         ];
@@ -393,12 +394,12 @@ function closeSessionState(set: SessionStoreSet): Pick<SessionState, "close"> {
   return {
     close: (id) =>
       set((state) => {
-      const sessions = state.sessions.filter((session) => session.id !== id);
-      return {
-        sessions,
-        count: trackedOrdinal(sessions),
-        activeId: state.activeId === id ? null : state.activeId,
-      };
+        const sessions = state.sessions.filter((session) => session.id !== id);
+        return {
+          sessions,
+          count: trackedOrdinal(sessions),
+          activeId: state.activeId === id ? null : state.activeId,
+        };
       }),
   };
 }
@@ -407,17 +408,18 @@ function statusSessionState(set: SessionStoreSet): Pick<SessionState, "setStatus
   return {
     setStatus: (id, status) =>
       set((state) => {
-      const sessions = state.sessions.map((session) =>
-        session.id === id ? { ...session, status } : session,
-      );
-      return {
-        sessions,
-        count: trackedOrdinal(sessions),
-        activeId:
-          state.activeId === id && status !== "running"
-            ? (state.sessions.find((session) => session.id !== id && isLiveSession(session))?.id ?? null)
-            : state.activeId,
-      };
+        const sessions = state.sessions.map((session) =>
+          session.id === id ? { ...session, status } : session,
+        );
+        return {
+          sessions,
+          count: trackedOrdinal(sessions),
+          activeId:
+            state.activeId === id && status !== "running"
+              ? (state.sessions.find((session) => session.id !== id && isLiveSession(session))
+                  ?.id ?? null)
+              : state.activeId,
+        };
       }),
   };
 }
@@ -438,7 +440,8 @@ function lifecycleSessionState(set: SessionStoreSet): Pick<SessionState, "setLif
     setLifecycle: (id, lifecycleId) =>
       set((state) => ({
         sessions: state.sessions.map((session) => {
-          if (session.id === id) return lifecycleId ? { ...session, lifecycleId } : clearLifecycle(session);
+          if (session.id === id)
+            return lifecycleId ? { ...session, lifecycleId } : clearLifecycle(session);
           if (lifecycleId && session.lifecycleId === lifecycleId) {
             return clearLifecycle(session);
           }
@@ -452,27 +455,27 @@ function taskSessionState(set: SessionStoreSet): Pick<SessionState, "setTask"> {
   return {
     setTask: (id, taskDocumentRef) =>
       set((state) => {
-      if (taskDocumentRef) {
-        // Advisory same-role guard; the server remains the real structural-seat arbiter.
-        const role = sessionSeatRole(state.sessions.find((session) => session.id === id) ?? {});
-        const owner = state.sessions.find(
-          (session) =>
-            session.id !== id &&
-            sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
-            isLiveSession(session) &&
-            sessionSeatRole(session) === role,
-        );
-        if (owner) return state;
-      }
-      return {
-        sessions: state.sessions.map((session) =>
-          session.id === id
-            ? taskDocumentRef
-              ? { ...session, taskDocumentRef }
-              : clearTask(session)
-            : session,
-        ),
-      };
+        if (taskDocumentRef) {
+          // Advisory same-role guard; the server remains the real structural-seat arbiter.
+          const role = sessionSeatRole(state.sessions.find((session) => session.id === id) ?? {});
+          const owner = state.sessions.find(
+            (session) =>
+              session.id !== id &&
+              sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
+              isLiveSession(session) &&
+              sessionSeatRole(session) === role,
+          );
+          if (owner) return state;
+        }
+        return {
+          sessions: state.sessions.map((session) =>
+            session.id === id
+              ? taskDocumentRef
+                ? { ...session, taskDocumentRef }
+                : clearTask(session)
+              : session,
+          ),
+        };
       }),
   };
 }
@@ -481,26 +484,26 @@ function assignmentSessionState(set: SessionStoreSet): Pick<SessionState, "apply
   return {
     applyTaskAssignment: (id, taskDocumentRef, seatRole) =>
       set((state) => {
-      const target = state.sessions.find((session) => session.id === id);
-      if (!target) return state;
-      return {
-        sessions: state.sessions.map((session) => {
-          if (session.id === id) {
-            return taskDocumentRef
-              ? { ...session, taskDocumentRef, seatRole }
-              : clearTask(session);
-          }
-          if (
-            taskDocumentRef &&
-            sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
-            isLiveSession(session) &&
-            sessionSeatRole(session) === seatRole
-          ) {
-            return clearTask(session);
-          }
-          return session;
-        }),
-      };
+        const target = state.sessions.find((session) => session.id === id);
+        if (!target) return state;
+        return {
+          sessions: state.sessions.map((session) => {
+            if (session.id === id) {
+              return taskDocumentRef
+                ? { ...session, taskDocumentRef, seatRole }
+                : clearTask(session);
+            }
+            if (
+              taskDocumentRef &&
+              sameTaskDocument(session.taskDocumentRef, taskDocumentRef) &&
+              isLiveSession(session) &&
+              sessionSeatRole(session) === seatRole
+            ) {
+              return clearTask(session);
+            }
+            return session;
+          }),
+        };
       }),
   };
 }
@@ -594,6 +597,8 @@ const OPTIONAL_SESSION_FIELDS: {
   { from: "retiredEdge", to: "retiredEdge" },
   { from: "spawnedBySession", to: "spawnedBySession" },
   { from: "spawnedByLifecycle", to: "spawnedByLifecycle" },
+  { from: "structuralParentTaskDocumentRef", to: "structuralParentTaskDocumentRef" },
+  { from: "structuralParentRole", to: "structuralParentRole" },
   { from: "spawnedLabel", to: "spawnedLabel" },
   { from: "spawnLevel", to: "spawnLevel" },
   { from: "spawnLevelSource", to: "spawnLevelSource" },
@@ -735,7 +740,10 @@ export type DeliveryStatus = "delivered" | "unconfirmed";
  * {@link pasteAndConfirm} retries through the harness boot window (Claude Code discards stdin while
  * booting) and only reports "delivered" once the composer echoed the draft.
  */
-export async function pasteDraftToSession(id: string, packageText: string): Promise<DeliveryStatus> {
+export async function pasteDraftToSession(
+  id: string,
+  packageText: string,
+): Promise<DeliveryStatus> {
   const conn = await waitForConnection(id);
   if (!conn) return "unconfirmed";
   return (await pasteAndConfirm(conn, packageText)) ? "delivered" : "unconfirmed";
@@ -760,7 +768,8 @@ export async function deliverToSession(id: string, packageText: string): Promise
       });
       if (!response.ok) return "unconfirmed";
       const body = (await response.json()) as { delivered?: boolean; acceptance?: string };
-      return body.delivered === true && (body.acceptance === "immediate" || body.acceptance === "queued")
+      return body.delivered === true &&
+        (body.acceptance === "immediate" || body.acceptance === "queued")
         ? "delivered"
         : "unconfirmed";
     } catch {

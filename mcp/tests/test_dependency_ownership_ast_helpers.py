@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from _evidence_catalog_fixture import write_synthetic_evidence_catalog
 from agents_remember_test_support.code_quality.dependency_ownership import (
+    CODEX_CONFIG_PATH,
     DependencyOwnershipGraph,
 )
 from agents_remember_test_support.code_quality.scope import ScopeError
@@ -174,6 +175,26 @@ def test_exact_dotted_module_literal_is_an_observable_test_consumer(tmp_path: Pa
     assert any(
         reason.kind.value == "literal-consumer"
         for reason in impact.reasons_for(Path("tests/test_wiring.py"))
+    )
+
+
+def test_codex_starter_config_has_exact_observed_consumers() -> None:
+    repository_root = Path(__file__).parents[2]
+
+    impact = DependencyOwnershipGraph(repository_root).resolve([CODEX_CONFIG_PATH])
+
+    assert impact.complete
+    assert impact.tests == (
+        Path("mcp/tests/test_public_surface_conformance.py"),
+        Path("mcp/tests/test_starter_renderers.py"),
+    )
+    assert all(
+        any(
+            reason.kind.value == "declared-consumer"
+            and reason.detail == "verified-repository-input"
+            for reason in impact.reasons_for(test)
+        )
+        for test in impact.tests
     )
 
 

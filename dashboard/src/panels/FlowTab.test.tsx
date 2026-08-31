@@ -57,6 +57,7 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
   it("encodes the router invariants: three conditions, the ladder, no chat builds", () => {
     const { getByText } = render(<FlowTab initialModel="router" />);
     expect(getByText(/the three conditions — in order, no fourth entry/)).not.toBeNull();
+    expect(getByText(/unresolvable role or incomplete hosted identity → FAIL CLOSED/)).not.toBeNull();
     expect(
       getByText(/task doc \(approved\) → branch \(intent\) → worktree \(only where something is built\)/),
     ).not.toBeNull();
@@ -171,6 +172,9 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
       getByText(/verdicts are evidence, not decisions — requireReviewerVerdictAtSeams binds delegated seam decisions/),
     ).not.toBeNull();
     expect(getByText(/the BACKEND ORCHESTRATOR at master-exit \(master-handover-approval\)/)).not.toBeNull();
+    expect(getByText(/leaf route\/full-loop → leaf document · parent = manager/)).not.toBeNull();
+    expect(getByText(/portfolio plan → sprint document · parent = architect/)).not.toBeNull();
+    expect(getByText(/super-exit → sprint document · parent = orchestrator/)).not.toBeNull();
     expect(getByText(/⟁ block\? → decomposable fix leaves/)).not.toBeNull();
   });
 });

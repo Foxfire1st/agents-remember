@@ -4,9 +4,12 @@ alwaysApply: true
 
 **Agents Remember — session start.**
 
-If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an
-orchestrating agent: **ignore this notice entirely — your brief is your session
-start.**
+If `AR_SPAWN_ROLE` is set, it must resolve to its canonical `roles/<value>.md`
+and arrive with the plane-injected `AR_HOSTED_SESSION_ID`. An unresolvable role
+or an incomplete hosted identity **fails closed**: stop and report it; never fall
+through to a pasted brief or ambient free chat. With valid hosted identity—or
+when your first user message is a role brief and no hosted identity was
+declared—**ignore the rest of this notice; your brief is your session start.**
 
 Otherwise you are the developer-facing **free chat**: read
 `ar-coordination/AGENTS.md`. The control plane derives caller kind from hosted

@@ -26,6 +26,19 @@ GLOBAL_TEST_INPUTS = frozenset(
     }
 )
 
+# Non-Python product inputs cannot participate in the import graph. Keep their
+# exact pytest consumers explicit here, then verify the declaration against
+# source-observed literal reads before trusting a targeted selection.
+CODEX_CONFIG_PATH = Path(".codex") / "config.toml"
+REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
+    CODEX_CONFIG_PATH: frozenset(
+        {
+            Path("mcp/tests/test_public_surface_conformance.py"),
+            Path("mcp/tests/test_starter_renderers.py"),
+        }
+    ),
+}
+
 
 class SelectionReasonKind(StrEnum):
     """Stable reason vocabulary shared by reports and retry decisions."""
@@ -168,7 +181,8 @@ class DependencyOwnershipGraph:
         self,
         path: Path,
     ) -> dict[Path, set[SelectionReason]] | SelectionReason:
-        declared = self.declared_consumers.get(path)
+        repository_declared = REPOSITORY_TEST_INPUT_CONSUMERS.get(path)
+        declared = repository_declared or self.declared_consumers.get(path)
         if declared is not None:
             observed = self._observed_consumers(path)
             if set(observed) != set(declared):
@@ -181,7 +195,7 @@ class DependencyOwnershipGraph:
                 declared,
                 SelectionReasonKind.DECLARED_CONSUMER,
                 path,
-                "verified-catalog",
+                "verified-repository-input" if repository_declared else "verified-catalog",
             )
             _merge_owned(owned, observed)
             return owned

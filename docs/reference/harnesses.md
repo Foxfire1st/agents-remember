@@ -209,8 +209,9 @@ makes that expressible (ruling 2026-07-07T08:15):
 ```
 
 The structural dispatcher derives dispatch level (`leaf` | `master` | `portfolio`) from the
-child role and canonical document altitude: leaf worker/reviewer/curator seats use `leaf`, a
-manager uses `master`, and sprint roles use `portfolio`. The level override
+canonical target-document altitude: worker/curator seats bind leaves, a manager binds a master,
+sprint roles bind the sprint, and a reviewer follows the exact leaf/master/sprint review seat.
+The level override
 deep-merges over the flat default at field granularity (unset fields
 inherit; lists replace). Full spend resolution chain:
 

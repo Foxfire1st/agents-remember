@@ -52,6 +52,7 @@ async def test_early_codex_completion_releases_live_correlation_and_late_duplica
         assert first_receipt.acceptance == "immediate"
         first_event = await next_event_of_kind(events, "completed")
         assert first_event.operation == first_request.operation
+        assert first_event.transcript[0].request_id == "request-early"
         assert adapter._turn_operations == {}
         assert adapter._unbound_completions == {}
         assert adapter._completed_turns["turn-early"] == first_request.operation

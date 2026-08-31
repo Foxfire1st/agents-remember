@@ -48,6 +48,13 @@ expand horizontally into new chats; sub-agents drill vertically inside this revi
 three review lenses. A reviewer never absorbs architect, orchestrator, strategist, manager, or
 worker work.
 
+The review seam fixes both this seat's task altitude and its plane-owned parent address: a leaf
+reviewer binds the leaf and reports to its manager; a master-exit reviewer binds the master and
+reports to that manager; a portfolio plan reviewer binds the sprint and reports to the architect;
+a super-exit reviewer binds the sprint and reports to the orchestrator. The control plane stamps
+that document+role parent address at dispatch, so replacement re-resolves its current occupant
+without treating the dispatcher's runtime id as authority.
+
 ## Lens
 
 - **Opening move:** scope the review — for organizational masters, the
@@ -310,7 +317,7 @@ integrated on super.
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| dispatch | target-only role; ambient takeover target | This seat has no `dispatch_agent` caller authority; only the owning manager is the ordinary plane-hosted caller, while an identity-free developer launcher may target the leaf reviewer only for an explicit task-seat takeover |
+| dispatch | target-only role; ambient takeover target | This seat has no `dispatch_agent` caller authority. The owning manager dispatches leaf and master-exit reviewers, the architect dispatches the sprint plan reviewer, and the orchestrator dispatches the sprint super-exit reviewer. An identity-free developer launcher may target an altitude-valid reviewer only for an explicit task-seat takeover; leaf/master parentage remains structurally unambiguous, while an ambient sprint reviewer has no basis to choose architect versus orchestrator and parent operations fail closed. |
 | tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates · inbox |
 
 Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and

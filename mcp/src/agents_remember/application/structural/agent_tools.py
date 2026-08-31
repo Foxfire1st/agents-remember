@@ -10,12 +10,16 @@ from typing import Any, cast
 from agents_remember.application.structural.dispatch_transaction import (
     DispatchEvidenceRuntime,
     DispatchTransaction,
-    execute_dispatch_transaction,
+    execute_serialized_dispatch,
     reconcile_dispatch_evidence,
 )
 from agents_remember.application.structural.outcomes import StructuralOutcome
 from agents_remember.application.structural.outcomes import (
     structural_payload as _target_payload,
+)
+from agents_remember.application.structural.reviewer_parent import (
+    AmbientReviewerParentError,
+    resolve_dispatch_provenance,
 )
 from agents_remember.application.terminal_tools import (
     RetiredSpawnInputs,
@@ -160,12 +164,9 @@ def _caller_error(
     )
 
 
-def _level_for_role(role: str) -> str:
-    if role in {"worker", "reviewer", "curator"}:
-        return "leaf"
-    if role == "manager":
-        return "master"
-    return "portfolio"
+def _level_for_document(topology: TaskDocumentTopology, document: TaskDocumentRef) -> str:
+    altitude = topology.altitude(document)
+    return "portfolio" if altitude == "sprint" else altitude
 
 
 def _post_structural_message(
@@ -300,7 +301,7 @@ def _spawn_dispatch_child(
         config,
         seat=SpawnSeat(
             task_document_ref=document,
-            level=_level_for_role(request.role),
+            level=_level_for_document(TaskDocumentTopology(config.coordination_root), document),
             label=request.label,
             env={"AR_SPAWN_ROLE": request.role},
         ),
@@ -415,7 +416,11 @@ def _resolve_dispatch_caller(
     """
     catalog, topology, resolver = structural
     document = resolved_document.ref
-    if resolve_ambient_caller(environ=runtime.environ) is not None:
+    try:
+        ambient_caller = resolve_ambient_caller(environ=runtime.environ)
+    except AmbientSeatError as exc:
+        return None, _caller_error("dispatch_agent", request.task_document_ref, request.role, exc)
+    if ambient_caller is not None:
         try:
             topology.validate_role(document, request.role)
         except TaskDocumentRefError as exc:
@@ -470,15 +475,25 @@ def dispatch_agent_tool(
     if refusal is not None:
         return refusal
 
-    spawned_by = (
-        SpawnedBy(
-            session_id=caller.id,
-            lifecycle_id=caller.lifecycle_id,
-            caller_kind="plane",
+    try:
+        provenance = resolve_dispatch_provenance(
+            topology,
+            document,
+            request.role,
+            caller,
         )
-        if caller is not None
-        else SpawnedBy(caller_kind="ambient")
-    )
+    except AmbientReviewerParentError as exc:
+        return _target_payload(
+            StructuralOutcome(
+                "dispatch_agent",
+                False,
+                exc.status,
+                document,
+                request.role,
+                str(exc),
+            )
+        )
+
     message_context = StructuralMessageContext(catalog, caller, runtime)
     transaction = DispatchTransaction(
         document=document,
@@ -489,14 +504,14 @@ def dispatch_agent_tool(
             config,
             request,
             runtime,
-            spawned_by=spawned_by,
+            spawned_by=provenance.spawned_by,
             resolved_document=resolved_document,
         ),
         retry_spawn=lambda: _spawn_dispatch_child(
             config,
             request,
             runtime,
-            spawned_by=spawned_by,
+            spawned_by=provenance.spawned_by,
             document=document,
         ),
         brief_spawned=lambda target_session_id: _brief_spawned_child(
@@ -514,25 +529,9 @@ def dispatch_agent_tool(
                 host=runtime.host,
             ).retired
         ),
+        expected_structural_parent=provenance.reviewer_parent,
     )
-    try:
-        with exclusive_structural_dispatch_lock(
-            config.coordination_root,
-            document,
-            request.role,
-        ):
-            return execute_dispatch_transaction(transaction)
-    except StructuralDispatchLockError as exc:
-        return _target_payload(
-            StructuralOutcome(
-                "dispatch_agent",
-                False,
-                "dispatch-serialization-refused",
-                document,
-                request.role,
-                str(exc),
-            )
-        )
+    return execute_serialized_dispatch(config.coordination_root, transaction)
 
 
 def _brief_spawned_child(

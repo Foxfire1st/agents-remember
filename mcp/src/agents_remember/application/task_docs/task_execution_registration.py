@@ -18,6 +18,10 @@ from agents_remember.tasks import (
     TaskExecutionRegistration,
     read_task_doc_with_source,
 )
+from agents_remember.tasks.document_refs import (
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
 
 from .task_doc_publication import (
     TaskDocPublicationConflict,
@@ -29,6 +33,7 @@ TaskExecutionRegistrationStatus = Literal[
     "registered",
     "already-registered",
     "task-retired",
+    "reviewer-non-leaf",
     "not-leaf",
     "blocked",
 ]
@@ -47,6 +52,7 @@ class TaskExecutionRegistrationResult:
             "registered",
             "already-registered",
             "task-retired",
+            "reviewer-non-leaf",
         }
 
 
@@ -77,7 +83,11 @@ def register_task_execution_evidence(
     """Register one bounded first-observation marker before its source row is reclaimed."""
 
     try:
-        root, path = _registration_address(coordination_root, task_document_ref)
+        root, path = _registration_address(
+            coordination_root,
+            task_document_ref,
+            registration_role=registration.role,
+        )
         loaded = _load_registration_source(root, path)
     except _RegistrationRefusal as refusal:
         return TaskExecutionRegistrationResult(
@@ -86,15 +96,20 @@ def register_task_execution_evidence(
             refusal.detail,
         )
     if loaded is None:
-        return _classify_missing_task_source(
+        return _classify_missing_registration_source(
             root,
             path,
             task_document_ref,
         )
+    address_classification = _classify_loaded_registration_address(
+        path,
+        loaded,
+        task_document_ref,
+    )
+    if address_classification is not None:
+        return address_classification
     document = loaded.document
     source = loaded.source
-    if document.kind != "subTask":
-        return TaskExecutionRegistrationResult("not-leaf", task_document_ref)
     key = (registration.sourceKind, registration.role)
     if any((item.sourceKind, item.role) == key for item in document.executionRegistrations):
         return TaskExecutionRegistrationResult("already-registered", task_document_ref)
@@ -124,9 +139,68 @@ def register_task_execution_evidence(
     return TaskExecutionRegistrationResult("registered", task_document_ref)
 
 
+def _classify_missing_registration_source(
+    root: Path,
+    path: Path,
+    task_document_ref: TaskDocumentRef,
+) -> TaskExecutionRegistrationResult:
+    if path.name == "task.json":
+        return TaskExecutionRegistrationResult(
+            "blocked",
+            task_document_ref,
+            "reviewer non-leaf task source is missing",
+        )
+    return _classify_missing_task_source(root, path, task_document_ref)
+
+
+def _classify_loaded_registration_address(
+    path: Path,
+    loaded: _RegistrationSource,
+    task_document_ref: TaskDocumentRef,
+) -> TaskExecutionRegistrationResult | None:
+    if path.name == "task.json":
+        return _classify_non_leaf_reviewer(loaded, task_document_ref)
+    if loaded.document.kind != "subTask":
+        return TaskExecutionRegistrationResult("not-leaf", task_document_ref)
+    return None
+
+
+def _classify_non_leaf_reviewer(
+    loaded: _RegistrationSource,
+    task_document_ref: TaskDocumentRef,
+) -> TaskExecutionRegistrationResult:
+    """Admit exact higher-review evidence to ordinary retention without leaf mutation."""
+
+    topology = TaskDocumentTopology(
+        loaded.root,
+        accepted_sources=(loaded.source,),
+    )
+    try:
+        altitude = topology.validate_role(task_document_ref, "reviewer")
+    except TaskDocumentRefError as exc:
+        return TaskExecutionRegistrationResult(
+            "blocked",
+            task_document_ref,
+            f"reviewer task topology is invalid: {exc.status}",
+        )
+    if altitude not in {"master", "sprint"}:
+        return TaskExecutionRegistrationResult(
+            "blocked",
+            task_document_ref,
+            f"reviewer non-leaf classification resolved unexpected altitude {altitude!r}",
+        )
+    return TaskExecutionRegistrationResult(
+        "reviewer-non-leaf",
+        task_document_ref,
+        f"topology-valid {altitude} reviewer evidence needs no leaf execution marker",
+    )
+
+
 def _registration_address(
     coordination_root: Path,
     task_document_ref: TaskDocumentRef,
+    *,
+    registration_role: ExecutionRegistrationRole,
 ) -> tuple[Path, Path]:
     root = coordination_root.resolve(strict=False)
     repository_root = (root / "tasks" / task_document_ref.repository).resolve(strict=False)
@@ -134,7 +208,7 @@ def _registration_address(
     if (
         not path.is_relative_to(repository_root)
         or path.suffix != ".json"
-        or path.name == "task.json"
+        or (path.name == "task.json" and registration_role != "reviewer")
     ):
         raise _RegistrationRefusal(
             "not-leaf",

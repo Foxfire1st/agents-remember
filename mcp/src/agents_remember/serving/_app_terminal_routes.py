@@ -636,6 +636,8 @@ def _seat_ref(entry: TerminalCatalogEntry) -> SeatRef:
         session_id=entry.id,
         task_document_ref=entry.binding_task_document_ref,
         seat_role=entry.binding_role,
+        structural_parent_task_document_ref=entry.structural_parent_task_document_ref,
+        structural_parent_role=entry.structural_parent_role,
     )
 
 

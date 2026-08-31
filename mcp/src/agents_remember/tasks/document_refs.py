@@ -15,6 +15,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document import (
     LEAF_ROLES,
     MASTER_ROLES,
+    REVIEWER_ALTITUDES,
     SPRINT_ROLES,
     LeafPlacement,
     SprintExecutionGraph,
@@ -247,23 +248,26 @@ class TaskDocumentTopology:
 
     def validate_role(self, ref: TaskDocumentRef, role: str) -> TaskAltitude:
         expected = (
-            "sprint"
+            REVIEWER_ALTITUDES
+            if role == "reviewer"
+            else frozenset({"sprint"})
             if role in SPRINT_ROLES
-            else "master"
+            else frozenset({"master"})
             if role in MASTER_ROLES
-            else "leaf"
+            else frozenset({"leaf"})
             if role in LEAF_ROLES
-            else None
+            else frozenset()
         )
-        if expected is None:
+        if not expected:
             raise TaskDocumentRefError(
                 "seat-role-unsupported", f"role {role!r} has no structural task altitude"
             )
         actual = self.altitude(ref)
-        if actual != expected:
+        if actual not in expected:
+            expected_label = "/".join(sorted(expected))
             raise TaskDocumentRefError(
                 "seat-role-altitude-mismatch",
-                f"role {role!r} requires a {expected} document, got {actual}: {ref.key}",
+                f"role {role!r} requires a {expected_label} document, got {actual}: {ref.key}",
             )
         return actual
 

@@ -215,6 +215,7 @@ class TerminalWebSocketTests2(TerminalWebSocketTests):
                 task_document_ref=None,
             )
         )
+        self.host.probe_names.add("ar-term")
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
             client.post(
                 "/api/terminal/chat-1",

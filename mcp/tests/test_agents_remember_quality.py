@@ -3,11 +3,14 @@ from __future__ import annotations
 import ast
 import asyncio
 import importlib
+import importlib.util
 import inspect
 import json
+import os
 import sys
+import tomllib
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -23,7 +26,22 @@ DAGGER_MANIFEST = REPOSITORY_ROOT / "dagger.json"
 DAGGER_SOURCE_ROOT = REPOSITORY_ROOT / ".dagger/src"
 DAGGER_MODULE = DAGGER_SOURCE_ROOT / "agents_remember_quality/main.py"
 DAGGER_MODULE_ID = "agents_remember_quality.main"
+E2E_HARNESS_ROOT = REPOSITORY_ROOT / "scripts/e2e_harness"
 VALID_DAGGER_NONCE = "0123456789abcdef0123456789abcdef"
+E2E_HARNESS_PYTHON = (
+    "scripts/e2e_harness/codex_driver.py",
+    "scripts/e2e_harness/dispatch_sentinels.py",
+    "scripts/e2e_harness/fixture.py",
+    "scripts/e2e_harness/reporting.py",
+    "scripts/e2e_harness/responses_server.py",
+    "scripts/e2e_harness/responses_sse.py",
+    "scripts/e2e_harness/run.py",
+    "scripts/e2e_harness/scenario.py",
+    "scripts/e2e_harness/scenario_control.py",
+    "scripts/e2e_harness/scenario_evidence.py",
+    "scripts/e2e_harness/scenario_runtime.py",
+    "scripts/e2e_harness/selection.py",
+)
 
 
 def load_dagger_module() -> ModuleType:
@@ -33,6 +51,18 @@ def load_dagger_module() -> ModuleType:
     sys.modules.pop(DAGGER_MODULE_ID, None)
     sys.modules.pop("agents_remember_quality", None)
     return importlib.import_module(DAGGER_MODULE_ID)
+
+
+def load_e2e_module(filename: str, module_id: str) -> ModuleType:
+    harness_root = str(E2E_HARNESS_ROOT)
+    if harness_root not in sys.path:
+        sys.path.insert(0, harness_root)
+    spec = importlib.util.spec_from_file_location(module_id, E2E_HARNESS_ROOT / filename)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_id] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class FakeContainer:
@@ -127,6 +157,101 @@ def test_agents_remember_quality_module_is_pinned_and_parseable() -> None:
     assert DAGGER_MODULE_ID.endswith(".main")
     assert DAGGER_MODULE.parent.parent == DAGGER_SOURCE_ROOT
     assert manifest["disableDefaultFunctionCaching"] is True
+
+
+def test_ambient_role_chat_harness_is_wired_and_parseable() -> None:
+    dagger_source = DAGGER_MODULE.read_text(encoding="utf-8")
+    assert "scripts/e2e_harness/run.py" in dagger_source
+
+    for relative in E2E_HARNESS_PYTHON:
+        path = REPOSITORY_ROOT / relative
+        compile(path.read_text(encoding="utf-8"), path.as_posix(), "exec")
+
+
+def test_ambient_role_chat_runner_refuses_before_declaring_a_host_test_process() -> None:
+    runner = load_e2e_module("run.py", "test_ambient_role_chat_e2e_run")
+
+    with (
+        patch.object(
+            runner,
+            "require_dagger_admission",
+            side_effect=DaggerAdmissionError("Dagger admission missing"),
+        ),
+        patch.object(runner, "declare_test_process") as declare,
+        pytest.raises(DaggerAdmissionError, match="admission missing"),
+    ):
+        runner._admit_execution()
+
+    declare.assert_not_called()
+
+
+def test_ambient_role_chat_tmux_commands_use_only_the_fixture_socket_root(
+    tmp_path: Path,
+) -> None:
+    runtime = load_e2e_module("scenario_runtime.py", "test_ambient_role_chat_scenario_runtime")
+    fixture = SimpleNamespace(root=tmp_path, codex_home=tmp_path / "codex-home")
+
+    with (
+        patch.dict(os.environ, {"TMUX": "inherited-parent-server"}, clear=False),
+        patch.object(
+            runtime.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0),
+        ) as run,
+    ):
+        runtime.prepare_tmux_server(fixture)
+        expected = (tmp_path / "tmux-runtime").as_posix()
+        assert os.environ["TMUX_TMPDIR"] == expected
+        assert "TMUX" not in os.environ
+        assert len(run.call_args_list) == 4
+        for invocation in run.call_args_list:
+            command_env = invocation.kwargs["env"]
+            assert command_env["TMUX_TMPDIR"] == expected
+            assert "TMUX" not in command_env
+        assert run.call_args_list[2].args[0] == [
+            "tmux",
+            "set-option",
+            "-s",
+            "exit-empty",
+            "off",
+        ]
+
+
+def test_ambient_role_chat_candidate_mcp_inherits_fixture_tmux_namespace(
+    tmp_path: Path,
+) -> None:
+    fixture = load_e2e_module("fixture.py", "test_ambient_role_chat_fixture")
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+
+    fixture._write_codex_config(
+        codex_home,
+        authority_path=tmp_path / "mcp-authority.json",
+        responses_base_url="http://127.0.0.1:1/v1",
+    )
+
+    config = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+    candidate = config["mcp_servers"]["agents_remember_candidate"]
+    assert candidate["env_vars"] == [
+        "AR_HOSTED_SESSION_ID",
+        "AR_SPAWN_ROLE",
+        "TMUX_TMPDIR",
+    ]
+
+
+@pytest.mark.parametrize(("ok", "expected"), [(True, True), (False, False)])
+def test_ambient_role_chat_discovery_decodes_current_codex_tool_result_envelope(
+    ok: bool,
+    expected: bool,
+) -> None:
+    evidence = load_e2e_module(
+        "scenario_evidence.py",
+        "test_ambient_role_chat_scenario_evidence",
+    )
+    result = f'Wall time: 4.1996 seconds\nOutput:\n{{"ok":{str(ok).lower()}}}'
+
+    assert evidence._tool_result_ok(result) is expected
+    assert evidence._tool_result_ok('prefix\nOutput:\n{"ok":true}') is False
 
 
 def test_candidate_setup_precedes_every_attempt_specific_cache_input() -> None:
@@ -319,7 +444,7 @@ def test_dagger_route_measurement_refuses_single_observation_distributions() -> 
 
 def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> None:
     module = load_dagger_module()
-    fake_dag = FakeDag([0, 0, 0])
+    fake_dag = FakeDag([0, 0, 0, 0])
 
     with (
         patch.object(module, "dag", fake_dag),
@@ -372,8 +497,58 @@ def test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph() -> No
     assert payload["completedSteps"] == [
         "environment",
         "codex-read-only-probe",
+        "ambient-role-chat-e2e",
         "quality-wrapper",
     ]
+    assert payload["attemptedSteps"] == payload["completedSteps"]
+    assert payload["skippedSteps"] == []
+    assert payload["failedStep"] is None
+    assert payload["promptSubmitted"] is True
+    assert payload["codexProtocol"] == module.AMBIENT_CODEX_PROTOCOL
+    assert payload["ambientRoleChatEvidence"] == {
+        "status": "passed",
+        "summary": "ambient-role-chat-e2e/summary.json",
+        "runs": [
+            "ambient-role-chat-e2e/run-1.json",
+            "ambient-role-chat-e2e/run-2.json",
+        ],
+    }
+
+
+def test_dagger_quality_treats_unselected_ambient_e2e_as_an_explicit_skip() -> None:
+    module = load_dagger_module()
+    fake_dag = FakeDag([0, 0, module.E2E_NOT_SELECTED_EXIT_CODE, 0])
+
+    with patch.object(module, "dag", fake_dag):
+        result = asyncio.run(
+            module.AgentsRememberQuality().quality(
+                FakeSource(), object(), mode="targeted", diff_base="base-commit"
+            )
+        )
+
+    payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
+    assert result.exit_code == 0
+    assert payload["status"] == "passed"
+    assert payload["attemptedSteps"] == [
+        "environment",
+        "codex-read-only-probe",
+        "ambient-role-chat-e2e",
+        "quality-wrapper",
+    ]
+    assert payload["completedSteps"] == [
+        "environment",
+        "codex-read-only-probe",
+        "quality-wrapper",
+    ]
+    assert payload["skippedSteps"] == ["ambient-role-chat-e2e"]
+    assert payload["failedStep"] is None
+    assert payload["stepExitCodes"]["ambient-role-chat-e2e"] == module.E2E_NOT_SELECTED_EXIT_CODE
+    assert payload["promptSubmitted"] is False
+    assert payload["codexProtocol"] == module.BASELINE_CODEX_PROTOCOL
+    assert payload["ambientRoleChatEvidence"] == {
+        "status": "skipped",
+        "summary": "ambient-role-chat-e2e/summary.json",
+    }
 
 
 def test_dagger_cadence_evidence_is_a_separate_non_accepting_graph() -> None:
@@ -424,7 +599,7 @@ def test_dagger_cadence_evidence_refuses_unknown_trigger() -> None:
 
 def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() -> None:
     module = load_dagger_module()
-    fake_dag = FakeDag([0] * 10)
+    fake_dag = FakeDag([0] * 11)
 
     with patch.object(module, "dag", fake_dag):
         asyncio.run(
@@ -452,7 +627,7 @@ def test_dagger_quality_full_uses_explicit_diff_base_without_targeted_flags() ->
 
 def test_dagger_quality_stops_at_the_first_failed_dashboard_rail() -> None:
     module = load_dagger_module()
-    fake_dag = FakeDag([0, 0, 0, 0, 7])
+    fake_dag = FakeDag([0, 0, 0, 0, 0, 7])
 
     with patch.object(module, "dag", fake_dag):
         result = asyncio.run(
@@ -463,19 +638,50 @@ def test_dagger_quality_stops_at_the_first_failed_dashboard_rail() -> None:
 
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
     assert result.exit_code == 7
-    assert payload["completedSteps"][-2:] == ["dashboard-install", "dashboard-lint"]
+    assert payload["completedSteps"][-2:] == ["quality-wrapper", "dashboard-install"]
+    assert payload["attemptedSteps"][-2:] == ["dashboard-install", "dashboard-lint"]
+    assert payload["failedStep"] == "dashboard-lint"
     assert ["npm", "run", "typecheck"] not in fake_dag.container_value.commands
 
 
 @pytest.mark.parametrize(
-    ("exit_codes", "completed"),
+    ("exit_codes", "attempted", "completed", "failed", "prompt_submitted"),
     [
-        ([9], ["environment"]),
-        ([0, 7], ["environment", "codex-read-only-probe"]),
+        ([9], ["environment"], [], "environment", False),
+        (
+            [0, 7],
+            ["environment", "codex-read-only-probe"],
+            ["environment"],
+            "codex-read-only-probe",
+            False,
+        ),
+        (
+            [0, 0, 7],
+            ["environment", "codex-read-only-probe", "ambient-role-chat-e2e"],
+            ["environment", "codex-read-only-probe"],
+            "ambient-role-chat-e2e",
+            None,
+        ),
+        (
+            [0, 0, 0, 7],
+            [
+                "environment",
+                "codex-read-only-probe",
+                "ambient-role-chat-e2e",
+                "quality-wrapper",
+            ],
+            ["environment", "codex-read-only-probe", "ambient-role-chat-e2e"],
+            "quality-wrapper",
+            True,
+        ),
     ],
 )
 def test_dagger_quality_exports_failure_at_the_exact_completed_boundary(
-    exit_codes: list[int], completed: list[str]
+    exit_codes: list[int],
+    attempted: list[str],
+    completed: list[str],
+    failed: str,
+    prompt_submitted: bool | None,
 ) -> None:
     module = load_dagger_module()
     fake_dag = FakeDag(exit_codes)
@@ -488,4 +694,9 @@ def test_dagger_quality_exports_failure_at_the_exact_completed_boundary(
     payload = json.loads(fake_dag.container_value.files["/reports/clean-quality-results.json"])
     assert result.exit_code != 0
     assert payload["status"] == "failed"
+    assert payload["attemptedSteps"] == attempted
     assert payload["completedSteps"] == completed
+    assert payload["failedStep"] == failed
+    assert payload["promptSubmitted"] is prompt_submitted
+    assert "causalFailureReport" not in payload
+    assert "causalFailureSummary" not in payload

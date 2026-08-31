@@ -25,6 +25,7 @@ from agents_remember.models.conversations.control_wire import (
     InteractionQuestionOption,
     PendingInteraction,
 )
+from agents_remember.models.operator_inbox import AdapterDeliveryState
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
@@ -412,7 +413,11 @@ def test_disappeared_interaction_expires_the_current_open_gate(tmp_path: Path) -
     assert store.current("L1")[second_gate.id].state == "expired"
 
 
-def test_transcript_completion_updates_but_never_consumes_inbox(tmp_path: Path) -> None:
+@pytest.mark.parametrize("adapter_state", ["accepted", "queued"])
+def test_transcript_completion_updates_but_never_consumes_inbox(
+    tmp_path: Path,
+    adapter_state: AdapterDeliveryState,
+) -> None:
     entry = _entry(tmp_path)
     inbox = OperatorInboxStore(tmp_path)
     row = create_operator_inbox_entry(
@@ -425,7 +430,7 @@ def test_transcript_completion_updates_but_never_consumes_inbox(tmp_path: Path) 
         update={
             "deliveryState": "delivered",
             "deliveredToSession": "worker-1",
-            "adapterDeliveryState": "accepted",
+            "adapterDeliveryState": adapter_state,
             "adapterRequestId": "inbox-1",
         }
     )

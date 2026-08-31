@@ -77,7 +77,9 @@ recordings, recording generators, migration proofs, and shared support. Every en
 - cadence, source version or generator, and the task/reason that introduced it;
 - lifetime plus either a permanence rationale or an expiry date;
 - an executable replacement contract; and
-- every current consumer.
+- every current consumer. Test artifacts use `exact` or `all-tests`; permanent executable
+  support outside the test tree uses `exact-source`, which is checked against the same
+  source-derived import and literal-reference graph.
 
 The catalog is validated in local static hooks and in both Dagger quality modes. It fails on an
 uncataloged governed artifact, missing consumer, unknown field, contradictory authority/lifetime,
@@ -85,9 +87,10 @@ expired migration, nonexistent replacement node/contract, or missing rationale. 
 references are parsed and must name exactly one real top-level function or class method; prose that
 merely resembles a selector is not sufficient.
 
-The current inventory contains 34 artifacts: 20 shared-support files, 11 recordings, two
-fixtures, and one recording generator. Twenty are permanent, 13 are versioned, and one is
-demo-only. There is no surviving task/date-shaped migration proof in the governed population.
+The current inventory contains 47 artifacts: 32 shared-support files, 11 recordings, two
+fixtures, and two recording generators. Thirty-three are permanent, 13 are versioned, and one
+is demo-only. The permanent population includes the source-derived ambient role-chat E2E harness;
+there is no surviving task/date-shaped migration proof in the governed population.
 
 ## Fixture authority
 

@@ -3,8 +3,8 @@
 ## Start Here — Route By Role
 
 Sessions route by role through the `l-01-agent-lifecycles` skill. A **spawned
-agent** (the `AR_SPAWN_ROLE` env var is set, or the first message is a role
-brief) follows its brief — the brief is its session start, and the rest of this
+agent** (a valid `AR_SPAWN_ROLE` plus its plane-injected hosted identity, or the
+first message is a role brief) follows its brief — the brief is its session start, and the rest of this
 section is not addressed to it. A **developer-facing session** is the **free
 chat** — a launcher, not a role seat (ruled 2026-07-09): it answers
 research-only questions inline, and for ordinary role-shaped work it resolves the
@@ -22,6 +22,10 @@ back to ambient. The spawned architect enters
 conversation from there. `dispatched` and `dispatch-queued` both mean the brief
 is durable; use the canonical `(sprint document, architect)` chat and do not send
 a second brief.
+
+An unresolvable `AR_SPAWN_ROLE`, a role without hosted identity, or hosted identity
+without its matching role is malformed plane identity and fails closed. It never
+falls through to role-brief or ambient free-chat routing.
 
 An explicit developer-declared task-seat takeover is the bounded exception: it
 uses the same ambient `dispatch_agent` transaction for the named role on that

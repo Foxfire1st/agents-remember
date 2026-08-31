@@ -26,7 +26,11 @@ from agents_remember.models.terminal_catalog import (
 )
 from agents_remember.observer import observer_root
 from agents_remember.serving.conversation.ports import TerminalCatalogPort
-from agents_remember.serving.dispatch_brief import DispatchBriefGate, HostedDelivery
+from agents_remember.serving.dispatch_brief import (
+    DISPATCH_BRIEF_READINESS_WAIT_SECONDS,
+    DispatchBriefGate,
+    HostedDelivery,
+)
 from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
 )
@@ -169,6 +173,28 @@ def test_ready_dispatch_is_inbox_rooted_lands_and_starts_expectation_clocks(
     # ack-by is retired with the N16 consume demotion; only the briefed-by clock rides here.
     assert set(by_kind) == {"briefed-by"}
     assert by_kind["briefed-by"].state == "met"
+
+
+def test_default_dispatch_gate_waits_for_the_bounded_spawn_startup_window(
+    tmp_path: Path,
+) -> None:
+    catalog = TerminalCatalog(tmp_path / "terminal-sessions.json")
+    target = _target(tmp_path)
+    catalog.upsert(target)
+    ready = HostedReadinessResult("ready", target.id, entry=target)
+
+    with mock.patch(
+        "agents_remember.serving.dispatch_brief.hosted_session_readiness",
+        return_value=ready,
+    ) as readiness:
+        refusal = DispatchBriefGate().check(
+            catalog,
+            TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
+            target,
+        )
+
+    assert refusal is None
+    assert readiness.call_args.kwargs["wait"].seconds == DISPATCH_BRIEF_READINESS_WAIT_SECONDS
 
 
 def test_rejected_adapter_receipt_keeps_same_row_pending(tmp_path: Path) -> None:

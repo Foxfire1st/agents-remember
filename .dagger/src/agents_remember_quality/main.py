@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import secrets
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -25,7 +27,7 @@ PLAYWRIGHT_IMAGE = (
     "mcr.microsoft.com/playwright:v1.60.0-noble@"
     "sha256:83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9"
 )
-CODEX_VERSION = "0.147.0"
+CODEX_VERSION = "0.151.0"
 RETRY_CACHE_ROOT = "/var/cache/agents-remember-quality-retry"
 PYTHON_BUILD_CACHE_ROOT = "/var/cache/agents-remember-python"
 RUNTIME_INSTALLER_ROOT = "/opt/agents-remember-runtime-installer"
@@ -40,6 +42,12 @@ RUNTIME_PROOF = "/opt/agents-remember-python-runtime.json"
 VENV_ROOT = "/opt/ar-venv"
 VENV_PYTHON = f"{VENV_ROOT}/bin/python"
 VENV_PROOF = "/opt/agents-remember-venv-runtime.json"
+E2E_NOT_SELECTED_EXIT_CODE = 78
+BASELINE_CODEX_PROTOCOL = "initialize -> initialized -> thread/list"
+AMBIENT_CODEX_PROTOCOL = (
+    f"{BASELINE_CODEX_PROTOCOL}; real app-server MCP connected -> "
+    "turn/start -> normally discovered MCP function calls"
+)
 
 
 def _canonical_python_base(source: dagger.Directory) -> dagger.Container:
@@ -72,7 +80,7 @@ def _canonical_python_base(source: dagger.Directory) -> dagger.Container:
                 "bash",
                 "-c",
                 f". {RUNTIME_CONTRACT}; apt-get install -y --no-install-recommends "
-                "$AR_PYTHON_APT_BUILD_DEPS",
+                "$AR_PYTHON_APT_BUILD_DEPS tmux",
             ]
         )
         .with_exec(["rm", "-rf", "/var/lib/apt/lists"])
@@ -244,7 +252,7 @@ def _candidate_container(
 
 async def _run_dashboard_quality(
     container: dagger.Container,
-) -> tuple[dagger.Container, int, list[str]]:
+) -> tuple[dagger.Container, int, list[str], list[str], dict[str, int]]:
     """Run every frontend rail inside the same clean Dagger environment."""
     container = container.with_env_variable("CI", "1")
     steps = (
@@ -259,19 +267,23 @@ async def _run_dashboard_quality(
         ),
         ("dashboard-build", ["npm", "run", "build"]),
     )
+    attempted: list[str] = []
     completed: list[str] = []
+    step_exit_codes: dict[str, int] = {}
     exit_code = 0
     for step, command in steps:
+        attempted.append(step)
         container = (
             await container.with_workdir("/workspace/dashboard")
             .with_exec(command, expect=ReturnType.ANY)
             .sync()
         )
         exit_code = await container.exit_code()
-        completed.append(step)
+        step_exit_codes[step] = exit_code
         if exit_code != 0:
             break
-    return container, exit_code, completed
+        completed.append(step)
+    return container, exit_code, attempted, completed, step_exit_codes
 
 
 async def _run_expected_commands(
@@ -293,6 +305,183 @@ async def _run_expected_commands(
         step_codes[step.name] = code
         route_ok = code == step.expected_exit
     return container, route_ok
+
+
+@dataclass
+class _QualityProgress:
+    container: dagger.Container
+    exit_code: int
+    attempted: list[str] = dataclass_field(default_factory=list)
+    completed: list[str] = dataclass_field(default_factory=list)
+    skipped: list[str] = dataclass_field(default_factory=list)
+    step_exit_codes: dict[str, int] = dataclass_field(default_factory=dict)
+
+
+async def _run_quality_step(
+    progress: _QualityProgress,
+    name: str,
+    command: list[str],
+) -> None:
+    if progress.exit_code != 0:
+        return
+    progress.attempted.append(name)
+    progress.container = await progress.container.with_exec(
+        command,
+        expect=ReturnType.ANY,
+    ).sync()
+    progress.exit_code = await progress.container.exit_code()
+    progress.step_exit_codes[name] = progress.exit_code
+    if progress.exit_code == 0:
+        progress.completed.append(name)
+
+
+async def _run_candidate_acceptance(
+    container: dagger.Container,
+    *,
+    mode: str,
+    diff_base: str,
+    reports: str,
+    memory_cap_bytes: int,
+) -> _QualityProgress:
+    environment_exit = await container.exit_code()
+    progress = _QualityProgress(
+        container=container,
+        exit_code=environment_exit,
+        attempted=["environment"],
+        completed=["environment"] if environment_exit == 0 else [],
+        step_exit_codes={"environment": environment_exit},
+    )
+    await _run_quality_step(
+        progress,
+        "codex-read-only-probe",
+        [
+            "/opt/ar-venv/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "-n=0",
+            "mcp/tests/test_codex_clean_room_probe.py",
+        ],
+    )
+    await _run_quality_step(
+        progress,
+        "ambient-role-chat-e2e",
+        [
+            VENV_PYTHON,
+            "scripts/e2e_harness/run.py",
+            "--mode",
+            mode,
+            "--diff-base",
+            diff_base,
+            "--reports",
+            reports,
+        ],
+    )
+    if progress.step_exit_codes.get("ambient-role-chat-e2e") == E2E_NOT_SELECTED_EXIT_CODE:
+        progress.skipped.append("ambient-role-chat-e2e")
+        progress.exit_code = 0
+    await _run_quality_step(
+        progress,
+        "quality-wrapper",
+        quality_wrapper_command(
+            reports=reports,
+            diff_base=diff_base,
+            mode=mode,
+            memory_cap_bytes=memory_cap_bytes,
+        ),
+    )
+    if progress.exit_code == 0 and mode == "full":
+        await _run_dashboard_steps(progress)
+    return progress
+
+
+async def _run_dashboard_steps(progress: _QualityProgress) -> None:
+    (
+        progress.container,
+        progress.exit_code,
+        attempted,
+        completed,
+        exit_codes,
+    ) = await _run_dashboard_quality(progress.container)
+    progress.attempted.extend(attempted)
+    progress.completed.extend(completed)
+    progress.step_exit_codes.update(exit_codes)
+
+
+def _quality_result_payload(
+    progress: _QualityProgress,
+    *,
+    started_at: str,
+    mode: str,
+    attempt_nonce: str,
+) -> dict[str, object]:
+    failed_step = next(
+        (
+            step
+            for step in reversed(progress.attempted)
+            if progress.step_exit_codes.get(step, 0) != 0 and step not in progress.skipped
+        ),
+        None,
+    )
+    e2e_completed = "ambient-role-chat-e2e" in progress.completed
+    e2e_attempted = "ambient-role-chat-e2e" in progress.attempted
+    e2e_skipped = "ambient-role-chat-e2e" in progress.skipped
+    codex_protocol = (
+        AMBIENT_CODEX_PROTOCOL
+        if e2e_completed
+        else BASELINE_CODEX_PROTOCOL
+        if "codex-read-only-probe" in progress.completed
+        else None
+    )
+    result: dict[str, object] = {
+        "status": "passed" if progress.exit_code == 0 else "failed",
+        "startedAt": started_at,
+        "finishedAt": datetime.now(UTC).isoformat(),
+        "mode": mode,
+        "codexMode": "real",
+        "codexProtocol": codex_protocol,
+        "promptSubmitted": (
+            True if e2e_completed else None if e2e_attempted and not e2e_skipped else False
+        ),
+        "credentialsMounted": False,
+        "containerSocketMounted": False,
+        "attemptedSteps": progress.attempted,
+        "completedSteps": progress.completed,
+        "skippedSteps": progress.skipped,
+        "failedStep": failed_step,
+        "stepExitCodes": progress.step_exit_codes,
+        "exitCode": progress.exit_code,
+        "attemptNonce": attempt_nonce,
+    }
+    if "quality-wrapper" in progress.completed:
+        result["causalFailureReport"] = "causal-failures.json"
+        result["causalFailureSummary"] = "causal-failures.md"
+    ambient_evidence = _ambient_evidence(e2e_completed=e2e_completed, e2e_skipped=e2e_skipped)
+    if ambient_evidence is not None:
+        result["ambientRoleChatEvidence"] = ambient_evidence
+    return result
+
+
+def _ambient_evidence(
+    *,
+    e2e_completed: bool,
+    e2e_skipped: bool,
+) -> dict[str, object] | None:
+    if e2e_completed:
+        return {
+            "status": "passed",
+            "summary": "ambient-role-chat-e2e/summary.json",
+            "runs": [
+                "ambient-role-chat-e2e/run-1.json",
+                "ambient-role-chat-e2e/run-2.json",
+            ],
+        }
+    if e2e_skipped:
+        return {
+            "status": "skipped",
+            "summary": "ambient-role-chat-e2e/summary.json",
+        }
+    return None
 
 
 @object_type
@@ -354,56 +543,27 @@ class AgentsRememberQuality:
             reports=reports,
         )
         container = await container.sync()
-        exit_code = await container.exit_code()
-        completed = ["environment"]
-        if exit_code == 0:
-            container = await container.with_exec(
-                [
-                    "/opt/ar-venv/bin/python",
-                    "-m",
-                    "pytest",
-                    "-q",
-                    "-n=0",
-                    "mcp/tests/test_codex_clean_room_probe.py",
-                ],
-                expect=ReturnType.ANY,
-            ).sync()
-            exit_code = await container.exit_code()
-            completed.append("codex-read-only-probe")
-        if exit_code == 0:
-            command = quality_wrapper_command(
-                reports=reports,
-                diff_base=diff_base,
-                mode=mode,
-                memory_cap_bytes=memory_cap_bytes,
-            )
-            container = await container.with_exec(command, expect=ReturnType.ANY).sync()
-            exit_code = await container.exit_code()
-            completed.append("quality-wrapper")
-        if exit_code == 0 and mode == "full":
-            container, exit_code, dashboard_completed = await _run_dashboard_quality(container)
-            completed.extend(dashboard_completed)
-        result = {
-            "status": "passed" if exit_code == 0 else "failed",
-            "startedAt": started_at,
-            "finishedAt": datetime.now(UTC).isoformat(),
-            "mode": mode,
-            "codexMode": "real",
-            "codexProtocol": "initialize -> initialized -> thread/list",
-            "promptSubmitted": False,
-            "credentialsMounted": False,
-            "containerSocketMounted": False,
-            "completedSteps": completed,
-            "exitCode": exit_code,
-            "attemptNonce": attempt_nonce,
-            "causalFailureReport": "causal-failures.json",
-            "causalFailureSummary": "causal-failures.md",
-        }
-        container = container.with_new_file(
+        progress = await _run_candidate_acceptance(
+            container,
+            mode=mode,
+            diff_base=diff_base,
+            reports=reports,
+            memory_cap_bytes=memory_cap_bytes,
+        )
+        result = _quality_result_payload(
+            progress,
+            started_at=started_at,
+            mode=mode,
+            attempt_nonce=attempt_nonce,
+        )
+        container = progress.container.with_new_file(
             f"{reports}/clean-quality-results.json",
             contents=json.dumps(result, indent=2, sort_keys=True) + "\n",
         )
-        return QualityResult(reports=container.directory(reports), exit_code=exit_code)
+        return QualityResult(
+            reports=container.directory(reports),
+            exit_code=progress.exit_code,
+        )
 
     @function
     async def retry_evidence(

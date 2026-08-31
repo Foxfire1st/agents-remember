@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Final, Literal
 
@@ -102,7 +103,9 @@ def _parse_manifest(raw: object) -> PublishedQualityManifest:
 
 
 def _parse_file(name: str, raw: object) -> PublishedQualityFile:
-    if not name or not isinstance(raw, dict) or set(raw) != {"sha256", "size"}:
+    if not is_safe_relative_report_path(name):
+        raise ValueError("quality manifest file path is invalid")
+    if not isinstance(raw, dict) or set(raw) != {"sha256", "size"}:
         raise ValueError("quality manifest file record is invalid")
     sha256 = raw.get("sha256")
     size = raw.get("size")
@@ -111,3 +114,48 @@ def _parse_file(name: str, raw: object) -> PublishedQualityFile:
     if isinstance(size, bool) or not isinstance(size, int) or size < 0:
         raise ValueError("quality manifest file size is invalid")
     return PublishedQualityFile(sha256=sha256, size=size)
+
+
+def is_safe_relative_report_path(name: str) -> bool:
+    if not name or "\\" in name:
+        return False
+    path = PurePosixPath(name)
+    return (
+        not path.is_absolute()
+        and path.as_posix() == name
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def require_real_directory_or_missing(path: Path, *, purpose: str) -> None:
+    """Refuse links and irregular nodes at a publication directory boundary."""
+
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise PublishedQualityManifestError(
+            f"cannot inspect {purpose} before quality publication: {path}"
+        ) from error
+    if not stat.S_ISDIR(mode):
+        raise PublishedQualityManifestError(
+            f"unsafe {purpose} before quality publication: {path} must be a real directory"
+        )
+
+
+def require_real_file_or_missing(path: Path, *, purpose: str) -> None:
+    """Refuse links and irregular nodes before removing a legacy report file."""
+
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise PublishedQualityManifestError(
+            f"cannot inspect {purpose} before quality publication: {path}"
+        ) from error
+    if not stat.S_ISREG(mode):
+        raise PublishedQualityManifestError(
+            f"unsafe {purpose} before quality publication: {path} must be a regular file"
+        )

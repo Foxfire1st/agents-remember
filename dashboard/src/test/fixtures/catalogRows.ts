@@ -40,10 +40,7 @@ export const FLEET_TASK_DOCUMENTS: TaskDocNode[] = [
     kind: "master",
     title: "Sprint",
     docPath: "/tasks/agents-remember/260700_sprint/task.json",
-    orchestrates: [
-      "260714_own-adapter-capability",
-      "260715_react-tui-cockpit-frontend",
-    ],
+    orchestrates: ["260714_own-adapter-capability", "260715_react-tui-cockpit-frontend"],
   }),
   taskDoc({
     id: "adapter-master",
@@ -142,6 +139,8 @@ export const FLEET: TerminalCatalogRow[] = [
     seatRole: "reviewer",
     spawnedBySession: "manager-l4",
     taskDocumentRef: taskRef(MASTER, "04_serving"),
+    structuralParentTaskDocumentRef: taskRef(MASTER, "task"),
+    structuralParentRole: "manager",
     turnState: "turn-ended",
     turnStateChangedAt: "2026-07-16T09:15:00Z",
     controlState: "ready",
@@ -185,6 +184,8 @@ export const FLEET: TerminalCatalogRow[] = [
     spawnRole: "reviewer",
     seatRole: "reviewer",
     taskDocumentRef: taskRef(MASTER, "01_protocol"),
+    structuralParentTaskDocumentRef: taskRef(MASTER, "task"),
+    structuralParentRole: "manager",
     status: "landed",
     landedAt: "2026-07-16T07:05:00Z",
     landedReason: "review approved",
@@ -351,11 +352,7 @@ export const L5I_INTERACTION_QUESTIONS: TerminalCatalogRow = catalogRow({
       {
         text: "Which extras should run?",
         header: "Extras",
-        options: [
-          { label: "tests" },
-          { label: "docs" },
-          { label: "bench" },
-        ],
+        options: [{ label: "tests" }, { label: "docs" }, { label: "bench" }],
         multiSelect: true,
       },
     ],

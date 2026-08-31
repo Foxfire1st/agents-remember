@@ -187,8 +187,10 @@ not allowed in spawned role seats.
 Every horizontal expansion from this seat follows the structural transaction in `../SKILL.md`:
 call `dispatch_agent` with this sprint's canonical task document, the target role, and one complete
 brief. The architect creates the sprint orchestrator and, when approved, strategist or separate
-designer seats. The control plane owns readiness, private occupant identity, and exact initial
-brief pinning. `dispatched` and `dispatch-queued` are both durable outcomes; never request an id,
+designer seats. It also creates the sprint-bound plan-review reviewer when the portfolio plan
+reaches that independent review seam. The control plane stamps this reviewer's parent as the
+architect seat, owns readiness, private occupant identity, and exact initial brief pinning.
+`dispatched` and `dispatch-queued` are both durable outcomes; never request an id,
 poll readiness, duplicate a queued brief, or respawn merely because delivery is pending.
 
 When a thematic master is resumed or reopened after other work has landed, resolve its explicit
@@ -295,13 +297,14 @@ acting on the decision.
 
 The architect may spawn role seats horizontally:
 
-- `AR_SPAWN_ROLE=orchestrator` for backend portfolio/orchestration churn — spawned as a matter of
+- `role="orchestrator"` for backend portfolio/orchestration churn — dispatched as a matter of
   course once a plan is approved (Spool-Up above), not on a per-request basis.
-- `AR_SPAWN_ROLE=strategist` only after the developer said yes to the proposed strategist pass
+- `role="strategist"` only after the developer said yes to the proposed strategist pass
   (ruled 2026-07-09: propose, never auto-run; recommend skipping only when a ruled plan is complete
   and its dependency, route, seam, classification, and priority assumptions remain valid).
-- `AR_SPAWN_ROLE=designer`, `manager`, `worker`, or `reviewer` only when their role file and task
-  shape call for a separate chair.
+- `role="designer"` or `role="reviewer"` only when their role file and task shape call for a
+  separate sprint chair. Manager and worker work is reached through the orchestrator/manager
+  ladder; a solo architect wears those hats instead of fabricating a direct-child relation.
 
 Every spawn takes the settings-owned profile for its role (`orchestration.roles.<role>`); no seat
 guesses or inherits a profile.
@@ -354,7 +357,7 @@ developer or the configured distinct decider; the architect does not approve its
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | dispatch | ambient-bootstrap target; plane-hosted caller after startup | For ordinary role-shaped work the identity-free launcher targets this architect on the canonical sprint; once hosted, the architect may create only structurally authorized sprint children, with no plane-to-ambient fallback |
-| tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · `message_parent`/`message_child` · gates for developer hand-offs · `dispatch_agent` |
+| tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · `message_parent`/`message_child` · gates for developer hand-offs · `dispatch_agent` · `retire_child` (same-sprint plan reviewer only) |
 
 Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
 `promptKeywords`) participate in Settings.json `orchestration.roles.architect` and

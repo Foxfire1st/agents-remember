@@ -50,7 +50,10 @@ def terminal_catalog_path(coordination_root: Path) -> Path:
 
 
 def _leaf_execution_entry(entry: TerminalCatalogEntry) -> bool:
-    return entry.binding_role in {"worker", "reviewer", "curator"} and any(
+    leaf_role = entry.binding_role in {"worker", "curator"} or (
+        entry.binding_role == "reviewer" and entry.spawn_level in {None, "leaf"}
+    )
+    return leaf_role and any(
         ref is not None
         for ref in (
             entry.task_document_ref,
@@ -310,7 +313,7 @@ class TerminalCatalog:
         the catalog is re-read on every sweep, so unbounded tombstone growth is the reclamation gap. Only
         ``terminated`` rows past the window are dropped -- ``running``/``exited`` rows are live, and
         ``landed`` rows are inspectable archives reclaimed by the L11 manual group-cleanup, never here.
-        A task-bound worker/reviewer/curator row is retained until its id is explicitly authorized
+        A task-bound worker/curator or leaf-altitude reviewer row is retained until its id is explicitly authorized
         by the task-owned execution registrar. That registrar publishes one bounded first-evidence
         marker before reclamation, so routine retention cannot turn historical execution into
         "never started". Other row provenance remains in the observer lifecycle event stream.

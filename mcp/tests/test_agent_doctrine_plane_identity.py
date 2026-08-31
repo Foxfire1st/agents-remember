@@ -142,6 +142,33 @@ def test_takeover_doctrine_makes_lineage_conflicts_resumable() -> None:
     assert "semantic truth" in text
 
 
+def test_malformed_role_identity_fails_closed_instead_of_falling_through() -> None:
+    text = _doctrine("SKILL.md")
+    assert "unresolvable `AR_SPAWN_ROLE`" in text
+    assert "malformed hosted identity and fails closed" in text
+    assert "never falls through to a pasted brief or free-chat routing" in text
+
+
+def test_reviewer_doctrine_names_every_runtime_review_parent_and_altitude() -> None:
+    text = _doctrine("roles/reviewer.md")
+    for required in (
+        "leaf reviewer binds the leaf and reports to its manager",
+        "master-exit reviewer binds the master and reports to that manager",
+        "portfolio plan reviewer binds the sprint and reports to the architect",
+        "super-exit reviewer binds the sprint and reports to the orchestrator",
+    ):
+        assert required in text
+
+
+def test_doctrine_never_advertises_removed_dispatch_env_arguments() -> None:
+    offenders = [
+        path.relative_to(SOURCE_SKILL).as_posix()
+        for path in _agent_instruction_files(SOURCE_SKILL)
+        if 'env={"AR_SPAWN_ROLE"' in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
+
+
 @pytest.mark.parametrize(
     "path",
     (

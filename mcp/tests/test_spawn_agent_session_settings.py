@@ -91,6 +91,11 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
         base.update(kwargs)
         if "task_document_ref" not in base and (task_ref := _role_ref(base)) is not None:
             base["task_document_ref"] = task_ref
+        env = base.get("env")
+        role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
+        if role == "reviewer" and "structural_parent_task_document_ref" not in base:
+            base["structural_parent_task_document_ref"] = MASTER_REF
+            base["structural_parent_role"] = "manager"
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
@@ -261,6 +266,11 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         base.update(kwargs)
         if "task_document_ref" not in base and (task_ref := _role_ref(base)) is not None:
             base["task_document_ref"] = task_ref
+        env = base.get("env")
+        role = env.get("AR_SPAWN_ROLE") if isinstance(env, dict) else None
+        if role == "reviewer" and "structural_parent_task_document_ref" not in base:
+            base["structural_parent_task_document_ref"] = MASTER_REF
+            base["structural_parent_role"] = "manager"
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log

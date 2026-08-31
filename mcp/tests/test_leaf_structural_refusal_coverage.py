@@ -203,15 +203,24 @@ def test_ambient_seat_resolution_rejects_every_unproven_identity() -> None:
         patch.object(ambient_seat, "ambient", return_value=lifecycle),
         pytest.raises(ambient_seat.AmbientSeatError, match="active lifecycle"),
     ):
-        ambient_seat.resolve_ambient_seat(catalog, environ={"AR_HOSTED_SESSION_ID": "seat"})
+        ambient_seat.resolve_ambient_seat(
+            catalog,
+            environ={"AR_HOSTED_SESSION_ID": "seat", "AR_SPAWN_ROLE": "worker"},
+        )
     entry.lifecycle_id = None
     entry.binding_task_document_ref = None
     with patch.object(ambient_seat, "ambient", return_value=None):
         with pytest.raises(ambient_seat.AmbientSeatError, match="not bound"):
-            ambient_seat.resolve_ambient_seat(catalog, environ={"AR_HOSTED_SESSION_ID": "seat"})
+            ambient_seat.resolve_ambient_seat(
+                catalog,
+                environ={"AR_HOSTED_SESSION_ID": "seat", "AR_SPAWN_ROLE": "worker"},
+            )
         entry.binding_task_document_ref = document
         assert (
-            ambient_seat.resolve_ambient_seat(catalog, environ={"AR_HOSTED_SESSION_ID": "seat"})
+            ambient_seat.resolve_ambient_seat(
+                catalog,
+                environ={"AR_HOSTED_SESSION_ID": "seat", "AR_SPAWN_ROLE": "worker"},
+            )
             is entry
         )
 
@@ -281,9 +290,14 @@ def test_structural_agent_payload_levels_and_plane_only_message_refusal(tmp_path
         "deliveryState": "delivered",
         "adapterDeliveryState": "accepted",
     }
-    assert tools._level_for_role("worker") == "leaf"
-    assert tools._level_for_role("manager") == "master"
-    assert tools._level_for_role("orchestrator") == "portfolio"
+    topology = Mock()
+    for altitude, expected in (
+        ("leaf", "leaf"),
+        ("master", "master"),
+        ("sprint", "portfolio"),
+    ):
+        topology.altitude.return_value = altitude
+        assert tools._level_for_document(topology, leaf) == expected
     context = tools.StructuralMessageContext(
         Mock(), SimpleNamespace(id="s", binding_role="manager"), tools.StructuralAgentRuntime()
     )
@@ -483,6 +497,7 @@ def test_terminal_tool_task_document_and_open_refusals(tmp_path: Path) -> None:
 def test_signal_routing_refuses_ambiguous_or_broken_task_containment() -> None:
     routing = importlib.import_module("agents_remember.controlplane.signal_routing")
     leaf = _task_ref("master/leaf.json")
+    master = _task_ref("master/task.json")
     sprint = _task_ref("sprint/task.json")
     catalog = Mock()
     replacement = SimpleNamespace(
@@ -521,6 +536,40 @@ def test_signal_routing_refuses_ambiguous_or_broken_task_containment() -> None:
     assert (
         routing._structural_parent_owner(catalog, hierarchy, document=leaf, role="operator") is None
     )
+
+    manager = SimpleNamespace(
+        id="manager-new",
+        lifecycle_id="manager-life",
+        status="running",
+        binding_role="manager",
+        task_document_ref=master,
+        replacement_for_task_document_ref=None,
+    )
+    catalog.list.return_value = [manager]
+    stamped_reviewer_row = SimpleNamespace(
+        messageKind="escalation",
+        subjectTaskDocumentRef=leaf,
+        seatRole="reviewer",
+        senderRole="reviewer",
+        ownerTaskDocumentRef=master,
+        ownerRole="manager",
+    )
+    assert routing.derive_row_owner(catalog, hierarchy, stamped_reviewer_row).agent_id == manager.id
+
+    with pytest.raises(
+        routing.StructuralRoutingError, match="incomplete structural parent address"
+    ):
+        routing._reviewer_parent_owner(
+            catalog,
+            hierarchy,
+            document=leaf,
+            structural_parent=(master, None),
+        )
+    hierarchy.altitude.return_value = "leaf"
+    hierarchy.parent.return_value = master
+    with pytest.raises(routing.StructuralRoutingError, match="invalid structural parent"):
+        routing._validate_reviewer_parent(hierarchy, leaf, sprint, "architect")
+
     catalog.get.return_value = None
     assert (
         routing.derive_signal_owner(
@@ -671,6 +720,87 @@ def test_retire_policy_and_manager_lookup_refuse_broken_topology() -> None:
         signals._manager_for_subordinate(catalog, hierarchy, subordinate)
 
 
+def test_manager_lookup_supports_stamped_and_legacy_leaf_reviewers() -> None:
+    signals = importlib.import_module("agents_remember.serving.state_signals")
+    leaf = _task_ref("master/leaf.json")
+    master = _task_ref("master/task.json")
+    manager = SimpleNamespace(
+        id="manager",
+        status="running",
+        binding_role="manager",
+        task_document_ref=master,
+        replacement_for_task_document_ref=None,
+    )
+    catalog = Mock()
+    catalog.list.return_value = [manager]
+    hierarchy = Mock()
+
+    stamped = SimpleNamespace(
+        binding_task_document_ref=leaf,
+        binding_role="reviewer",
+        structural_parent_task_document_ref=master,
+        structural_parent_role="manager",
+    )
+    assert signals._manager_for_subordinate(catalog, hierarchy, stamped) is manager
+
+    legacy = SimpleNamespace(
+        binding_task_document_ref=leaf,
+        binding_role="reviewer",
+        structural_parent_task_document_ref=None,
+        structural_parent_role=None,
+    )
+    hierarchy.altitude.return_value = "leaf"
+    hierarchy.parent.return_value = master
+    assert signals._manager_for_subordinate(catalog, hierarchy, legacy) is manager
+
+    hierarchy.altitude.return_value = "master"
+    assert signals._manager_for_subordinate(catalog, hierarchy, legacy) is None
+
+    unrelated = SimpleNamespace(
+        binding_task_document_ref=leaf,
+        binding_role="architect",
+        structural_parent_task_document_ref=None,
+        structural_parent_role=None,
+    )
+    assert signals._manager_for_subordinate(catalog, hierarchy, unrelated) is None
+
+
+def test_reviewer_parent_address_covers_legacy_incomplete_and_mismatched_stamps() -> None:
+    seats = importlib.import_module("agents_remember.serving.structural_seats")
+    leaf = _task_ref("master/leaf.json")
+    master = _task_ref("master/task.json")
+    sprint = _task_ref("sprint/task.json")
+    topology = Mock()
+    resolver = seats.StructuralSeatResolver(Mock(), topology)
+
+    topology.altitude.return_value = "leaf"
+    topology.parent.return_value = master
+    legacy = SimpleNamespace(
+        structural_parent_task_document_ref=None,
+        structural_parent_role=None,
+    )
+    assert resolver._reviewer_parent_address(legacy, leaf) == (master, "manager")
+
+    topology.altitude.return_value = "master"
+    with pytest.raises(seats.StructuralSeatError, match="has no plane-stamped structural parent"):
+        resolver._reviewer_parent_address(legacy, master)
+
+    incomplete = SimpleNamespace(
+        structural_parent_task_document_ref=master,
+        structural_parent_role=None,
+    )
+    with pytest.raises(seats.StructuralSeatError, match="incomplete structural parent address"):
+        resolver._reviewer_parent_address(incomplete, master)
+
+    topology.altitude.return_value = "leaf"
+    mismatched = SimpleNamespace(
+        structural_parent_task_document_ref=sprint,
+        structural_parent_role="architect",
+    )
+    with pytest.raises(seats.StructuralSeatError, match="invalid structural parent"):
+        resolver._reviewer_parent_address(mismatched, leaf)
+
+
 def test_unbound_child_authorization_and_duplicate_catalog_occupants_fail() -> None:
     seats = importlib.import_module("agents_remember.serving.structural_seats")
     catalog_module = importlib.import_module("agents_remember.serving.terminal_catalog")
@@ -811,7 +941,12 @@ def test_terminal_binding_conflicts_reap_dead_occupants_and_keep_live_ones(tmp_p
     runtime = SimpleNamespace(
         catalog=SimpleNamespace(path=tmp_path / "logs" / "dashboard" / "terminal-sessions.json")
     )
-    provenance = SimpleNamespace(task_document_ref=None, replacement_for_task_document_ref=None)
+    provenance = SimpleNamespace(
+        task_document_ref=None,
+        replacement_for_task_document_ref=None,
+        structural_parent_task_document_ref=None,
+        structural_parent_role=None,
+    )
     refusal = opener._task_binding_refusal(runtime, provenance, "worker")
     assert refusal is not None and refusal.status == "task-binding-required"
     assert opener._task_binding_refusal(runtime, provenance, "terminal") is None

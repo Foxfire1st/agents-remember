@@ -69,9 +69,12 @@ with the directive text:
 ```markdown
 **Agents Remember — session start.**
 
-If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an
-orchestrating agent: **ignore this notice entirely — your brief is your session
-start.**
+If `AR_SPAWN_ROLE` is set, it must resolve to its canonical role file and arrive
+with the plane-injected hosted-session identity. An unresolvable role or an
+incomplete hosted identity fails closed; it never falls through to a pasted
+brief or ambient free chat. With valid hosted identity—or when the first user
+message is a role brief and no hosted identity was declared—the brief is the
+session start.
 
 Otherwise you are the developer-facing **free chat**: read
 `ar-coordination/AGENTS.md`; answer research inline, or for ordinary role-shaped work create/resolve the

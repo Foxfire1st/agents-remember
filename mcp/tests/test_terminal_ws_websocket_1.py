@@ -220,6 +220,7 @@ class TerminalWebSocketTests1(TerminalWebSocketTests):
         self.catalog.upsert(
             _catalog_entry("exited", cwd=self.tmp, status="exited", tmux_name="ar-exited")
         )
+        self.host.probe_names.add("ar-running")
 
         with TestClient(self.app) as client:
             response = client.post(

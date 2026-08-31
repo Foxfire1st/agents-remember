@@ -136,6 +136,11 @@ def _legacy_named_scope(
         return None
     if repository is None or folder is None:
         raise TerminalCatalogMigrationError("legacy named-seat scope is incomplete")
+    if role == "reviewer":
+        raise TerminalCatalogMigrationError(
+            "legacy reviewer rows require their original leafKey; a named scope cannot prove a "
+            "new master or sprint review seam"
+        )
     candidate = topology.canonical_ref(repository, f"{folder}/task.json")
     altitude = topology.altitude(candidate)
     if role in SPRINT_ROLES and altitude == "master":

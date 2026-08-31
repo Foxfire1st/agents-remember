@@ -70,6 +70,9 @@ class _TaskHierarchy:
     def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
         return {LEAF_REF: MASTER_REF, MASTER_REF: SPRINT_REF, SPRINT_REF: None}[ref]
 
+    def altitude(self, ref: TaskDocumentRef) -> str:
+        return "leaf" if ref == LEAF_REF else "master" if ref == MASTER_REF else "sprint"
+
 
 class OperatorInboxRecordTests(unittest.TestCase):
     def test_create_and_consume_are_snapshots(self) -> None:

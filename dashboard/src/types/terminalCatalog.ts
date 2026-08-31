@@ -4,17 +4,18 @@
 // the wire form; written-only-when-set fields are optional (`?:`). The Python entry is the source
 // of truth — keep this dataclass-backed surface in lockstep by hand.
 
-export type TerminalOpenKind = "terminal" | "harness";
-export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";
-export type HarnessControlState = "starting" | "ready" | "disconnected" | "failed" | "unsupported";
-export type HarnessActivityState = "idle" | "running" | "blocked" | "settling" | "unknown";
-export type HarnessAcceptanceState = "immediate" | "queued" | "rejected" | "unknown" | "unsupported";
+export type TerminalOpenKind = 'terminal' | 'harness';
+export type TerminalSessionStatus = 'running' | 'exited' | 'landed' | 'terminated';
+export type HarnessControlState = 'starting' | 'ready' | 'disconnected' | 'failed' | 'unsupported';
+export type HarnessActivityState = 'idle' | 'running' | 'blocked' | 'settling' | 'unknown';
+export type HarnessAcceptanceState =
+  'immediate' | 'queued' | 'rejected' | 'unknown' | 'unsupported';
 // Live turn-state, classified from pane observation on the liveness-sweep cadence (10 s
 // rate-limited) — absent means unclassified, never a fabricated state.
-export type SeatTurnState = "working" | "turn-ended" | "awaiting-input" | "stale";
-export type TerminalLivenessEvidence = "tmux-command-failed" | "pane-gone";
-export type TerminalOutcome = "completed" | "interrupted" | "failed" | "unknown";
-export type InterruptOrigin = "developer" | "unknown";
+export type SeatTurnState = 'working' | 'turn-ended' | 'awaiting-input' | 'stale';
+export type TerminalLivenessEvidence = 'tmux-command-failed' | 'pane-gone';
+export type TerminalOutcome = 'completed' | 'interrupted' | 'failed' | 'unknown';
+export type InterruptOrigin = 'developer' | 'unknown';
 
 export interface TaskDocumentRef {
   repository: string;
@@ -53,6 +54,9 @@ export interface TerminalCatalogRow {
   spawnedBySession?: string;
   spawnedByLifecycle?: string;
   spawnedByKind?: string;
+  /** Generation-bound structural owner of a polymorphic reviewer seat. */
+  structuralParentTaskDocumentRef?: TaskDocumentRef;
+  structuralParentRole?: string;
   spawnRole?: string;
   launchArgs?: string[];
   promptKeywords?: string[];
@@ -106,7 +110,7 @@ export interface TerminalCatalogRow {
   interruptedBy?: InterruptOrigin;
   terminalEvidenceSequence?: number;
   terminalNativeCursor?: string;
-  interruptRequestedBy?: "developer";
+  interruptRequestedBy?: 'developer';
   interruptRequestedAt?: string;
   interruptRequestedTurnId?: string;
   stateSignalEmittedFor?: string;

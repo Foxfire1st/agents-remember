@@ -24,7 +24,11 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.models.structural.agent import DispatchAgentRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
-from agents_remember.serving.ambient_seat import AmbientCaller, resolve_ambient_caller
+from agents_remember.serving.ambient_seat import (
+    AmbientCaller,
+    AmbientSeatError,
+    resolve_ambient_caller,
+)
 from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import TaskDocument, write_task_doc
@@ -391,6 +395,50 @@ class DispatchAgentAmbientTests(unittest.TestCase):
         self.assertEqual(caller.caller_kind, "ambient")
         self.assertIsInstance(caller, AmbientCaller)
 
+    def test_role_without_hosted_identity_never_falls_back_to_ambient_dispatch(self) -> None:
+        with (
+            self.assertRaisesRegex(AmbientSeatError, "without the plane-injected"),
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+            ) as spawn,
+        ):
+            resolve_ambient_caller(environ={"AR_SPAWN_ROLE": "architect"})
+        spawn.assert_not_called()
+
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+        ) as spawn:
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="orchestrator",
+                    brief="Orchestrate the sprint.",
+                ),
+                StructuralAgentRuntime(environ={"AR_SPAWN_ROLE": "architect"}),
+            )
+
+        self.assertEqual(result["status"], "ambient-seat-incomplete")
+        spawn.assert_not_called()
+
+    def test_hosted_identity_without_process_role_refuses_before_spawn(self) -> None:
+        self.catalog.upsert(_seat("architect", self.sprint, "architect", spawned_by_kind=None))
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+        ) as spawn:
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="orchestrator",
+                    brief="Orchestrate the sprint.",
+                ),
+                StructuralAgentRuntime(environ={"AR_HOSTED_SESSION_ID": "architect"}),
+            )
+
+        self.assertEqual(result["status"], "ambient-seat-incomplete")
+        spawn.assert_not_called()
+
     def test_ambient_dispatch_runs_the_real_spawn_and_persists_the_brief(self) -> None:
         host = _FakeHost()
         _write_architect_settings(self.root)
@@ -597,6 +645,103 @@ class DispatchAgentAmbientTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dispatch-persistence-refused")
         self.assertIn("child retired; retirement event logging failed", result["detail"])
+
+    def test_plane_dispatch_persistence_failure_retires_the_unbriefed_child_privately(
+        self,
+    ) -> None:
+        self.catalog.upsert(_seat("architect", self.sprint, "architect", spawned_by_kind="plane"))
+        self.catalog.upsert(
+            _seat(
+                "private-child-id",
+                self.sprint,
+                "orchestrator",
+                spawned_by_kind="plane",
+            )
+        )
+        retired = _seat(
+            "private-child-id",
+            self.sprint,
+            "orchestrator",
+            status="terminated",
+            spawned_by_kind="plane",
+        )
+        with (
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.spawn_agent_session_tool",
+                return_value={"status": "spawned-unbriefed", "session": "private-child-id"},
+            ),
+            mock.patch(
+                "agents_remember.application.structural.agent_tools._post_structural_message",
+                side_effect=ValueError("store refused"),
+            ),
+            mock.patch(
+                "agents_remember.application.structural.agent_tools.retire_entry",
+                return_value=retired,
+            ) as retire,
+        ):
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="orchestrator",
+                    brief="Coordinate the sprint.",
+                ),
+                StructuralAgentRuntime(
+                    environ={
+                        "AR_HOSTED_SESSION_ID": "architect",
+                        "AR_SPAWN_ROLE": "architect",
+                    }
+                ),
+            )
+
+        self.assertEqual(result["status"], "dispatch-persistence-refused")
+        self.assertNotIn("private-child-id", str(result))
+        self.assertEqual(retire.call_args.args[2].id, "private-child-id")
+        closure = retire.call_args.args[3]
+        self.assertEqual(closure.by_session, "architect")
+        self.assertEqual(closure.edge, "dispatch-rollback")
+
+    def test_plane_dispatch_refuses_broken_plane_identity_without_downgrading(self) -> None:
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+        ) as spawn:
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="architect",
+                    brief="Design the sprint.",
+                ),
+                StructuralAgentRuntime(
+                    environ={"AR_HOSTED_SESSION_ID": "ghost", "AR_SPAWN_ROLE": "architect"}
+                ),
+            )
+
+        self.assertEqual(result["status"], "ambient-seat-stale")
+        spawn.assert_not_called()
+
+    def test_plane_dispatch_refuses_an_unauthorized_child_role(self) -> None:
+        self.catalog.upsert(_seat("architect", self.sprint, "architect", spawned_by_kind="plane"))
+        with mock.patch(
+            "agents_remember.application.structural.agent_tools.spawn_agent_session_tool"
+        ) as spawn:
+            result = dispatch_agent_tool(
+                self.config,
+                DispatchAgentRequest(
+                    task_document_ref=self.sprint,
+                    role="system-specialist",
+                    brief="Investigate the sprint.",
+                ),
+                StructuralAgentRuntime(
+                    environ={
+                        "AR_HOSTED_SESSION_ID": "architect",
+                        "AR_SPAWN_ROLE": "architect",
+                    }
+                ),
+            )
+
+        self.assertEqual(result["status"], "structural-child-refused")
+        spawn.assert_not_called()
 
 
 if __name__ == "__main__":  # pragma: no cover

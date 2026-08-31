@@ -6,11 +6,16 @@ from typing import cast
 
 import pytest
 from agents_remember.errors import CodexAppServerError
+from agents_remember.serving import codex_mcp_readiness
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
 )
-from agents_remember.serving.codex_app_server_protocol import JsonObject
+from agents_remember.serving.codex_app_server_protocol import JsonObject, ShutdownMode
+from agents_remember.serving.codex_mcp_readiness import (
+    CodexMcpReadinessTiming,
+    wait_for_codex_mcp_tool,
+)
 from test_codex_app_server_adapter import (
     TEST_SETTINGS,
     FakeCodexTransport,
@@ -22,6 +27,256 @@ from test_codex_app_server_adapter import (
     prime_start,
     settle,
 )
+
+
+class _ReadinessClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class _CleanupFailingTransport(FakeCodexTransport):
+    async def stop(self, mode: ShutdownMode) -> None:
+        await super().stop(mode)
+        raise RuntimeError("fixture cleanup failure")
+
+
+def _mcp_page(
+    status: str,
+    *tools: str,
+    cursor: str | None = None,
+) -> JsonObject:
+    return {
+        "data": [
+            {
+                "name": "agents-remember",
+                "runtimeStatus": status,
+                "authStatus": "unsupported",
+                "tools": {name: {} for name in tools},
+            }
+        ],
+        "nextCursor": cursor,
+    }
+
+
+@pytest.mark.anyio
+async def test_mcp_readiness_waits_for_the_exact_connected_tool() -> None:
+    transport = FakeCodexTransport()
+    transport.queue_response("mcpServerStatus/list", _mcp_page("starting"))
+    transport.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("connected", "dispatch_agent", "server_info"),
+    )
+    clock = _ReadinessClock()
+
+    evidence = await wait_for_codex_mcp_tool(
+        transport,
+        thread_id="thread-1",
+        tool_name="dispatch_agent",
+        timing=CodexMcpReadinessTiming(
+            timeout_seconds=1,
+            poll_seconds=0.1,
+            clock=clock,
+            sleeper=clock.sleep,
+        ),
+    )
+
+    assert evidence.to_json() == {
+        "serverName": "agents-remember",
+        "runtimeStatus": "connected",
+        "toolName": "dispatch_agent",
+        "toolCount": 2,
+    }
+    assert clock.sleeps == [0.1]
+
+
+@pytest.mark.anyio
+async def test_mcp_readiness_paginates_and_rejects_a_repeated_cursor() -> None:
+    transport = FakeCodexTransport()
+    transport.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("connected", "server_info", cursor="page-2"),
+    )
+    transport.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("connected", "dispatch_agent"),
+    )
+
+    evidence = await wait_for_codex_mcp_tool(
+        transport,
+        thread_id="thread-1",
+        tool_name="dispatch_agent",
+    )
+
+    assert evidence.server_name == "agents-remember"
+    assert transport.requests[1][1]["cursor"] == "page-2"
+
+    repeated = FakeCodexTransport()
+    repeated.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("starting", cursor="same"),
+    )
+    repeated.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("starting", cursor="same"),
+    )
+    with pytest.raises(CodexAppServerError, match="repeated a pagination cursor"):
+        await wait_for_codex_mcp_tool(
+            repeated,
+            thread_id="thread-1",
+            tool_name="dispatch_agent",
+        )
+
+
+@pytest.mark.anyio
+async def test_mcp_readiness_timeout_is_bounded_and_actionable() -> None:
+    transport = FakeCodexTransport()
+    transport.queue_response("mcpServerStatus/list", _mcp_page("starting"))
+    transport.queue_response("mcpServerStatus/list", _mcp_page("starting"))
+    clock = _ReadinessClock()
+
+    with pytest.raises(CodexAppServerError, match="timed out waiting for required role tool"):
+        await wait_for_codex_mcp_tool(
+            transport,
+            thread_id="thread-1",
+            tool_name="dispatch_agent",
+            timing=CodexMcpReadinessTiming(
+                timeout_seconds=0.1,
+                poll_seconds=0.1,
+                clock=clock,
+                sleeper=clock.sleep,
+            ),
+        )
+
+    assert clock.sleeps == [0.1]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("thread_id", "tool_name", "timing", "message"),
+    (
+        ("", "dispatch_agent", CodexMcpReadinessTiming(), "non-empty thread id"),
+        ("thread-1", "", CodexMcpReadinessTiming(), "non-empty tool name"),
+        (
+            "thread-1",
+            "dispatch_agent",
+            CodexMcpReadinessTiming(timeout_seconds=0),
+            "positive bounded timing",
+        ),
+    ),
+)
+async def test_mcp_readiness_rejects_invalid_requests_before_transport(
+    thread_id: str,
+    tool_name: str,
+    timing: CodexMcpReadinessTiming,
+    message: str,
+) -> None:
+    with pytest.raises(CodexAppServerError, match=message):
+        await wait_for_codex_mcp_tool(
+            FakeCodexTransport(),
+            thread_id=thread_id,
+            tool_name=tool_name,
+            timing=timing,
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    (
+        ({"data": {}}, "requires data array"),
+        ({"data": [None]}, "status must be an object"),
+        (
+            {"data": [{"runtimeStatus": "connected", "tools": {}}]},
+            "requires a name",
+        ),
+        (
+            {
+                "data": [
+                    {
+                        "name": "agents-remember",
+                        "runtimeStatus": "connected",
+                        "tools": [],
+                    }
+                ]
+            },
+            "tools must be an object or null",
+        ),
+        (
+            {
+                "data": [
+                    {
+                        "name": "agents-remember",
+                        "runtimeStatus": "connected",
+                        "tools": {"": {}},
+                    }
+                ]
+            },
+            "tool names must be non-empty strings",
+        ),
+    ),
+)
+async def test_mcp_readiness_rejects_malformed_status_rows(
+    payload: JsonObject,
+    message: str,
+) -> None:
+    transport = FakeCodexTransport()
+    transport.queue_response("mcpServerStatus/list", payload)
+    with pytest.raises(CodexAppServerError, match=message):
+        await wait_for_codex_mcp_tool(
+            transport,
+            thread_id="thread-1",
+            tool_name="dispatch_agent",
+        )
+
+
+@pytest.mark.anyio
+async def test_mcp_readiness_rejects_invalid_cursor_and_page_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid = FakeCodexTransport()
+    invalid.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("starting", cursor=""),
+    )
+    with pytest.raises(CodexAppServerError, match="invalid cursor"):
+        await wait_for_codex_mcp_tool(
+            invalid,
+            thread_id="thread-1",
+            tool_name="dispatch_agent",
+        )
+
+    limited = FakeCodexTransport()
+    limited.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("starting", cursor="page-2"),
+    )
+    monkeypatch.setattr(codex_mcp_readiness, "MCP_STATUS_PAGE_LIMIT", 1)
+    with pytest.raises(CodexAppServerError, match="exceeded the pagination limit"):
+        await wait_for_codex_mcp_tool(
+            limited,
+            thread_id="thread-1",
+            tool_name="dispatch_agent",
+        )
+
+
+@pytest.mark.anyio
+async def test_role_readiness_refuses_a_missing_thread_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = FakeCodexTransport()
+    adapter = make_adapter(transport)
+    monkeypatch.setattr(adapter, "_require_transport", lambda: transport)
+
+    with pytest.raises(CodexAppServerError, match="without a thread id"):
+        await adapter._role_mcp_readiness(replace(launch(), env={"AR_SPAWN_ROLE": "architect"}))
 
 
 @pytest.mark.anyio
@@ -109,6 +364,99 @@ async def test_roleless_start_uses_dynamic_model_and_model_local_effort_defaults
         }
     finally:
         await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_role_start_waits_for_dispatch_tool_before_becoming_ready() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response(
+        "mcpServerStatus/list",
+        {
+            "data": [
+                {
+                    "name": "agents-remember",
+                    "runtimeStatus": "connected",
+                    "tools": {"dispatch_agent": {}, "server_info": {}},
+                }
+            ],
+            "nextCursor": None,
+        },
+    )
+    adapter = make_adapter(transport)
+    role_launch = replace(
+        launch(),
+        env={"PRESERVE_INSTALLED_AUTH": "1", "AR_SPAWN_ROLE": "architect"},
+    )
+
+    handshake = await adapter.start(role_launch)
+    try:
+        assert handshake.snapshot.control == "ready"
+        assert handshake.snapshot.raw["requiredMcpTool"] == {
+            "serverName": "agents-remember",
+            "runtimeStatus": "connected",
+            "toolName": "dispatch_agent",
+            "toolCount": 2,
+        }
+        assert handshake.raw["requiredMcpTool"] == handshake.snapshot.raw["requiredMcpTool"]
+        assert [method for method, _ in transport.requests][-1] == "mcpServerStatus/list"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_role_start_refuses_settled_mcp_surface_without_dispatch_tool() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response(
+        "mcpServerStatus/list",
+        {
+            "data": [
+                {
+                    "name": "agents-remember",
+                    "runtimeStatus": "connected",
+                    "tools": {"server_info": {}},
+                }
+            ],
+            "nextCursor": None,
+        },
+    )
+    adapter = make_adapter(transport)
+    role_launch = replace(
+        launch(),
+        env={"PRESERVE_INSTALLED_AUTH": "1", "AR_SPAWN_ROLE": "architect"},
+    )
+
+    with pytest.raises(CodexAppServerError, match="settled without required role tool"):
+        await adapter.start(role_launch)
+
+    assert transport.stop_modes == ["forced"]
+
+
+@pytest.mark.anyio
+async def test_role_start_preserves_readiness_refusal_when_cleanup_also_fails() -> None:
+    data = fixture()
+    transport = _CleanupFailingTransport()
+    prime_start(transport, data)
+    transport.queue_response(
+        "mcpServerStatus/list",
+        _mcp_page("connected", "server_info"),
+    )
+    adapter = make_adapter(transport)
+    role_launch = replace(launch(), env={"AR_SPAWN_ROLE": "architect"})
+
+    with pytest.raises(
+        CodexAppServerError,
+        match="settled without required role tool",
+    ) as caught:
+        await adapter.start(role_launch)
+
+    assert caught.value.__notes__ == [
+        "Codex role startup cleanup also failed: RuntimeError: fixture cleanup failure"
+    ]
+    assert transport.stop_modes == ["forced"]
 
 
 @pytest.mark.anyio

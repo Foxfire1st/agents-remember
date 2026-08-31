@@ -531,6 +531,7 @@ class SettingsResilienceTests(unittest.IsolatedAsyncioTestCase):
                 heartbeat_store=AgentNotifierHeartbeatStore(root / "logs" / "observer"),
                 observer_root=root / "logs" / "observer",
                 liveness_clock=lambda: NOW,
+                liveness_sweeper=SimpleNamespace(refresh=lambda: ()),
                 register_inbox_execution_evidence=None,
             )
 

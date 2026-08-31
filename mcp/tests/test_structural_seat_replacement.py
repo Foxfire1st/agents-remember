@@ -71,6 +71,12 @@ class StructuralSeatReplacementTests(unittest.TestCase):
         self.catalog = TerminalCatalog(terminal_catalog_path(self.root))
         self.host = FakeHost()
         self.overrides = SpawnOverrides(host=self.host, which=detected_harness)  # type: ignore[arg-type]
+        readiness_wait = mock.patch(
+            "agents_remember.serving.dispatch_brief.DISPATCH_BRIEF_READINESS_WAIT_SECONDS",
+            0.0,
+        )
+        readiness_wait.start()
+        self.addCleanup(readiness_wait.stop)
 
     def _runtime(
         self, session_id: str | None = None, role: str | None = None
@@ -192,7 +198,7 @@ class StructuralSeatReplacementTests(unittest.TestCase):
 
         with (
             mock.patch(
-                "agents_remember.application.structural.agent_tools."
+                "agents_remember.application.structural.dispatch_transaction."
                 "exclusive_structural_dispatch_lock",
                 side_effect=contended_lock,
             ),

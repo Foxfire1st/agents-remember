@@ -692,6 +692,7 @@ class SprintLinkageTests(unittest.TestCase):
         )
         with self.assertRaises(ValidationError):
             SprintSeat(role="worker")  # a leaf role is not a sprint seat
+        self.assertEqual(SprintSeat(role="reviewer").role, "reviewer")
         with self.assertRaises(ValidationError):
             SprintSeat(role="orchestrator", identity="  ")
         with self.assertRaisesRegex(ValidationError, "unique among planned/active"):

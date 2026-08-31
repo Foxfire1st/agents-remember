@@ -58,6 +58,11 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.task_binding import (
+    TaskBindingRequest,
+    TaskDocumentResolutionFailure,
+    resolve_task_binding,
+)
 from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSessionBinding,
@@ -68,8 +73,6 @@ from agents_remember.serving.terminal_task_assignment import (
     task_binding_conflict_owner,
 )
 from agents_remember.serving.terminal_tmux import tmux_session_name
-from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.worktrees.source_lineage import lineage_refusal, source_lineage_for_task
 
 OpenTerminalStatus = Literal[
     "opened",
@@ -176,6 +179,8 @@ class SpawnProvenance:
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
     spawned_by_kind: Literal["plane", "ambient", "unattributed"] | None = None
+    structural_parent_task_document_ref: TaskDocumentRef | None = None
+    structural_parent_role: str | None = None
     spawn_level: str | None = None
     spawn_level_source: str | None = None
 
@@ -526,12 +531,12 @@ def _opened_catalog_entry(
 ) -> TerminalCatalogEntry:
     """The durable row for the process this open just spawned.
 
-    Only two things survive from a prior row of the same id, and they are the two the departed
-    process never owned: the seat's write-once spawn provenance (:func:`_preserved`) and the tmux
-    identity carried on :class:`ReopenState`. Everything the *process* decided -- its knobs, its
-    resolved pair, its session log, every live control observation -- belongs to the process that
-    is gone, so the new row states this spawn's own values and leaves the observations unset until
-    the bridge reports them. A row whose process still runs never reaches here at all.
+    Write-once spawn ancestry survives from a prior row of the same id, together with the tmux
+    identity carried on :class:`ReopenState`. The structural parent of a polymorphic reviewer is
+    generation-bound instead: a retired plan reviewer may later reopen as a fresh super-exit
+    reviewer at the same canonical seat address, with a different plane-stamped owner. Everything
+    else the *process* decided -- its knobs, resolved pair, session log, and live observations --
+    belongs to the departed process. A row whose process still runs never reaches here at all.
     """
 
     existing = reopen.existing
@@ -569,6 +574,8 @@ def _opened_catalog_entry(
             existing, provenance.spawned_by_lifecycle, "spawned_by_lifecycle"
         ),
         spawned_by_kind=_preserved(existing, provenance.spawned_by_kind, "spawned_by_kind"),
+        structural_parent_task_document_ref=provenance.structural_parent_task_document_ref,
+        structural_parent_role=provenance.structural_parent_role,
         spawn_role=spawn_env.get("AR_SPAWN_ROLE"),
         launch_args=tuple(knobs.launch_args) if knobs.launch_args else None,
         prompt_keywords=tuple(knobs.prompt_keywords) if knobs.prompt_keywords else None,
@@ -707,34 +714,28 @@ def _task_binding_refusal(
     seat_role: str,
 ) -> OpenTerminalResult | None:
     """Validate one role against the real task document before any host side effect."""
-
-    if (
-        provenance.task_document_ref is not None
-        and provenance.replacement_for_task_document_ref is not None
-    ):
-        return OpenTerminalResult(status="task-binding-invalid")
-    ref = provenance.task_document_ref or provenance.replacement_for_task_document_ref
-    structural_role = seat_role not in {"chat", "terminal"}
-    if ref is None:
-        return OpenTerminalResult(status="task-binding-required") if structural_role else None
-    topology = TaskDocumentTopology(runtime.catalog.path.parent.parent.parent)
     try:
-        topology.resolve(ref)
-        if structural_role:
-            topology.validate_role(ref, seat_role)
-    except TaskDocumentRefError:
-        return OpenTerminalResult(status="task-binding-invalid")
-    if not structural_role:
-        return None
-    lineage = source_lineage_for_task(topology.coordination_root, ref)
-    refusal = lineage_refusal(lineage)
+        binding = resolve_task_binding(
+            runtime.catalog.path.parent.parent.parent,
+            TaskBindingRequest(
+                task_document_ref=provenance.task_document_ref,
+                replacement_for_task_document_ref=provenance.replacement_for_task_document_ref,
+                seat_role=seat_role,
+                structural_parent_task_document_ref=(
+                    provenance.structural_parent_task_document_ref
+                ),
+                structural_parent_role=provenance.structural_parent_role,
+            ),
+        )
+    except TaskDocumentResolutionFailure as exc:
+        return OpenTerminalResult(status="task-binding-invalid", detail=str(exc))
+    refusal = binding.refusal
     if refusal is None:
         return None
-    status, detail = refusal
     return OpenTerminalResult(
-        status=status,
-        detail=detail,
-        source_lineage=lineage,
+        status=refusal.status,
+        detail=refusal.detail,
+        source_lineage=refusal.source_lineage,
     )
 
 

@@ -35,16 +35,17 @@ everything below.
 
 In dashboard-owned sessions, this seat stays manager for its lifetime. A pasted brief for another
 role is refused and escalated to the backend orchestrator via inbox instead of rerouting this chat.
-Roles expand horizontally into new chats (`dispatch_agent` with the leaf document and target role) — a role
+Roles expand horizontally into new chats (`dispatch_agent` with the leaf task document and target role) — a role
 seat is never a native sub-agent of this one, and this seat uses no native sub-agents: analysis
 and report checks are its own work, or a dispatched reviewer/curator seat's. A spawned manager
 never absorbs architect, orchestrator, strategist, reviewer, curator, or worker briefs.
 
 ## Hosted Role Dispatch
 
-Every worker, reviewer, or curator dispatch below uses the shared structural transaction in
-`../SKILL.md`: call `dispatch_agent` with the canonical leaf document, target role, and complete
-brief. The control plane owns readiness, occupant identity, and exact initial brief pinning. A
+Every worker, leaf reviewer, or curator dispatch below uses the shared structural transaction in
+`../SKILL.md` with the canonical leaf task document. The master-exit reviewer uses the same transaction
+with this canonical master task document. In both cases call `dispatch_agent` with the target role and
+complete brief. The control plane owns readiness, occupant identity, and exact initial brief pinning. A
 `dispatch-queued` outcome remains durable for standard retry; never request or retain an occupant
 id, poll exact readiness, duplicate its brief, or respawn merely because delivery is pending.
 
@@ -308,7 +309,8 @@ stops belong to the orchestrator via the system-specialist protocol.
   retry, a duplicate spawn), retire it by hand:
   `retire_child(task_document_ref=<leaf document>, role=<seat role>, reason=...)`. Server
   policy enforces the authority split: **you may retire only worker/reviewer/curator seats of your
-  OWN master** — you live outside the master stack you manage, so you can never unseat yourself
+  OWN master** — leaf execution seats through the leaf address, plus the master-exit reviewer
+  through this master document. You can never unseat yourself
   (owner-never-self-retires); a target of any other role, or of a different master, is refused
   loudly. Transcripts are never deleted — retiring only terminates the tmux session and marks the
   catalog row.
@@ -316,7 +318,7 @@ stops belong to the orchestrator via the system-specialist protocol.
 ### 3 — Master-exit seam
 
 When all leaves are ready for the master completion boundary, spawn the **adversarial reviewer**
-(master-exit) via `dispatch_agent` on the review task document with role `reviewer` and the reviewer
+(master-exit) via `dispatch_agent` on this canonical master document with role `reviewer` and the reviewer
 role file (`roles/reviewer.md`). For an organizational master, scope the accumulated contributions
 of its prior leaves already landed on super plus the proposed final leaf as the exact proposed
 final super candidate; for an atomic master, scope the isolated atomic branch. Pass the execution
@@ -383,8 +385,8 @@ state without exposing its private correlation.
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| dispatch | plane-hosted caller; ambient takeover target | The orchestrator is the ordinary plane-hosted caller that creates this master seat; this manager may create only its direct worker/reviewer/curator children, while an identity-free launcher may target it only for an explicit task-seat takeover |
-| tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `dispatch_agent` · `retire_child` (your own master's worker/reviewer/curator seats only) · `message_parent`/`message_child` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` |
+| dispatch | plane-hosted caller; ambient takeover target | The orchestrator is the ordinary plane-hosted caller that creates this master seat; this manager may create worker/reviewer/curator seats on its leaves and its same-master master-exit reviewer, while an identity-free launcher may target it only for an explicit task-seat takeover |
+| tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `dispatch_agent` · `retire_child` (your own master's leaf execution seats and same-master reviewer only) · `message_parent`/`message_child` · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` |
 
 Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
 `promptKeywords`) participate in Settings.json `orchestration.roles.manager` and

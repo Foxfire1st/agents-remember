@@ -17,7 +17,7 @@ def _task_ref(path: str):
     return TaskDocumentRef(repository="repo", path=path)
 
 
-def test_terminal_catalog_migration_maps_every_legacy_identity(tmp_path: Path) -> None:
+def test_terminal_catalog_migration_maps_every_legacy_identity() -> None:
     migration = importlib.import_module("agents_remember.serving.terminal_catalog_migration")
     leaf = _task_ref("master/leaf.json")
     master = _task_ref("master/task.json")
@@ -45,6 +45,11 @@ def test_terminal_catalog_migration_maps_every_legacy_identity(tmp_path: Path) -
     with pytest.raises(migration.TerminalCatalogMigrationError, match="bad role"):
         migration.task_ref_for_role(topology, leaf, "manager")
 
+
+def test_terminal_catalog_migration_resolves_legacy_named_scope() -> None:
+    migration = importlib.import_module("agents_remember.serving.terminal_catalog_migration")
+    master = _task_ref("master/task.json")
+    sprint = _task_ref("sprint/task.json")
     topology = Mock()
     topology.canonical_ref.return_value = master
     topology.altitude.return_value = "master"
@@ -76,7 +81,19 @@ def test_terminal_catalog_migration_maps_every_legacy_identity(tmp_path: Path) -
         )
         == master
     )
+    with pytest.raises(migration.TerminalCatalogMigrationError, match="original leafKey"):
+        migration._legacy_named_scope(
+            topology,
+            {"spawnRepo": "repo", "spawnSprint": "master"},
+            "reviewer",
+        )
 
+
+def test_terminal_catalog_migration_rewrites_legacy_rows(tmp_path: Path) -> None:
+    migration = importlib.import_module("agents_remember.serving.terminal_catalog_migration")
+    leaf = _task_ref("master/leaf.json")
+    master = _task_ref("master/task.json")
+    topology = Mock()
     row = {
         "kind": "harness",
         "seatRole": "worker",
@@ -194,6 +211,11 @@ def test_task_document_topology_children_and_refusals(tmp_path: Path) -> None:
     topology.altitude = Mock(return_value="sprint")
     topology._commanded_masters = Mock(return_value=commanded)
     assert topology.children(sprint) == (master,)
+
+    topology.altitude = Mock(return_value="leaf")
+    for altitude in ("leaf", "master", "sprint"):
+        topology.altitude = Mock(return_value=altitude)
+        assert topology.validate_role(leaf, "reviewer") == altitude
 
     topology.altitude = Mock(return_value="leaf")
     with pytest.raises(refs.TaskDocumentRefError, match="has no structural task altitude"):

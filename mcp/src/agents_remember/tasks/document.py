@@ -38,14 +38,15 @@ TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 DocKind = Literal["light", "subTask", "master"]
 RouteReviewVerdict = Literal["pass", "pass-with-notes", "block"]
 
-# The structural task altitude per role. The SprintSeat schema validates against
-# SPRINT_ROLES; ``document_refs`` re-exports all three for its altitude checks, so the
-# canonical home is here (importing from document_refs would cycle).
+# The structural task altitude per role. Reviewer is deliberately polymorphic across the three
+# review seams; SprintSeat admits it in addition to the ordinary sprint roles. ``document_refs``
+# re-exports these constants for its altitude checks, so their canonical home is here.
 SPRINT_ROLES = frozenset(
     {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
 )
 MASTER_ROLES = frozenset({"manager"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+REVIEWER_ALTITUDES = frozenset({"sprint", "master", "leaf"})
 
 
 class _Doc(BaseModel):
@@ -725,8 +726,9 @@ class SprintSeat(_Doc):
     @classmethod
     def _check_sprint_role(cls, value: str) -> str:
         role = value.strip()
-        if role not in SPRINT_ROLES:
-            raise ValueError(f"sprint seat role must be one of {sorted(SPRINT_ROLES)}")
+        allowed = SPRINT_ROLES | {"reviewer"}
+        if role not in allowed:
+            raise ValueError(f"sprint seat role must be one of {sorted(allowed)}")
         return role
 
     @field_validator("identity")

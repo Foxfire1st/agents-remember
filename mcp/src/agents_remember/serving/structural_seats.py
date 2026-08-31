@@ -52,7 +52,9 @@ class StructuralSeatResolver:
         if document is None:
             raise StructuralSeatError("ambient-seat-unbound", "caller has no task document")
         role = caller.binding_role
-        if role in {"worker", "reviewer", "curator"}:
+        if role == "reviewer":
+            return self._reviewer_parent_address(caller, document)
+        if role in {"worker", "curator"}:
             return self._parent_document(document), "manager"
         if role == "manager":
             return self._parent_document(document), "orchestrator"
@@ -115,35 +117,93 @@ class StructuralSeatResolver:
                 "orchestrator",
                 "strategist",
                 "designer",
+                "reviewer",
             }:
                 raise StructuralSeatError(
                     "structural-child-refused",
-                    "architect children are its sprint orchestrator, strategist, and designer",
+                    "architect children are its sprint orchestrator, strategist, designer, "
+                    "and plan-review reviewer",
                 )
         elif caller.binding_role == "orchestrator":
-            same_sprint_specialist = document == caller_document and role == "system-specialist"
+            same_sprint_child = document == caller_document and role in {
+                "system-specialist",
+                "reviewer",
+            }
             master_manager = (
                 role == "manager" and self._parent_document(document) == caller_document
             )
-            if not same_sprint_specialist and not master_manager:
+            if not same_sprint_child and not master_manager:
                 raise StructuralSeatError(
                     "structural-child-refused",
-                    "orchestrator children are its sprint specialists and managers on direct masters",
+                    "orchestrator children are its sprint specialists, its super-exit reviewer, "
+                    "and managers on direct masters",
                 )
         elif caller.binding_role == "manager":
-            if role not in {"worker", "reviewer", "curator"}:
-                raise StructuralSeatError(
-                    "structural-child-refused", "manager children are worker/reviewer/curator seats"
-                )
-            if self._parent_document(document) != caller_document:
-                raise StructuralSeatError(
-                    "structural-child-refused", "requested leaf is outside the manager's master"
-                )
+            self._authorize_manager_child(caller_document, document, role)
         else:
             raise StructuralSeatError(
                 "structural-child-refused",
                 f"role {caller.binding_role!r} does not own subordinate seats",
             )
+
+    def _authorize_manager_child(
+        self,
+        caller_document: TaskDocumentRef,
+        document: TaskDocumentRef,
+        role: str,
+    ) -> None:
+        if document == caller_document and role == "reviewer":
+            return
+        if document == caller_document or role not in {"worker", "reviewer", "curator"}:
+            raise StructuralSeatError(
+                "structural-child-refused",
+                "manager children are worker/reviewer/curator seats on its leaves and its "
+                "master-exit reviewer on the master",
+            )
+        if self._parent_document(document) != caller_document:
+            raise StructuralSeatError(
+                "structural-child-refused",
+                "requested leaf is outside the manager's master",
+            )
+
+    def _reviewer_parent_address(
+        self,
+        caller: TerminalCatalogEntry,
+        document: TaskDocumentRef,
+    ) -> tuple[TaskDocumentRef, str]:
+        """Validate the plane-stamped owner of a polymorphic reviewer seat."""
+
+        parent_document = caller.structural_parent_task_document_ref
+        parent_role = caller.structural_parent_role
+        altitude = self.topology.altitude(document)
+        if parent_document is None and parent_role is None:
+            if altitude == "leaf":
+                # Reviewer rows that predate polymorphic reviewer seats were leaf-only. Preserve
+                # that one deterministic migration meaning without guessing a higher-level owner.
+                return self._parent_document(document), "manager"
+            raise StructuralSeatError(
+                "structural-parent-unproven",
+                f"{altitude} reviewer {document.key} has no plane-stamped structural parent",
+            )
+        if parent_document is None or parent_role is None:
+            raise StructuralSeatError(
+                "structural-parent-incomplete",
+                f"reviewer {document.key} has an incomplete structural parent address",
+            )
+        allowed = (
+            {(self._parent_document(document), "manager")}
+            if altitude == "leaf"
+            else {(document, "manager")}
+            if altitude == "master"
+            else {(document, "architect"), (document, "orchestrator")}
+        )
+        if (parent_document, parent_role) not in allowed:
+            raise StructuralSeatError(
+                "structural-parent-mismatch",
+                f"reviewer {document.key} at {altitude} has invalid structural parent "
+                f"{parent_document.key} as {parent_role}",
+            )
+        return parent_document, parent_role
 
     def _parent_document(self, document: TaskDocumentRef) -> TaskDocumentRef:
         try:

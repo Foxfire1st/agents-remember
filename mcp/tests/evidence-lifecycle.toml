@@ -1,4 +1,4 @@
-schema_version = "ar-test-evidence-lifecycle/v2"
+schema_version = "ar-test-evidence-lifecycle/v3"
 large_fixture_bytes = 25000
 
 [[contract]]
@@ -95,6 +95,11 @@ evidence_node = "mcp/tests/test_harness_control_claude_stream_1.py::ClaudeStream
 id = "synthetic-test-evidence-candidate"
 owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
 evidence_node = "mcp/tests/test_evidence_lifecycle.py::EvidenceLifecycleTests::test_repository_inventory_is_closed_over_governed_artifacts"
+
+[[contract]]
+id = "ambient-role-chat-e2e"
+owner = "scripts/e2e_harness/run.py"
+evidence_node = "mcp/tests/test_agents_remember_quality.py::test_dagger_quality_builds_the_real_probe_and_targeted_wrapper_graph"
 
 [[artifact]]
 path = "mcp/tests/_control_plane.py"
@@ -692,6 +697,7 @@ consumers = [
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_direct_landing_input_boundary.py",
   "mcp/tests/test_direct_landing_operation_recovery.py",
+  "mcp/tests/test_dispatch_agent_ambient_reviewer.py",
   "mcp/tests/test_dispatch_expectation_rows.py",
   "mcp/tests/test_durable_store_contract.py",
   "mcp/tests/test_gate_replay_window.py",
@@ -832,6 +838,7 @@ consumers = [
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_direct_landing_input_boundary.py",
   "mcp/tests/test_direct_landing_operation_recovery.py",
+  "mcp/tests/test_dispatch_agent_ambient_reviewer.py",
   "mcp/tests/test_dispatch_expectation_rows.py",
   "mcp/tests/test_durable_store_contract.py",
   "mcp/tests/test_gate_replay_window.py",
@@ -1117,3 +1124,253 @@ lifetime = "permanent"
 permanence_rationale = "The manifest removes the unmarked-unit fallback and binds selection, cadence, retry, and reporting to one explicit population."
 replacement_contract = "node:mcp/tests/test_evidence_lanes.py::EvidenceLaneRegistryTests::test_item_category_is_exact_and_provider_gates_are_provider_evidence"
 consumer_scope = "all-tests"
+
+[[artifact]]
+path = "scripts/e2e_harness/codex_driver.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "real Codex app-server driver and candidate MCP discovery"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The clean-room route must exercise the supported Codex process and public MCP discovery boundary."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/dispatch_sentinels.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "public dispatch schema rejection sentinels"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The hosted leg needs explicit failure sentinels that distinguish discovery from model timeout."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/responses_server.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "disposable canonical task, contract, runtime, and repository fixture"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Each run needs a fresh authority fixture built from production models rather than copied state."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+  "scripts/e2e_harness/scenario_runtime.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/reporting.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "checkpoint recorder and atomic JSON evidence writer"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The scenario requires one typed checkpoint vocabulary and durable per-run evidence projection."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/responses_server.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "scripted Responses API server over the public dispatch advertisement"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Real Codex needs a deterministic independent response peer that still consumes the advertised MCP schema."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/responses_sse.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "minimal OpenAI Responses SSE frames consumed by real Codex"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The deterministic provider peer must emit an independent supported wire sequence."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/responses_server.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/run.py"
+kind = "recording-generator"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "two fresh no-retry Dagger replications of the ambient role-chat route"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The acceptance route must regenerate candidate-bound checkpoint evidence inside Dagger."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  ".dagger/src/agents_remember_quality/main.py",
+  "mcp/tests/test_agents_remember_quality.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "canonical ambient spawn, hosted handoff, vacancy, and replacement scenario"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The cross-process behavior is one ordered scenario whose checkpoints cannot be reduced to unit assertions."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario_control.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "public control submission and durable observation helpers"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The scenario must drive and observe the real control and inbox boundaries without internal handler shortcuts."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario_evidence.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "checkpoint definitions and independently observed route evidence"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The route needs stable requirement-linked checkpoints separated from scenario mutation code."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario_runtime.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "process-race"
+cadence = "affected"
+source_version_or_generator = "fixture tmux socket lifecycle and spawned-process teardown"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Process isolation and cleanup need one bounded owner that proves no host tmux authority is reused."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/selection.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "explicit affected-path projection with source-derived direct-import closure test"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Targeted acceptance must fail when a directly imported harness dependency can green-skip the scenario."
+replacement_contract = "contract:ambient-role-chat-e2e"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+]
