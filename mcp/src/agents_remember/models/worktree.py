@@ -18,6 +18,12 @@ from agents_remember.models.lifecycles.operation import LifecycleOperationProjec
 from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
 from agents_remember.models.lifecycles.operation_wait import LifecycleWaitOutcome
 from agents_remember.models.quality import QualityGateResult
+from agents_remember.models.structural.atomic_series_activation import (
+    AtomicSeriesActivationRecord,
+    AtomicSeriesObservedState,
+    AtomicSeriesSourcePair,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]
@@ -136,6 +142,68 @@ class SyncResolutionProjection(StrictResponseModel):
     files: list[str] = Field(default_factory=list)
 
 
+class AtomicSeriesActivationFact(StrictResponseModel):
+    """Read-only source-pair activation evidence carried by status/refusals."""
+
+    address: str | None = Field(default=None, max_length=4096)
+    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    state: AtomicSeriesObservedState
+    record: AtomicSeriesActivationRecord | None = None
+    errorType: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+
+
+class AtomicSeriesAdmissionActivation(StrictResponseModel):
+    """Activation snapshot nested in an admission refusal."""
+
+    path: str = Field(min_length=1, max_length=4096)
+    observedState: AtomicSeriesObservedState
+    recordPresent: bool
+    sourcePairFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    revision: int | None = Field(default=None, ge=1)
+    selectedAt: str | None = Field(default=None, max_length=128)
+    selectedMaster: TaskDocumentRef | None = None
+    selectedContractPath: str | None = Field(default=None, max_length=4096)
+    errorType: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+
+
+class AtomicSeriesAdmissionRequested(StrictResponseModel):
+    master: TaskDocumentRef | None = None
+    contractPath: str | None = Field(default=None, max_length=4096)
+
+
+class AtomicSeriesAdmissionBlocking(StrictResponseModel):
+    master: TaskDocumentRef
+    contractPath: str = Field(min_length=1, max_length=4096)
+    state: AtomicSeriesObservedState
+    revision: int = Field(ge=1)
+    selectedAt: str = Field(min_length=1, max_length=128)
+
+
+class AtomicSeriesAdmissionStatusAction(StrictResponseModel):
+    tool: Literal["worktree_status"] = "worktree_status"
+    args: dict[str, object]
+
+
+class AtomicSeriesAdmission(StrictResponseModel):
+    """Bounded explanation of why an activation boundary admitted or refused work."""
+
+    classification: Literal["wait", "corrective-action"]
+    operation: str = Field(min_length=1, max_length=256)
+    requested: AtomicSeriesAdmissionRequested
+    sourcePair: AtomicSeriesSourcePair | None = None
+    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    activation: AtomicSeriesAdmissionActivation | None = None
+    blocking: AtomicSeriesAdmissionBlocking | None = None
+    retryPrecondition: str = Field(min_length=1, max_length=8192)
+    statusAction: AtomicSeriesAdmissionStatusAction | None = None
+    status: str = Field(min_length=1, max_length=256)
+    detail: str = Field(min_length=1, max_length=8192)
+    expected: dict[str, object] | None = None
+    observed: dict[str, object] | None = None
+
+
 # Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
 # is what these were, and the copies had drifted apart in six places at once: `chat-task`
 # (the kind `worktree_start`'s own docstring advertises, on 8 contracts), `reopened`,
@@ -199,6 +267,10 @@ class WorktreeSummary(StrictResponseModel):
     lifecycleOperation: LifecycleOperationProjection | None = None
     sourceLineage: SourceLineageProjection | None = None
     syncOperation: SyncOperationProjection | None = None
+    atomicSeriesActivation: AtomicSeriesActivationFact | None = None
+    admission: AtomicSeriesAdmission | None = None
+    retryPrecondition: str | None = Field(default=None, max_length=8192)
+    statusAction: AtomicSeriesAdmissionStatusAction | None = None
 
 
 class WorktreeCommandResponse(FlexibleToolResponse):
@@ -229,6 +301,10 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     correctedCall: CloseoutCorrectedCall | None = None
     code_quality_gate: QualityGateResult | None = None
     quality_gate: QualityGateResult | None = None
+    atomicSeriesActivation: AtomicSeriesActivationFact | None = None
+    admission: AtomicSeriesAdmission | None = None
+    retryPrecondition: str | None = Field(default=None, max_length=8192)
+    statusAction: AtomicSeriesAdmissionStatusAction | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):

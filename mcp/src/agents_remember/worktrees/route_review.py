@@ -39,6 +39,122 @@ class RouteReviewError(ValueError):
         super().__init__(detail)
 
 
+_ROUTE_REVIEW_RECORD_STATUSES = frozenset(
+    {
+        "route-review-required",
+        "route-review-stale",
+        "route-review-evidence-stale",
+        "route-review-dependencies-stale",
+        "route-review-task-intent-missing",
+        "route-review-task-intent-unavailable",
+        "route-review-task-intent-stale",
+    }
+)
+
+
+def route_review_refusal_projection(
+    status: str,
+    detail: str,
+    *,
+    contract: WorktreeContract | None = None,
+) -> dict[str, object]:
+    """Project one route-review refusal into truthful, task-bound recovery guidance.
+
+    The route gate remains the authority for whether a review is required.  This helper only
+    explains the already-established refusal at an application boundary.  A task-addressed
+    ``task_doc`` retry is emitted only when the caller has the exact contract, so an admission
+    finding without that identity cannot accidentally invent a review payload or destination.
+    """
+
+    if status == "route-review-task-document-missing":
+        expected = {"taskDocument": "canonical leaf task document with route-review authority"}
+        observed = {"taskDocument": "missing"}
+        next_action = "inspect_task_document"
+        summary = (
+            "Restore or inspect the canonical leaf task document, then record a current "
+            "route review before retrying closeout."
+        )
+        next_operation = "inspect_task_document"
+        required_args: list[str] | None = None
+    elif status == "route-review-blocked":
+        expected = {"routeReview": "current passing independent review"}
+        observed = {"routeReview": "blocked"}
+        next_action = "developer-decision"
+        summary = (
+            "The independent route review blocks this candidate; resolve that review decision "
+            "before retrying closeout."
+        )
+        next_operation = "developer-decision"
+        required_args = None
+    elif status in _ROUTE_REVIEW_RECORD_STATUSES:
+        expected = {"routeReview": "current passing review bound to this candidate"}
+        observed = {"routeReviewStatus": status}
+        next_action = "record_route_review"
+        summary = (
+            "Record or refresh the route review for the exact current candidate, then retry "
+            "closeout."
+        )
+        next_operation = "record_route_review"
+        required_args = ["review"]
+    else:
+        expected = {"routeReview": "valid current review authority"}
+        observed = {"routeReviewStatus": status}
+        next_action = "developer-decision"
+        summary = f"Resolve the route-review admission failure ({status}) before retrying closeout."
+        next_operation = "developer-decision"
+        required_args = None
+
+    result: dict[str, object] = {
+        "status": status,
+        "detail": detail,
+        "expected": expected,
+        "observed": observed,
+        "nextAction": next_action,
+    }
+    next_step: dict[str, object] = {
+        "summary": summary,
+        "nextOperation": next_operation,
+    }
+    if contract is not None:
+        contract_path = contract.contract_path.as_posix()
+        result["contractPath"] = contract_path
+        if status == "route-review-task-document-missing":
+            next_args = {
+                "repo_id": contract.repo_name,
+                "operation": "get",
+                "contract_path": contract_path,
+            }
+            result["nextTool"] = "task_doc"
+            result["nextArgs"] = next_args
+            next_step["nextTool"] = "task_doc"
+            next_step["nextArgs"] = next_args
+        elif status in _ROUTE_REVIEW_RECORD_STATUSES:
+            next_args = {
+                "repo_id": contract.repo_name,
+                "operation": "record_route_review",
+                "contract_path": contract_path,
+            }
+            result["nextTool"] = "task_doc"
+            result["nextArgs"] = next_args
+            next_step["nextTool"] = "task_doc"
+            next_step["nextArgs"] = next_args
+        if required_args:
+            result["nextRequiredArgs"] = required_args
+            next_step["nextRequiredArgs"] = required_args
+    result["nextStep"] = next_step
+    return result
+
+
+def route_review_refusal_fields(
+    error: RouteReviewError,
+    *,
+    contract: WorktreeContract,
+) -> dict[str, object]:
+    """Project a typed route-review error with the exact contract identity."""
+
+    return route_review_refusal_projection(error.status, str(error), contract=contract)
+
+
 def code_candidate_tree(contract: WorktreeContract) -> str:
     if contract.kind == "series":
         return require_git(

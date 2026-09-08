@@ -36,12 +36,16 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.worktree import (
+    AtomicSeriesActivationFact,
     SourceLineageProjection,
     SyncOperationProjection,
     WorktreeState,
     WorktreeSummary,
 )
 from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.activation.atomic_series_activation import (
+    atomic_series_status_projection,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
     require_contract_matches_lifecycle_operation_location,
@@ -140,6 +144,11 @@ def worktree_status_packet(
             )
         ),
         sync_operation=sync_operation,
+        atomic_series_activation=(
+            AtomicSeriesActivationFact.model_validate(atomic_series_status_projection(contract))
+            if contract.kind == "series"
+            else None
+        ),
     )
 
 
@@ -210,6 +219,7 @@ def _summary_from_status_payload(
     *,
     lifecycle_operation: LifecycleOperationProjection | None = None,
     sync_operation: SyncOperationProjection | None = None,
+    atomic_series_activation: AtomicSeriesActivationFact | None = None,
 ) -> WorktreeSummary:
     """Project a snake_case status payload onto the camelCase wire model, field by field.
 
@@ -260,6 +270,9 @@ def _summary_from_status_payload(
         unknownContractCells=payload.get("unknown_contract_cells"),
         lifecycleOperation=lifecycle_operation,
         syncOperation=sync_operation,
+        atomicSeriesActivation=(
+            atomic_series_activation if atomic_series_activation is not None else None
+        ),
         sourceLineage=(
             SourceLineageProjection.model_validate(source_lineage)
             if source_lineage is not None

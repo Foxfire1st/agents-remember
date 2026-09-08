@@ -81,6 +81,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import
     start_or_observe_closeout_operation,
     start_or_observe_operation,
 )
+from agents_remember.worktrees.route_review import (
+    RouteReviewError,
+    route_review_refusal_fields,
+    route_review_refusal_projection,
+)
 from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -456,6 +461,7 @@ def _start_closeout_operation(
         CloseoutInputError,
         LifecycleControlError,
         LifecycleOperationReadError,
+        RouteReviewError,
         TaskIntentError,
     ) as error:
         return _start_operation_refusal(
@@ -463,6 +469,7 @@ def _start_closeout_operation(
             confined,
             address,
             error,
+            contract=configured.contract,
         )
     if isinstance(execution, ConfiguredContractRefused):
         return project_configured_contract_refusal(
@@ -769,11 +776,25 @@ def _start_operation_refusal(
     contract_path: Path,
     address: LifecycleOperationPublicAddress,
     error: Exception,
+    *,
+    contract: WorktreeContract | None = None,
 ) -> dict[str, Any]:
     """Translate one start/admission failure without duplicating route classifiers."""
 
-    if isinstance(error, CertificationContractError):
-        return certification_admission_refusal(address.operation, error)
+    if isinstance(error, (RouteReviewError, CertificationContractError)):
+        fields = (
+            route_review_refusal_fields(error, contract=contract)
+            if isinstance(error, RouteReviewError) and contract is not None
+            else route_review_refusal_projection(error.status, str(error))
+            if isinstance(error, RouteReviewError)
+            else certification_admission_refusal(address.operation, error, contract=contract)
+        )
+        return {
+            "ok": False,
+            "operation": address.operation,
+            "state": "refused",
+            **fields,
+        }
     if isinstance(error, CloseoutInputError):
         return _closeout_input_refusal(address.operation, error)
     if isinstance(error, TaskIntentError):
@@ -994,6 +1015,13 @@ def _worktree_closeout(
     )
     try:
         result = git_worktree_manager.closeout_result(args, configured.contract)
+    except RouteReviewError as error:
+        return {
+            "ok": False,
+            "operation": operation,
+            "state": "refused",
+            **route_review_refusal_fields(error, contract=configured.contract),
+        }
     except CuratorCoherenceError as error:
         return {
             "ok": False,

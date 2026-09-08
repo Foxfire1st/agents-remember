@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
+    bounded_activation_detail,
+    observe_atomic_series,
     publish_atomic_series_selection,
     require_atomic_series_cancellation_owner,
     require_selected_atomic_series,
 )
 from agents_remember.worktrees.activation.atomic_series_activation_release import (
     release_atomic_series_selection,
+)
+from agents_remember.worktrees.activation.atomic_series_admission import (
+    AtomicSeriesAdmissionRequest,
+    atomic_series_admission_projection,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -38,11 +44,22 @@ _EXPECTED_ADMISSION_FAILURES = (
 )
 
 
+@dataclass(frozen=True)
+class _AdmissionRefusalRequest:
+    contract: WorktreeContract
+    args: WorktreeArgs | None
+    operation: str
+    status: str
+    detail: str
+    error: BaseException | None = None
+
+
 def activate_atomic_series_contract(
     contract: WorktreeContract,
     *,
     activation_args: WorktreeArgs | None = None,
     dry_run: bool = False,
+    operation: str = "worktree_attach",
 ) -> WorktreeContract | WorktreeCommandResult:
     """Select an existing series before implementation attach/dispatch exposure."""
 
@@ -60,10 +77,13 @@ def activate_atomic_series_contract(
             current = load_contract(contract.contract_path)
             if current != contract:
                 return _admission_refusal(
-                    contract,
-                    activation_args,
-                    status="atomic-series-contract-changed",
-                    detail="atomic-series contract changed while source evidence was refreshed",
+                    _AdmissionRefusalRequest(
+                        contract=contract,
+                        args=activation_args,
+                        operation=operation,
+                        status="atomic-series-contract-changed",
+                        detail="atomic-series contract changed while source evidence was refreshed",
+                    )
                 )
             return reconcile_selected_series_under_authority(
                 current,
@@ -72,10 +92,14 @@ def activate_atomic_series_contract(
             )
     except _EXPECTED_ADMISSION_FAILURES as error:
         return _admission_refusal(
-            contract,
-            activation_args,
-            status=getattr(error, "status", "atomic-series-admission-failed"),
-            detail=str(error),
+            _AdmissionRefusalRequest(
+                contract=contract,
+                args=activation_args,
+                operation=operation,
+                status=getattr(error, "status", "atomic-series-admission-failed"),
+                detail=str(error),
+                error=error,
+            )
         )
 
 
@@ -129,10 +153,14 @@ def sync_selected_atomic_series_under_authority(
         return _sync_selected_atomic_series_under_authority(contract, args=args, fetch=fetch)
     except _EXPECTED_ADMISSION_FAILURES as error:
         return _admission_refusal(
-            contract,
-            args,
-            status=getattr(error, "status", "atomic-series-admission-failed"),
-            detail=str(error),
+            _AdmissionRefusalRequest(
+                contract=contract,
+                args=args,
+                operation="worktree_sync",
+                status=getattr(error, "status", "atomic-series-admission-failed"),
+                detail=str(error),
+                error=error,
+            )
         )
 
 
@@ -201,13 +229,11 @@ def _sync_selected_atomic_series_under_authority(
     return WorktreeCommandResult(synced.returncode, payload)
 
 
-def _admission_refusal(
-    contract: WorktreeContract,
-    args: WorktreeArgs | None,
-    *,
-    status: str,
-    detail: str,
-) -> WorktreeCommandResult:
+def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResult:
+    contract = request.contract
+    args = request.args
+    public_detail = bounded_activation_detail(request.detail)
+    assert public_detail is not None
     retry_args: dict[str, object] = {
         "contract_path": contract.contract_path.as_posix(),
         "dry_run": False,
@@ -216,20 +242,60 @@ def _admission_refusal(
         retry_args["memory_sync_choice"] = args.memory_sync_choice
     if args is not None and args.resolution_action is not None:
         retry_args["resolution_action"] = args.resolution_action
+    observation = getattr(request.error, "observation", None)
+    if observation is None:
+        try:
+            observation = observe_atomic_series(contract)
+        except _EXPECTED_ADMISSION_FAILURES:
+            observation = None
+    admission = atomic_series_admission_projection(
+        AtomicSeriesAdmissionRequest(
+            operation=request.operation,
+            status=request.status,
+            detail=public_detail,
+            contract=contract,
+            observation=observation,
+            expected=getattr(request.error, "expected", None),
+            observed=getattr(request.error, "observed", None),
+        )
+    )
+    if admission["classification"] == "wait" and admission.get("blocking") is not None:
+        blocking = admission["blocking"]
+        assert isinstance(blocking, dict)
+        blocker = blocking.get("master")
+        blocker_key = (
+            f"{blocker.get('repository')}:{blocker.get('path')}"
+            if isinstance(blocker, dict)
+            else "the named selected master"
+        )
+        summary = (
+            f"Atomic-series admission is waiting: {blocker_key} currently owns the "
+            f"source-pair selection in {blocking.get('state')} state. "
+            "Inspect the supplied worktree_status address before retrying."
+        )
+    else:
+        summary = (
+            f"Atomic-series admission refused ({request.status}): {public_detail} "
+            "Apply the reported corrective action and inspect the supplied worktree_status "
+            "address before retrying."
+        )
+        bounded_summary = bounded_activation_detail(summary)
+        assert bounded_summary is not None
+        summary = bounded_summary
     return WorktreeCommandResult(
         2,
         {
-            "state": status,
-            "status": status,
-            "summary": (
-                "Atomic-series admission refused without exposing implementation work. "
-                "Re-read the exact contract and retry its contract-addressed sync."
-            ),
-            "detail": detail,
+            "state": request.status,
+            "status": request.status,
+            "summary": summary,
+            "detail": public_detail,
             "contract_path": contract.contract_path.as_posix(),
             "retryable": True,
             "nextTool": "worktree_sync",
             "nextArgs": retry_args,
+            "admission": admission,
+            "retryPrecondition": admission["retryPrecondition"],
+            "statusAction": admission["statusAction"],
         },
     )
 

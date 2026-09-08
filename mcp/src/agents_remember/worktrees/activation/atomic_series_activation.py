@@ -55,13 +55,37 @@ ACTIVATION_OWNERSHIP = StoreOwnership(
     ),
 )
 
+_PUBLIC_ACTIVATION_DETAIL_MAX = 8192
+_PUBLIC_ACTIVATION_DETAIL_TRUNCATION = "\u2026 [detail truncated]"
+
+
+def bounded_activation_detail(detail: str | None) -> str | None:
+    """Keep malformed-authority diagnostics inside the public response contract."""
+
+    if detail is None or len(detail) <= _PUBLIC_ACTIVATION_DETAIL_MAX:
+        return detail
+    return detail[: _PUBLIC_ACTIVATION_DETAIL_MAX - len(_PUBLIC_ACTIVATION_DETAIL_TRUNCATION)] + (
+        _PUBLIC_ACTIVATION_DETAIL_TRUNCATION
+    )
+
 
 class AtomicSeriesActivationError(RuntimeError):
     """The selected source-pair authority is absent, malformed, or inconsistent."""
 
-    def __init__(self, status: str, detail: str) -> None:
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        observation: AtomicSeriesActivationObservation | None = None,
+        expected: dict[str, object] | None = None,
+        observed: dict[str, object] | None = None,
+    ) -> None:
         self.status = status
         self.detail = detail
+        self.observation = observation
+        self.expected = expected
+        self.observed = observed
         super().__init__(detail)
 
 
@@ -99,6 +123,8 @@ class AtomicSeriesActivationObservation:
             fact["record"] = self.record.model_dump(mode="json")
         if self.error_type is not None:
             fact["errorType"] = self.error_type
+        if self.detail is not None:
+            fact["detail"] = bounded_activation_detail(self.detail)
         return fact
 
 
@@ -269,6 +295,13 @@ def require_selected_atomic_series(
         raise AtomicSeriesActivationError(
             "atomic-series-activation-selected-contract-mismatch",
             "sync continuation/cancellation requires the exact selected reconciling series",
+            observation=observation,
+            expected={
+                "master": expected_master.model_dump(mode="json"),
+                "contractPath": contract.contract_path.as_posix(),
+                "state": required_state,
+            },
+            observed=observation.source_fact(),
         )
     return observation
 
@@ -291,6 +324,13 @@ def require_atomic_series_cancellation_owner(
         raise AtomicSeriesActivationError(
             "atomic-series-activation-selected-contract-mismatch",
             "sync cancellation requires the exact selected or last-released series",
+            observation=observation,
+            expected={
+                "master": expected_master.model_dump(mode="json"),
+                "contractPath": contract.contract_path.as_posix(),
+                "state": ["reconciling", "vacant"],
+            },
+            observed=observation.source_fact(),
         )
     return observation
 
@@ -457,6 +497,19 @@ def series_master_ref(contract: WorktreeContract) -> TaskDocumentRef:
         repository=contract.repo_name,
         path=task_path.relative_to(repository_root).as_posix(),
     )
+
+
+def atomic_series_status_projection(contract: WorktreeContract) -> dict[str, object]:
+    """Read the activation fact for status without creating or repairing state."""
+
+    try:
+        return observe_atomic_series(contract).source_fact()
+    except AtomicSeriesActivationError as error:
+        return {
+            "state": "unreadable",
+            "errorType": error.status,
+            "detail": bounded_activation_detail(error.detail),
+        }
 
 
 def _series_is_terminal(contract: WorktreeContract) -> bool:

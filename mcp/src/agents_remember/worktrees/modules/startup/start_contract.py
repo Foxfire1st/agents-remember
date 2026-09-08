@@ -48,6 +48,12 @@ from agents_remember.worktrees.modules.startup.leaf_ref_start import (
     invalid_leaf_ref_result,
     resolve_start_leaf_doc_id,
 )
+from agents_remember.worktrees.modules.startup.master_series_admission import (
+    MasterSeriesContractAdmissionError,
+    _existing_master_series_contract,
+    _master_series_admission_refusal,
+    memory_mode_for_repository,
+)
 from agents_remember.worktrees.scheduling_mode import (
     TERMINAL_SERIES_CLEANUP,
     commanded_sprint_masters,
@@ -70,7 +76,6 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     default_series_contract,
     load_contract,
-    worktree_group_for,
 )
 
 MASTER_SERIES_BOOTSTRAP_OWNERSHIP = StoreOwnership(
@@ -193,16 +198,6 @@ def _master_execution_nature(task_root: Path) -> str | None:
     return document.executionNature
 
 
-def memory_mode_for_repository(code_repo: Path, memory_root: Path | None) -> str:
-    """Derive the contract vocabulary from the configured repository topology."""
-
-    if memory_root is None:
-        return "disabled"
-    if memory_root.resolve() == (code_repo / "ar-memory").resolve():
-        return "internal"
-    return "external"
-
-
 @dataclass(frozen=True)
 class MasterSeriesContractSpec:
     """All task/config-derived identity needed to materialize one master edge."""
@@ -241,7 +236,14 @@ def ensure_master_series_contract(
 
     _require_commanded_atomic_master(spec)
     if dry_run:
-        candidate = _bootstrap_preflight_contract(spec)
+        try:
+            candidate = _bootstrap_preflight_contract(spec)
+        except MasterSeriesContractAdmissionError as error:
+            return _master_series_admission_refusal(
+                spec,
+                error,
+                operation=leaf_admission_operation or "worktree_start",
+            )
         if leaf_admission_operation is not None:
             require_series_accepting_leaves(candidate, operation=leaf_admission_operation)
         return candidate
@@ -253,7 +255,14 @@ def ensure_master_series_contract(
     with exclusive_access(
         _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
     ):
-        preflight = _bootstrap_preflight_contract(spec)
+        try:
+            preflight = _bootstrap_preflight_contract(spec)
+        except MasterSeriesContractAdmissionError as error:
+            return _master_series_admission_refusal(
+                spec,
+                error,
+                operation=leaf_admission_operation or "worktree_start",
+            )
     invalid = atomic_series_activation_input_refusal(preflight, activation_args)
     if invalid is not None:
         return invalid
@@ -279,7 +288,14 @@ def ensure_master_series_contract(
             if recovering is not None:
                 contract = recovering
             else:
-                existing = _existing_master_series_contract(spec)
+                try:
+                    existing = _existing_master_series_contract(spec)
+                except MasterSeriesContractAdmissionError as error:
+                    return _master_series_admission_refusal(
+                        spec,
+                        error,
+                        operation=leaf_admission_operation or "worktree_start",
+                    )
                 if existing is not None:
                     contract = existing
                 else:
@@ -359,139 +375,6 @@ def _master_series_bootstrap_lock_target(spec: MasterSeriesContractSpec) -> Path
         / slugify(spec.repo_name)
         / slugify(spec.task_name)
     )
-
-
-def _existing_master_series_contract(
-    spec: MasterSeriesContractSpec,
-) -> WorktreeContract | None:
-    path = series_contract_path(spec.task_root)
-    if not path.exists():
-        return None
-    try:
-        existing = load_contract(path)
-    except ContractError as exc:
-        raise RuntimeError(f"parent task contract is not readable: {path}") from exc
-    if existing.kind != "series":
-        raise RuntimeError(f"parent task contract is not a series contract: {path}")
-    if existing.cleanup in TERMINAL_SERIES_CLEANUP:
-        # Stale terminal artifact (L13-R5b): it no longer owns the lane; the
-        # caller's fresh bootstrap replaces it.
-        return None
-    if not all(
-        (
-            _same_master_task_edge(existing, spec, path),
-            _same_master_repository_edge(existing, spec),
-            _same_master_branch_edge(existing, spec),
-        )
-    ):
-        raise RuntimeError(
-            "existing master series contract does not match the commanding sprint's "
-            "declared integrationBranch and repository memory edge"
-        )
-    return existing
-
-
-def _same_master_task_edge(
-    existing: WorktreeContract, spec: MasterSeriesContractSpec, path: Path
-) -> bool:
-    expected_task_artifact = spec.task_root / "task.md"
-    expected_worktree_group = worktree_group_for(
-        spec.coordination_root, spec.repo_name, spec.task_name
-    )
-    return all(
-        (
-            existing.task_id == slugify(spec.task_name).upper(),
-            existing.task_name == spec.task_name,
-            existing.repo_name == spec.repo_name,
-            existing.workflow_kind == spec.workflow_kind,
-            existing.coordination_root.resolve() == spec.coordination_root.resolve(),
-            existing.task_root.resolve() == spec.task_root.resolve(),
-            existing.contract_path.resolve() == path.resolve(),
-            existing.task_artifact.resolve() == expected_task_artifact.resolve(),
-            existing.worktree_group.resolve() == expected_worktree_group.resolve(),
-            existing.parent_task_name == spec.parent_task_name,
-            existing.parent_contract_path is None,
-            existing.leaf_id == "",
-            existing.lifecycle_id == "",
-        )
-    )
-
-
-def _same_master_repository_edge(
-    existing: WorktreeContract, spec: MasterSeriesContractSpec
-) -> bool:
-    expected_memory_mode = memory_mode_for_repository(spec.code_repo, spec.memory_root)
-    expected_memory_repo = spec.memory_root if expected_memory_mode == "external" else None
-    return all(
-        (
-            _same_repository_root(existing.code_repo_path, spec.code_repo),
-            _same_repository_root(existing.code_worktree, spec.code_repo),
-            existing.memory_mode == expected_memory_mode,
-            _same_optional_repository_root(existing.memory_repo_path, expected_memory_repo),
-            _same_series_memory_edge(
-                existing.ledger_path,
-                existing.memory_repo_path,
-                existing.memory_worktree,
-            ),
-        )
-    )
-
-
-def _same_master_branch_edge(existing: WorktreeContract, spec: MasterSeriesContractSpec) -> bool:
-    expected_branch = f"ar/{slugify(spec.task_name)}"
-    external_memory = existing.memory_mode == "external"
-    return all(
-        (
-            existing.code_source_branch == spec.protected_branch,
-            existing.code_work_branch == expected_branch,
-            existing.memory_source_branch == (spec.protected_branch if external_memory else ""),
-            existing.memory_work_branch == (expected_branch if external_memory else ""),
-        )
-    )
-
-
-def _repository_root(path: Path | None) -> Path | None:
-    if path is None or not path.is_dir():
-        return None
-    result = run_git(path, ["rev-parse", "--show-toplevel"])
-    output = result.stdout.strip()
-    if result.returncode != 0 or not output:
-        return None
-    root = Path(output).resolve()
-    return root if path.resolve() == root else None
-
-
-def _same_repository_root(left: Path | None, right: Path | None) -> bool:
-    if _repository_root(left) is None or _repository_root(right) is None:
-        return False
-    left_identity = repository_identity(left)
-    right_identity = repository_identity(right)
-    return left_identity is not None and left_identity == right_identity
-
-
-def _same_optional_repository_root(left: Path | None, right: Path | None) -> bool:
-    if left is None or right is None:
-        return left is None and right is None
-    return _same_repository_root(left, right)
-
-
-def _same_series_memory_edge(
-    ledger: Path | None,
-    memory_repo: Path | None,
-    memory_worktree: Path | None,
-) -> bool:
-    if ledger is None or memory_repo is None:
-        return ledger is None and memory_repo is None and memory_worktree is None
-    repository_root = _repository_root(memory_repo)
-    if repository_root is None:
-        return False
-    authority_root = repository_root
-    if memory_worktree is not None:
-        worktree_root = _repository_root(memory_worktree)
-        if worktree_root is None or not _same_repository_root(memory_worktree, memory_repo):
-            return False
-        authority_root = worktree_root
-    return ledger.resolve() == (authority_root / "memory.md").resolve()
 
 
 def _new_master_series_contract(spec: MasterSeriesContractSpec) -> WorktreeContract:
@@ -1058,6 +941,53 @@ def _start_memory_base(
     return memory_base_for_source(memory_repo, memory_source_branch)
 
 
+def _existing_master_series_admission_refusal(
+    context,
+    args: WorktreeArgs,
+    task_root: Path,
+    memory_mode: str,
+    memory_repo: Path | None,
+) -> WorktreeCommandResult | None:
+    """Project a persisted master edge refusal before branch protection runs.
+
+    ``require_proposed_work_branches`` reads the same persisted series contract while
+    calculating protected surfaces.  If that contract names a foreign source edge, its
+    authority check would otherwise raise a plain ``RuntimeError`` before the startup
+    admission transaction can return its public reason.  This read-only preflight keeps
+    the existing ordering and policy while giving the already-known edge mismatch the
+    typed admission projection used by the later bootstrap path.
+    """
+
+    nature = _master_execution_nature(task_root)
+    if nature is None and not _task_root_has_master_artifact(task_root):
+        return None
+    if _is_graph_organizational(context, task_root, nature):
+        return None
+    protected_branch = _declared_integration_source_branch(context, task_root)
+    spec = MasterSeriesContractSpec(
+        coordination_root=context.coordination_root,
+        repo_name=context.code_repository_name,
+        code_repo=context.code_repository_root,
+        memory_root=memory_repo
+        if memory_mode == "external"
+        else (context.code_repository_root / "ar-memory" if memory_mode == "internal" else None),
+        task_root=task_root,
+        task_name=args.task_name or task_root.name,
+        parent_task_name=args.parent_task or "",
+        workflow_kind=args.workflow_kind,
+        protected_branch=protected_branch,
+    )
+    try:
+        _existing_master_series_contract(spec)
+    except MasterSeriesContractAdmissionError as error:
+        return _master_series_admission_refusal(
+            spec,
+            error,
+            operation="atomic leaf start",
+        )
+    return None
+
+
 def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
     assert args.task_name is not None
     assert args.worktree_name is not None
@@ -1075,6 +1005,15 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Wor
     memory_mode = args.memory_mode or context.memory_mode
     memory_repo = _start_memory_repo(context, memory_mode)
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
+    admission_refusal = _existing_master_series_admission_refusal(
+        context,
+        args,
+        task_root,
+        memory_mode,
+        memory_repo,
+    )
+    if admission_refusal is not None:
+        return admission_refusal
     require_proposed_work_branches(
         ProposedWorkBranches(
             coordination_root=context.coordination_root,

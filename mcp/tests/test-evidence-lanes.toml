@@ -106,6 +106,7 @@ public-contract = [
 ]
 integration = [
   "mcp/tests/test_atomic_series_activation.py",
+  "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_citation_document_transaction.py",
@@ -153,6 +154,7 @@ integration = [
   "mcp/tests/test_tools.py",
   "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_closeout_route_review_transport.py",
   "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",

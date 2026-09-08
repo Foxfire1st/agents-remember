@@ -298,6 +298,7 @@ permanence_rationale = "The helper is the single test-side composition root for 
 replacement_contract = "node:mcp/tests/test_prepared_publication_recovery.py::test_real_gate_five_prepares_then_publishes_memory_and_ledger"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_atomic_series_activation.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
@@ -325,6 +326,7 @@ consumers = [
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_closeout_route_review_transport.py",
   "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_support.py",
@@ -346,6 +348,7 @@ permanence_rationale = "Closeout fixtures need one shared input author that pres
 replacement_contract = "node:mcp/tests/test_prepared_publication_recovery.py::test_real_gate_five_prepares_then_publishes_memory_and_ledger"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_atomic_series_activation.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
@@ -373,6 +376,7 @@ consumers = [
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_closeout_route_review_transport.py",
   "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_support.py",

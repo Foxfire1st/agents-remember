@@ -13,6 +13,9 @@ from agents_remember.tasks.leaf_doc import (
     plan_leaf_doc_lifecycle_restamp,
 )
 from agents_remember.tasks.store import write_task_docs
+from agents_remember.worktrees.activation.atomic_series_activation import (
+    atomic_series_status_projection,
+)
 from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
     activate_atomic_series_contract,
 )
@@ -157,7 +160,10 @@ def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 ),
             },
         )
-    return WorktreeCommandResult(0, dict(status_payload(contract)))
+    payload = dict(status_payload(contract))
+    if contract.kind == "series":
+        payload["atomicSeriesActivation"] = atomic_series_status_projection(contract)
+    return WorktreeCommandResult(0, payload)
 
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -180,6 +186,7 @@ def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
             parent_series,
             activation_args=args,
             dry_run=args.dry_run,
+            operation="worktree_attach",
         )
         if isinstance(activation, WorktreeCommandResult):
             return activation
