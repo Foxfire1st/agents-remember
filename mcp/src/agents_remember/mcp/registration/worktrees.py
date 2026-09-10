@@ -4,8 +4,6 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.application.lifecycle.lifecycle_enclosure_tools import EnclosureAdoptionRequest
-from agents_remember.application.lifecycle.lifecycle_status_wait import LifecycleStatusWaitRequest
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tools import (
     StartExecution,
@@ -14,15 +12,12 @@ from agents_remember.application.worktree_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
-from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 
 from ..tools import (
     worktree_attach_payload,
-    worktree_enclosure_adopt_payload,
     worktree_start_payload,
     worktree_status_payload,
-    worktree_status_wait_payload,
     worktree_sync_payload,
 )
 
@@ -110,33 +105,6 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
 def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Adopt or re-attach one existing worktree enclosure."""
 
-    @server.tool()
-    def worktree_enclosure_adopt(
-        contract_path: str,
-        expected_worktree_group: str,
-        rationale: str,
-        *,
-        dry_run: bool = True,
-        approved: bool = False,
-        expected_publication_request_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Explicitly adopt one readable pre-locator enclosure. Dry-run by default.
-
-        This is the only old-layout address migration. It validates one exact contract/root,
-        preserves source digests and an audit receipt, and never runs from normal status,
-        control, contract writes, or schema-1 repair.
-        """
-        return worktree_enclosure_adopt_payload(
-            config,
-            EnclosureAdoptionRequest(
-                contract_path=contract_path,
-                expected_worktree_group=expected_worktree_group,
-                rationale=rationale,
-                dry_run=dry_run,
-                approved=approved,
-                expected_publication_request_id=expected_publication_request_id,
-            ),
-        )
 
     @server.tool()
     def worktree_attach(
@@ -198,37 +166,6 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
             caller=caller,
         )
 
-    @server.tool()
-    def worktree_status_wait(
-        contract_path: str,
-        operation_kind: LifecycleOperationKind,
-        *,
-        expected_generation: int,
-        after_revision: int,
-        timeout_seconds: float = 30.0,
-    ) -> dict[str, Any]:
-        """Wait read-only, up to timeout_seconds, for one meaningful lifecycle
-        status change of one exact task operation (CCR-R15). Address the canonical
-        contract, operation kind, expected public generation, and the opaque
-        after_revision cursor from a prior worktree_status snapshot; no
-        operation key or PID is accepted. On change it returns the current compact
-        R18-coherent status plus the next cursor; on timeout it returns the unchanged
-        snapshot and cursor without claiming failure. Heartbeats, unchanged current
-        commands, log growth, and queue changes never wake it. A generation successor
-        wakes an old-generation wait with explicit successor information; wrong
-        contract/generation/cursor and unreadable journals refuse typed. Read-only:
-        never mutates, retries, cancels, or acquires lifecycle/queue/gate/worker
-        authority."""
-        return worktree_status_wait_payload(
-            config,
-            LifecycleStatusWaitRequest(
-                contract_path=contract_path,
-                operation_kind=operation_kind,
-                expected_generation=expected_generation,
-                after_revision=after_revision,
-                timeout_seconds=timeout_seconds,
-            ),
-        )
 
     @server.tool()
     def worktree_sync(

@@ -98,13 +98,11 @@ from .worktree import (
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
-    worktree_enclosure_adopt_payload,
     worktree_integrate_payload,
     worktree_legacy_operation_payload,
     worktree_operation_control_payload,
     worktree_start_payload,
     worktree_status_payload,
-    worktree_status_wait_payload,
     worktree_sync_payload,
 )
 
@@ -190,12 +188,10 @@ __all__ = [
     "worktree_cleanup_payload",
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",
-    "worktree_enclosure_adopt_payload",
     "worktree_integrate_payload",
     "worktree_legacy_operation_payload",
     "worktree_operation_control_payload",
     "worktree_start_payload",
     "worktree_status_payload",
-    "worktree_status_wait_payload",
     "worktree_sync_payload",
 ]
