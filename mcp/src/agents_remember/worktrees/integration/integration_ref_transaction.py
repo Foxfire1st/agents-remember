@@ -19,7 +19,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 )
 from agents_remember.worktrees.integration.integration_operation_authority import (
     require_authorized_integration_commits,
-    require_current_integration_sources,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -141,12 +140,6 @@ def prepare_integration_ref_move(
             expected_series_prefix=expected_series_ledger_prefix,
         )
 
-    require_current_integration_sources(
-        contract,
-        args,
-        code_source_commit=code_head_before,
-        memory_source_commit=memory_head_before,
-    )
     _require_clean_branch_checkout(contract.code_repo_path, code_target.branch, code_head_before)
     if external:
         assert contract.memory_repo_path is not None

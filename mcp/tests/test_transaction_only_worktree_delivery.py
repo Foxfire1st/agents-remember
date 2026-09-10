@@ -9,7 +9,6 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.lifecycle.lifecycle_operation_worker import (
     OperationRuntime,
@@ -322,16 +321,16 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
             dry_run=True,
         )
         assert preview["ok"] is True, preview
-        queued = worktree_tools.worktree_integrate_tool(
+        applied = worktree_tools.worktree_integrate_tool(
             config,
             contract_path=closed.contract_path.as_posix(),
             strategy="ff-only",
             dry_run=False,
         )
-        assert queued["ok"] is True and queued["state"] == "queued", queued
-        integrated, operation = _run_queued_operation(closed, "integrate")
 
-    assert operation is not None and operation.status == "completed", operation
+    # Integration runs in this process: the refs themselves are the record.
+    assert applied["ok"] is True, applied
+    integrated = load_contract(closed.contract_path)
     assert integrated.integration_status == "completed"
     assert integrated.integrated_code_commit == integrated.code_commit
     assert integrated.integrated_memory_content_commit == integrated.memory_content_commit
@@ -357,13 +356,13 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
         stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
-        queued = worktree_tools.worktree_integrate_tool(
+        preview = worktree_tools.worktree_integrate_tool(
             config,
             contract_path=closed.contract_path.as_posix(),
             strategy="ff-only",
-            dry_run=False,
+            dry_run=True,
         )
-        assert queued["ok"] is True and queued["state"] == "queued", queued
+        assert preview["ok"] is True, preview
 
         _git(fixture.code_repo, "branch", "race", source_before)
         _git(fixture.code_repo, "switch", "race")
@@ -374,17 +373,19 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
         _git(fixture.code_repo, "update-ref", "refs/heads/ar/master", raced, source_before)
         code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
 
-        store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "integrate"))
-        running = OperationRuntime(store).start()
-        runtime = OperationRuntime(store)
-        with pytest.raises(RuntimeError, match="code integration source moved") as raised:
-            execute_operation(running, runtime)
-        runtime.fail(raised.value)
-        operation = store.read()
+        # The parent moved past the candidate, so the git replay requirement is
+        # true and the integration refuses before any ref moves. The refusal is
+        # a return value, not an exception.
+        refused = worktree_tools.worktree_integrate_tool(
+            config,
+            contract_path=closed.contract_path.as_posix(),
+            strategy="ff-only",
+            dry_run=False,
+        )
 
-    assert operation is not None and operation.status == "failed", operation
-    assert operation.result is not None, operation
-    assert "code integration source moved" in repr(operation.result)
+    assert refused["ok"] is False, refused
+    assert refused["state"] == "blocked-non-ff", refused
+    assert "source branch moved" in repr(refused)
     assert _git(fixture.code_repo, "rev-parse", "ar/master") == raced
     assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == memory_before
     assert not code_hook_log.exists()

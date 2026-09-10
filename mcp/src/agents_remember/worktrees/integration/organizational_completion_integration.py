@@ -86,8 +86,8 @@ def preview_organizational_completion(
 def prepare_integration_publication_intent(
     contract: WorktreeContract,
     *,
-    operation_key: str,
-    generation: int,
+    operation_key: str = "",
+    generation: int = 0,
     facts: IntegrationBoundaryFacts,
 ) -> IntegrationPublicationIntent:
     """Bind the source authority before protected refs or task truth move."""

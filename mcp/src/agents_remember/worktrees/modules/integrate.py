@@ -30,10 +30,6 @@ from agents_remember.worktrees.integration.integration_claim_transfer import (
     prove_recovery_publication_authority,
     transfer_and_publish_integration_claim,
 )
-from agents_remember.worktrees.integration.integration_operation_authority import (
-    require_current_integration_sources,
-    require_plane_integration_operation,
-)
 from agents_remember.worktrees.integration.integration_publication_fence import (
     IntegrationDoorAuthorityConflict,
     integration_door_decision_payload,
@@ -85,7 +81,6 @@ from agents_remember.worktrees.modules.integration_preflight_results import (
 from agents_remember.worktrees.modules.integration_publication import (
     IntegratePreview,
     IntegrationPublication,
-    protected_integration_decision,
     publish_journaled_organizational_completion,
 )
 from agents_remember.worktrees.modules.integration_recovery import (
@@ -707,23 +702,17 @@ def integrate_result(
     else:
         require_ordinary_worktree(contract, operation="worktree_integrate")
     integration_targets(contract)
-    operation = None
-    if not args.dry_run:
-        operation = require_plane_integration_operation(contract, args)
-    completed = _completed_integration_result(contract, args, operation)
+    completed = _completed_integration_result(contract, args, None)
     if completed is not None:
         return completed
     validate_integrate_contract(contract)
+    # THE ONE INTEGRATION RULE, read from Git: the leaf's source branch must not
+    # have moved since the candidate was verified. code_replay_required and
+    # memory_replay_required are is_ancestor reads of the live source tip against
+    # the candidate commit; a source that moved off that ancestry blocks the
+    # integration in _blocked_non_ff_result.
     sources = _integration_replay_requirements(contract)
-    operation = None
-    if not args.dry_run:
-        operation = require_current_integration_sources(
-            contract,
-            args,
-            code_source_commit=sources.current_code_source,
-            memory_source_commit=sources.current_memory_source,
-        )
-    return _continue_integration(contract, args, sources, operation)
+    return _continue_integration(contract, args, sources, None)
 
 
 def _completed_integration_result(
@@ -769,9 +758,6 @@ def _recover_integration_publication_edge(
     current = load_contract(contract.contract_path)
     if current != contract and contract.integration_status != "completed":
         raise RuntimeError("integration contract changed before recovery finalization")
-    decision = protected_integration_decision(current, args)
-    if decision is not None:
-        return decision
     if current.integration_status != "completed":
         require_atomic_landing_authority(current)
     result = _recover_integration_finalization(current, args, authority)
@@ -915,8 +901,8 @@ def _apply_integration(
     commits, boundary_facts = prepared
     intent = args.integration_publication or prepare_integration_publication_intent(
         contract,
-        operation_key=args.operation_key,
-        generation=args.operation_generation,
+        operation_key=args.operation_key or "",
+        generation=args.operation_generation or 0,
         facts=boundary_facts,
     )
     commit_tuple = (commits.code, commits.memory_content, commits.ledger)
@@ -967,9 +953,6 @@ def _publish_integration_edge(
         require_series_contract_authority(current, operation="worktree_integrate")
     else:
         require_ordinary_worktree(current, operation="worktree_integrate")
-    decision = protected_integration_decision(current, publication.locked_args)
-    if decision is not None:
-        return decision
     blocked = _integration_source_state_block(current, publication.sources)
     if blocked is not None:
         return blocked
@@ -997,15 +980,19 @@ def _publish_integration_edge(
     )
     try:
         merge_integrated_commits(current, publication.commits, snapshot)
-    except IntegrationRefRace:
-        operation = require_plane_integration_operation(current, publication.locked_args)
-        authority = operation.integrationAuthority
-        assert authority is not None
-        classification = classify_integration_authority_refs(
-            authority,
-            operation.recoveryCommits,
+    except IntegrationRefRace as race:
+        # A named ref moved between the exact read and the compare-and-swap. Git
+        # reports what is true and the operator re-runs the integration.
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "integration-ref-race",
+                "summary": "a protected integration ref moved during the exact ref move",
+                "detail": str(race),
+                "nextTool": "worktree_integrate",
+                "nextArgs": {"contract_path": current.contract_path.as_posix()},
+            },
         )
-        return WorktreeCommandResult(2, classification.public_payload())
     report_operation_progress(
         publication.locked_args,
         "contract-finalization",

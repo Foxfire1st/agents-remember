@@ -21,7 +21,6 @@ from agents_remember.models.closeout.input import CloseoutCorrectedCall, Effecti
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
-    IntegrateOperationInput,
     IntegrateStrategy,
     LifecycleOperationKind,
     LifecycleOperationProjection,
@@ -67,7 +66,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_closeout_operation,
-    start_or_observe_operation,
 )
 from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import (
@@ -463,55 +461,27 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Start or observe the exact contract-addressed integration operation.
+    """Land the task branches onto their source branches in this process.
 
-    This task-addressed boundary does not make scheduling decisions or claim a
-    closeout door. The operation worker revalidates its exact journal, contract,
-    and protected-ref authority immediately before moving source history.
+    The one integration rule is the moved-parent refusal inside
+    ``git_worktree_manager.integrate_result``: an is_ancestor comparison of the
+    leaf's source ref against the candidate it was verified at. No door
+    authority, publication intent, claim, journal or operation record
+    participates.
+
+    THE REFUSAL IS A RETURN VALUE, NOT AN EXCEPTION: a moved parent produces
+    ``state == "blocked-non-ff"`` carrying "source branch moved" and routing to
+    the documented ``worktree_sync`` remedy, where it previously raised
+    ``RuntimeError("code integration source moved")``.
     """
 
     configured = admit_configured_contract(config, contract_path)
-    address = LifecycleOperationPublicAddress("worktree_integrate", "integrate")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
-            operation=address.operation,
-            address=address,
+            operation="worktree_integrate",
         )
     confined_contract = configured.contract_path
-    if not dry_run:
-        try:
-            execution = execute_configured_contract_operation(
-                configured,
-                lambda: start_or_observe_operation(
-                    IntegrateOperationInput(
-                        configPath=config.config_path.as_posix(),
-                        contractPath=confined_contract.as_posix(),
-                        strategy=strategy,
-                        ledgerCommitMessage=ledger_commit_message,
-                        gatePolicy=_gate_policy_snapshot(config),
-                        autoCompleteSeats=config.retirement.auto_land_on_integration,
-                    ),
-                    configured.contract,
-                ),
-            )
-        except (
-            LifecycleControlError,
-            LifecycleOperationReadError,
-        ) as error:
-            return _start_operation_refusal(
-                config,
-                confined_contract,
-                address,
-                error,
-            )
-        if isinstance(execution, ConfiguredContractRefused):
-            return project_configured_contract_refusal(
-                execution,
-                operation=address.operation,
-                address=address,
-            )
-        return _operation_acknowledgement("worktree_integrate", execution)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
         strategy=strategy,
