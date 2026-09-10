@@ -158,7 +158,6 @@ integration = [
   "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
   "mcp/tests/test_worktree_sync.py",

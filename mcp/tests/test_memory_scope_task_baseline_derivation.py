@@ -5,15 +5,14 @@ from __future__ import annotations
 import agents_remember.memory_quality.incremental_scope.candidate as candidate_module
 from agents_remember.memory_quality.incremental_scope.models import TaskObservationPair
 from agents_remember.models.task_document import CanonicalTaskObservation
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 def _observation() -> CanonicalTaskObservation:
     return CanonicalTaskObservation(
         taskRoot="/coordination/tasks/repo-a/leaf",
-        taskDocumentRef={
-            "repository": "repo-a",
-            "path": "leaf.json",
-        },
+        taskDocumentRef=TaskDocumentRef(repository="repo-a", path="leaf.json"),
         sourceDigest="a" * 64,
         sourceAuthorityNamespace="agents-remember.task-document-source",
         sourceValidatorVersion="task-document-source-cas/v1",
@@ -28,11 +27,15 @@ def test_task_baseline_is_the_task_document_observation(monkeypatch) -> None:
     observed = _observation()
     monkeypatch.setattr(candidate_module, "observe_contract_task", lambda contract: observed)
 
-    pair = candidate_module.observe_contract_task_pair(object())
+    # The derivation never reads the contract, so an uninitialized instance is the
+    # honest stub: it is a real `WorktreeContract` for typing, with no field
+    # supplied to accidentally satisfy a read.
+    pair = candidate_module.observe_contract_task_pair(WorktreeContract.__new__(WorktreeContract))
 
     assert isinstance(pair, TaskObservationPair)
     assert pair.base is observed
     assert pair.candidate is observed
+    assert pair.base is not None
     assert pair.base.sourceAuthorityNamespace == "agents-remember.task-document-source"
 
 

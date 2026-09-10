@@ -17,6 +17,7 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import observe_atomic_series
@@ -280,6 +281,8 @@ class CloseoutSourceLineageHealTests(unittest.TestCase):
             refusal = raised.exception
             self.assertEqual(refusal.status, "source-lineage-sync-conflict")
             resolution = refusal.payload["resolution"]
+            # `payload` values are `object`; narrow before indexing.
+            assert isinstance(resolution, dict)
             self.assertEqual(resolution["side"], "code")
             self.assertIn("base.txt", resolution["files"])
             self.assertEqual(refusal.payload["nextTool"], "worktree_sync")
@@ -331,7 +334,9 @@ class CloseoutSourceLineageHealTests(unittest.TestCase):
 
             refusal = raised.exception
             self.assertEqual(refusal.status, "source-lineage-sync-conflict")
-            self.assertIn("base.txt", refusal.payload["resolution"]["files"])
+            sync_resolution = refusal.payload["resolution"]
+            assert isinstance(sync_resolution, dict)
+            self.assertIn("base.txt", sync_resolution["files"])
             message = str(refusal)
             self.assertIn("both worktrees -- code and memory", message)
             self.assertIn("neither code nor memory", message)
@@ -363,7 +368,11 @@ class CloseoutSourceLineageHealTests(unittest.TestCase):
                 fixture.leaf_contract,
                 WorktreeArgs(),
                 sources,
-                SimpleNamespace(generation=1, operationKey="", integrationAuthority=None),
+                # A real record instance carrying exactly the fields this boundary
+                # reads; the handoff only inspects generation/operationKey/authority.
+                LifecycleOperationRecord.model_construct(
+                    generation=1, operationKey="", integrationAuthority=None
+                ),
             )
 
             reason = cast(str, blocked.payload["reason"])
