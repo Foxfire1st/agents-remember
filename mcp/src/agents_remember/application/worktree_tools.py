@@ -366,16 +366,13 @@ def worktree_closeout_apply_tool(
     *,
     corrective_dispositions: tuple[RedCatalogDisposition, ...] = (),
 ) -> dict[str, Any]:
-    if approval.dry_run:
-        return _worktree_closeout(
-            config,
-            operation="worktree_closeout_apply",
-            contract_path=contract_path,
-            messages=messages,
-            approval=approval,
-        )
-    return _start_closeout_operation(
-        config, contract_path, messages, approval, corrective_dispositions=corrective_dispositions
+    del corrective_dispositions
+    return _worktree_closeout(
+        config,
+        operation="worktree_closeout_apply",
+        contract_path=contract_path,
+        messages=messages,
+        approval=approval,
     )
 
 

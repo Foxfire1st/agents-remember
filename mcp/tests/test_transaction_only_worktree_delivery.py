@@ -260,26 +260,27 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
             stack.enter_context(patcher)
         # The existing helper publishes a deliberately non-applicable waiting door.  Its
         # disposable sprint has no queue projection, so bypass only that fixture fence while
-        # retaining the public apply admission and worker transaction.
+        # retaining the public apply admission.
         stack.enter_context(
             mock.patch.object(lifecycle_operations, "require_first_ready_generation")
         )
-        stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
         preview = worktree_tools.worktree_closeout_preview_tool(
             config, contract.contract_path.as_posix(), MESSAGES
         )
         assert preview["ok"] is True, preview
         assert preview["state"] == "would-closeout"
-        queued = worktree_tools.worktree_closeout_apply_tool(
+        applied = worktree_tools.worktree_closeout_apply_tool(
             config,
             contract.contract_path.as_posix(),
             MESSAGES,
             CloseoutApproval(intent_note="developer approved transaction"),
         )
-        assert queued["ok"] is True and queued["state"] == "queued", queued
-        closed, operation = _run_queued_operation(contract, "closeout")
 
-    assert operation is not None and operation.status == "completed", operation
+    # Closeout runs in this process: no detached worker, no operation record. The
+    # three commits and their ancestry are the whole record of what it did.
+    assert applied["ok"] is True, applied
+    assert applied["state"] == "closed", applied
+    closed = load_contract(contract.contract_path)
     assert closed.closeout_status == "completed"
     assert closed.code_commit and closed.memory_content_commit and closed.ledger_commit
     assert _git(contract.code_worktree, "rev-parse", "HEAD") == closed.code_commit
@@ -287,6 +288,13 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     mapping = load_ledger(contract.ledger_path).rows[0]
     assert mapping.code_commit == closed.code_commit
     assert mapping.memory_commit == closed.memory_content_commit
+    # The validated messages are the ones that actually landed in the commit objects.
+    assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+    assert _git(contract.memory_worktree, "log", "-1", "--format=%s") == MESSAGES.ledger
+    assert (
+        _git(contract.memory_worktree, "log", "-1", "--format=%s", closed.memory_content_commit)
+        == MESSAGES.memory
+    )
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
 
