@@ -20,8 +20,8 @@ from agents_remember.memory_quality.check import (
     run_memory_quality_check,
 )
 from agents_remember.memory_quality.memory_census import _Census, _Tree
-from agents_remember.memory_quality.style.document_shape import entity_catalog_alignment
 from agents_remember.memory_quality.memory_census_scope import MemoryCensusScope
+from agents_remember.memory_quality.style.document_shape import entity_catalog_alignment
 
 
 def write_json(path: Path, data: dict) -> None:

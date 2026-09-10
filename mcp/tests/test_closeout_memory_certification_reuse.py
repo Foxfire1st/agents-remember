@@ -34,8 +34,14 @@ from agents_remember.memory_quality.curator_checklist import (
     report_path_for,
     write_curator_checklist,
 )
+from agents_remember.memory_quality.future_code_candidate import (
+    capture_future_code_candidate,
+)
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     missing_onboarding_for_source,
+)
+from agents_remember.memory_quality.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
 )
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
@@ -65,12 +71,6 @@ from agents_remember.worktrees.integration.closeout.curator_coherence_publicatio
 from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
     closeout_door_tool,
-)
-from agents_remember.memory_quality.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.memory_quality.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.integration.closeout.preparation.code_view import prepare_code_view
 from agents_remember.worktrees.integration.closeout.preparation.memory_execution import (
