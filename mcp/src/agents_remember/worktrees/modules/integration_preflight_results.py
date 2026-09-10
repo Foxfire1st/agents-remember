@@ -34,21 +34,31 @@ def atomic_landing_blocked_result(
     )
 
 
-def prepared_integration_recovery(args: WorktreeArgs):
+def prepared_integration_recovery(
+    args: WorktreeArgs,
+) -> tuple[IntegratedCommits, IntegrationBoundaryFacts] | None:
+    """Recover the prepared commit pair and its published boundary facts.
+
+    This used to return a four-tuple carrying the integration's quality
+    certification result and certification object as its middle elements. Nothing
+    ever read them: the synchronous integration path (a3695361) narrowed the fresh
+    branch of ``_prepare_integration_commits`` to ``(commits, boundary_facts)`` and
+    ``_apply_integration`` unpacks exactly two names, so the recovery branch kept
+    publishing two values no consumer could reach. The requirement is deleted here
+    rather than satisfied, so both branches of ``_prepare_integration_commits`` now
+    agree on one shape.
+    """
     if args.integration_publication is None:
         return None
     recovery = args.recovery_commits
     if recovery is None:
         raise RuntimeError("integration publication recovery has no commit tuple")
-    certification = args.quality_certification
     return (
         IntegratedCommits(
             code=recovery.codeCommit,
             memory_content=recovery.memoryContentCommit,
             ledger=recovery.ledgerCommit,
         ),
-        certification.result if certification is not None else {},
-        certification,
         IntegrationBoundaryFacts(None, None, None),
     )
 

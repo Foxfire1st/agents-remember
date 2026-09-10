@@ -43,6 +43,7 @@ from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
 from agents_remember.worktrees.integration.organizational_completion_integration import (
+    IntegrationBoundaryFacts,
     prepare_integration_publication_intent,
     preview_integration_boundary,
 )
@@ -651,7 +652,7 @@ def _prepare_integration_commits(
     contract: WorktreeContract,
     args: WorktreeArgs,
     sources: IntegrationSources,
-):
+) -> WorktreeCommandResult | tuple[IntegratedCommits, IntegrationBoundaryFacts]:
     recovered = prepared_integration_recovery(args)
     return recovered or _prepare_fresh_integration_commits(contract, args, sources)
 
@@ -660,7 +661,7 @@ def _prepare_fresh_integration_commits(
     contract: WorktreeContract,
     _args: WorktreeArgs,
     sources: IntegrationSources,
-):
+) -> WorktreeCommandResult | tuple[IntegratedCommits, IntegrationBoundaryFacts]:
     integrated_code_commit, blocked = _integrated_code_commit(contract, sources.current_code_source)
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
