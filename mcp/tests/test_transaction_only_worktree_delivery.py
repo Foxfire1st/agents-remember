@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +19,7 @@ from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     load_ledger,
@@ -182,6 +184,35 @@ def _forbid_acceptance_tools():
     )
 
 
+def _install_failing_pre_commit_hooks(contract, root: Path) -> tuple[Path, Path]:
+    """Install real failing hooks in both repositories and return their logs."""
+
+    logs = (root / "code-pre-commit.log", root / "memory-pre-commit.log")
+    repositories = (contract.code_repo_path, contract.memory_repo_path)
+    for repository, log in zip(repositories, logs, strict=True):
+        assert repository is not None
+        hook_directory = Path(_git(repository, "rev-parse", "--git-path", "hooks"))
+        if not hook_directory.is_absolute():
+            hook_directory = repository / hook_directory
+        hook_directory.mkdir(parents=True, exist_ok=True)
+        hook = hook_directory / "pre-commit"
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' transaction-hook-invoked >> {shlex.quote(log.as_posix())}\n"
+            "exit 97\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        assert hook.is_file() and hook.stat().st_mode & 0o111
+        probe = run_git(repository, ["hook", "run", "pre-commit"])
+        assert probe.returncode == 97, probe
+        assert log.read_text(encoding="utf-8").splitlines() == [
+            "transaction-hook-invoked"
+        ]
+        log.unlink()
+    return logs
+
+
 def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools(
     tmp_path, worktree_services
 ):
@@ -221,6 +252,7 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     _bind_task_without_review(contract)
     config = _public_config(tmp_path, contract)
     _assert_no_profile_or_review(config, contract)
+    code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(contract, tmp_path)
 
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
@@ -254,6 +286,8 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     mapping = load_ledger(contract.ledger_path).rows[0]
     assert mapping.code_commit == closed.code_commit
     assert mapping.memory_commit == closed.memory_content_commit
+    assert not code_hook_log.exists()
+    assert not memory_hook_log.exists()
 
 
 def test_public_integration_merges_prepared_pair_without_acceptance_tools(
@@ -268,6 +302,7 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
+    code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
 
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
@@ -296,6 +331,8 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     assert integrated.integrated_ledger_commit == integrated.ledger_commit
     assert _git(fixture.code_repo, "rev-parse", "ar/master") == integrated.code_commit
     assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == integrated.ledger_commit
+    assert not code_hook_log.exists()
+    assert not memory_hook_log.exists()
 
 
 def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, worktree_services):
@@ -330,6 +367,7 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
         _git(fixture.code_repo, "commit", "-m", "Parallel source change")
         raced = _git(fixture.code_repo, "rev-parse", "HEAD")
         _git(fixture.code_repo, "update-ref", "refs/heads/ar/master", raced, source_before)
+        code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
 
         store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "integrate"))
         running = OperationRuntime(store).start()
@@ -344,5 +382,7 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     assert "code integration source moved" in repr(operation.result)
     assert _git(fixture.code_repo, "rev-parse", "ar/master") == raced
     assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == memory_before
+    assert not code_hook_log.exists()
+    assert not memory_hook_log.exists()
     current = load_contract(closed.contract_path)
     assert current.integration_status != "completed"

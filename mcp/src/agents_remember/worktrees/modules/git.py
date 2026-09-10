@@ -186,11 +186,11 @@ def run_pre_commit_hook_if_configured(repo: Path) -> bool:
 
 
 def commit_verified_staged(repo: Path, message: str) -> str:
-    """Commit exactly the staged tree a preceding strict gate certified.
+    """Commit exactly the staged tree without invoking repository hooks.
 
-    The caller has already staged and verified the index.  In particular, this helper
-    must neither restage the working tree nor rerun a hook after the gate's pytest-final
-    subprocess.
+    The caller has already staged and verified the intended index. In particular, this
+    helper must neither restage the working tree nor rerun a hook after the caller's
+    transaction or quality preparation.
     """
     if run_git(repo, ["diff", "--cached", "--quiet"]).returncode == 0:
         return head_commit(repo)

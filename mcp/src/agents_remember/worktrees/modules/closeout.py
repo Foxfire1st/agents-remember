@@ -401,7 +401,7 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     or only touches the index of the task's own disposable worktree, so a refusal there changes
     nothing and must not cost the developer their approval.
     ``mcp/tests/test_gate_replay_window.py`` pins both halves: the gate is already ``applied`` by
-    the time ``commit_if_dirty`` runs, and a gate failure leaves it ``approved``.
+    the time the transaction commit runs, and a gate failure leaves it ``approved``.
     """
     if not contract.lifecycle_id:
         return None

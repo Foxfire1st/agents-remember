@@ -21,7 +21,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
-    commit_if_dirty,
+    commit_verified_staged,
     head_commit,
     is_ancestor,
     require_git,
@@ -154,7 +154,8 @@ def _commit_memory_content(
             expected_output_tree=None,
             use_current_candidate=True,
         )
-        committed = commit_if_dirty(
+        require_git(contract.memory_worktree, ["add", "-A"])
+        committed = commit_verified_staged(
             contract.memory_worktree,
             effective_input.message_for("memory"),
         )
@@ -221,7 +222,7 @@ def _commit_ledger_mapping(
     )
     write_ledger(contract.ledger_path, intended_ledger)
     require_git(contract.memory_worktree, ["add", "memory.md"])
-    committed = commit_if_dirty(
+    committed = commit_verified_staged(
         contract.memory_worktree,
         effective_input.message_for("ledger"),
     )

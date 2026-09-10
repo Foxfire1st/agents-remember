@@ -34,7 +34,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     branch_commit,
-    commit_if_dirty,
+    commit_verified_staged,
     head_commit,
     is_ancestor,
     require_clean,
@@ -198,7 +198,8 @@ def accepted_code_commit(
             expected_output_tree=None,
             use_current_candidate=True,
         )
-        code_commit = commit_if_dirty(
+        require_git(contract.code_worktree, ["add", "-A"])
+        code_commit = commit_verified_staged(
             contract.code_worktree, effective_input.message_for("code")
         )
         prove_git_commit(
@@ -265,7 +266,7 @@ def resume_external_commits(
         )
         write_ledger(contract.ledger_path, intended_ledger)
         require_git(contract.memory_worktree, ["add", "memory.md"])
-        ledger_commit = commit_if_dirty(
+        ledger_commit = commit_verified_staged(
             contract.memory_worktree,
             effective_input.message_for("ledger"),
         )
@@ -344,7 +345,7 @@ def _resume_pending_ledger_commit(
         "prepared-staged",
     }:
         raise CloseoutLedgerRecoveryDecision(classification)
-    ledger_commit = commit_if_dirty(
+    ledger_commit = commit_verified_staged(
         repository,
         effective_input.message_for("ledger"),
     )
