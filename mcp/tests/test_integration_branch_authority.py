@@ -15,7 +15,6 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
-    LifecycleOperationRecoveryCommits,
 )
 from agents_remember.worktrees.integration import (
     integration_ref_transaction,
@@ -37,7 +36,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import (
     IntegrationSources,
-    _recover_landed_refs,
 )
 from integration_branch_authority_test_support import (
     _authority_fixture,
@@ -164,50 +162,3 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 closed.code_commit,
             )
             self.assertEqual(_git(memory_repo, "rev-parse", "ar/master"), raced_memory)
-
-    def test_external_code_only_crash_completes_the_exact_memory_ref_on_retry(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            fixture = _authority_fixture(root, external_memory=True)
-            closed = _closed_external_leaf_worktrees(fixture, root)
-            memory_repo = closed.memory_repo_path
-            assert memory_repo is not None
-            operation_input = IntegrateOperationInput(
-                configPath=fixture.config_path.as_posix(),
-                contractPath=closed.contract_path.as_posix(),
-            )
-            lifecycle_operations.start_or_observe_operation(
-                operation_input,
-                closed,
-                launcher=lambda *_: None,
-            )
-            store = LifecycleOperationStore(
-                operation_record_path(closed.worktree_group, "integrate")
-            )
-            running = OperationRuntime(store).start()
-            authority = running.integrationAuthority
-            assert authority is not None
-            _git(
-                fixture.code_repo,
-                "update-ref",
-                "refs/heads/ar/master",
-                closed.code_commit,
-                authority.codeSourceCommit,
-            )
-
-            recovered = _recover_landed_refs(
-                closed,
-                WorktreeArgs(operation_key=running.operationKey),
-                LifecycleOperationRecoveryCommits(
-                    codeCommit=closed.code_commit,
-                    memoryContentCommit=closed.memory_content_commit,
-                    ledgerCommit=closed.ledger_commit,
-                ),
-                authority,
-            )
-
-            self.assertTrue(recovered)
-            self.assertEqual(
-                _git(memory_repo, "rev-parse", "ar/master"),
-                closed.ledger_commit,
-            )

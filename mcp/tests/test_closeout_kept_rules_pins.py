@@ -28,6 +28,7 @@ from agents_remember.worktrees.closeout_input import (
     CloseoutInputError,
     normalize_closeout_input,
 )
+from agents_remember.worktrees.integration import integration_ref_transaction
 from agents_remember.worktrees.modules.closeout import _validate_closeout_source_heads
 from agents_remember.worktrees.modules.integrate import _integration_replay_requirements
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -249,3 +250,20 @@ def test_r4_integration_replay_requirement_is_git_ancestry_not_a_record(tmp_path
         _git_contract(repo, code_base_commit=base, code_commit=candidate)
     )
     assert moved.code_replay_required is True
+
+
+def test_r4_no_crash_recovery_path_exists_after_a_torn_ref_move() -> None:
+    """R4: after a crash between the two ref moves there is no recovery entry point.
+
+    Mid-crash integration-ref recovery was removed as a capability: its only
+    input was the journaled expected pre-move ref value, and with the journal gone
+    that value has no durable source. The operator-visible behaviour is defined
+    instead of undefined -- re-run ``worktree_integrate``, which reads the live
+    refs through the replay requirement and either proceeds or returns
+    ``blocked-non-ff`` (pinned by
+    ``test_r4_integration_replay_requirement_is_git_ancestry_not_a_record`` and by
+    ``test_public_integration_ref_movement_refuses_before_pair_merge``).
+    """
+
+    assert not hasattr(integration_ref_transaction, "recover_integration_ref")
+    assert not hasattr(integration_ref_transaction, "refresh_recovered_checkout")

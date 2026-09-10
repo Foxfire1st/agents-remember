@@ -326,45 +326,6 @@ def _require_preserved_ledger_history(
         )
 
 
-def recover_integration_ref(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    commits: IntegratedCommits,
-    *,
-    side: str,
-) -> bool:
-    """CAS one torn side only under the immutable journaled integration authority."""
-
-    record = require_authorized_integration_commits(
-        contract,
-        args,
-        code_commit=commits.code,
-        memory_content_commit=commits.memory_content,
-        ledger_commit=commits.ledger,
-    )
-    authority = record.integrationAuthority
-    assert authority is not None
-    if side == "code":
-        repository = contract.code_repo_path
-        branch = authority.codeSourceBranch
-        expected = authority.codeSourceCommit
-        target = commits.code
-    elif side == "memory" and contract.memory_repo_path is not None:
-        repository = contract.memory_repo_path
-        branch = authority.memorySourceBranch
-        expected = authority.memorySourceCommit
-        target = commits.ledger
-    else:
-        raise RuntimeError(f"invalid integration recovery side: {side!r}")
-    return _compare_and_swap_ref(
-        repository,
-        branch,
-        expected,
-        target,
-        authority=_PREPARED_MOVE_AUTHORITY,
-    )
-
-
 def _compare_and_swap_ref(
     repo: Path,
     branch: str,
@@ -408,40 +369,6 @@ def refresh_owned_checkout(
                 f"protected ref {branch!r} landed, but its checkout contains unrelated changes"
             )
         require_git(checkout, ["read-tree", "--reset", "-u", new])
-
-
-def refresh_recovered_checkout(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    commits: IntegratedCommits,
-    refresh: CheckoutRefresh,
-) -> None:
-    """Refresh one landed checkout only after revalidating its immutable operation record."""
-
-    record = require_authorized_integration_commits(
-        contract,
-        args,
-        code_commit=commits.code,
-        memory_content_commit=commits.memory_content,
-        ledger_commit=commits.ledger,
-    )
-    authority = record.integrationAuthority
-    assert authority is not None
-    if refresh.side == "code":
-        repository = contract.code_repo_path
-        branch = authority.codeSourceBranch
-    elif refresh.side == "memory" and contract.memory_repo_path is not None:
-        repository = contract.memory_repo_path
-        branch = authority.memorySourceBranch
-    else:
-        raise RuntimeError(f"invalid integration checkout recovery side: {refresh.side!r}")
-    refresh_owned_checkout(
-        repository,
-        branch,
-        refresh.old,
-        refresh.new,
-        authority=_PREPARED_MOVE_AUTHORITY,
-    )
 
 
 def _require_clean_branch_checkout(repo: Path, branch: str, expected: str) -> None:

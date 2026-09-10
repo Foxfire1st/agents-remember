@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
-from typing import Literal
+from dataclasses import replace
 
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
 from agents_remember.controlplane.records import GateRecord
@@ -12,10 +11,7 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.lifecycles.operation import (
-    IntegrationOperationAuthority,
-    IntegrationPublicationIntent,
     LifecycleOperationRecord,
-    LifecycleOperationRecoveryCommits,
 )
 from agents_remember.worktrees.integration.atomic_series_landing import (
     AtomicLandingBlocked,
@@ -27,29 +23,18 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_series_contract_authority,
 )
 from agents_remember.worktrees.integration.integration_claim_transfer import (
-    prove_recovery_publication_authority,
     transfer_and_publish_integration_claim,
 )
 from agents_remember.worktrees.integration.integration_publication_fence import (
     IntegrationDoorAuthorityConflict,
     integration_door_decision_payload,
 )
-from agents_remember.worktrees.integration.integration_ref_state import (
-    IntegrationRefDecisionError,
-    IntegrationRefPublicationInterrupted,
-    IntegrationRefState,
-    classify_integration_authority_refs,
-)
 from agents_remember.worktrees.integration.integration_ref_transaction import (
-    CheckoutRefresh,
     IntegratedCommits,
     IntegrationRefRace,
     IntegrationSources,
     merge_integrated_commits,
     prepare_integration_ref_move,
-    recover_integration_ref,
-    refresh_recovered_checkout,
-    require_integrated_ledger_mapping,
 )
 from agents_remember.worktrees.integration.integration_resolution_handoff import (
     integration_resolution_required,
@@ -83,10 +68,6 @@ from agents_remember.worktrees.modules.integration_publication import (
     IntegrationPublication,
     publish_journaled_organizational_completion,
 )
-from agents_remember.worktrees.modules.integration_recovery import (
-    classify_convergent_recovery_refs,
-    prove_external_memory_recovery,
-)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.series_closeout import (
     atomic_series_ledger_prefix,
@@ -104,16 +85,6 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-
-
-@dataclass(frozen=True)
-class _ExternalRefRecovery:
-    recovered_commits: IntegratedCommits
-    authority: IntegrationOperationAuthority
-    commits: LifecycleOperationRecoveryCommits
-
-
-HANDOVER_GATE_KIND = "master-handover-approval"
 
 
 def handover_gate_guard(
@@ -443,249 +414,6 @@ def _integrated_result(
     return WorktreeCommandResult(0, payload)
 
 
-def _recover_landed_refs(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    commits: LifecycleOperationRecoveryCommits,
-    authority: IntegrationOperationAuthority,
-) -> bool:
-    """Finish or prove the exact named-ref transaction after an abrupt worker death."""
-
-    if contract.memory_mode != "external" and (commits.memoryContentCommit or commits.ledgerCommit):
-        raise RuntimeError(
-            "integration recovery recorded external-memory commits for an internal-memory contract"
-        )
-    facts = classify_integration_authority_refs(authority, commits)
-    if facts.state == "unchanged":
-        return False
-    if facts.state == "conflict":
-        raise IntegrationRefDecisionError(facts)
-    code_source = facts.object_id("codeRef")
-    if code_source is None:
-        raise IntegrationRefDecisionError(facts)
-    code_before = authority.codeSourceCommit
-    code_after = commits.codeCommit
-    if contract.memory_mode != "external":
-        if code_source != code_after:
-            raise RuntimeError(
-                "integration recovery found an unowned code ref value: "
-                f"{code_source} (expected {code_before} or {code_after})"
-            )
-        refresh_recovered_checkout(
-            contract,
-            args,
-            IntegratedCommits(code=code_after, memory_content="", ledger=""),
-            CheckoutRefresh(side="code", old=code_before, new=code_after),
-        )
-        return True
-
-    return _recover_external_landed_refs(
-        contract,
-        args,
-        commits,
-        authority,
-        facts,
-    )
-
-
-def _recover_external_landed_refs(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    commits: LifecycleOperationRecoveryCommits,
-    authority: IntegrationOperationAuthority,
-    facts: IntegrationRefState,
-) -> bool:
-    code_source = facts.object_id("codeRef")
-    memory_source = facts.object_id("memoryRef")
-    if code_source is None or memory_source is None:
-        raise IntegrationRefDecisionError(facts)
-    code_before = authority.codeSourceCommit
-    code_after = commits.codeCommit
-    if contract.memory_repo_path is None:
-        raise RuntimeError("external-memory integration recovery requires a memory repo")
-    memory_before = authority.memorySourceCommit
-    memory_after = commits.ledgerCommit
-    recovered_commits = IntegratedCommits(
-        code=code_after,
-        memory_content=commits.memoryContentCommit,
-        ledger=memory_after,
-    )
-    recovery = _ExternalRefRecovery(recovered_commits, authority, commits)
-    if code_source == code_after and memory_source in {memory_before, memory_after}:
-        require_integrated_ledger_mapping(
-            contract,
-            recovered_commits,
-            memory_source_commit=authority.memorySourceCommit,
-            expected_series_prefix=(
-                atomic_series_ledger_prefix(contract)
-                if contract.kind == "series" and contract.memory_mode == "external"
-                else ()
-            ),
-        )
-    if code_source == code_after and memory_source == memory_before:
-        memory_source = _recover_external_ref(
-            contract,
-            args,
-            recovery,
-            side="memory",
-            intended=memory_after,
-        )
-    if code_source == code_before and memory_source == memory_after:
-        code_source = _recover_external_ref(
-            contract,
-            args,
-            recovery,
-            side="code",
-            intended=code_after,
-        )
-    live = classify_convergent_recovery_refs(authority, commits)
-    if live.object_id("codeRef") != code_after or live.object_id("memoryRef") != memory_after:
-        raise IntegrationRefPublicationInterrupted(live)
-    refresh_recovered_checkout(
-        contract,
-        args,
-        recovered_commits,
-        CheckoutRefresh(side="code", old=code_before, new=code_after),
-    )
-    refresh_recovered_checkout(
-        contract,
-        args,
-        recovered_commits,
-        CheckoutRefresh(side="memory", old=memory_before, new=memory_after),
-    )
-    return True
-
-
-def _recover_external_ref(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    recovery: _ExternalRefRecovery,
-    *,
-    side: Literal["code", "memory"],
-    intended: str,
-) -> str:
-    if recover_integration_ref(contract, args, recovery.recovered_commits, side=side):
-        return intended
-    live = classify_convergent_recovery_refs(recovery.authority, recovery.commits)
-    if live.object_id(f"{side}Ref") != intended:
-        raise IntegrationRefPublicationInterrupted(live)
-    return intended
-
-
-def _prove_integration_recovery_commits(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    commits: LifecycleOperationRecoveryCommits,
-    authority: IntegrationOperationAuthority,
-) -> IntegratedCommits | WorktreeCommandResult | None:
-    """Prove a wholly landed source pair, or permit an untouched retry."""
-    try:
-        moved = _recover_landed_refs(contract, args, commits, authority)
-    except IntegrationRefDecisionError as exc:
-        return WorktreeCommandResult(2, exc.classification.decision_payload())
-    except IntegrationRefPublicationInterrupted as exc:
-        return WorktreeCommandResult(2, exc.classification.interruption_payload())
-    if not moved:
-        return None
-
-    if contract.kind == "series":
-        task_code_head = branch_commit(contract.code_repo_path, contract.code_work_branch)
-    else:
-        require_clean(contract.code_worktree, "recovering integration code worktree")
-        task_code_head = head_commit(contract.code_worktree)
-    if task_code_head != commits.codeCommit:
-        raise RuntimeError(
-            "integration contract-finalization recovery requires manual reconciliation: "
-            f"recorded code commit {commits.codeCommit}, found task HEAD {task_code_head}"
-        )
-    if contract.memory_mode == "external":
-        prove_external_memory_recovery(contract, commits)
-    return IntegratedCommits(
-        code=commits.codeCommit,
-        memory_content=commits.memoryContentCommit,
-        ledger=commits.ledgerCommit,
-    )
-
-
-def _recover_integration_finalization(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    authority: IntegrationOperationAuthority,
-) -> WorktreeCommandResult | None:
-    commits = args.recovery_commits
-    if commits is None:
-        return None
-    if contract.integration_status == "completed":
-        _prove_completed_integration_descendant(contract, commits, authority)
-        return WorktreeCommandResult(
-            0,
-            {"state": "already-integrated", "recovered": True, **status_payload(contract)},
-        )
-    proven = _prove_integration_recovery_commits(contract, args, commits, authority)
-    if proven is None:
-        return None
-    if isinstance(proven, WorktreeCommandResult):
-        return proven
-    result = _integrated_result(
-        contract,
-        args,
-        proven,
-        handover_warning=None,
-    )
-    result.payload["recovered"] = True
-    return result
-
-
-def _prove_completed_integration_descendant(
-    contract: WorktreeContract,
-    commits: LifecycleOperationRecoveryCommits,
-    authority: IntegrationOperationAuthority,
-) -> None:
-    expected = (commits.codeCommit, commits.memoryContentCommit, commits.ledgerCommit)
-    contract_commits = (
-        contract.integrated_code_commit,
-        contract.integrated_memory_content_commit,
-        contract.integrated_ledger_commit,
-    )
-    authority_commits = (
-        authority.codeCandidateCommit,
-        authority.memoryContentCommit,
-        authority.ledgerCommit,
-    )
-    if contract_commits != expected or authority_commits != expected:
-        raise RuntimeError(
-            "completed integration contract does not match its recorded recovery authority"
-        )
-    targets = {target.side: target for target in integration_targets(contract)}
-    code_target = targets["code"]
-    code_tip = branch_commit(contract.code_repo_path, code_target.branch)
-    if not is_ancestor(contract.code_repo_path, commits.codeCommit, code_tip):
-        raise RuntimeError("completed integration commit is not reachable from the current target")
-    if contract.memory_mode != "external":
-        return
-    assert contract.memory_repo_path is not None
-    memory_target = targets["memory"]
-    memory_tip = branch_commit(contract.memory_repo_path, memory_target.branch)
-    if not is_ancestor(contract.memory_repo_path, commits.ledgerCommit, memory_tip):
-        raise RuntimeError(
-            "completed integration ledger is not reachable from the current memory target"
-        )
-    require_integrated_ledger_mapping(
-        contract,
-        IntegratedCommits(
-            code=commits.codeCommit,
-            memory_content=commits.memoryContentCommit,
-            ledger=commits.ledgerCommit,
-        ),
-        memory_source_commit=authority.memorySourceCommit,
-        expected_series_prefix=(
-            atomic_series_ledger_prefix(contract)
-            if contract.kind == "series" and contract.memory_mode == "external"
-            else ()
-        ),
-    )
-
-
 def integrate_result(
     args: WorktreeArgs,
     current_contract: WorktreeContract,
@@ -702,9 +430,6 @@ def integrate_result(
     else:
         require_ordinary_worktree(contract, operation="worktree_integrate")
     integration_targets(contract)
-    completed = _completed_integration_result(contract, args, None)
-    if completed is not None:
-        return completed
     validate_integrate_contract(contract)
     # THE ONE INTEGRATION RULE, read from Git: the leaf's source branch must not
     # have moved since the candidate was verified. code_replay_required and
@@ -713,93 +438,6 @@ def integrate_result(
     # integration in _blocked_non_ff_result.
     sources = _integration_replay_requirements(contract)
     return _continue_integration(contract, args, sources, None)
-
-
-def _completed_integration_result(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    operation: LifecycleOperationRecord | None,
-) -> WorktreeCommandResult | None:
-    recovered = None
-    if operation is not None and operation.recoveryCommits is not None:
-        if operation.integrationAuthority is None:
-            raise RuntimeError(
-                "completed integration recovery has no immutable integration authority"
-            )
-        if args.recovery_commits != operation.recoveryCommits:
-            raise RuntimeError(
-                "integration recovery input does not match the durable operation record"
-            )
-        recovered = _recover_integration_under_authority(
-            contract,
-            args,
-            operation.integrationAuthority,
-        )
-    completed = recovered
-    if completed is None and contract.integration_status == "completed":
-        if not args.dry_run:
-            raise RuntimeError(
-                "completed integration requires exact durable recovery evidence before "
-                "journal finalization"
-            )
-        completed = WorktreeCommandResult(
-            0,
-            {"state": "already-integrated", **status_payload(contract)},
-        )
-    return completed
-
-
-def _recover_integration_publication_edge(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    authority: IntegrationOperationAuthority,
-    intent: IntegrationPublicationIntent,
-) -> WorktreeCommandResult | None:
-    current = load_contract(contract.contract_path)
-    if current != contract and contract.integration_status != "completed":
-        raise RuntimeError("integration contract changed before recovery finalization")
-    if current.integration_status != "completed":
-        require_atomic_landing_authority(current)
-    result = _recover_integration_finalization(current, args, authority)
-    return publish_journaled_organizational_completion(result, intent)
-
-
-def _recover_integration_under_authority(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-    authority: IntegrationOperationAuthority,
-) -> WorktreeCommandResult | None:
-    intent = args.integration_publication
-    if intent is None:
-        raise RuntimeError("integration recovery has no journaled publication intent")
-    commits = (
-        authority.codeCandidateCommit,
-        authority.memoryContentCommit,
-        authority.ledgerCommit,
-    )
-    try:
-        intent = prove_recovery_publication_authority(
-            contract,
-            args,
-            intent,
-            commits=commits,
-        )
-    except IntegrationDoorAuthorityConflict as error:
-        return WorktreeCommandResult(2, integration_door_decision_payload(error.evidence))
-
-    try:
-        if contract.kind == "series":
-            if contract.integration_status != "completed":
-                return publish_series_integration_under_authority(
-                    contract,
-                    lambda: _recover_integration_publication_edge(
-                        contract, args, authority, intent
-                    ),
-                )
-            return _recover_integration_publication_edge(contract, args, authority, intent)
-        return _recover_integration_publication_edge(contract, args, authority, intent)
-    except AtomicLandingBlocked as error:
-        return atomic_landing_blocked_result(contract, error)
 
 
 def _continue_integration(
@@ -816,6 +454,9 @@ def _continue_integration(
     if lineage_block is not None:
         return lineage_block
     return _handover_or_apply_integration(contract, args, sources)
+
+
+HANDOVER_GATE_KIND = "master-handover-approval"
 
 
 def _handover_or_apply_integration(
