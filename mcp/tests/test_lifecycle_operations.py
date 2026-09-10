@@ -11,10 +11,6 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_errors import (
     LifecycleControlError,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    contract_lifecycle_lease,
-    require_lifecycle_operation_compatible,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
     operation_record_path,
@@ -55,20 +51,6 @@ def test_start_returns_immediately_and_duplicate_observes_one_launch(tmp_path: P
     assert len(launches) == 1
     assert "job" not in first.model_dump_json().lower()
     assert "pid" not in first.model_dump_json().lower()
-
-
-def test_contract_lifecycle_lease_excludes_cross_kind_and_terminal_mutation(
-    tmp_path: Path,
-) -> None:
-    contract = selected_contract(tmp_path)
-    start_closeout_operation(_input(contract), launcher=lambda *_: None)
-
-    with contract_lifecycle_lease(contract):
-        with pytest.raises(RuntimeError, match=r"integrate cannot proceed.*closeout"):
-            require_lifecycle_operation_compatible(contract, operation_kind="integrate")
-        with pytest.raises(RuntimeError, match=r"terminal mutation cannot proceed.*closeout"):
-            require_lifecycle_operation_compatible(contract, operation_kind=None)
-        require_lifecycle_operation_compatible(contract, operation_kind="closeout")
 
 
 def test_cancel_before_boundary_proves_exit_before_releasing_worker_authority(

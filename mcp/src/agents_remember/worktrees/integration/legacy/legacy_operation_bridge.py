@@ -46,7 +46,6 @@ from agents_remember.worktrees.integration.legacy.legacy_operation_archive impor
 from agents_remember.worktrees.integration.legacy.legacy_operation_authority import (
     legacy_lifecycle_lease,
     legacy_pre_adoption,
-    require_explicit_bridge_compatible,
     revalidated_legacy_target,
 )
 from agents_remember.worktrees.integration.legacy.legacy_operation_failures import (
@@ -137,13 +136,6 @@ def legacy_operation_action(
             pre_adoption=pre_adoption,
             revalidate_contract=revalidate_contract,
         )
-        if request.action != "inspect":
-            require_explicit_bridge_compatible(
-                current,
-                target,
-                operation_kind,
-                publish_worker_exits=False,
-            )
         return _legacy_operation_action_locked(current, target.path, request)
     with legacy_lifecycle_lease(contract, pre_adoption=pre_adoption):
         current, target = revalidated_legacy_target(
@@ -151,12 +143,6 @@ def legacy_operation_action(
             operation_kind,
             pre_adoption=pre_adoption,
             revalidate_contract=revalidate_contract,
-        )
-        require_explicit_bridge_compatible(
-            current,
-            target,
-            operation_kind,
-            publish_worker_exits=True,
         )
         with lifecycle_operation_record_access(target.path):
             return _legacy_operation_action_locked(current, target.path, request)

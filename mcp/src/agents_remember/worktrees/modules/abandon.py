@@ -32,9 +32,6 @@ from agents_remember.worktrees.integration.atomic_series_terminal import (
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    contract_lifecycle_lease,
-)
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     terminal_archive_required_result,
     terminal_contract_authority_if_present,
@@ -188,52 +185,49 @@ def _abandon_with_guard(
     guard: TerminalGuard,
 ) -> WorktreeCommandResult:
     try:
-        with contract_lifecycle_lease(contract):
-            terminal_archive = terminal_archive_required_result(
+        terminal_archive = terminal_archive_required_result(
+            contract,
+            operation="worktree_abandon",
+            arguments=TerminalWorktreeAbandonArguments(force=args.force),
+            dry_run=args.dry_run,
+        )
+        if terminal_archive.returncode != 0:
+            return terminal_archive
+        terminal_authority = (
+            None
+            if args.dry_run
+            else terminal_contract_authority_if_present(load_contract(contract.contract_path))
+        )
+
+        def publish(
+            series_permit: AtomicSeriesTerminalPermit | None = None,
+        ) -> WorktreeCommandResult:
+            current = load_contract(contract.contract_path)
+            if args.dry_run:
+                if current != contract:
+                    raise RuntimeError("abandon contract changed before preview")
+            else:
+                terminal = terminal_contract_authority_if_present(current)
+                if terminal is None:
+                    raise RuntimeError("abandon lost terminal archive authority before mutation")
+                current = terminal.archived_contract
+            outputs = _abandon_terminal_outputs(
+                args,
+                current,
+                preflight,
+                series_permit=series_permit,
+            )
+            result = _abandon_outputs_result(args, current, preflight, guard, outputs)
+            return _with_terminal_archive(result, terminal_archive)
+
+        if contract.kind == "series":
+            return publish_atomic_series_terminal_under_authority(
                 contract,
-                operation="worktree_abandon",
-                arguments=TerminalWorktreeAbandonArguments(force=args.force),
-                dry_run=args.dry_run,
+                "worktree_abandon",
+                publish,
+                terminal_authority=terminal_authority,
             )
-            if terminal_archive.returncode != 0:
-                return terminal_archive
-            terminal_authority = (
-                None
-                if args.dry_run
-                else terminal_contract_authority_if_present(load_contract(contract.contract_path))
-            )
-
-            def publish(
-                series_permit: AtomicSeriesTerminalPermit | None = None,
-            ) -> WorktreeCommandResult:
-                current = load_contract(contract.contract_path)
-                if args.dry_run:
-                    if current != contract:
-                        raise RuntimeError("abandon contract changed before preview")
-                else:
-                    terminal = terminal_contract_authority_if_present(current)
-                    if terminal is None:
-                        raise RuntimeError(
-                            "abandon lost terminal archive authority before mutation"
-                        )
-                    current = terminal.archived_contract
-                outputs = _abandon_terminal_outputs(
-                    args,
-                    current,
-                    preflight,
-                    series_permit=series_permit,
-                )
-                result = _abandon_outputs_result(args, current, preflight, guard, outputs)
-                return _with_terminal_archive(result, terminal_archive)
-
-            if contract.kind == "series":
-                return publish_atomic_series_terminal_under_authority(
-                    contract,
-                    "worktree_abandon",
-                    publish,
-                    terminal_authority=terminal_authority,
-                )
-            return publish()
+        return publish()
     except Exception as error:
         return WorktreeCommandResult(
             2,
@@ -254,13 +248,12 @@ def _terminal_archive_observation(
     *,
     force: bool,
 ) -> WorktreeCommandResult:
-    with contract_lifecycle_lease(contract):
-        return terminal_archive_required_result(
-            contract,
-            operation="worktree_abandon",
-            arguments=TerminalWorktreeAbandonArguments(force=force),
-            dry_run=False,
-        )
+    return terminal_archive_required_result(
+        contract,
+        operation="worktree_abandon",
+        arguments=TerminalWorktreeAbandonArguments(force=force),
+        dry_run=False,
+    )
 
 
 def _already_abandoned(

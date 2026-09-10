@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.door import CloseoutDoorRequest
 from agents_remember.models.lifecycles.operation import (
@@ -97,10 +96,9 @@ def declare_selected_candidate(
     assert context.candidate is not None
     if context.master.document.executionNature == "atomic":
         assert contract.parent_contract_path is not None
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            publish_atomic_series_selection(
-                load_contract(contract.parent_contract_path), "active", timestamp=NOW
-            )
+        publish_atomic_series_selection(
+            load_contract(contract.parent_contract_path), "active", timestamp=NOW
+        )
     report = contract.task_root / "notes" / "reports" / f"{leaf.slug}-review.md"
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(

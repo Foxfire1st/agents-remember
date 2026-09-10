@@ -5,7 +5,6 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.gate_policy import (
@@ -818,10 +817,8 @@ def _recover_integration_under_authority(
                         contract, args, authority, intent
                     ),
                 )
-            with integration_authority_lock(contract.coordination_root, contract.repo_name):
-                return _recover_integration_publication_edge(contract, args, authority, intent)
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
             return _recover_integration_publication_edge(contract, args, authority, intent)
+        return _recover_integration_publication_edge(contract, args, authority, intent)
     except AtomicLandingBlocked as error:
         return atomic_landing_blocked_result(contract, error)
 
@@ -958,9 +955,8 @@ def _apply_integration(
             )
             completed = publish_journaled_organizational_completion(result, intent)
         else:
-            with integration_authority_lock(contract.coordination_root, contract.repo_name):
-                result = _publish_integration_edge(publication)
-                completed = publish_journaled_organizational_completion(result, intent)
+            result = _publish_integration_edge(publication)
+            completed = publish_journaled_organizational_completion(result, intent)
     except AtomicLandingBlocked as error:
         return atomic_landing_blocked_result(contract, error)
     assert completed is not None

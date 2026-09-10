@@ -33,8 +33,6 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.errors import TaskIntentError
 from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -84,10 +82,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candida
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     operation_state_fingerprint,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    contract_lifecycle_lease,
-    require_lifecycle_operation_compatible,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_projection import (
     operation_projection,
@@ -211,22 +205,18 @@ def _direct_landing_after_policy(
             "direct-landing-code-commit-required",
             "direct landing requires the exact series code commit to verify",
         )
-    with contract_lifecycle_lease(contract):
-        current, _location = reread_configured_contract(
-            contract,
-            config.config_path.as_posix(),
+    current, _location = reread_configured_contract(
+        contract,
+        config.config_path.as_posix(),
+    )
+    if current != contract:
+        raise DirectLandingError(
+            "direct-landing-contract-changed",
+            "series contract changed before direct landing",
         )
-        if current != contract:
-            raise DirectLandingError(
-                "direct-landing-contract-changed",
-                "series contract changed before direct landing",
-            )
-        if request.dry_run:
-            return _direct_landing_preview(current, request, effective_input, code_commit)
-        require_lifecycle_operation_compatible(current, operation_kind="direct-landing")
-        return _start_or_observe_direct_landing(
-            config, current, request, effective_input, code_commit
-        )
+    if request.dry_run:
+        return _direct_landing_preview(current, request, effective_input, code_commit)
+    return _start_or_observe_direct_landing(config, current, request, effective_input, code_commit)
 
 
 def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) -> str:
@@ -458,17 +448,16 @@ def _start_or_observe_direct_landing(
             observed={"disposition": "absent"},
         )
     if door.disposition == "waiting":
-        with integration_authority_lock(config.coordination_root, contract.repo_name):
-            current_contract, _location = reread_configured_contract(
-                contract,
-                config.config_path.as_posix(),
+        current_contract, _location = reread_configured_contract(
+            contract,
+            config.config_path.as_posix(),
+        )
+        if current_contract != contract:
+            raise DirectLandingError(
+                "direct-landing-contract-changed",
+                "series contract changed before direct landing admission",
             )
-            if current_contract != contract:
-                raise DirectLandingError(
-                    "direct-landing-contract-changed",
-                    "series contract changed before direct landing admission",
-                )
-            prepared = _prepare_direct_landing_candidate(identity, door.generationId)
+        prepared = _prepare_direct_landing_candidate(identity, door.generationId)
     record, claimed_contract, created, sprint_ref = _claim_direct_landing(
         config,
         contract,
@@ -497,16 +486,15 @@ def _start_or_observe_direct_landing(
             _direct_landing_observation(claimed_contract, record),
             projection_effect,
         )
-    with integration_authority_lock(config.coordination_root, claimed_contract.repo_name):
-        live_contract, _location = reread_configured_contract(
-            claimed_contract,
-            config.config_path.as_posix(),
-        )
-        _require_direct_claim_owner(live_contract, record)
-        runtime = DirectLandingRuntime(live_contract, record)
-        result = execute_or_require_direct_landing_recovery(live_contract, runtime)
-        completed = runtime.store.read() or runtime.record
-        result = _with_lifecycle_operation(result, live_contract, completed)
+    live_contract, _location = reread_configured_contract(
+        claimed_contract,
+        config.config_path.as_posix(),
+    )
+    _require_direct_claim_owner(live_contract, record)
+    runtime = DirectLandingRuntime(live_contract, record)
+    result = execute_or_require_direct_landing_recovery(live_contract, runtime)
+    completed = runtime.store.read() or runtime.record
+    result = _with_lifecycle_operation(result, live_contract, completed)
     return _with_projection_effect(result, projection_effect)
 
 
@@ -607,15 +595,14 @@ def _claim_direct_landing(
 ) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef]:
     """Create/replay the journal intent and claim one exact waiting series door."""
 
-    with task_publication_lock(admitted_contract.coordination_root, admitted_contract.repo_name):
-        contract, _location = reread_configured_contract(
-            admitted_contract,
-            config.config_path.as_posix(),
-        )
-        door = _require_direct_door(contract)
-        if door.disposition == "claimed":
-            return _resume_direct_claim(contract, store, identity, door)
-        return _claim_waiting_direct_landing(contract, store, prepared, door)
+    contract, _location = reread_configured_contract(
+        admitted_contract,
+        config.config_path.as_posix(),
+    )
+    door = _require_direct_door(contract)
+    if door.disposition == "claimed":
+        return _resume_direct_claim(contract, store, identity, door)
+    return _claim_waiting_direct_landing(contract, store, prepared, door)
 
 
 def _require_direct_door(contract: WorktreeContract) -> CloseoutDoorGeneration:

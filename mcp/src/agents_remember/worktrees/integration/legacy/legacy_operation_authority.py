@@ -10,19 +10,9 @@ from pathlib import Path
 
 from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
 from agents_remember.worktrees.integration.legacy.legacy_operation_failures import LegacyBridgeError
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    contract_lifecycle_lease,
-    require_legacy_operation_compatible,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
     require_matching_lifecycle_operation_location,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
-    public_failure_evidence,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -96,8 +86,7 @@ def legacy_lifecycle_lease(
     pre_adoption: bool,
 ) -> Iterator[None]:
     if not pre_adoption:
-        with contract_lifecycle_lease(contract):
-            yield
+        yield
         return
     lock_path = contract.worktree_group / "reports" / ".legacy-lifecycle.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,67 +96,3 @@ def legacy_lifecycle_lease(
             yield
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-
-def require_explicit_bridge_compatible(
-    contract: WorktreeContract,
-    target: LegacyOperationTarget,
-    operation_kind: LifecycleOperationKind,
-    *,
-    publish_worker_exits: bool,
-) -> None:
-    if not target.pre_adoption:
-        try:
-            require_legacy_operation_compatible(
-                contract,
-                target_kind=operation_kind,
-                publish_worker_exits=publish_worker_exits,
-            )
-        except RuntimeError as error:
-            raise LegacyBridgeError(
-                "legacy-cross-kind-authority-active",
-                "another canonical lifecycle authority prevents legacy publication",
-                observed={
-                    "failure": public_failure_evidence(
-                        stage="legacy-compatibility",
-                        side="journal",
-                        name="current-operation.json",
-                        error_type=type(error).__name__,
-                        observed={"state": "incompatible"},
-                    )
-                },
-            ) from error
-        return
-    active: list[str] = []
-    for kind in ("closeout", "integrate", "direct-landing"):
-        if kind == operation_kind:
-            continue
-        path = contract.worktree_group / "reports" / f"{kind}-operation.json"
-        try:
-            record = LifecycleOperationStore(path).read()
-        except RuntimeError as error:
-            raise LegacyBridgeError(
-                "legacy-cross-kind-evidence-invalid",
-                "another exact historic operation path is unreadable or non-current-schema",
-                expected={"name": path.name, "schemaVersion": "3.0"},
-                observed={
-                    "failure": public_failure_evidence(
-                        stage="legacy-cross-kind-read",
-                        side="journal",
-                        name=path.name,
-                        error_type=type(error).__name__,
-                        observed={"state": "unreadable"},
-                    )
-                },
-            ) from error
-        if record is not None and (
-            record.status in {"queued", "running", "input-required", "termination-required"}
-            or record.workerPid is not None
-        ):
-            active.append(kind)
-    if active:
-        raise LegacyBridgeError(
-            "legacy-cross-kind-authority-active",
-            "legacy lifecycle repair cannot proceed while another task operation is active: "
-            + ", ".join(active),
-        )

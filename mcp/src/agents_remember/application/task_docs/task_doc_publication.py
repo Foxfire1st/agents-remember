@@ -24,7 +24,6 @@ from agents_remember.worktrees.queue.closeout_projection_publication import (
 )
 from agents_remember.worktrees.task_fact_publication import (
     publish_task_fact_mutation,
-    validate_task_fact_mutation,
 )
 
 from .task_doc_graph_titles import require_single_graph_document
@@ -135,7 +134,6 @@ def publish_task_doc_transaction_and_refresh(
 
     published = publish_task_fact_mutation(
         transaction.coordination_root,
-        transaction.target_repo_id,
         validate=lambda: require_task_doc_sources_current(transaction.source_snapshots),
         projection_scopes=lambda: resolve_projection_scope_union(
             transaction.coordination_root,
@@ -258,11 +256,7 @@ def validate_task_doc_transaction(transaction: TaskDocPublicationTransaction) ->
             transaction.scope_changes,
         )
 
-    validate_task_fact_mutation(
-        transaction.coordination_root,
-        transaction.target_repo_id,
-        validate,
-    )
+    validate()
 
 
 def require_task_doc_sources_current(

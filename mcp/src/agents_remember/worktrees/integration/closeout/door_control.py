@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration, CloseoutDoorRequest
@@ -50,27 +49,26 @@ def closeout_door_tool(
         authorize_door_actor(actor, context, request.action)
         return _response(request, admitted_contract, effects=[])
 
-    with task_publication_lock(config.coordination_root, admitted_contract.repo_name):
-        contract, _location = reread_configured_contract(
-            admitted_contract,
-            config.config_path.as_posix(),
+    contract, _location = reread_configured_contract(
+        admitted_contract,
+        config.config_path.as_posix(),
+    )
+    context = door_task_context(config, contract, request)
+    authorize_door_actor(actor, context, request.action)
+    generation = updated_door_generation(context, request, actor)
+    try:
+        proof = publish_door_intent(
+            contract.contract_path,
+            prepare_door_publication(contract, generation),
         )
-        context = door_task_context(config, contract, request)
-        authorize_door_actor(actor, context, request.action)
-        generation = updated_door_generation(context, request, actor)
-        try:
-            proof = publish_door_intent(
-                contract.contract_path,
-                prepare_door_publication(contract, generation),
-            )
-        except DoorPublicationError as exc:
-            return _publication_failure(request, contract.contract_path, generation, exc)
-        if proof.state != "proven":
-            raise CloseoutQueueError(
-                "closeout-door-publication-interrupted",
-                "door source publication did not produce exact canonical contract bytes",
-            )
-        published = load_contract(contract.contract_path)
+    except DoorPublicationError as exc:
+        return _publication_failure(request, contract.contract_path, generation, exc)
+    if proof.state != "proven":
+        raise CloseoutQueueError(
+            "closeout-door-publication-interrupted",
+            "door source publication did not produce exact canonical contract bytes",
+        )
+    published = load_contract(contract.contract_path)
     try:
         effect = refresh_closeout_projection(
             config.coordination_root,

@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.certification.corrective import RedCatalogDisposition
 from agents_remember.models.closeout.input import (
@@ -83,10 +81,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_door_co
     complete_pending_door_locked,
     project_closeout_refresh,
     record_door_intent,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    contract_lifecycle_lease,
-    require_lifecycle_operation_compatible,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_live_decision import (
     raise_live_evidence_decision,
@@ -177,67 +171,58 @@ def control_operation(
             "lifecycle control requires a nonblank developer intent note",
             next_action=command.action,
         )
-    with contract_lifecycle_lease(
-        command.admitted_contract,
-        location=command.admitted_location,
-    ):
-        contract, location = _reload_control_contract(command)
-        require_lifecycle_operation_compatible(
-            contract,
-            operation_kind=command.kind,
-            publish_worker_exits=not command.dry_run,
-        )
-        store = LifecycleOperationStore(location.journal_path(command.kind))
-        observed = _observe_control_under_lease(command, contract=contract, store=store)
-        legal_rows = legal_operation_controls(
+    contract, location = _reload_control_contract(command)
+    store = LifecycleOperationStore(location.journal_path(command.kind))
+    observed = _observe_control_under_lease(command, contract=contract, store=store)
+    legal_rows = legal_operation_controls(
+        observed.contract,
+        observed.record,
+        context=LifecycleControlProjectionContext(
+            allow_completed_disposition=command.allow_completed_disposition,
+            caller=command.caller,
+            integration=observed.integration,
+            door=observed.door,
+        ),
+    )
+    legal = {item["action"] for item in legal_rows}
+    if command.action not in legal:
+        raise_live_evidence_decision(
             observed.contract,
             observed.record,
-            context=LifecycleControlProjectionContext(
-                allow_completed_disposition=command.allow_completed_disposition,
-                caller=command.caller,
-                integration=observed.integration,
-                door=observed.door,
-            ),
+            integration_observation=observed.integration,
         )
-        legal = {item["action"] for item in legal_rows}
-        if command.action not in legal:
-            raise_live_evidence_decision(
+        if (
+            command.action == "cancel"
+            and observed.record.status == "cancelled"
+            and observed.record.operationKind == "integrate"
+            and observed.record.organizationalRepair is not None
+        ):
+            # A previously advertised repair payload must still classify an
+            # exact post-crash reset or third byte state even when status no
+            # longer advertises cancellation for the contradiction.
+            return cancel_operation(
                 observed.contract,
+                observed.store,
                 observed.record,
-                integration_observation=observed.integration,
+                dry_run=command.dry_run,
             )
-            if (
-                command.action == "cancel"
-                and observed.record.status == "cancelled"
-                and observed.record.operationKind == "integrate"
-                and observed.record.organizationalRepair is not None
-            ):
-                # A previously advertised repair payload must still classify an
-                # exact post-crash reset or third byte state even when status no
-                # longer advertises cancellation for the contradiction.
-                return cancel_operation(
-                    observed.contract,
-                    observed.store,
-                    observed.record,
-                    dry_run=command.dry_run,
-                )
-            next_row = legal_rows[0] if legal_rows else None
-            next_action = next_row["action"] if next_row else "developer-decision"
-            raise LifecycleControlError(
-                "lifecycle-control-not-legal",
-                "the requested action is not legal for the current generation evidence",
-                expected={"legalActions": sorted(legal)},
-                observed={"requestedAction": command.action, "status": observed.record.status},
-                next_action=next_action,
-                next_tool=next_row["tool"] if next_row else None,
-                next_args=next_row["arguments"] if next_row else None,
-            )
-        return _execute_legal_control(
-            observed.contract,
-            observed.store,
-            observed.record,
-            command,
+        next_row = legal_rows[0] if legal_rows else None
+        next_action = next_row["action"] if next_row else "developer-decision"
+        raise LifecycleControlError(
+            "lifecycle-control-not-legal",
+            "the requested action is not legal for the current generation evidence",
+            expected={"legalActions": sorted(legal)},
+            observed={"requestedAction": command.action, "status": observed.record.status},
+            next_action=next_action,
+            next_tool=next_row["tool"] if next_row else None,
+            next_args=next_row["arguments"] if next_row else None,
         )
+    return _execute_legal_control(
+        observed.contract,
+        observed.store,
+        observed.record,
+        command,
+    )
 
 
 def _observe_control_under_lease(
@@ -260,21 +245,16 @@ def _observe_control_under_lease(
     )
     integration = None
     if command.kind == "integrate":
-        with integration_authority_lock(
-            contract.coordination_root,
-            contract.repo_name,
-            create=not command.dry_run,
-        ):
-            contract, location = _reload_control_contract(command)
-            store = LifecycleOperationStore(location.journal_path(command.kind))
-            record = _require_generation(store, command, contract=contract)
-            record = (
-                project_worker_exit(record)
-                if command.dry_run
-                else reconcile_worker_exit(store) or record
-            )
-            integration = classify_integration_operation(contract, record)
-            require_integration_operation_convergent(integration)
+        contract, location = _reload_control_contract(command)
+        store = LifecycleOperationStore(location.journal_path(command.kind))
+        record = _require_generation(store, command, contract=contract)
+        record = (
+            project_worker_exit(record)
+            if command.dry_run
+            else reconcile_worker_exit(store) or record
+        )
+        integration = classify_integration_operation(contract, record)
+        require_integration_operation_convergent(integration)
     publication = record.doorPublication
     door = (
         classify_door_publication(publication, contract)
@@ -373,17 +353,16 @@ def _resume(
         return operation_projection(record, contract=contract)
     contract, record = _resume_closeout_publications(contract, store, record)
     if record.operationKind == "direct-landing":
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            current_contract, _location = reread_configured_contract(
-                contract,
-                record.input.configPath,
-            )
-            _require_proven_closeout_door_for_launch(current_contract, record)
-            current = recover_direct_landing_under_authority(current_contract, store, record)
-            return operation_projection(
-                current,
-                contract=load_contract(current_contract.contract_path),
-            )
+        current_contract, _location = reread_configured_contract(
+            contract,
+            record.input.configPath,
+        )
+        _require_proven_closeout_door_for_launch(current_contract, record)
+        current = recover_direct_landing_under_authority(current_contract, store, record)
+        return operation_projection(
+            current,
+            contract=load_contract(current_contract.contract_path),
+        )
     requeued, changed = store.resume_generation(
         requeued_same_generation,
         expected_generation=record.generation,
@@ -603,21 +582,20 @@ def _resume_completed_supersede(
     current_contract = contract
     if not dry_run:
         operation_input = record.input
-        with task_publication_lock(contract.coordination_root, contract.repo_name):
-            current_contract, _location = reread_configured_contract(
-                contract,
-                operation_input.configPath,
+        current_contract, _location = reread_configured_contract(
+            contract,
+            operation_input.configPath,
+        )
+        current_record = store.read()
+        if current_record is None or current_record.generationDisposition != "superseded":
+            raise LifecycleControlError(
+                "lifecycle-generation-changed",
+                "the superseded generation changed before replay",
+                next_action="developer-decision",
             )
-            current_record = store.read()
-            if current_record is None or current_record.generationDisposition != "superseded":
-                raise LifecycleControlError(
-                    "lifecycle-generation-changed",
-                    "the superseded generation changed before replay",
-                    next_action="developer-decision",
-                )
-            _require_supersede_declaration_match(current_record, declaration_fingerprint)
-            record = complete_pending_door_locked(current_contract, store, current_record)
-            current_contract = load_contract(current_contract.contract_path)
+        _require_supersede_declaration_match(current_record, declaration_fingerprint)
+        record = complete_pending_door_locked(current_contract, store, current_record)
+        current_contract = load_contract(current_contract.contract_path)
     _require_waiting_supersede_proof(current_contract, record)
     projection = operation_projection(record, contract=current_contract)
     return project_closeout_refresh(
@@ -683,68 +661,67 @@ def _publish_completed_supersede(
 ) -> LifecycleOperationProjection:
 
     operation_input = record.input
-    with task_publication_lock(contract.coordination_root, contract.repo_name):
-        current_contract, _location = reread_configured_contract(
-            contract,
-            operation_input.configPath,
+    current_contract, _location = reread_configured_contract(
+        contract,
+        operation_input.configPath,
+    )
+    current_record = store.read()
+    if current_record is not None and current_record.generationDisposition == "superseded":
+        _require_supersede_declaration_match(
+            current_record,
+            source.declaration_fingerprint,
         )
-        current_record = store.read()
-        if current_record is not None and current_record.generationDisposition == "superseded":
-            _require_supersede_declaration_match(
-                current_record,
-                source.declaration_fingerprint,
-            )
-            updated = complete_pending_door_locked(
+        updated = complete_pending_door_locked(
+            current_contract,
+            store,
+            current_record,
+        )
+        current_contract = load_contract(current_contract.contract_path)
+    elif current_record is None or current_record != record:
+        raise LifecycleControlError(
+            "lifecycle-generation-changed",
+            "the completed generation changed before supersede publication",
+            expected={"generation": record.generation, "fingerprint": record.fingerprint},
+            observed={
+                "generation": current_record.generation if current_record is not None else 0,
+                "fingerprint": current_record.fingerprint if current_record is not None else "",
+            },
+            next_action="developer-decision",
+        )
+    else:
+        require_completed_disposition(current_contract, current_record, "supersede")
+        try:
+            successor = superseding_door_generation(
+                runtime,
                 current_contract,
-                store,
-                current_record,
+                actor=source.caller,
+                grade=source.grade,
+                admission=source.admission,
             )
-            current_contract = load_contract(current_contract.contract_path)
-        elif current_record is None or current_record != record:
+        except CloseoutQueueError as exc:
             raise LifecycleControlError(
-                "lifecycle-generation-changed",
-                "the completed generation changed before supersede publication",
-                expected={"generation": record.generation, "fingerprint": record.fingerprint},
-                observed={
-                    "generation": current_record.generation if current_record is not None else 0,
-                    "fingerprint": current_record.fingerprint if current_record is not None else "",
-                },
-                next_action="developer-decision",
+                exc.status,
+                "fresh supersede door evidence is not admissible",
+                next_action="supersede",
+            ) from exc
+        intent = prepare_door_publication(current_contract, successor)
+        updated = store.update(
+            lambda current: record_door_intent(
+                current.model_copy(
+                    update={
+                        "generationDisposition": "superseded",
+                        "supersedeDeclarationFingerprint": source.declaration_fingerprint,
+                        "guidance": (
+                            "A distinct current-source waiting door successor is published."
+                        ),
+                    }
+                ),
+                intent,
+                generation_disposition="superseded",
             )
-        else:
-            require_completed_disposition(current_contract, current_record, "supersede")
-            try:
-                successor = superseding_door_generation(
-                    runtime,
-                    current_contract,
-                    actor=source.caller,
-                    grade=source.grade,
-                    admission=source.admission,
-                )
-            except CloseoutQueueError as exc:
-                raise LifecycleControlError(
-                    exc.status,
-                    "fresh supersede door evidence is not admissible",
-                    next_action="supersede",
-                ) from exc
-            intent = prepare_door_publication(current_contract, successor)
-            updated = store.update(
-                lambda current: record_door_intent(
-                    current.model_copy(
-                        update={
-                            "generationDisposition": "superseded",
-                            "supersedeDeclarationFingerprint": source.declaration_fingerprint,
-                            "guidance": (
-                                "A distinct current-source waiting door successor is published."
-                            ),
-                        }
-                    ),
-                    intent,
-                    generation_disposition="superseded",
-                )
-            )
-            updated = complete_pending_door_locked(current_contract, store, updated)
-            current_contract = load_contract(current_contract.contract_path)
+        )
+        updated = complete_pending_door_locked(current_contract, store, updated)
+        current_contract = load_contract(current_contract.contract_path)
     projection = operation_projection(updated, contract=current_contract)
     return project_closeout_refresh(
         projection,
@@ -878,42 +855,41 @@ def _refresh_resume_door(
         caller=actor,
     )
     runtime = load_config(command.configured_authority)
-    with task_publication_lock(contract.coordination_root, contract.repo_name):
-        current, _location = reread_configured_contract(
-            contract,
-            command.configured_authority,
+    current, _location = reread_configured_contract(
+        contract,
+        command.configured_authority,
+    )
+    try:
+        context = door_task_context(runtime, current, request)
+        authorize_door_actor(actor, context, "update-provenance")
+        generation = updated_door_generation(context, request, actor)
+        proof = publish_door_intent(
+            current.contract_path,
+            prepare_door_publication(current, generation),
         )
-        try:
-            context = door_task_context(runtime, current, request)
-            authorize_door_actor(actor, context, "update-provenance")
-            generation = updated_door_generation(context, request, actor)
-            proof = publish_door_intent(
-                current.contract_path,
-                prepare_door_publication(current, generation),
-            )
-        except DoorPublicationError as exc:
-            classification = exc.classification
-            raise LifecycleControlError(
-                exc.status,
-                exc.detail,
-                expected=classification.expected,
-                observed=classification.observed,
-                next_action="resume"
-                if classification.state == "accepted-before"
-                else "developer-decision",
-            ) from exc
-        except CloseoutQueueError as exc:
-            raise LifecycleControlError(
-                exc.status,
-                str(exc),
-                next_action="resume",
-            ) from exc
-        if proof.state != "proven":
-            raise LifecycleControlError(
-                "closeout-resume-door-unproven",
-                "resume could not prove its source-door successor",
-                next_action="resume",
-            )
+    except DoorPublicationError as exc:
+        classification = exc.classification
+        raise LifecycleControlError(
+            exc.status,
+            exc.detail,
+            expected=classification.expected,
+            observed=classification.observed,
+            next_action="resume"
+            if classification.state == "accepted-before"
+            else "developer-decision",
+        ) from exc
+    except CloseoutQueueError as exc:
+        raise LifecycleControlError(
+            exc.status,
+            str(exc),
+            next_action="resume",
+        ) from exc
+    if proof.state != "proven":
+        raise LifecycleControlError(
+            "closeout-resume-door-unproven",
+            "resume could not prove its source-door successor",
+            next_action="resume",
+        )
     updated = load_contract(contract.contract_path)
     door = updated.closeout_door
     if door is None:

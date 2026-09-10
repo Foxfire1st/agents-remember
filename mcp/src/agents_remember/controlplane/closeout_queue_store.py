@@ -12,7 +12,6 @@ from pydantic import ValidationError
 
 from agents_remember.controlplane.closeout_queue_records import CloseoutProjectionBuild
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.models.closeout.projection import (
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
@@ -205,13 +204,7 @@ class CloseoutQueueStore:
         atomic_write_text(
             self.build_path, build.model_dump_json(exclude_none=True, indent=2) + "\n"
         )
-        with (
-            task_publication_lock(
-                self.coordination_root,
-                self.sprint_ref.repository,
-            ),
-            exclusive_access(self.state_path, PROJECTION_OWNERSHIP),
-        ):
+        with exclusive_access(self.state_path, PROJECTION_OWNERSHIP):
             current = self._read_state(build.builtAt)
             source = current_source()
             if not source.readable:

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.tasks import (
@@ -97,7 +96,6 @@ def register_task_execution_evidence(
         )
     if loaded is None:
         return _classify_missing_registration_source(
-            root,
             path,
             task_document_ref,
         )
@@ -140,7 +138,6 @@ def register_task_execution_evidence(
 
 
 def _classify_missing_registration_source(
-    root: Path,
     path: Path,
     task_document_ref: TaskDocumentRef,
 ) -> TaskExecutionRegistrationResult:
@@ -150,7 +147,7 @@ def _classify_missing_registration_source(
             task_document_ref,
             "reviewer non-leaf task source is missing",
         )
-    return _classify_missing_task_source(root, path, task_document_ref)
+    return _classify_missing_task_source(path, task_document_ref)
 
 
 def _classify_loaded_registration_address(
@@ -262,28 +259,26 @@ def _load_registration_source(root: Path, path: Path) -> _RegistrationSource | N
 
 
 def _classify_missing_task_source(
-    coordination_root: Path,
     path: Path,
     task_document_ref: TaskDocumentRef,
 ) -> TaskExecutionRegistrationResult:
     """Prove under the task CAS that a missing child no longer has a live parent row."""
 
-    with task_publication_lock(coordination_root, task_document_ref.repository):
-        try:
-            _require_task_source_still_missing(path)
-            parent = _load_retirement_parent(path.parent / "task.json")
-            detail = _retirement_detail(parent, path, task_document_ref)
-        except _RegistrationRefusal as refusal:
-            return TaskExecutionRegistrationResult(
-                refusal.status,
-                task_document_ref,
-                refusal.detail,
-            )
+    try:
+        _require_task_source_still_missing(path)
+        parent = _load_retirement_parent(path.parent / "task.json")
+        detail = _retirement_detail(parent, path, task_document_ref)
+    except _RegistrationRefusal as refusal:
         return TaskExecutionRegistrationResult(
-            "task-retired",
+            refusal.status,
             task_document_ref,
-            detail,
+            refusal.detail,
         )
+    return TaskExecutionRegistrationResult(
+        "task-retired",
+        task_document_ref,
+        detail,
+    )
 
 
 def _require_task_source_still_missing(path: Path) -> None:

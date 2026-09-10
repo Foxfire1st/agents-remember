@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.models.closeout.projection import (
     ProjectionInvalidationResult,
     ProjectionRebuildResult,
@@ -39,7 +38,6 @@ class TaskFactPublicationResult[T]:
 
 def publish_task_fact_mutation[T](
     coordination_root: Path,
-    repo_id: str,
     *,
     validate: Callable[[], None],
     projection_scopes: Callable[[], tuple[TaskDocumentRef, ...]],
@@ -48,13 +46,12 @@ def publish_task_fact_mutation[T](
     """Publish truth and invalidate its complete fixed-order scope union under one CAS."""
 
     timestamp = now_iso()
-    with task_publication_lock(coordination_root, repo_id):
-        validate()
-        scopes = tuple(sorted(set(projection_scopes()), key=lambda ref: ref.key))
-        result = publication()
-        receipts = tuple(
-            _invalidate_scope(coordination_root, sprint_ref, timestamp) for sprint_ref in scopes
-        )
+    validate()
+    scopes = tuple(sorted(set(projection_scopes()), key=lambda ref: ref.key))
+    result = publication()
+    receipts = tuple(
+        _invalidate_scope(coordination_root, sprint_ref, timestamp) for sprint_ref in scopes
+    )
     effects: list[TaskDocProjectionEffect] = []
     for receipt in receipts:
         if receipt.invalidation.outcome == "failed":
@@ -70,15 +67,6 @@ def publish_task_fact_mutation[T](
         except Exception as exc:
             effects.append(_rebuild_failure_effect(receipt, exc))
     return TaskFactPublicationResult(result, tuple(effects))
-
-
-def validate_task_fact_mutation(
-    coordination_root: Path,
-    repo_id: str,
-    validate: Callable[[], None],
-) -> None:
-    with task_publication_lock(coordination_root, repo_id, create=False):
-        validate()
 
 
 def contract_projection_scopes(
@@ -122,7 +110,6 @@ def publish_contract_task_facts[T](
 ) -> TaskFactPublicationResult[T]:
     return publish_task_fact_mutation(
         contract.coordination_root,
-        contract.repo_name,
         validate=validate,
         projection_scopes=lambda: contract_projection_scopes(contract, documents),
         publication=publication,

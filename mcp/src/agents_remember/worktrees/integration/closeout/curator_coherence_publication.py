@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
 from agents_remember.models.lifecycles.curator_coherence import (
@@ -176,47 +175,42 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
     record_path = paths.generation_record(record_digest)
     report_path = paths.generation_report(record_digest)
     snapshot_path: Path | None = None
-    with task_publication_lock(contract.coordination_root, contract.repo_name):
-        current_contract = load_contract(contract.contract_path)
-        if current_contract != contract:
-            raise CuratorCoherenceError(
-                "curator-coherence-contract-stale",
-                "the leaf contract changed during coherence publication",
-                next_action="prepare",
-            )
-        replay = _idempotent_replay(current_contract, publication_fingerprint)
-        if replay is not None:
-            return _validated_payload(request, current_contract, replay, state="already-current")
-        _require_predecessor(current_contract, request)
-        _require_observation_unchanged(
-            observation, observe_curator_coherence_source(current_contract)
+    current_contract = load_contract(contract.contract_path)
+    if current_contract != contract:
+        raise CuratorCoherenceError(
+            "curator-coherence-contract-stale",
+            "the leaf contract changed during coherence publication",
+            next_action="prepare",
         )
-        require_recorded_judgments_current(current_contract, judgments)
-        _publish_generation(record_path, report_path, record_bytes, report_bytes)
-        if request.freeze_snapshot:
-            snapshot_path = _publish_snapshot(
-                current_contract,
-                record,
-                record_digest,
-                record_path,
-                report_path,
-            )
-        _require_observation_unchanged(
-            observation, observe_curator_coherence_source(current_contract)
+    replay = _idempotent_replay(current_contract, publication_fingerprint)
+    if replay is not None:
+        return _validated_payload(request, current_contract, replay, state="already-current")
+    _require_predecessor(current_contract, request)
+    _require_observation_unchanged(observation, observe_curator_coherence_source(current_contract))
+    require_recorded_judgments_current(current_contract, judgments)
+    _publish_generation(record_path, report_path, record_bytes, report_bytes)
+    if request.freeze_snapshot:
+        snapshot_path = _publish_snapshot(
+            current_contract,
+            record,
+            record_digest,
+            record_path,
+            report_path,
         )
-        require_recorded_judgments_current(current_contract, judgments)
-        authority = CuratorCoherenceAuthority(
-            leafId=current_contract.leaf_id,
-            contractPath=current_contract.contract_path.as_posix(),
-            currentRecordDigest=record_digest,
-            recordPath=_task_relative(current_contract, record_path),
-            reportPath=_task_relative(current_contract, report_path),
-            reportSha256=record.reportSha256,
-        )
-        atomic_write_text(
-            paths.canonical,
-            _json_bytes(authority.model_dump(mode="json")).decode("utf-8"),
-        )
+    _require_observation_unchanged(observation, observe_curator_coherence_source(current_contract))
+    require_recorded_judgments_current(current_contract, judgments)
+    authority = CuratorCoherenceAuthority(
+        leafId=current_contract.leaf_id,
+        contractPath=current_contract.contract_path.as_posix(),
+        currentRecordDigest=record_digest,
+        recordPath=_task_relative(current_contract, record_path),
+        reportPath=_task_relative(current_contract, report_path),
+        reportSha256=record.reportSha256,
+    )
+    atomic_write_text(
+        paths.canonical,
+        _json_bytes(authority.model_dump(mode="json")).decode("utf-8"),
+    )
     validated = require_current_curator_coherence(contract)
     payload = _validated_payload(request, contract, validated, state="published")
     if snapshot_path is not None:

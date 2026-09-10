@@ -88,8 +88,8 @@ def sync_contract_under_authority(
 ) -> WorktreeCommandResult:
     """Start, observe, continue, cancel, or recover one exact sync transaction.
 
-    The caller holds ``integration_authority_lock``. No lock survives the return:
-    an agent resolves retained conflicts in the ordinary worktree between calls.
+    No lock is held across the call: an agent resolves retained conflicts in the
+    ordinary worktree between calls.
     """
 
     try:

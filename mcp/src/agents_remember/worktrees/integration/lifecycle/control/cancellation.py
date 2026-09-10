@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import NoReturn
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.models.lifecycles.door import DoorPublicationEvidence
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
@@ -163,27 +162,26 @@ def _publish_cancelled_outcome(
 
     if record.operationKind in {"closeout", "direct-landing"}:
         operation_input = record.input
-        with task_publication_lock(contract.coordination_root, contract.repo_name):
-            contract, _location = reread_configured_contract(
-                contract,
-                operation_input.configPath,
+        contract, _location = reread_configured_contract(
+            contract,
+            operation_input.configPath,
+        )
+        claimed = _require_cancelled_door_owner(contract, record)
+        successor = successor_waiting_door(
+            claimed.generation,
+            declared_by="lifecycle-cancel",
+            declared_at=stamp,
+        )
+        intent = prepare_door_publication(contract, successor)
+        cancelled = store.update(
+            lambda current: record_door_intent(
+                cancelled_record(current),
+                intent,
+                generation_disposition="cancelled",
             )
-            claimed = _require_cancelled_door_owner(contract, record)
-            successor = successor_waiting_door(
-                claimed.generation,
-                declared_by="lifecycle-cancel",
-                declared_at=stamp,
-            )
-            intent = prepare_door_publication(contract, successor)
-            cancelled = store.update(
-                lambda current: record_door_intent(
-                    cancelled_record(current),
-                    intent,
-                    generation_disposition="cancelled",
-                )
-            )
-            cancelled = complete_pending_door_locked(contract, store, cancelled)
-            contract = load_contract(contract.contract_path)
+        )
+        cancelled = complete_pending_door_locked(contract, store, cancelled)
+        contract = load_contract(contract.contract_path)
     else:
         cancelled = store.update(cancelled_record)
     return cancelled, contract

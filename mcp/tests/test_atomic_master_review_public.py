@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.memory_ledger import load_ledger
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
@@ -631,12 +630,11 @@ def _prepare_atomic_leaf_landing(
     """Create one review-free atomic leaf closeout source for the landing proof."""
 
     assert contract.parent_contract_path is not None
-    with integration_authority_lock(contract.coordination_root, contract.repo_name):
-        publish_atomic_series_selection(
-            load_contract(contract.parent_contract_path),
-            "active",
-            timestamp="2026-08-15T00:00:00+00:00",
-        )
+    publish_atomic_series_selection(
+        load_contract(contract.parent_contract_path),
+        "active",
+        timestamp="2026-08-15T00:00:00+00:00",
+    )
     git(contract.code_worktree, "add", "-A")
     git(contract.code_worktree, "commit", "-m", "atomic child candidate")
     candidate_commit = git(contract.code_worktree, "rev-parse", "HEAD")
