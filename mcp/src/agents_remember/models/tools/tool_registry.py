@@ -30,7 +30,6 @@ from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
 from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceResponse
-from agents_remember.models.lifecycles.door_response import CloseoutDoorResponse
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.lifecycles.responses import (
     LifecycleBlockResponse,
@@ -211,7 +210,6 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
     "curator_coherence": CuratorCoherenceResponse,
-    "closeout_door": CloseoutDoorResponse,
     "closeout_queue": CloseoutQueueResponse,
     "direct_landing": DirectLandingResponse,
     "lifecycle_gate": LifecycleGateResponse,

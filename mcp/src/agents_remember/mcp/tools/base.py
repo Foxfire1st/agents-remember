@@ -57,7 +57,6 @@ PUBLIC_TOOLS = (
     "lifecycle_finalize_task",
     "task_doc",
     "curator_coherence",
-    "closeout_door",
     "closeout_queue",
     "codex_benchmark_prepare",
     "codex_benchmark_run",

@@ -4,7 +4,6 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.application.closeout_door import CloseoutDoorRequest
 from agents_remember.application.closeout_queue import CloseoutQueueRequest
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
@@ -16,7 +15,6 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
 
 from ..tools import (
-    closeout_door_payload,
     closeout_queue_payload,
     curator_coherence_payload,
     lifecycle_finalize_task_payload,
@@ -37,18 +35,6 @@ def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) ->
         defers, withdraws, or otherwise mutates closeout intent."""
         return closeout_queue_payload(config, request)
 
-
-def _register_closeout_door_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    @server.tool()
-    def closeout_door(request: CloseoutDoorRequest) -> dict[str, Any]:
-        """Publish or inspect one exact contract-owned closeout-door generation.
-        declare and update-provenance require complete current task, source, review, memory,
-        ledger, admission, and scheduling evidence; defer, resume, and withdraw change only the
-        exact current generation's disposition. Successful source publication refreshes the
-        affected sprint projection after releasing the short task/door publication mutex. Same
-        intent retries converge on the already-published generation. Claiming is intentionally
-        absent here: worktree_closeout_apply validates first-ready and owns waiting-to-claimed."""
-        return closeout_door_payload(config, request)
 
 
 def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -252,5 +238,4 @@ def register_task_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_task_finalizer_tools(server, config)
     _register_task_document_tools(server, config)
     _register_curator_coherence_tools(server, config)
-    _register_closeout_door_tools(server, config)
     _register_closeout_queue_tools(server, config)
