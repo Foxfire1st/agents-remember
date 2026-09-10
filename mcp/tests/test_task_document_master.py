@@ -72,20 +72,24 @@ class MasterApplicationTests(unittest.TestCase):
         )
         self.assertEqual(doc.subTasks[0].scope, "done")
 
-    def test_set_subtask_completed_refuses_unready_or_missing_exact_leaf(self) -> None:
+    def test_set_subtask_completed_trusts_the_declared_row(self) -> None:
+        # The master's own declared row is authoritative: marking it Completed does
+        # not read or grade the child leaf document.
         self._create(subTasks=[{"number": "1", "name": "A", "status": "planning"}])
-        with self.assertRaises(TaskDocError) as missing:
-            self._op("set_subtask", subtask={"number": "1", "status": "Completed"})
-        self.assertIn("no leaf task document exists", str(missing.exception))
+        missing = self._op("set_subtask", subtask={"number": "1", "status": "Completed"})
+        self.assertEqual(
+            read_task_doc(Path(str(missing["docPath"]))).subTasks[0].status, "Completed"
+        )
 
         leaf_json, _leaf_md = self._author_leaf(number="1", slug="01_a")
         leaf = read_task_doc(leaf_json)
         data = leaf.model_dump(by_alias=True)
         data["steps"] = [{"id": "S1", "title": "Open", "status": "pending"}]
         write_task_doc(leaf_json.parent, TaskDocument.model_validate(data))
-        with self.assertRaises(TaskDocError) as unresolved:
-            self._op("set_subtask", subtask={"number": "1", "status": "Completed"})
-        self.assertIn("'id': 'S1'", str(unresolved.exception))
+        unresolved = self._op("set_subtask", subtask={"number": "1", "status": "Completed"})
+        self.assertEqual(
+            read_task_doc(Path(str(unresolved["docPath"]))).subTasks[0].status, "Completed"
+        )
 
     def test_replace_cannot_erase_or_change_unresolved_row_identity_or_multiplicity(self) -> None:
         task_root = self.coord / "tasks" / "agents-remember" / "series"
@@ -140,7 +144,9 @@ class MasterApplicationTests(unittest.TestCase):
         row = read_task_doc(Path(str(changed["docPath"]))).subTasks[0]
         self.assertEqual((row.name, row.scope), ("Renamed metadata", "Clarified scope"))
 
-    def test_master_completion_revalidates_pending_leaf_behind_completed_row(self) -> None:
+    def test_master_completion_does_not_regrade_a_pending_child_leaf(self) -> None:
+        # A master completes against its own declared rows; a child leaf's own
+        # pending steps are that document's business, not a master-completion gate.
         task_root = self.coord / "tasks" / "agents-remember" / "series"
         leaf = _doc(
             id="1",
@@ -156,15 +162,23 @@ class MasterApplicationTests(unittest.TestCase):
             subTasks=[
                 {
                     "number": "1",
-                    "name": "False completion",
+                    "name": "Declared completion",
                     "file": "01_a.md",
                     "status": "Completed",
                 }
             ],
         )
         write_task_doc(task_root, legacy)
+        completed = self._op("set_status", fields={"status": "Completed"})
+        self.assertEqual(read_task_doc(Path(str(completed["docPath"]))).status, "Completed")
+        # The child leaf still cannot claim Completed on its own unresolved steps.
         with self.assertRaises(TaskDocError) as pending:
-            self._op("set_status", fields={"status": "Completed"})
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(repo_id="agents-remember", task_name="series", slug="01_a"),
+                operation="set_status",
+                edit=TaskDocEdit(fields={"status": "Completed"}),
+            )
         self.assertIn("'id': 'S1'", str(pending.exception))
 
     def _author_leaf(self, *, number: str = "1", slug: str = "01_a") -> tuple[Path, Path]:

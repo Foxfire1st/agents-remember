@@ -45,7 +45,6 @@ from agents_remember.tasks import (
     SubTaskRef,
     TaskDocSourceSnapshot,
     TaskDocument,
-    completion_blockers,
     json_path_for,
     markdown_path_for,
     missing_task_doc_source,
@@ -60,10 +59,6 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentRefError,
     TaskDocumentTopology,
     repository_master_documents,
-)
-from agents_remember.tasks.leaf_doc import (
-    TerminalLeafResolutionError,
-    resolve_terminal_leaf_doc,
 )
 from agents_remember.tasks.serving_preflight import (
     TopologyServingBuildError,
@@ -217,8 +212,6 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
             f"task-sprint-linkage-row-number-taken: row {payload.number!r} already exists"
         )
     candidate_master = _assert_execution_nature(topology, sprint_ref, master, payload)
-    if payload.status == "Completed":
-        _require_completed_master(candidate_master or master.document, master.ref, payload.number)
     candidate_sprint, graph_node = _attach_candidate(sprint, master, payload)
     overrides: dict[TaskDocumentRef, TaskDocument] = {sprint_ref: candidate_sprint}
     if candidate_master is not None:
@@ -396,45 +389,6 @@ def collect_linkage_facts(
     facts.extend(_membership_facts(membership, referenced))
     facts.extend(_uncommanded_facts(sprint, masters, membership))
     return facts
-
-
-def validate_completed_master_row(task_root: Path, ref: SubTaskRef) -> None:
-    """Terminal check for one row newly marked Completed on a master document.
-
-    A typed ``masterRef`` row (L14) completes against the linked master document
-    itself; any other row resolves the terminal leaf doc exactly as before.
-    """
-
-    if ref.masterRef is not None:
-        # TaskDocumentRef confines the path (no absolute or parent parts), so the
-        # linked master document always sits inside the repository task root.
-        master_path = task_root.parent / ref.masterRef.path
-        try:
-            master = read_task_doc(master_path)
-        except (OSError, ValueError) as exc:
-            raise SprintLinkageError(
-                f"cannot mark master row {ref.number!r} Completed: cannot read the linked "
-                f"master document: {exc}"
-            ) from exc
-        _require_completed_master(master, ref.masterRef, ref.number)
-        return
-    asserted = (task_root / Path(ref.file).with_suffix(".json")) if ref.file else None
-    try:
-        resolved = resolve_terminal_leaf_doc(task_root, ref.number, asserted_path=asserted)
-    except TerminalLeafResolutionError as exc:
-        raise SprintLinkageError(f"cannot mark master row {ref.number!r} Completed: {exc}") from exc
-    if resolved is None:
-        raise SprintLinkageError(
-            f"cannot mark master row {ref.number!r} Completed: no leaf task document exists"
-        )
-    _path, leaf = resolved
-    blockers = completion_blockers(leaf)
-    if blockers:
-        exact = [blocker.model_dump() for blocker in blockers]
-        raise SprintLinkageError(
-            f"cannot mark master row {ref.number!r} Completed: task completion refused; "
-            f"unresolved work units: {exact!r}"
-        )
 
 
 # --- payload + sprint context -------------------------------------------------
@@ -667,18 +621,6 @@ def _require_no_touching_edges(graph: SprintExecutionGraph, master_ref: TaskDocu
 
 
 # --- shared validation + publication ------------------------------------------
-
-
-def _require_completed_master(
-    document: TaskDocument, master_ref: TaskDocumentRef, row_number: str
-) -> None:
-    blockers = completion_blockers(document)
-    if document.status != "Completed" or blockers:
-        exact = [blocker.model_dump() for blocker in blockers]
-        raise SprintLinkageError(
-            f"cannot mark master row {row_number!r} Completed: linked master "
-            f"{master_ref.key} is {document.status}, unresolved units: {exact!r}"
-        )
 
 
 def _validate_candidate(

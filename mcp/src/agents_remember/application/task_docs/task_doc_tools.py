@@ -36,7 +36,6 @@ from agents_remember.tasks import (
 )
 from agents_remember.tasks.master_sync import MasterSyncError, plan_master_sync
 from agents_remember.tasks.readiness import (
-    completed_master_rows_to_validate,
     missing_unresolved_master_rows,
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
@@ -277,7 +276,6 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     config = context.config
     target = context.target
     operation = context.operation
-    edit = context.edit
     task_root = context.task_root
     original = context.original
     doc = context.candidate
@@ -286,7 +284,6 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
     _enforce_terminal_status(doc)
-    _enforce_completed_master_rows(task_root, operation, original, doc, edit)
     _enforce_register_section_shapes(doc)
     try:
         enforce_execution_topology_edit(
@@ -905,31 +902,6 @@ def _raise_for_completion_blockers(doc: TaskDocument) -> None:
     raise TaskDocError(f"task completion refused; unresolved work units: {exact!r}")
 
 
-def _enforce_completed_master_rows(
-    task_root: Path,
-    operation: str,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-    edit: TaskDocEdit,
-) -> None:
-    if candidate.kind != "master":
-        return
-    targeted_number = None
-    if operation == "set_subtask" and edit.subtask:
-        targeted_number = str(edit.subtask.get("number") or "")
-    for ref in completed_master_rows_to_validate(
-        candidate,
-        original=original,
-        targeted_number=targeted_number,
-    ):
-        try:
-            # Lives with the sprint linkage module (L14): a typed masterRef row
-            # completes against the linked master document, not a leaf doc.
-            task_sprint_linkage.validate_completed_master_row(task_root, ref)
-        except task_sprint_linkage.SprintLinkageError as exc:
-            raise TaskDocError(str(exc)) from exc
-
-
 def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
     for item in items:
         if item.get("id") == item_id:
@@ -1001,13 +973,6 @@ def _remove_subtask(
     updated = _validate(data)
     _enforce_preserves_unresolved_master_rows("remove_subtask", doc, updated)
     _enforce_terminal_status(updated)
-    _enforce_completed_master_rows(
-        context.task_root,
-        "remove_subtask",
-        doc,
-        updated,
-        TaskDocEdit(subtask=subtask),
-    )
     leaf_files = _leaf_doc_files(context.task_root, match)
     source_snapshots = [selected_snapshot]
     if leaf_files:
