@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EVIDENCE_DEPENDENCY_VALIDATOR,
@@ -363,3 +366,20 @@ class CuratorCoherenceResponse(ToolResponse):
         elif not self.status or not self.detail or self.state != "refused":
             raise ValueError("failed coherence response requires typed refusal fields")
         return self
+
+
+@dataclass(frozen=True)
+class ValidatedCuratorCoherence:
+    """One validated coherence authority.
+
+    Shelved with its model, not with the plane that first consumed it: the
+    record, its paths and its evidence are model facts, and both the memory
+    quality certification lane and the closeout lane read them.
+    """
+
+    authority: CuratorCoherenceAuthority
+    record: CuratorCoherenceRecord
+    record_path: Path
+    report_path: Path
+    record_digest: str
+    evidence: list[EvidenceFact]

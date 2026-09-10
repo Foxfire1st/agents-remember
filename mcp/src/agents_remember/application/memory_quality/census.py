@@ -15,13 +15,13 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery i
     parse_table_metadata_text,
 )
 from agents_remember.memory_quality.memory_census import build_memory_census
-from agents_remember.models.lifecycles.curator_coherence import CuratorSourceCandidate
-from agents_remember.models.lifecycles.memory_census import MemoryCensusResult, MemoryCensusRow
 from agents_remember.memory_quality.memory_census_scope import (
     MemoryCensusCodeInput,
     MemoryCensusScope,
     capture_memory_census_scope,
 )
+from agents_remember.models.lifecycles.curator_coherence import CuratorSourceCandidate
+from agents_remember.models.lifecycles.memory_census import MemoryCensusResult, MemoryCensusRow
 from agents_remember.worktrees.worktree_contract import load_contract
 
 

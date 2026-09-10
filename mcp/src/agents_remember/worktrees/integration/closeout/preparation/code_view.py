@@ -11,6 +11,9 @@ from agents_remember.kernel.git_command import (
     inspect_git_preparation,
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
+from agents_remember.memory_quality.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.models.certification.references import CertificateObjectReference
 from agents_remember.models.lifecycles.evidence_dependencies import canonical_sha256
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
@@ -27,9 +30,6 @@ from agents_remember.worktrees.integration.closeout.certification.execution impo
 )
 from agents_remember.worktrees.integration.closeout.certification.observation import refuse
 from agents_remember.worktrees.integration.closeout.certification.selection import load_typed
-from agents_remember.memory_quality.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.worktrees.integration.closeout.preparation_selection import (
     require_preparation_logical_refs,
     selected_preparation_intents,

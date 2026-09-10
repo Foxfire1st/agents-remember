@@ -8,18 +8,18 @@ from tempfile import TemporaryDirectory
 from typing import NoReturn
 
 from agents_remember.errors import FutureCodeCandidateError, MemoryCandidatePairError
-from agents_remember.models.task_document import CanonicalTaskObservation
-from agents_remember.models.task_intent import TaskIntentIdentity
-from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
-from agents_remember.tasks.store import TaskDocSourceSnapshot, current_task_doc_source
-from agents_remember.tasks.task_intent import task_intent_identity
 from agents_remember.memory_quality.future_code_candidate import (
     capture_future_code_candidate,
 )
 from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
+from agents_remember.models.task_document import CanonicalTaskObservation
+from agents_remember.models.task_intent import TaskIntentIdentity
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
+from agents_remember.tasks.store import TaskDocSourceSnapshot, current_task_doc_source
+from agents_remember.tasks.task_intent import task_intent_identity
 from agents_remember.worktrees.modules.git import require_git, worktree_candidate_tree
 from agents_remember.worktrees.queue.closeout_projection_members import (
     candidate_task_topology_fingerprint,

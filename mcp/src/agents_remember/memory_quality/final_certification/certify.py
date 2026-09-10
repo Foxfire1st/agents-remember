@@ -27,10 +27,10 @@ from agents_remember.errors import FinalCertificationError
 from agents_remember.memory_quality.incremental_scope.affected_models import (
     AffectedClosurePlan,
 )
-from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
-from agents_remember.worktrees.integration.closeout.curator_coherence import (
+from agents_remember.models.lifecycles.curator_coherence import (
     ValidatedCuratorCoherence,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 
 from .catalog import (
     ExecutedFinalCatalog,
