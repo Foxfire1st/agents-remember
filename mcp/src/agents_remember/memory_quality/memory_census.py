@@ -30,7 +30,7 @@ from agents_remember.models.lifecycles.memory_census import (
     MemoryCensusRow,
     require_git_relative_path,
 )
-from agents_remember.worktrees.integration.closeout.memory_census_scope import MemoryCensusScope
+from agents_remember.memory_quality.memory_census_scope import MemoryCensusScope
 
 
 def _git(root: Path, arguments: list[str]) -> str:
